@@ -1,0 +1,112 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/free_setup.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/dish.gd" id="2"]
+[ext_resource type="Texture2D" path="res://icons/reset.svg" id="4"]
+[ext_resource type="PackedScene" path="res://ui/setting_row.tscn" id="5"]
+
+[node name="FreeSetup" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1")
+
+[node name="Dish" type="Node2D" parent="."]
+script = ExtResource("2")
+
+[node name="Title" type="Label" parent="."]
+theme_type_variation = &"Title"
+layout_mode = 0
+offset_left = 48.0
+offset_top = 36.0
+offset_right = 600.0
+offset_bottom = 110.0
+text = "FREE MODE"
+
+[node name="Subtitle" type="Label" parent="."]
+theme_type_variation = &"Accent"
+layout_mode = 0
+offset_left = 50.0
+offset_top = 112.0
+offset_right = 600.0
+offset_bottom = 140.0
+text = "The playground. No goals, no paperwork. Just bups."
+
+[node name="SectionLabel" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 4
+anchor_top = 0.5
+anchor_bottom = 0.5
+offset_left = 72.0
+offset_top = -148.0
+offset_right = 400.0
+offset_bottom = -118.0
+grow_vertical = 2
+theme_type_variation = &"Bright"
+text = "STARTING CONDITIONS"
+vertical_alignment = 1
+
+[node name="ResetButton" type="Button" parent="."]
+layout_mode = 1
+anchors_preset = 4
+anchor_top = 0.5
+anchor_bottom = 0.5
+offset_left = 516.0
+offset_top = -150.0
+offset_right = 544.0
+offset_bottom = -118.0
+grow_horizontal = 0
+grow_vertical = 2
+theme_type_variation = &"IconButton"
+icon = ExtResource("4")
+icon_alignment = 1
+
+[node name="Panel" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 4
+anchor_top = 0.5
+anchor_bottom = 0.5
+offset_left = 48.0
+offset_top = -110.0
+offset_right = 568.0
+offset_bottom = 0.0
+grow_vertical = 1
+
+[node name="Box" type="VBoxContainer" parent="Panel"]
+theme_type_variation = &"RoomyStack"
+layout_mode = 2
+
+[node name="BupsRow" parent="Panel/Box" instance=ExtResource("5")]
+layout_mode = 2
+label_text = "Bups"
+
+[node name="NutrientsRow" parent="Panel/Box" instance=ExtResource("5")]
+layout_mode = 2
+label_text = "Nutrients"
+
+[node name="RateRow" parent="Panel/Box" instance=ExtResource("5")]
+layout_mode = 2
+label_text = "Nutrient rate"
+
+[node name="DishRow" parent="Panel/Box" instance=ExtResource("5")]
+layout_mode = 2
+label_text = "Dish radius"
+
+[node name="Actions" type="HBoxContainer" parent="Panel/Box"]
+layout_mode = 2
+
+[node name="BackButton" type="Button" parent="Panel/Box/Actions"]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Back"
+
+[node name="GoButton" type="Button" parent="Panel/Box/Actions"]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"PrimaryButton"
+text = "GO!"
