@@ -2,3 +2,11 @@
 .godot/
 /android/
 .vscode/
+
+# Native extension build products (godot-cpp is a nested clone; the API dump is generated)
+native/godot-cpp/
+native/bin/
+native/extension_api.json
+native/.sconsign.dblite
+*.o
+*.os

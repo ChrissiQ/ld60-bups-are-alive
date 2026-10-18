@@ -4,17 +4,28 @@
 [ext_resource type="Script" uid="uid://fg5kxl7qvimr" path="res://scripts/dish.gd" id="2"]
 [ext_resource type="Script" uid="uid://cuvljn38b57td" path="res://scripts/graph.gd" id="3"]
 [ext_resource type="Script" path="res://scripts/toolbar.gd" id="4"]
-[ext_resource type="Texture2D" path="res://icons/tool_info.svg" id="6"]
+[ext_resource type="Texture2D" path="res://icons/tool_select.svg" id="6"]
 [ext_resource type="Texture2D" path="res://icons/tool_pan.svg" id="7"]
 [ext_resource type="Texture2D" path="res://icons/tool_nutrient.svg" id="8"]
+[ext_resource type="Texture2D" path="res://icons/tool_source.svg" id="source_icon"]
+[ext_resource type="Texture2D" path="res://icons/tool_erase.svg" id="erase_icon"]
 [ext_resource type="Texture2D" path="res://icons/zoom_out.svg" id="9"]
 [ext_resource type="Texture2D" path="res://icons/zoom_in.svg" id="10"]
 [ext_resource type="Texture2D" path="res://icons/pause.svg" id="11"]
 [ext_resource type="Texture2D" path="res://icons/speed_1.svg" id="12"]
 [ext_resource type="Texture2D" path="res://icons/speed_3.svg" id="13"]
 [ext_resource type="Texture2D" path="res://icons/speed_8.svg" id="14"]
+[ext_resource type="Texture2D" path="res://icons/speed_ultra.svg" id="ultra_icon"]
 [ext_resource type="Script" path="res://scripts/tool_options.gd" id="15"]
 [ext_resource type="PackedScene" path="res://ui/stat_row.tscn" id="stat_row"]
+[ext_resource type="PackedScene" path="res://ui/setting_row.tscn" id="setting_row"]
+[ext_resource type="PackedScene" path="res://scenes/pause_menu.tscn" id="pause_menu"]
+[ext_resource type="PackedScene" path="res://ui/bup_name_row.tscn" id="bup_name_row"]
+[ext_resource type="Texture2D" path="res://icons/lineage.svg" id="lineage_icon"]
+[ext_resource type="Texture2D" path="res://icons/pick_all.svg" id="pick_all_icon"]
+[ext_resource type="Texture2D" path="res://icons/pick_background.svg" id="pick_background_icon"]
+[ext_resource type="Texture2D" path="res://icons/pick_bup.svg" id="pick_bup_icon"]
+[ext_resource type="Texture2D" path="res://icons/pick_source.svg" id="pick_source_icon"]
 
 [node name="Main" type="Node2D" unique_id=510029721]
 script = ExtResource("1")
@@ -56,45 +67,6 @@ fit_content = true
 scroll_active = false
 autowrap_mode = 3
 
-[node name="StatsPanel" type="PanelContainer" parent="HUD"]
-visible = false
-anchors_preset = 1
-anchor_left = 1.0
-anchor_right = 1.0
-offset_left = -250.0
-offset_top = 16.0
-offset_right = -16.0
-offset_bottom = 16.0
-grow_horizontal = 0
-mouse_filter = 2
-theme_type_variation = &"StatsPanel"
-
-[node name="Box" type="VBoxContainer" parent="HUD/StatsPanel"]
-theme_type_variation = &"TightStack"
-layout_mode = 2
-mouse_filter = 2
-
-[node name="Heading" type="Label" parent="HUD/StatsPanel/Box"]
-theme_type_variation = &"SmallBright"
-layout_mode = 2
-text = "INITIAL CONDITIONS"
-
-[node name="BupsRow" parent="HUD/StatsPanel/Box" instance=ExtResource("stat_row")]
-layout_mode = 2
-label_text = "Bups"
-
-[node name="NutrientsRow" parent="HUD/StatsPanel/Box" instance=ExtResource("stat_row")]
-layout_mode = 2
-label_text = "Nutrients"
-
-[node name="RateRow" parent="HUD/StatsPanel/Box" instance=ExtResource("stat_row")]
-layout_mode = 2
-label_text = "Nutrient rate"
-
-[node name="DishRow" parent="HUD/StatsPanel/Box" instance=ExtResource("stat_row")]
-layout_mode = 2
-label_text = "Dish radius"
-
 [node name="Banner" type="Label" parent="HUD" unique_id=1097942447]
 theme_type_variation = &"Banner"
 anchors_preset = 10
@@ -135,7 +107,7 @@ script = ExtResource("4")
 theme_type_variation = &"TightRow"
 layout_mode = 2
 
-[node name="InfoButton" type="Button" parent="HUD/Toolbars/Toolbar/Row"]
+[node name="SelectButton" type="Button" parent="HUD/Toolbars/Toolbar/Row"]
 layout_mode = 2
 theme_type_variation = &"ToolButton"
 toggle_mode = true
@@ -153,6 +125,18 @@ icon_alignment = 1
 layout_mode = 2
 theme_type_variation = &"ToolButton"
 icon = ExtResource("8")
+icon_alignment = 1
+
+[node name="SourceButton" type="Button" parent="HUD/Toolbars/Toolbar/Row"]
+layout_mode = 2
+theme_type_variation = &"ToolButton"
+icon = ExtResource("source_icon")
+icon_alignment = 1
+
+[node name="EraseButton" type="Button" parent="HUD/Toolbars/Toolbar/Row"]
+layout_mode = 2
+theme_type_variation = &"ToolButton"
+icon = ExtResource("erase_icon")
 icon_alignment = 1
 
 [node name="Separator1" type="VSeparator" parent="HUD/Toolbars/Toolbar/Row"]
@@ -185,16 +169,22 @@ theme_type_variation = &"ToolButton"
 icon = ExtResource("12")
 icon_alignment = 1
 
-[node name="Speed3Button" type="Button" parent="HUD/Toolbars/Toolbar/Row"]
+[node name="Speed100Button" type="Button" parent="HUD/Toolbars/Toolbar/Row"]
 layout_mode = 2
 theme_type_variation = &"ToolButton"
 icon = ExtResource("13")
 icon_alignment = 1
 
-[node name="Speed8Button" type="Button" parent="HUD/Toolbars/Toolbar/Row"]
+[node name="Speed1000Button" type="Button" parent="HUD/Toolbars/Toolbar/Row"]
 layout_mode = 2
 theme_type_variation = &"ToolButton"
 icon = ExtResource("14")
+icon_alignment = 1
+
+[node name="SpeedUltraButton" type="Button" parent="HUD/Toolbars/Toolbar/Row"]
+layout_mode = 2
+theme_type_variation = &"ToolButton"
+icon = ExtResource("ultra_icon")
 icon_alignment = 1
 
 [node name="ToolOptions" type="PanelContainer" parent="HUD/Toolbars" node_paths=PackedStringArray("toolbar")]
@@ -203,6 +193,43 @@ layout_mode = 2
 theme_type_variation = &"Tray"
 script = ExtResource("15")
 toolbar = NodePath("../Toolbar")
+
+[node name="SelectOptions" type="Control" parent="HUD/Toolbars/ToolOptions"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+
+[node name="Modes" type="HBoxContainer" parent="HUD/Toolbars/ToolOptions/SelectOptions"]
+theme_type_variation = &"TightRow"
+layout_mode = 0
+
+[node name="PickAllButton" type="Button" parent="HUD/Toolbars/ToolOptions/SelectOptions/Modes"]
+layout_mode = 2
+theme_type_variation = &"ToolButton"
+toggle_mode = true
+button_pressed = true
+icon = ExtResource("pick_all_icon")
+icon_alignment = 1
+
+[node name="PickBackgroundButton" type="Button" parent="HUD/Toolbars/ToolOptions/SelectOptions/Modes"]
+layout_mode = 2
+theme_type_variation = &"ToolButton"
+toggle_mode = true
+icon = ExtResource("pick_background_icon")
+icon_alignment = 1
+
+[node name="PickBupsButton" type="Button" parent="HUD/Toolbars/ToolOptions/SelectOptions/Modes"]
+layout_mode = 2
+theme_type_variation = &"ToolButton"
+toggle_mode = true
+icon = ExtResource("pick_bup_icon")
+icon_alignment = 1
+
+[node name="PickSourcesButton" type="Button" parent="HUD/Toolbars/ToolOptions/SelectOptions/Modes"]
+layout_mode = 2
+theme_type_variation = &"ToolButton"
+toggle_mode = true
+icon = ExtResource("pick_source_icon")
+icon_alignment = 1
 
 [node name="NutrientOptions" type="Control" parent="HUD/Toolbars/ToolOptions"]
 custom_minimum_size = Vector2(0, 30)
@@ -220,6 +247,40 @@ value = 1.0
 rounded = true
 select_all_on_focus = true
 
+[node name="SourceOptions" type="Control" parent="HUD/Toolbars/ToolOptions"]
+visible = false
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+
+[node name="SourceRate" type="SpinBox" parent="HUD/Toolbars/ToolOptions/SourceOptions"]
+theme_type_variation = &"CompactSpinBox"
+custom_minimum_size = Vector2(52, 30)
+layout_mode = 0
+offset_right = 52.0
+offset_bottom = 30.0
+min_value = 0.5
+max_value = 60.0
+step = 0.5
+value = 10.0
+select_all_on_focus = true
+
+[node name="EraseOptions" type="Control" parent="HUD/Toolbars/ToolOptions"]
+visible = false
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+
+[node name="BrushSize" type="SpinBox" parent="HUD/Toolbars/ToolOptions/EraseOptions"]
+theme_type_variation = &"CompactSpinBox"
+custom_minimum_size = Vector2(52, 30)
+layout_mode = 0
+offset_right = 52.0
+offset_bottom = 30.0
+min_value = 5.0
+max_value = 100.0
+value = 30.0
+rounded = true
+select_all_on_focus = true
+
 [node name="InfoPanel" type="PanelContainer" parent="HUD"]
 visible = false
 anchors_preset = 3
@@ -234,7 +295,27 @@ offset_bottom = -16.0
 grow_horizontal = 0
 grow_vertical = 0
 
-[node name="InfoText" type="RichTextLabel" parent="HUD/InfoPanel"]
+[node name="Box" type="VBoxContainer" parent="HUD/InfoPanel"]
+layout_mode = 2
+theme_type_variation = &"TightStack"
+
+[node name="TopRow" type="HBoxContainer" parent="HUD/InfoPanel/Box"]
+visible = false
+layout_mode = 2
+
+[node name="NameRow" parent="HUD/InfoPanel/Box/TopRow" instance=ExtResource("bup_name_row")]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="LineageButton" type="Button" parent="HUD/InfoPanel/Box/TopRow"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"IconButton"
+tooltip_text = "Lineage"
+icon = ExtResource("lineage_icon")
+icon_alignment = 1
+
+[node name="InfoText" type="RichTextLabel" parent="HUD/InfoPanel/Box"]
 theme_type_variation = &"ReadoutAccent"
 custom_minimum_size = Vector2(310, 0)
 layout_mode = 2
@@ -243,6 +324,59 @@ bbcode_enabled = true
 fit_content = true
 scroll_active = false
 autowrap_mode = 3
+
+[node name="SourceRate" parent="HUD/InfoPanel/Box" instance=ExtResource("setting_row")]
+visible = false
+layout_mode = 2
+label_text = "Rate"
+label_min_width = 44.0
+slider_min_width = 84.0
+value_min_width = 64.0
+unit_min_width = 40.0
+
+[node name="DeleteSource" type="Button" parent="HUD/InfoPanel/Box"]
+visible = false
+layout_mode = 2
+theme_type_variation = &"DialogButton"
+text = "Delete source"
+
+[node name="Follow" type="Button" parent="HUD/InfoPanel/Box"]
+visible = false
+layout_mode = 2
+theme_type_variation = &"DialogButton"
+text = "Follow"
+
+[node name="LineagePanel" type="PanelContainer" parent="HUD"]
+visible = false
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -350.0
+offset_top = -16.0
+offset_right = -16.0
+offset_bottom = -16.0
+grow_horizontal = 0
+grow_vertical = 0
+
+[node name="Box" type="VBoxContainer" parent="HUD/LineagePanel"]
+layout_mode = 2
+theme_type_variation = &"TightStack"
+
+[node name="Title" type="Label" parent="HUD/LineagePanel/Box"]
+theme_type_variation = &"BupName"
+layout_mode = 2
+text_overrun_behavior = 3
+
+[node name="Scroll" type="ScrollContainer" parent="HUD/LineagePanel/Box"]
+custom_minimum_size = Vector2(310, 260)
+layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="Entries" type="VBoxContainer" parent="HUD/LineagePanel/Box/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
 
 [node name="PauseRing" type="Panel" parent="HUD"]
 theme_type_variation = &"RingPanel"
@@ -272,3 +406,8 @@ grow_vertical = 0
 text = "PAUSED"
 horizontal_alignment = 1
 vertical_alignment = 2
+
+[node name="MenuLayer" type="CanvasLayer" parent="."]
+layer = 10
+
+[node name="PauseMenu" parent="MenuLayer" instance=ExtResource("pause_menu")]

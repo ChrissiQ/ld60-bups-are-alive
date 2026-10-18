@@ -7,4 +7,5 @@ extends RefCounted
 const MENU := "res://scenes/menu.tscn"
 const INTRO := "res://scenes/intro.tscn"
 const FREE_SETUP := "res://scenes/free_setup.tscn"
+const FOUNDERS := "res://scenes/founders.tscn"
 const GAME := "res://scenes/main.tscn"

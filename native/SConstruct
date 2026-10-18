@@ -1,0 +1,7 @@
+#!/usr/bin/env python
+# Builds the native part of Bups Are Alive (a Godot GDExtension). Run `scons` in this folder.
+env = SConscript("godot-cpp/SConstruct")
+env.Append(CPPPATH=["src/"])
+sources = Glob("src/*.cpp")
+library = env.SharedLibrary("bin/libbups{}{}".format(env["suffix"], env["SHLIBSUFFIX"]), source=sources)
+Default(library)

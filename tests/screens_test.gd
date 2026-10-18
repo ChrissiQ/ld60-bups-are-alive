@@ -25,6 +25,14 @@ func _init() -> void:
 	var menu: Control = load(Scenes.MENU).instantiate()
 	root.add_child(menu)
 	await process_frame
+	var menu_hues := []
+	for id in menu.dish.bup_ids():
+		menu_hues.append(menu.dish.bup_info(id)["hue"])
+	menu_hues.sort()
+	var menu_even: bool = menu_hues.size() == 4
+	for k in menu_hues.size():
+		menu_even = menu_even and absf(fposmod(menu_hues[(k + 1) % menu_hues.size()] - menu_hues[k], 1.0) - 0.25) < 0.01
+	check(menu_even, "the dish behind the title starts with founders in evenly spaced colours (%s)" % [menu_hues])
 	menu._show_controls(true)
 	check(menu.controls_panel.visible and not menu.buttons.visible, "the controls panel replaces the buttons")
 	menu._unhandled_input(_escape(true))

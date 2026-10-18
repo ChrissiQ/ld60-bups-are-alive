@@ -249,6 +249,38 @@ corner_radius_top_right = 6
 corner_radius_bottom_right = 6
 corner_radius_bottom_left = 6
 
+[sub_resource type="StyleBoxFlat" id="popup_panel"]
+content_margin_left = 12.0
+content_margin_top = 12.0
+content_margin_right = 12.0
+content_margin_bottom = 12.0
+bg_color = Color(0.02, 0.05, 0.03, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.45, 1, 0.6, 0.7)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="deceased_panel"]
+content_margin_left = 24.0
+content_margin_top = 20.0
+content_margin_right = 24.0
+content_margin_bottom = 20.0
+bg_color = Color(0.035, 0.04, 0.038, 0.96)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.55, 0.58, 0.56, 0.75)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
 [sub_resource type="StyleBoxFlat" id="primary_focus"]
 bg_color = Color(1, 0.75, 0.3, 1)
 border_width_left = 2
@@ -309,6 +341,9 @@ corner_radius_top_right = 4
 corner_radius_bottom_right = 4
 corner_radius_bottom_left = 4
 
+[sub_resource type="StyleBoxFlat" id="veil_style"]
+bg_color = Color(0.02, 0.04, 0.03, 0.82)
+
 [sub_resource type="StyleBoxFlat" id="ring_style"]
 draw_center = false
 border_width_left = 8
@@ -360,6 +395,22 @@ border_width_top = 2
 border_width_right = 2
 border_width_bottom = 2
 border_color = Color(0.45, 1, 0.6, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxFlat" id="tool_disabled"]
+content_margin_left = 6.0
+content_margin_top = 6.0
+content_margin_right = 6.0
+content_margin_bottom = 6.0
+bg_color = Color(0.02, 0.04, 0.03, 0.6)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.45, 1, 0.6, 0.18)
 corner_radius_top_left = 4
 corner_radius_top_right = 4
 corner_radius_bottom_right = 4
@@ -485,6 +536,16 @@ Banner/base_type = &"Label"
 Banner/colors/font_color = Color(0.85, 0.95, 1, 1)
 Banner/font_sizes/font_size = 28
 Banner/fonts/font = ExtResource("f700")
+BupName/base_type = &"Label"
+BupName/colors/font_color = Color(1, 0.75, 0.3, 1)
+BupName/font_sizes/font_size = 18
+BupName/fonts/font = ExtResource("f700")
+ColorPicker/constants/h_width = 22
+ColorPicker/constants/sv_height = 170
+ColorPicker/constants/sv_width = 215
+PopupPanel/styles/panel = SubResource("popup_panel")
+DeceasedPanel/base_type = &"PanelContainer"
+DeceasedPanel/styles/panel = SubResource("deceased_panel")
 Bright/base_type = &"Label"
 Bright/colors/font_color = Color(1, 1, 1, 1)
 Button/colors/font_color = Color(0.45, 1, 0.6, 1)
@@ -549,6 +610,14 @@ HistoryGraph/colors/population = Color(1, 0.75, 0.3, 1)
 HistoryGraph/colors/trait = Color(0.45, 1, 0.6, 1)
 HistoryGraph/font_sizes/legend = 12
 HistoryGraph/font_sizes/tick = 11
+ListButton/base_type = &"Button"
+ListButton/colors/font_disabled_color = Color(1, 0.75, 0.3, 1)
+ListButton/font_sizes/font_size = 16
+ListButton/styles/disabled = SubResource("icon_normal")
+ListButton/styles/hover = SubResource("icon_hover")
+ListButton/styles/hover_pressed = SubResource("icon_pressed")
+ListButton/styles/normal = SubResource("icon_normal")
+ListButton/styles/pressed = SubResource("icon_pressed")
 IconButton/base_type = &"Button"
 IconButton/colors/icon_focus_color = Color(0.45, 1, 0.6, 1)
 IconButton/colors/icon_hover_color = Color(0.45, 1, 0.6, 1)
@@ -591,6 +660,8 @@ ReadoutAccent/font_sizes/normal_font_size = 14
 RichTextLabel/fonts/bold_font = ExtResource("f700")
 RichTextLabel/fonts/mono_font = ExtResource("f500")
 RichTextLabel/fonts/normal_font = ExtResource("f500")
+Veil/base_type = &"Panel"
+Veil/styles/panel = SubResource("veil_style")
 RingPanel/base_type = &"Panel"
 RingPanel/styles/panel = SubResource("ring_style")
 RoomyStack/base_type = &"VBoxContainer"
@@ -627,6 +698,8 @@ Title/font_sizes/font_size = 56
 Title/fonts/font = ExtResource("f700")
 ToolButton/base_type = &"Button"
 ToolButton/constants/icon_max_width = 24
+ToolButton/colors/icon_disabled_color = Color(1, 1, 1, 0.25)
+ToolButton/styles/disabled = SubResource("tool_disabled")
 ToolButton/styles/hover = SubResource("tool_hover")
 ToolButton/styles/hover_pressed = SubResource("tool_pressed")
 ToolButton/styles/normal = SubResource("tool_normal")

@@ -1,0 +1,34 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://ui/bup_name_row.gd" id="1"]
+[ext_resource type="Texture2D" path="res://icons/rename.svg" id="2"]
+
+[node name="BupNameRow" type="HBoxContainer"]
+script = ExtResource("1")
+
+[node name="Swatch" type="ColorRect" parent="."]
+visible = false
+custom_minimum_size = Vector2(16, 16)
+layout_mode = 2
+size_flags_vertical = 4
+
+[node name="Name" type="Label" parent="."]
+theme_type_variation = &"BupName"
+layout_mode = 2
+size_flags_horizontal = 3
+text_overrun_behavior = 3
+
+[node name="Edit" type="LineEdit" parent="."]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+context_menu_enabled = false
+select_all_on_focus = true
+
+[node name="Rename" type="Button" parent="."]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"IconButton"
+tooltip_text = "Rename"
+icon = ExtResource("2")
+icon_alignment = 1

@@ -21,9 +21,12 @@ const SCRIPT_DIRS := ["res://scripts", "res://ui"]
 const SETTING_ROW := "res://ui/setting_row.tscn"
 ## Widgets that stand in for SettingRow, and the few places allowed to use them.
 const BANNED_WIDGETS := ["HSlider", "VSlider", "SpinBox", "HScrollBar", "VScrollBar"]
-const WIDGET_ALLOWED := ["res://ui/setting_row.tscn", "res://scenes/main.tscn:NutrientCount"]  ## (the tool tray's count box)
-## World rendering (the dish, bups, food) is art, not UI chrome, so it keeps its own colours.
-const COLOR_ALLOWED := ["res://scripts/dish.gd"]
+const WIDGET_ALLOWED := ["res://ui/setting_row.tscn", "res://scenes/main.tscn:NutrientCount", "res://scenes/main.tscn:SourceRate", "res://scenes/main.tscn:BrushSize"]  ## (the tool tray's number boxes)
+## World rendering (the dish, bups, nutrient) is art, not UI chrome, so it keeps its own colours.
+const COLOR_ALLOWED := ["res://scripts/dish.gd", "res://scripts/genome.gd"]  ## (the bups' own colours are world data too)
+## A bup's name has exactly one source (see BupNames): panels must not build one themselves.
+const NAME_FILES := ["res://scripts/bup_names.gd", "res://scripts/cell.gd", "res://scripts/dish.gd"]  ## the only scripts that may touch how a bup is named
+const NAME_INTERNALS := ["\\btitle_for\\(", "\\bdefault_name\\(", "BupNames\\.clean\\("]  ## (regular expressions: Dish's own bup_default_name( is fine)
 const SCENE_PATHS_FILE := "res://scripts/scenes.gd"  ## the only script that may spell out a screen's path
 
 var failures: Array = []
@@ -150,6 +153,10 @@ func _init() -> void:
 			var code := _code_only(line)
 			if path != SCENE_PATHS_FILE and code.contains("res://scenes/"):
 				fail(path, i + 1, "spells out a scene path in '%s'" % code.strip_edges(), "add it to scripts/scenes.gd and use Scenes.NAME")
+			if path not in NAME_FILES:
+				for internal in NAME_INTERNALS:
+					if RegEx.create_from_string(internal).search(code) != null:
+						fail(path, i + 1, "builds a bup's name itself ('%s')" % code.strip_edges(), "use Dish.bup_name(id), or put a BupNameRow (ui/bup_name_row.tscn) in the panel and call show_bup()")
 			if path not in COLOR_ALLOWED:
 				if color_rx.search(code) != null:
 					fail(path, i + 1, "hard-coded colour in '%s'" % code.strip_edges(), "add a colour to the theme (a theme type for custom drawing) and read it with get_theme_color()")

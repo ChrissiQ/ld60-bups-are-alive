@@ -1,0 +1,14 @@
+[configuration]
+entry_symbol = "bups_library_init"
+compatibility_minimum = "4.5"
+
+; The macOS libraries are universal (Apple Silicon and Intel). Windows and Linux ones are built by
+; .github/workflows/build-native.yml (and by `scons platform=<os> arch=x86_64 target=template_release`
+; on those systems); until they exist, the game runs only where a library is present.
+[libraries]
+macos.debug = "res://native/bin/libbups.macos.template_debug.universal.dylib"
+macos.release = "res://native/bin/libbups.macos.template_release.universal.dylib"
+windows.debug.x86_64 = "res://native/bin/libbups.windows.template_debug.x86_64.dll"
+windows.release.x86_64 = "res://native/bin/libbups.windows.template_release.x86_64.dll"
+linux.debug.x86_64 = "res://native/bin/libbups.linux.template_debug.x86_64.so"
+linux.release.x86_64 = "res://native/bin/libbups.linux.template_release.x86_64.so"

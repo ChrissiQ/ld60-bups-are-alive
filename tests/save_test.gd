@@ -6,13 +6,14 @@ extends SceneTree
 func _init() -> void:
 	var a := Dish.new()
 	root.add_child(a)
-	a.rng.seed = 7
+	a.set_seed(7)
 	a.strike()
 	a.food_rate = 9.0
+	a.place_source(a.global_position + Vector2(50, 30), 4.0)
 	var tracker := GoalTracker.new()
-	for i in 600:
-		a.step(1.0 / 30.0)
-		tracker.update(a, 1.0 / 30.0)
+	for i in 240:  # two hours of simulation time
+		a.advance(30.0)
+		tracker.update(a, 30.0)
 
 	var text := JSON.stringify({"dish": a.to_dict(), "goals": tracker.to_dict()})
 	var parsed: Dictionary = JSON.parse_string(text)
@@ -25,24 +26,30 @@ func _init() -> void:
 
 	var failures := []
 	if not ok: failures.append("from_dict returned false")
-	if a.cells.size() != b.cells.size(): failures.append("cell count %d vs %d" % [a.cells.size(), b.cells.size()])
-	if a.food.size() != b.food.size(): failures.append("food count")
+	if a.population() != b.population(): failures.append("cell count %d vs %d" % [a.population(), b.population()])
 	if absf(a.time - b.time) > 0.001: failures.append("time")
 	if a.food_rate != b.food_rate: failures.append("food_rate")
-	for g in Genome.GENES:
-		if absf(a.mean_gene(g) - b.mean_gene(g)) > 0.001: failures.append("mean %s" % g)
-	if absf(a.mean_mutations() - b.mean_mutations()) > 0.001: failures.append("mutations")
+	var stats_a := a.population_stats()
+	var stats_b := b.population_stats()
+	for key: String in Genome.LABELS.keys() + ["mutations", "harm"]:
+		if absf(stats_a[key] - stats_b[key]) > 0.001: failures.append("mean %s" % key)
+	if b.sources.size() != 1 or absf(b.sources[0].rate - 4.0) > 0.001 or absf(b.sources[0].emitted - a.sources[0].emitted) > 0.01 or b.sources[0].pos.distance_to(a.sources[0].pos) > 0.01: failures.append("nutrient source")
+	if absf(a.field.total() - b.field.total()) > 0.01 * maxf(a.field.total(), 1.0): failures.append("dissolved nutrient")
+	var a_ids := a.bup_ids()
+	var b_ids := b.bup_ids()
+	for i in mini(a_ids.size(), b_ids.size()):
+		if absf(a.bup_info(a_ids[i])["mass"] - b.bup_info(b_ids[i])["mass"]) > 0.0001: failures.append("body size of cell %d" % i)
 	if a.history["pop"].size() != b.history["pop"].size(): failures.append("history length")
 	if tracker.index != t2.index: failures.append("goal index")
 	# A restored dish must keep running.
-	for i in 90: b.step(1.0 / 30.0)
-	if b.cells.is_empty(): failures.append("restored dish died immediately")
+	b.advance(300.0)
+	if b.population() == 0: failures.append("restored dish died immediately")
 	# Garbage input is rejected without touching the dish.
 	var c := Dish.new()
 	root.add_child(c)
 	if c.from_dict({"nope": 1}): failures.append("accepted garbage")
 
-	print("cells=%d food=%d history=%d goal_index=%d" % [a.cells.size(), a.food.size(), a.history["pop"].size(), tracker.index])
+	print("cells=%d nutrient=%.0f history=%d goal_index=%d" % [a.population(), a.field.total() / Dish.NUTRIENT_ENERGY, a.history["pop"].size(), tracker.index])
 	if failures.is_empty():
 		print("SAVE ROUNDTRIP OK")
 	else:

@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cb6g23exi3m3x"
-path="res://.godot/imported/tool_info.svg-ae9b60ab6ad95612e55bb9fbbaec214a.ctex"
+uid="uid://cqm27oibdb7vp"
+path="res://.godot/imported/lineage.svg-5dc37e5fecac590f86f6ddb92803c46b.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://icons/tool_info.svg"
-dest_files=["res://.godot/imported/tool_info.svg-ae9b60ab6ad95612e55bb9fbbaec214a.ctex"]
+source_file="res://icons/lineage.svg"
+dest_files=["res://.godot/imported/lineage.svg-5dc37e5fecac590f86f6ddb92803c46b.ctex"]
 
 [params]
 

@@ -3,20 +3,36 @@ extends RefCounted
 ## How a dish begins. Goal mode uses the defaults; free mode lets the player choose.
 
 const MIN_BUPS := 1
-const MAX_BUPS := 200  ## a deliberate cap for the setup sliders, below the sim's Dish.MAX_CELLS
-const MAX_NUTRIENTS := Dish.MAX_FOOD  ## can't start with more food than the dish can hold
+const UM_PER_MM := 1000.0  ## the dish is chosen and shown in mm; the game works in µm
+const MAX_BUPS := 100  ## the most founders a dish starts with (each can be named and coloured before the start)
+const MIN_BUP_LIMIT := 10
+const MAX_BUP_LIMIT := 100000  ## how far the limit slider goes: how many the machine can run is for the player to find out
+const MAX_NUTRIENTS := 2000  ## units of nutrient already dissolved in the dish at the start
 const MAX_NUTRIENT_RATE := 30.0
-const MIN_DISH_RADIUS := 150.0
-const MAX_DISH_RADIUS := 600.0
+const MIN_DISH_RADIUS := 1000.0  ## µm: 1 mm, the smallest dish a player can choose (smaller ones are not much use)
+const MIN_SIM_RADIUS := 150.0  ## µm: the smallest dish the simulation itself will run (the tests and old saves use small ones)
+const MAX_DISH_RADIUS := 12000.0  ## µm: 12 mm in radius, 24 mm across (a real petri dish is about 90 mm)
 
 var bups := 4
-var nutrients := 60  ## food items in the dish at the start
-var nutrient_rate := 6.0  ## food items appearing per second
+var nutrients := 60  ## units of nutrient dissolved in the dish at the start, spread evenly
+var nutrient_rate := 3.0  ## units of nutrient fed in per minute, spread evenly
 var dish_radius := Dish.DEFAULT_RADIUS  ## physical size of the dish
+## What the player chose for the founders, in order: {"name": "", "color": "#rrggbb"}. Founders beyond the list, and
+## any with nothing chosen, start unnamed and in the default colour.
+var founders: Array = []
+var bup_limit := Dish.cap_for(Dish.DEFAULT_RADIUS)  ## the most bups the dish holds: past it each birth displaces a random bup
 
 
 ## Where free mode remembers the player's last choices (separate from the experiment save).
 static var settings_path := "user://free_settings.json"
+
+
+## Gives the founders evenly spaced colours (as far apart in hue as they can be), at random. This is how goal mode and
+## the title screen's dish start.
+func spread_founders() -> void:
+	founders = []
+	for color in Genome.spread_colors(bups):
+		founders.append({"color": Genome.hex_of(color)})
 
 
 ## An independent copy. Goes through to_dict/from_dict, so a new field only has to be added there.
@@ -25,7 +41,7 @@ func copy() -> StartConditions:
 
 
 func to_dict() -> Dictionary:
-	return {"bups": bups, "nutrients": nutrients, "nutrient_rate": nutrient_rate, "dish_radius": dish_radius}
+	return {"bups": bups, "nutrients": nutrients, "nutrient_rate": nutrient_rate, "dish_radius": dish_radius, "bup_limit": bup_limit, "founders": founders.slice(0, bups).duplicate(true)}  # (only the founders there are: nothing hidden is carried over)
 
 
 ## Anything missing, malformed or out of range falls back to the default / the nearest valid value.
@@ -35,6 +51,18 @@ static func from_dict(d: Dictionary) -> StartConditions:
 	c.nutrients = clampi(int(_number(d, "nutrients", c.nutrients)), 0, MAX_NUTRIENTS)
 	c.nutrient_rate = clampf(_number(d, "nutrient_rate", c.nutrient_rate), 0.0, MAX_NUTRIENT_RATE)
 	c.dish_radius = clampf(_number(d, "dish_radius", c.dish_radius), MIN_DISH_RADIUS, MAX_DISH_RADIUS)
+	c.bup_limit = clampi(int(_number(d, "bup_limit", c.bup_limit)), MIN_BUP_LIMIT, MAX_BUP_LIMIT)
+	c.bup_limit = maxi(c.bup_limit, c.bups)  # the dish holds at least its founders
+	var saved_founders: Variant = d.get("founders")
+	if saved_founders is Array:
+		for entry in saved_founders.slice(0, MAX_BUPS):
+			var founder := {}
+			if entry is Dictionary:
+				if entry.get("name") is String:
+					founder["name"] = Dish.cleaned_name(entry["name"])
+				if Genome.is_hex_color(entry.get("color")):
+					founder["color"] = entry["color"].to_lower()
+			c.founders.append(founder)
 	return c
 
 

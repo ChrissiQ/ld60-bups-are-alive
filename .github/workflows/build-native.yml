@@ -1,0 +1,45 @@
+# Builds the native simulation (native/) for every platform the game ships on, so a player needs
+# nothing installed. NOT YET RUN: written alongside the first multi-platform setup, so expect to fix
+# small things on its first run.
+#
+# It builds against godot-cpp's own bundled Godot 4.5 API (api_version=4.5, matching
+# compatibility_minimum in native/bups.gdextension), so no API dump is needed, and the result runs
+# on Godot 4.5 and later. godot-cpp is pinned to the commit the game was developed against.
+name: build-native
+on:
+  push:
+    paths: ["native/**", ".github/workflows/build-native.yml"]
+  workflow_dispatch:
+env:
+  GODOT_CPP_COMMIT: 2bb1acf6f8ae1ce96ac7b9ba3a10b499c59c49ec
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, platform: windows, arch: x86_64 }
+          - { os: ubuntu-latest, platform: linux, arch: x86_64 }
+          - { os: macos-latest, platform: macos, arch: universal }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install scons
+      - name: Get godot-cpp at the pinned commit
+        shell: bash
+        run: |
+          git clone https://github.com/godotengine/godot-cpp native/godot-cpp
+          git -C native/godot-cpp checkout "$GODOT_CPP_COMMIT"
+      - name: Build debug and release
+        working-directory: native
+        shell: bash
+        run: |
+          for target in template_debug template_release; do
+            scons platform=${{ matrix.platform }} arch=${{ matrix.arch }} target=$target api_version=4.5 -j4
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bups-${{ matrix.platform }}
+          path: native/bin/

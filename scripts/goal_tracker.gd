@@ -5,9 +5,10 @@ extends RefCounted
 signal goal_completed(goal: Goal)
 
 const POP_TARGET := 100
-const SENSE_TARGET := 75.0
-const SENSE_FRACTION := 0.6
+const SENSE_TARGET := 70.0
+const SENSE_FRACTION := 0.5
 const SENSE_MIN_POP := 15
+const SENSE_HOLD := 1800.0  ## sim seconds (half an hour)
 
 var goals: Array[Goal] = []
 var index := 0
@@ -19,15 +20,15 @@ func _init() -> void:
 		"A Living Colony",
 		"Grow the colony to %d bups." % POP_TARGET,
 		0.0,
-		func(d: Dish) -> float: return minf(d.cells.size() / float(POP_TARGET), 1.0),
-		func(d: Dish) -> String: return "%d / %d bups" % [d.cells.size(), POP_TARGET],
+		func(d: Dish) -> float: return minf(d.population() / float(POP_TARGET), 1.0),
+		func(d: Dish) -> String: return "%d / %d bups" % [d.population(), POP_TARGET],
 	))
 	goals.append(Goal.new(
 		"Keen Senses",
-		"Breed a strain where %d%% of bups sense food from %d units away. Hold for 10s. Scarcity rewards seeking." % [SENSE_FRACTION * 100, SENSE_TARGET],
-		10.0,
+		"Breed a strain where %d%% of bups sense food from %d units away. Hold for %s.\n\nNutrient tools are unlocked. Cut the random feed (DOWN key) and place a nutrient source at the far edge of the dish: only bups that can find it will thrive." % [SENSE_FRACTION * 100, SENSE_TARGET, SimClock.format(SENSE_HOLD)],
+		SENSE_HOLD,
 		func(d: Dish) -> float:
-			if d.cells.size() < SENSE_MIN_POP:
+			if d.population() < SENSE_MIN_POP:
 				return 0.0
 			return minf(d.fraction_with_gene_at_least("sense", SENSE_TARGET) / SENSE_FRACTION, 1.0),
 		func(d: Dish) -> String:
@@ -55,7 +56,7 @@ func all_done() -> bool:
 
 func update(dish: Dish, delta: float) -> void:
 	var goal := current()
-	if goal == null or dish.cells.is_empty():
+	if goal == null or dish.population() == 0:
 		return
 	if goal.progress.call(dish) >= 1.0:
 		held += delta

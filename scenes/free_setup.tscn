@@ -26,58 +26,38 @@ offset_right = 600.0
 offset_bottom = 110.0
 text = "FREE MODE"
 
-[node name="Subtitle" type="Label" parent="."]
-theme_type_variation = &"Accent"
-layout_mode = 0
-offset_left = 50.0
-offset_top = 112.0
-offset_right = 600.0
-offset_bottom = 140.0
-text = "The playground. No goals, no paperwork. Just bups."
-
-[node name="SectionLabel" type="Label" parent="."]
-layout_mode = 1
-anchors_preset = 4
-anchor_top = 0.5
-anchor_bottom = 0.5
-offset_left = 72.0
-offset_top = -148.0
-offset_right = 400.0
-offset_bottom = -118.0
-grow_vertical = 2
-theme_type_variation = &"Bright"
-text = "STARTING CONDITIONS"
-vertical_alignment = 1
-
-[node name="ResetButton" type="Button" parent="."]
-layout_mode = 1
-anchors_preset = 4
-anchor_top = 0.5
-anchor_bottom = 0.5
-offset_left = 516.0
-offset_top = -150.0
-offset_right = 544.0
-offset_bottom = -118.0
-grow_horizontal = 0
-grow_vertical = 2
-theme_type_variation = &"IconButton"
-icon = ExtResource("4")
-icon_alignment = 1
-
 [node name="Panel" type="PanelContainer" parent="."]
 layout_mode = 1
 anchors_preset = 4
 anchor_top = 0.5
 anchor_bottom = 0.5
 offset_left = 48.0
-offset_top = -110.0
-offset_right = 568.0
+offset_top = 0.0
+offset_right = 48.0
 offset_bottom = 0.0
-grow_vertical = 1
+grow_horizontal = 1
+grow_vertical = 2
 
 [node name="Box" type="VBoxContainer" parent="Panel"]
 theme_type_variation = &"RoomyStack"
 layout_mode = 2
+
+[node name="Header" type="HBoxContainer" parent="Panel/Box"]
+layout_mode = 2
+
+[node name="SectionLabel" type="Label" parent="Panel/Box/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"Bright"
+text = "STARTING CONDITIONS"
+vertical_alignment = 1
+
+[node name="ResetButton" type="Button" parent="Panel/Box/Header"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"IconButton"
+icon = ExtResource("4")
+icon_alignment = 1
 
 [node name="BupsRow" parent="Panel/Box" instance=ExtResource("5")]
 layout_mode = 2
@@ -85,15 +65,19 @@ label_text = "Bups"
 
 [node name="NutrientsRow" parent="Panel/Box" instance=ExtResource("5")]
 layout_mode = 2
-label_text = "Nutrients"
+label_text = "Start nutrient"
 
 [node name="RateRow" parent="Panel/Box" instance=ExtResource("5")]
 layout_mode = 2
-label_text = "Nutrient rate"
+label_text = "Nutrient feed"
 
 [node name="DishRow" parent="Panel/Box" instance=ExtResource("5")]
 layout_mode = 2
 label_text = "Dish radius"
+
+[node name="LimitRow" parent="Panel/Box" instance=ExtResource("5")]
+layout_mode = 2
+label_text = "Bup limit"
 
 [node name="Actions" type="HBoxContainer" parent="Panel/Box"]
 layout_mode = 2
@@ -109,4 +93,4 @@ custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
 size_flags_horizontal = 3
 theme_type_variation = &"PrimaryButton"
-text = "GO!"
+text = "NEXT"

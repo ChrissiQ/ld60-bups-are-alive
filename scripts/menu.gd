@@ -29,10 +29,8 @@ var _flicker_left := 0.0
 func _ready() -> void:
 	tagline.text = TAGLINES[randi() % TAGLINES.size()]
 	dish.position = _dish_center()
-	var ambient := StartConditions.new()
-	ambient.nutrient_rate = 10.0
-	dish.strike(ambient)
-	dish.extinct.connect(func() -> void: dish.strike(ambient), CONNECT_DEFERRED)
+	dish.strike(_ambient_start())
+	dish.extinct.connect(func() -> void: dish.strike(_ambient_start()), CONNECT_DEFERRED)  # (each time in new colours)
 
 	load_button.disabled = not SaveGame.has_save()
 	# Without this, arrow-key navigation still lands on the disabled button.
@@ -50,6 +48,14 @@ func _ready() -> void:
 	quit_button.focus_neighbor_bottom = quit_button.get_path_to(new_button)
 	quit_button.focus_next = quit_button.get_path_to(new_button)
 	new_button.grab_focus()
+
+
+## The dish behind the title: a fed colony of founders in evenly spaced colours.
+func _ambient_start() -> StartConditions:
+	var start := StartConditions.new()
+	start.nutrient_rate = 10.0
+	start.spread_founders()
+	return start
 
 
 func _dish_center() -> Vector2:
@@ -70,7 +76,7 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE and controls_panel.visible:
+	if UiInput.is_escape_press(event) and controls_panel.visible:
 		_show_controls(false)
 
 

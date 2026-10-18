@@ -23,8 +23,14 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
 
-[node name="Value" type="Label" parent="."]
-custom_minimum_size = Vector2(56, 0)
+[node name="Value" type="LineEdit" parent="."]
+custom_minimum_size = Vector2(88, 0)
 layout_mode = 2
-theme_type_variation = &"Bright"
-horizontal_alignment = 2
+size_flags_vertical = 4
+alignment = 2
+context_menu_enabled = false
+select_all_on_focus = true
+
+[node name="Unit" type="Label" parent="."]
+custom_minimum_size = Vector2(100, 0)
+layout_mode = 2

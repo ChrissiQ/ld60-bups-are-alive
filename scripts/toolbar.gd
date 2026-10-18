@@ -3,7 +3,7 @@ extends PanelContainer
 ## Top-of-screen toolbar: click tools, zoom, and simulation speed.
 ## Plain Buttons with Shortcuts and tooltips; the screen that owns it reacts to the signals.
 
-enum Tool { INFO, PAN, NUTRIENT }
+enum Tool { SELECT, PAN, NUTRIENT, SOURCE, ERASE }
 
 signal tool_selected(tool: Tool)
 signal zoom_in_requested
@@ -11,15 +11,18 @@ signal zoom_out_requested
 signal speed_selected(multiplier: float)
 signal pause_toggled(paused: bool)
 
-@onready var info_button: Button = $Row/InfoButton
+@onready var select_button: Button = $Row/SelectButton
 @onready var pan_button: Button = $Row/PanButton
 @onready var nutrient_button: Button = $Row/NutrientButton
+@onready var source_button: Button = $Row/SourceButton
+@onready var erase_button: Button = $Row/EraseButton
 @onready var zoom_out_button: Button = $Row/ZoomOutButton
 @onready var zoom_in_button: Button = $Row/ZoomInButton
 @onready var pause_button: Button = $Row/PauseButton
 @onready var speed_1_button: Button = $Row/Speed1Button
-@onready var speed_3_button: Button = $Row/Speed3Button
-@onready var speed_8_button: Button = $Row/Speed8Button
+@onready var speed_100_button: Button = $Row/Speed100Button
+@onready var speed_1000_button: Button = $Row/Speed1000Button
+@onready var speed_ultra_button: Button = $Row/SpeedUltraButton
 
 var _tool_buttons: Dictionary = {}
 var _last_play: Button  ## the speed button to resume with
@@ -27,27 +30,25 @@ var _last_play: Button  ## the speed button to resume with
 
 func _ready() -> void:
 	var tools := ButtonGroup.new()
-	_setup_tool(info_button, Tool.INFO, tools, "Info", "I", [KEY_I])
+	_setup_tool(select_button, Tool.SELECT, tools, "Select", "S", [KEY_S])
 	_setup_tool(pan_button, Tool.PAN, tools, "Pan", "H", [KEY_H])
-	_setup_tool(nutrient_button, Tool.NUTRIENT, tools, "Place nutrients", "N", [KEY_N])
+	_setup_tool(nutrient_button, Tool.NUTRIENT, tools, "Drop nutrient", "N", [KEY_N])
+	_setup_tool(source_button, Tool.SOURCE, tools, "Place a nutrient source", "F", [KEY_F])
+	_setup_tool(erase_button, Tool.ERASE, tools, "Erase nutrient", "E", [KEY_E])
 
 	_setup(zoom_out_button, "Zoom out", "-", [KEY_MINUS, KEY_KP_SUBTRACT])
 	zoom_out_button.pressed.connect(zoom_out_requested.emit)
 	_setup(zoom_in_button, "Zoom in", "+", [KEY_EQUAL, KEY_KP_ADD], [KEY_EQUAL])
 	zoom_in_button.pressed.connect(zoom_in_requested.emit)
 
-	# Pause and the three play speeds are one exclusive group: exactly one is selected, so
+	# Pause and the four play speeds are one exclusive group: exactly one is selected, so
 	# you are either paused or playing. Space swaps between pause and the last speed (below).
 	var playback := ButtonGroup.new()
-	_setup(pause_button, "Pause", "Space", [])
-	pause_button.toggle_mode = true
-	pause_button.button_group = playback
-	pause_button.toggled.connect(func(on: bool) -> void:
-		if on:
-			pause_toggled.emit(true))
-	_setup_speed(speed_1_button, playback, 1.0, "Play", "1", KEY_1)
-	_setup_speed(speed_3_button, playback, 3.0, "Speed x3", "2", KEY_2)
-	_setup_speed(speed_8_button, playback, 8.0, "Speed x8", "3", KEY_3)
+	_setup_toggle(pause_button, playback, "Pause", "Space", [], pause_toggled.emit.bind(true))
+	_setup_speed(speed_1_button, playback, 1.0, "x1: real time", "1", KEY_1)
+	_setup_speed(speed_100_button, playback, 100.0, "x100: 1 s = 1.7 min", "2", KEY_2)
+	_setup_speed(speed_1000_button, playback, 1000.0, "x1,000: 1 s = 17 min", "3", KEY_3)
+	_setup_speed(speed_ultra_button, playback, 10000.0, "x10,000: 1 s = 2.8 h", "4", KEY_4)
 	speed_1_button.button_pressed = true
 
 
@@ -75,32 +76,45 @@ func current_tool() -> Tool:
 	for tool: Tool in _tool_buttons:
 		if _tool_buttons[tool].button_pressed:
 			return tool
-	return Tool.INFO
+	return Tool.SELECT
 
 
 func select_tool(tool: Tool) -> void:
 	_tool_buttons[tool].button_pressed = true
 
 
+## Locks or unlocks a tool. A locked one is greyed out and says why; if it was the selected
+## tool the toolbar falls back to Select, so the screen is never left holding a tool it can't use.
+func set_tool_locked(tool: Tool, locked: bool, reason := "") -> void:
+	var button: Button = _tool_buttons[tool]
+	button.disabled = locked
+	var base := button.get_meta("tooltip", button.tooltip_text) as String
+	button.set_meta("tooltip", base)
+	button.tooltip_text = "%s - %s" % [base, reason] if locked and reason != "" else base
+	if locked and button.button_pressed:
+		select_tool(Tool.SELECT)
+
+
 func _setup_tool(button: Button, tool: Tool, group: ButtonGroup, description: String, key_label: String, keys: Array) -> void:
+	_setup_toggle(button, group, description, key_label, keys, tool_selected.emit.bind(tool))
+	_tool_buttons[tool] = button
+
+
+func _setup_speed(button: Button, group: ButtonGroup, multiplier: float, description: String, key_label: String, key: Key) -> void:
+	_setup_toggle(button, group, description, key_label, [key], func() -> void:
+		_last_play = button
+		pause_toggled.emit(false)
+		speed_selected.emit(multiplier))
+
+
+## A button of an exclusive group: choosing it (not letting go of it) does `on_chosen`.
+func _setup_toggle(button: Button, group: ButtonGroup, description: String, key_label: String, keys: Array, on_chosen: Callable) -> void:
 	_setup(button, description, key_label, keys)
 	button.toggle_mode = true
 	button.button_group = group
 	button.toggled.connect(func(on: bool) -> void:
 		if on:
-			tool_selected.emit(tool))
-	_tool_buttons[tool] = button
-
-
-func _setup_speed(button: Button, group: ButtonGroup, multiplier: float, description: String, key_label: String, key: Key) -> void:
-	_setup(button, description, key_label, [key])
-	button.toggle_mode = true
-	button.button_group = group
-	button.toggled.connect(func(on: bool) -> void:
-		if on:
-			_last_play = button
-			pause_toggled.emit(false)
-			speed_selected.emit(multiplier))
+			on_chosen.call())
 
 
 ## Tooltip reads "<what it does> (<key>)". Focus is off so Space and arrow keys keep
