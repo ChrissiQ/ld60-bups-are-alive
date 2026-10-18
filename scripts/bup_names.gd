@@ -13,7 +13,7 @@ const MAX_LENGTH := 24
 
 ## "lil bup #578": its size word, going by the size its genome grows to, and its number.
 static func default_name(size_gene: float, id: int) -> String:
-	return "%s #%s" % [Cell.title_for(size_gene), UiText.group(str(id))]
+	return Strings.t("bups.name", [Cell.title_for(size_gene), UiText.group(str(id))])
 
 
 ## What a typed name becomes: no line breaks or control characters, spaces trimmed, a sensible length.

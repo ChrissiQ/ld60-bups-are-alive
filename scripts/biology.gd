@@ -28,7 +28,9 @@ const MEMORY_LONG := 2.0  ## s
 const MAX_DRIFT_FRACTION := 0.22  ## the ceiling of the coarse drift up a gradient, as a share of swim speed, fitted with Cell.DRIFT_HALF and DRIFT_NOISE so that it reproduces the run-and-tumble model (which reaches about 3 of 20 µm/s in steep gradients: noise keeps it under the ceiling). Real cells are reported to reach ~0.35 [search: ~7 of 20 µm/s, Berg & Turner 1990, secondary source], so this model's chemotaxis is still conservative; TUMBLE_UP_FACTOR is the knob.
 
 # --- The medium ------------------------------------------------------------------------------
-const NUTRIENT_DIFFUSION := 600.0  ## µm^2/s, glucose in water [memory: the search could not confirm it]
+const MEDIUM_THICKNESS := 25.0  ## how many times thicker than water the medium is (viscosity): nutrient diffuses that many times slower (Stokes-Einstein). Swimming is left as it is [choice]
+const WATER_DIFFUSION := 600.0  ## µm^2/s, glucose in water [memory: the search could not confirm it]
+const NUTRIENT_DIFFUSION := WATER_DIFFUSION / MEDIUM_THICKNESS  ## µm^2/s
 
 # --- Body ------------------------------------------------------------------------------------
 const BIRTH_LENGTH := 2.0  ## µm [search: length 2.6-4.0 µm in one compilation; 2 at birth is typical]

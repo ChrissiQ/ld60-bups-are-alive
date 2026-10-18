@@ -7,6 +7,8 @@
 #include "nutrient_field.h"
 #include "params.h"
 
+#include <limits>
+
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -27,6 +29,7 @@ class BupSim : public RefCounted {
 	struct Bup {
 		int64_t id = 0;
 		float x = 0, y = 0, dx = 1, dy = 0;
+		float px = std::numeric_limits<float>::quiet_NaN(), py = std::numeric_limits<float>::quiet_NaN(); // where it was in the last picture (none yet: NaN), for its trail
 		float energy = 0, mass = 0, birth_mass = 0;
 		int generation = 0;
 		float genes[4] = { 0, 0, 0, 0 }; // speed, sense, metabolism, size
@@ -61,6 +64,7 @@ class BupSim : public RefCounted {
 	};
 	std::unordered_map<int64_t, Record> records;
 	double now_seconds = 0.0;
+	double upkeep_scale = 1.0; // multiplies the base and per-mass maintenance costs (a harsher dish)
 	int now_minutes() const { return (int)(now_seconds / 60.0); }
 	void make_record(const Bup &b, int64_t parent);
 	void record_death(const Bup &b);
@@ -118,6 +122,7 @@ public:
 	void reset(double dish_radius, int64_t seed);
 	void set_seed(int64_t seed);
 	void set_limit(int bup_limit) { limit = bup_limit; }
+	void set_upkeep_scale(double scale) { upkeep_scale = scale; }
 	void grow(double new_radius); // a larger dish; the bups and the nutrient stay
 	Ref<NutrientField> get_field() const { return field; }
 	double random_float() { return uniform(); }
@@ -173,7 +178,7 @@ public:
 	Vector2 nearest_and_count(const Vector2 &local, double near) const;
 
 	void step(double delta, const PackedVector2Array &source_pos, const PackedFloat32Array &source_rates, double feed_per_minute, double sim_time = -1.0);
-	PackedFloat32Array render_buffer(double pixel_um, int capacity) const;
+	PackedFloat32Array render_buffer(double pixel_um, int capacity); // (it also notes where each bup was drawn, so the next picture can draw its trail)
 	Vector2 bup_pos(int64_t id) const;
 	void set_custom_name(int64_t id, const String &name);
 	String custom_name(int64_t id) const;

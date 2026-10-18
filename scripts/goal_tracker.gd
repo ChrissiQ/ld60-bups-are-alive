@@ -4,7 +4,7 @@ extends RefCounted
 
 signal goal_completed(goal: Goal)
 
-const POP_TARGET := 100
+const POP_TARGET := 1000  ## a colony big enough to select from in experiment 2
 const SENSE_TARGET := 70.0
 const SENSE_FRACTION := 0.5
 const SENSE_MIN_POP := 15
@@ -17,23 +17,22 @@ var held := 0.0
 
 func _init() -> void:
 	goals.append(Goal.new(
-		"A Living Colony",
-		"Grow the colony to %d bups." % POP_TARGET,
+		Strings.t("goals.living_title"),
+		Strings.t("goals.living_text", [POP_TARGET]),
 		0.0,
 		func(d: Dish) -> float: return minf(d.population() / float(POP_TARGET), 1.0),
-		func(d: Dish) -> String: return "%d / %d bups" % [d.population(), POP_TARGET],
+		func(d: Dish) -> String: return Strings.t("goals.living_status", [d.population(), POP_TARGET]),
 	))
 	goals.append(Goal.new(
-		"Keen Senses",
-		"Breed a strain where %d%% of bups sense food from %d units away. Hold for %s.\n\nNutrient tools are unlocked. Cut the random feed (DOWN key) and place a nutrient source at the far edge of the dish: only bups that can find it will thrive." % [SENSE_FRACTION * 100, SENSE_TARGET, SimClock.format(SENSE_HOLD)],
+		Strings.t("goals.keen_title"),
+		Strings.t("goals.keen_text", [SENSE_FRACTION * 100, SENSE_TARGET, SimClock.format(SENSE_HOLD), Dish.SUGGESTED_BLOOM_RATE]),
 		SENSE_HOLD,
 		func(d: Dish) -> float:
 			if d.population() < SENSE_MIN_POP:
 				return 0.0
 			return minf(d.fraction_with_gene_at_least("sense", SENSE_TARGET) / SENSE_FRACTION, 1.0),
 		func(d: Dish) -> String:
-			return "%.0f%% keen-sensed (need %d%%, min %d bups)" % [
-				d.fraction_with_gene_at_least("sense", SENSE_TARGET) * 100.0, SENSE_FRACTION * 100, SENSE_MIN_POP],
+			return Strings.t("goals.keen_status", [d.fraction_with_gene_at_least("sense", SENSE_TARGET) * 100.0, SENSE_FRACTION * 100, SENSE_MIN_POP]),
 	))
 
 

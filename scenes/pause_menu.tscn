@@ -31,7 +31,7 @@ anchor_right = 1.0
 offset_top = 70.0
 offset_bottom = 170.0
 grow_horizontal = 2
-text = "BUPS ARE ALIVE"
+text = "@pause.game_title"
 horizontal_alignment = 1
 vertical_alignment = 1
 
@@ -43,7 +43,7 @@ anchor_right = 1.0
 offset_top = 172.0
 offset_bottom = 210.0
 grow_horizontal = 2
-text = "Paused"
+text = "@pause.subtitle"
 horizontal_alignment = 1
 vertical_alignment = 1
 
@@ -70,16 +70,16 @@ layout_mode = 2
 [node name="Heading" type="Label" parent="Content/Settings/Box"]
 theme_type_variation = &"Heading"
 layout_mode = 2
-text = "THE DISH"
+text = "@pause.dish_header"
 horizontal_alignment = 1
 
 [node name="DishRow" parent="Content/Settings/Box" instance=ExtResource("2")]
 layout_mode = 2
-label_text = "Dish radius"
+label_text = "@pause.dish_radius"
 
 [node name="LimitRow" parent="Content/Settings/Box" instance=ExtResource("2")]
 layout_mode = 2
-label_text = "Bup limit"
+label_text = "@pause.bup_limit"
 
 [node name="Buttons" type="VBoxContainer" parent="Content"]
 layout_mode = 2
@@ -88,13 +88,13 @@ layout_mode = 2
 custom_minimum_size = Vector2(320, 48)
 layout_mode = 2
 size_flags_horizontal = 4
-text = "Resume"
+text = "@pause.resume"
 
 [node name="QuitButton" type="Button" parent="Content/Buttons"]
 custom_minimum_size = Vector2(320, 48)
 layout_mode = 2
 size_flags_horizontal = 4
-text = "Quit to Menu"
+text = "@pause.quit"
 
 [node name="Initial" type="PanelContainer" parent="."]
 visible = false
@@ -117,34 +117,38 @@ mouse_filter = 2
 [node name="Heading" type="Label" parent="Initial/Box"]
 theme_type_variation = &"SmallBright"
 layout_mode = 2
-text = "STARTING CONDITIONS"
+text = "@pause.record_header"
 
 [node name="BupsRow" parent="Initial/Box" instance=ExtResource("3")]
 layout_mode = 2
-label_text = "Bups"
+label_text = "@pause.record_bups"
 
 [node name="NutrientsRow" parent="Initial/Box" instance=ExtResource("3")]
 layout_mode = 2
-label_text = "Start nutrient"
+label_text = "@pause.record_start_nutrient"
 
 [node name="RateRow" parent="Initial/Box" instance=ExtResource("3")]
 layout_mode = 2
-label_text = "Nutrient feed"
+label_text = "@pause.record_nutrient_feed"
+
+[node name="BloomRow" parent="Initial/Box" instance=ExtResource("3")]
+layout_mode = 2
+label_text = "@pause.record_plankton_bloom"
 
 [node name="DishRow" parent="Initial/Box" instance=ExtResource("3")]
 layout_mode = 2
-label_text = "Dish radius"
+label_text = "@pause.record_dish_radius"
 
 [node name="LimitRow" parent="Initial/Box" instance=ExtResource("3")]
 layout_mode = 2
-label_text = "Bup limit"
+label_text = "@pause.record_bup_limit"
 
 [node name="ConfirmDialog" type="ConfirmationDialog" parent="."]
-title = "Quit to menu"
+title = "@pause.confirm_title"
 initial_position = 2
 size = Vector2i(460, 130)
 visible = false
-ok_button_text = "Quit"
-dialog_text = "This dish is not saved."
-cancel_button_text = "Stay"
+ok_button_text = "@pause.confirm_ok"
+dialog_text = "@pause.confirm_text"
+cancel_button_text = "@pause.confirm_cancel"
 dialog_autowrap = true

@@ -22,7 +22,7 @@
 	X(max_drift_fraction) X(run_seconds) X(trait_mutations) X(harmful_mutations) \
 	X(compensatory_mutations) X(lethal_fraction) X(harm_shape) X(mean_harm) X(mean_repair) \
 	X(max_harm) X(hue_step) X(sat_step) X(val_step) X(val_min) X(add_mass_factor) X(min_length_px) X(min_width_px) \
-	X(founder_hue) X(founder_sat) X(founder_val)
+	X(founder_hue) X(founder_sat) X(founder_val) X(max_trail_px)
 
 namespace godot {
 

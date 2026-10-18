@@ -90,7 +90,7 @@ func _init() -> void:
 	var setup: Control = load("res://scenes/free_setup.tscn").instantiate()
 	root.add_child(setup)
 	await process_frame
-	check(setup.bups_row.slider.value == 4 and setup.nutrients_row.slider.value == 60, "first ever visit shows the defaults")
+	check(setup.bups_row.slider.value == 4 and setup.nutrients_row.slider.value == 10000, "first ever visit shows the defaults")
 	setup.bups_row.slider.value = 55
 	setup.nutrients_row.slider.value = 90
 	setup.rate_row.slider.value = 3

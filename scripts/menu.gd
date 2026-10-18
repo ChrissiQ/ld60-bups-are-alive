@@ -1,15 +1,6 @@
 extends Control
 ## Title screen. A live dish of bups multiplies quietly behind the buttons.
 
-const TAGLINES := [
-	"It's alive! It's ALIVE! (There are only a few of them, so far.)",
-	"Science! Lightning! Questionable hygiene!",
-	"Please do not feed the bups after midnight. Or before. Actually, do feed them.",
-	"Nobody warned the bups about natural selection.",
-	"A tiny scandal in a glass dish.",
-	"Every great discovery started with someone forgetting to cover a petri dish.",
-]
-
 @onready var dish: Dish = $Dish
 @onready var title: Label = $Title
 @onready var buttons: VBoxContainer = $Buttons
@@ -27,7 +18,9 @@ var _flicker_left := 0.0
 
 
 func _ready() -> void:
-	tagline.text = TAGLINES[randi() % TAGLINES.size()]
+	Strings.apply(self)  # (the texts the scene gives as @section.name)
+	var quips := Strings.list("menu", "quip")
+	tagline.text = quips[randi() % quips.size()] if not quips.is_empty() else ""
 	dish.position = _dish_center()
 	dish.strike(_ambient_start())
 	dish.extinct.connect(func() -> void: dish.strike(_ambient_start()), CONNECT_DEFERRED)  # (each time in new colours)

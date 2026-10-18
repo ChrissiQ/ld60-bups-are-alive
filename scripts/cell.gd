@@ -72,4 +72,4 @@ static func mass_to_add(genome: Dictionary) -> float:
 ## The size word in a bup's default name, going by the size its genome grows to. Only BupNames uses this:
 ## to show a bup's name, ask the dish (`Dish.bup_name`).
 static func title_for(size_gene: float) -> String:
-	return "lil bup" if size_gene < 3.5 else ("big bup" if size_gene > 5.5 else "bup")
+	return Strings.t("bups.small") if size_gene < 3.5 else (Strings.t("bups.large") if size_gene > 5.5 else Strings.t("bups.medium"))

@@ -34,7 +34,7 @@ static func thousands(value: float, decimals := 0) -> String:
 ## Colours every number in the text, and separates its thousands.
 ## A dish radius (µm) as it is shown: "6.25 mm".
 static func mm(radius_um: float) -> String:
-	return "%s mm" % String.num(radius_um / StartConditions.UM_PER_MM, 2)
+	return Strings.t("ui.mm", [String.num(radius_um / StartConditions.UM_PER_MM, 2)])
 
 
 static func numbers(text: String) -> String:

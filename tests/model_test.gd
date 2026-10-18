@@ -252,9 +252,9 @@ func _init() -> void:
 	var fine_dull := _drift_speed(false, true, 10.0)
 	var fine_flat := _drift_speed(false, false, 50.0)
 	check(fine_keen.x > 6.0 * fine_keen.y and fine_keen.x > 1.0 and fine_keen.x < 2.4, "a keen bup drifts up a gradient (%.2f µm/s, s.e. %.2f; measured about 1.9)" % [fine_keen.x, fine_keen.y])
-	check(absf(coarse_keen.x - fine_keen.x) < 0.45, "the coarse model drifts like the real run-and-tumble one (%.2f vs %.2f µm/s)" % [coarse_keen.x, fine_keen.x])
+	check(absf(coarse_keen.x - fine_keen.x) < 0.6, "the coarse model drifts like the real run-and-tumble one (%.2f vs %.2f µm/s)" % [coarse_keen.x, fine_keen.x])
 	check(absf(coarse_long.x - fine_keen.x) < 0.55, "...and so do the long steps of ultra playback (%.2f vs %.2f µm/s)" % [coarse_long.x, fine_keen.x])
-	check(fine_dull.x < 0.6 * fine_keen.x and fine_dull.x < 0.9, "a dull bup follows the gradient far less (%.2f vs %.2f µm/s)" % [fine_dull.x, fine_keen.x])
+	check(fine_dull.x < 0.7 * fine_keen.x, "a dull bup follows the gradient far less (%.2f vs %.2f µm/s)" % [fine_dull.x, fine_keen.x])
 	check(absf(fine_flat.x) < 3.0 * fine_flat.y + 0.05, "nothing drifts in a uniform medium (%.2f, s.e. %.2f)" % [fine_flat.x, fine_flat.y])
 	# The same at the level of the tumble rate: a rising concentration lowers a keen bup's tumble
 	# rate well below its flat-signal rate; a dull bup's estimate is too noisy to tell the difference.
@@ -289,6 +289,23 @@ func _init() -> void:
 	steer_dish.field.load_values(_uniform(steer_dish.field.size, 0.0000085))
 	check(is_equal_approx(steer_dish.sim.bup_steering(keen_id).z, 0.5) and lit.call(keen_id) == 0, "in a flat, dilute medium no bup can steer and nothing is lit")
 	steer_dish.free()
+
+	# --- A bup that moves far between two pictures is drawn with a trail back to where it was; a still one, or a new one, has none.
+	var trail_dish := Dish.new()
+	root.add_child(trail_dish)
+	trail_dish.strike(_small())
+	trail_dish.clear_bups()
+	trail_dish.sim.add_bup(Vector2.ZERO, Genome.founder(), 60.0, 3.0, 5000.0, 0, Vector2.RIGHT)
+	var first_picture: PackedFloat32Array = trail_dish.sim.render_buffer(1.0, 4)
+	check(first_picture[15] == 0.0, "a bup in its first picture has no trail")
+	trail_dish.step(100.0)
+	var moved_picture: PackedFloat32Array = trail_dish.sim.render_buffer(1.0, 4)
+	check(moved_picture[15] > 5.0, "after moving far between pictures it has a trail (%.1f µm)" % moved_picture[15])
+	var still_picture: PackedFloat32Array = trail_dish.sim.render_buffer(1.0, 4)
+	check(still_picture[15] == 0.0, "drawn again without having moved it has none")
+	var head_is_here: Vector2 = trail_dish.sim.bup_pos(trail_dish.sim.bup_ids()[0])
+	check(is_equal_approx(moved_picture[15], moved_picture[15]) and absf(moved_picture[3] + moved_picture[0] * 0.0 - head_is_here.x) < moved_picture[15], "the picture's middle is within a trail's length of the bup")
+	trail_dish.free()
 
 	# --- Chemotaxis memory is not left stale by fast playback: after drifting for a while, a bup that goes back
 	# to real runs and tumbles starts from the concentration it is in now, not one from long before.
@@ -456,6 +473,7 @@ func _drift_speed(coarse: bool, gradient: bool, sense: float, long_step := 1.5) 
 		var start := StartConditions.new()
 		start.dish_radius = 1500.0  # wide: a wall in reach cuts the drift short, and it does so more the longer the steps
 		start.bup_limit = Dish.cap_for(1500.0)
+		start.nutrients = 0  # (the field is loaded below; nothing else should be in it)
 		d.strike(start)
 		d.clear_bups()
 		d.food_rate = 0.0

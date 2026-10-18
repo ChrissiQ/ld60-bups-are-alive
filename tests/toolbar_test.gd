@@ -98,7 +98,7 @@ func _init() -> void:
 	check(paused_label.is_visible_in_tree() and paused_label.text == "PAUSED", "PAUSED shows while paused")
 	check(paused_label.get_theme_color("font_color").r > 0.8 and paused_label.get_theme_color("font_color").g < 0.3 and paused_label.get_theme_font_size("font_size") >= 40, "PAUSED is large and red")
 	check(absf(label_rect.get_center().x - win.x * 0.5) <= 1.0, "PAUSED is centred horizontally")
-	check(is_equal_approx(label_rect.end.y, win.y - 16.0), "PAUSED sits 8px inside the 8px border (bottom edge %.0f, window %.0f)" % [label_rect.end.y, win.y])
+	check(is_equal_approx(label_rect.end.y, win.y - 20.0), "PAUSED sits 14px inside the 6px border, like the rest of the HUD (bottom edge %.0f, window %.0f)" % [label_rect.end.y, win.y])
 	check(paused_label.mouse_filter == Control.MOUSE_FILTER_IGNORE, "PAUSED doesn't swallow clicks")
 	check(paused_label.get_theme_font("font").resource_path == "res://fonts/CommitMono-700.otf", "PAUSED is the bundled font in bold")
 	check(_exclusive(m.toolbar) and not m.toolbar.speed_1_button.button_pressed, "free mode start: only Pause is lit")
@@ -160,7 +160,7 @@ func _init() -> void:
 	await process_frame
 	await process_frame
 	check(m.dish.nutrients_placed == 31, "dish counted 31 placed, got %d" % m.dish.nutrients_placed)
-	check(m.hud.get_parsed_text().contains("PLACED  31"), "the readout shows the placed count: '%s'" % m.hud.get_parsed_text().get_slice("\n", 3))
+	check(m.hud.get_parsed_text().contains("placed  31"), "the readout shows the placed count: '%s'" % m.hud.get_parsed_text().get_slice("\n", 3))
 	check(m.hud.get_theme_font("normal_font") is FontFile and m.hud.get_theme_font("normal_font").resource_path.begins_with("res://fonts/CommitMono"), "HUD text uses the bundled font")
 	for node in [m.hud, m.goal_panel, m.info_text]:
 		check(node.mouse_filter == Control.MOUSE_FILTER_IGNORE, "%s doesn't swallow clicks" % node.name)
@@ -207,11 +207,11 @@ func _init() -> void:
 
 	# --- Select tool: click selects, empty click deselects, middle button pans.
 	var picks: Dictionary = m.tool_options.pick_buttons
-	var pick_names := ["Select all", "Background", "Bups", "Nutrient sources"]
-	var picks_ok: bool = m.tool_options.visible and picks.size() == 4 and picks[0].button_pressed
+	var pick_names := ["Select all", "Background", "Bups", "Nutrient sources", "Plankton"]
+	var picks_ok: bool = m.tool_options.visible and picks.size() == 5 and picks[0].button_pressed
 	for i in picks.size():
 		picks_ok = picks_ok and picks[i].icon != null and picks[i].text == "" and picks[i].tooltip_text == pick_names[i]
-	check(picks_ok, "the select tool has a tray of four icon buttons (no text) named on hover, with Select all chosen")
+	check(picks_ok, "the select tool has a tray of five icon buttons (no text) named on hover, with Select all chosen")
 	var bup: int = m.dish.bup_ids()[0]
 	m.dish.sim.set_bup_pos(bup, Vector2(20, 10))
 	_click(m, centre + Vector2(20, 10))
@@ -250,20 +250,20 @@ func _init() -> void:
 	await process_frame
 	await process_frame
 	var readout: String = m.hud.get_parsed_text()
-	check(readout.contains("PLAYBACK  x1") and not readout.contains("(x"), "readout shows 'PLAYBACK  x1' on its own line and no '(x..)' after the time: '%s'" % readout.get_slice("\n", 1))
+	check(readout.contains("playback  x1") and not readout.contains("(x"), "readout shows 'playback  x1' on its own line and no '(x..)' after the time: '%s'" % readout.get_slice("\n", 1))
 	var time_line := ""
 	for line in readout.split("\n"):
-		if line.begins_with("TIME  "):
+		if line.begins_with("time  "):
 			time_line = line
 	check(time_line != "" and not time_line.contains("x"), "the TIME line is just the time ('%s')" % time_line)
 	m.toolbar.speed_1000_button.button_pressed = true
 	await process_frame
 	await process_frame
-	check(m.hud.get_parsed_text().contains("PLAYBACK  x1,000"), "speed 1000 reads 'PLAYBACK  x1,000'")
+	check(m.hud.get_parsed_text().contains("playback  x1,000"), "speed 1000 reads 'playback  x1,000'")
 	m.toolbar.set_paused(true)
 	await process_frame
 	await process_frame
-	check(m.hud.get_parsed_text().contains("PLAYBACK  paused") and not m.hud.get_parsed_text().contains("[PAUSED]"), "paused reads 'PLAYBACK  paused'")
+	check(m.hud.get_parsed_text().contains("playback  paused") and not m.hud.get_parsed_text().contains("[PAUSED]"), "paused reads 'playback  paused'")
 	m.toolbar.speed_1_button.button_pressed = true  # resume at normal speed
 
 	# --- Select tool: the panel follows the pointer until a bup or source is clicked.
@@ -474,6 +474,43 @@ func _init() -> void:
 	check(m.dish.selected_source == null, "...and changing to Background lets go of it")
 	picks[0].button_pressed = true
 	m.dish.sources.clear()
+	await process_frame
+
+	# --- Plankton can be picked: by Select all (under bups and sources) and by its own mode; the readout says what it holds.
+	m.dish.clear_bups()
+	m.dish.sources.clear()
+	m.dish.plankton.clear()
+	var float_spot: Vector2 = m.dish.global_position + Vector2(60, -50)
+	m.dish.place_plankton(float_spot)
+	var floater: Plankton = m.dish.plankton[0]
+	floater.burst_at = m.dish.time + 1.0e9  # (not within this test)
+	await process_frame
+	_hover_over(m, float_spot)
+	check(heading.call() == "PLANKTON" and m.info_text.get_parsed_text().contains("holds"), "Select all: hovering a plankton shows what it holds ('%s')" % heading.call())
+	check(not m.info_text.get_parsed_text().contains("burst"), "...and doesn't give away when it will burst")
+	var over_floater: int = m.dish.add_bup(float_spot, Genome.founder(), 30.0)
+	_hover_over(m, float_spot)
+	check(m.name_row.visible and m.dish.hovered_plankton == null, "a bup over a plankton is picked first")
+	m.dish.remove_bup(over_floater)
+	picks[Dish.PickMode.PLANKTON].button_pressed = true
+	_hover_over(m, float_spot)
+	check(m.dish.pick_mode == Dish.PickMode.PLANKTON and heading.call() == "PLANKTON", "Plankton mode: shows the plankton")
+	_hover_over(m, m.dish.global_position + Vector2(-150, 120))
+	check(not m.info_panel.visible, "...and nothing over empty ground")
+	m.dish.select_at(float_spot)
+	check(m.dish.selected_plankton == floater and m.dish.selected_id == -1 and m.dish.selected_source == null, "a click in Plankton mode picks it")
+	picks[Dish.PickMode.BUPS].button_pressed = true
+	check(m.dish.selected_plankton == null, "changing to a mode that doesn't look at plankton lets go of it")
+	picks[Dish.PickMode.PLANKTON].button_pressed = true
+	m.dish.select_at(float_spot)
+	m.toolbar.select_tool(Toolbar.Tool.PAN)
+	check(m.dish.selected_plankton == null, "using another tool lets go of a selected plankton")
+	m.toolbar.select_tool(Toolbar.Tool.SELECT)
+	m.dish.select_at(float_spot)
+	floater.burst_at = m.dish.time + 1.0
+	m.dish.step(2.0)
+	check(m.dish.selected_plankton == null and m.dish.plankton.is_empty(), "a selected plankton that bursts is let go")
+	picks[Dish.PickMode.ALL].button_pressed = true
 	await process_frame
 
 	# --- At high playback speed a readout's figures change at most a few times a second, but a new subject shows at once.
@@ -780,14 +817,51 @@ func _init() -> void:
 	check(not g.menu_open, "Escape closes it")
 	g.toolbar.set_paused(true)
 	check(g.paused and g.pause_ring.visible, "goal mode pause shows the ring too")
-	for locked_tool in [Toolbar.Tool.NUTRIENT, Toolbar.Tool.SOURCE, Toolbar.Tool.ERASE]:
+	for locked_tool in [Toolbar.Tool.NUTRIENT, Toolbar.Tool.SOURCE, Toolbar.Tool.ERASE, Toolbar.Tool.PLANKTON]:
 		check(g.toolbar.button_for(locked_tool).disabled, "goal 1 locks the nutrient tools")
 	check(not g.toolbar.button_for(Toolbar.Tool.SELECT).disabled and not g.toolbar.button_for(Toolbar.Tool.PAN).disabled, "...but not select or pan")
 	check(g.toolbar.source_button.tooltip_text.contains("unlocks with experiment 2"), "a locked tool says why")
 	g.tracker.index = 1
 	g._sync_tool_locks()
-	for locked_tool in [Toolbar.Tool.NUTRIENT, Toolbar.Tool.SOURCE, Toolbar.Tool.ERASE]:
+	for locked_tool in [Toolbar.Tool.NUTRIENT, Toolbar.Tool.SOURCE, Toolbar.Tool.ERASE, Toolbar.Tool.PLANKTON]:
 		check(not g.toolbar.button_for(locked_tool).disabled, "experiment 2 unlocks the nutrient tools")
+	g.tracker.index = 0
+	# The rate box: the feed is always there; the bloom comes with plankton, at experiment 2, and starts at none.
+	await process_frame
+	check(g.rate_panel.visible and g.feed_row.visible and g.bloom_row.visible and not g.bloom_row.slider.editable and g.bloom_row.label.tooltip_text == "Unlocks with experiment 2" and g.dish.bloom_rate == 0.0, "goal 1 shows the feed control, and the bloom control faint with the reason")
+	check(g.rate_panel.position.y >= g.hud.position.y + g.hud.get_content_height(), "the rate box sits under the readout, not over it")
+	check(not g.hud.get_parsed_text().contains("UP/DOWN") and not g.hud.get_parsed_text().contains("ESC"), "the readout has no shortcut reminders")
+	check(absf(g.feed_row.label.global_position.x - g.hud.global_position.x) < 1.5 and g.rate_panel.global_position.x < g.hud.global_position.x, "the box's text lines up with the readout's, and the box itself starts further left")
+	g.feed_row.slider.value = 4.0
+	check(is_equal_approx(g.dish.food_rate, 4.0), "the feed control sets the dish's feed")
+	g.dish.food_rate = 0.0
+	g.tracker.index = 1
+	g.toolbar.set_paused(false)
+	g._on_goal_completed(g.tracker.goals[0])
+	await process_frame
+	check(g.paused and g.toolbar.pause_button.button_pressed, "reaching a goal pauses the game")
+	check(g.dish.upkeep_factor == Dish.GOAL_UPKEEP_FACTOR, "experiment 2 makes staying alive cost more")
+	g.dish.upkeep_factor = 1.0
+	check(g.bloom_row.slider.editable and g.dish.bloom_rate == 0.0, "experiment 2 unlocks the bloom control, at none until the player chooses")
+	check(g.bloom_row.global_position.y < g.feed_row.global_position.y, "the bloom control is above the feed control")
+	check(g.bloom_row.label.tooltip_text == "Plankton bloom rate" and g.feed_row.label.tooltip_text == "Constant feed nutrients" and g.feed_row.label.mouse_filter != Control.MOUSE_FILTER_IGNORE, "hovering a name says what the rate is")
+	g.bloom_row.slider.value = 12.0
+	check(is_equal_approx(g.dish.bloom_rate, 12.0), "the control sets the dish's bloom rate")
+	g.dish.bloom_rate = 36.0
+	g.dish.food_rate = 6.0
+	await process_frame
+	check(is_equal_approx(g.bloom_row.value, 36.0) and is_equal_approx(g.feed_row.value, 6.0), "the controls follow the dish when it changes some other way")
+	g.dish.bloom_rate = 0.0
+	g.dish.food_rate = 0.0
+	check(g.tracker.goals[1].text.contains("%.0f a day" % Dish.SUGGESTED_BLOOM_RATE), "the goal text suggests a bloom rate")
+	g.toolbar.set_paused(true)
+	g.toolbar.select_tool(Toolbar.Tool.PLANKTON)
+	check(g.tool == Toolbar.Tool.PLANKTON and g.toolbar.plankton_button.tooltip_text.begins_with("Place plankton"), "the plankton tool is selected from the toolbar")
+	var plankton_spot: Vector2 = g.dish.global_position + Vector2(300, 100)
+	for k in 5:
+		_click(g, _screen(g, plankton_spot + Vector2(k * 30, 0)))
+	check(g.dish.plankton.size() == 5, "each click places a plankton, as many as the player likes (%d)" % g.dish.plankton.size())
+	g.dish.plankton.clear()
 	g.toolbar.select_tool(Toolbar.Tool.SOURCE)
 	g.tracker.index = 0
 	g._sync_tool_locks()

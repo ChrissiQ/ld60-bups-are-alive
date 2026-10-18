@@ -8,7 +8,7 @@ extends Node2D
 ## Bups are named by a stable id (an int), since the native arrays compact as bups die.
 
 signal extinct
-enum PickMode { ALL, BACKGROUND, BUPS, SOURCES }  ## what the select tool looks at: everything (a source over a bup), only the medium, only bups, or only sources
+enum PickMode { ALL, BACKGROUND, BUPS, SOURCES, PLANKTON }  ## what the select tool looks at: everything (a source over a bup), only the medium, only bups, or only sources
 
 signal selection_changed  ## the selected bup is now another (or none)
 
@@ -16,6 +16,17 @@ const DEFAULT_RADIUS := 10000.0  ## µm: 10 mm, the dish goal mode uses and free
 const NUTRIENT_SCATTER := 5.0  ## radius a dose spreads over, per sqrt(nutrient) in it
 const MAX_CELLS := 300  ## the smallest carrying limit; see `cap_for`. Past the limit each birth displaces a random bup (a Moran process)
 const MAX_SOURCES := 12
+const PLANKTON_UNITS := 300.0  ## nutrient a plankton releases when it bursts [choice: a patch a few minutes of chemotaxis can use; see SUGGESTED_BLOOM_RATE]
+const PLANKTON_PATCH_RADIUS := 250.0  ## µm the released nutrient starts out spread over (a lysed cell's cloud: Stocker et al. 2008 used ~300 µm)
+const PLANKTON_MEAN_LIFE := 3600.0  ## s a plankton floats on average before bursting [choice: lysis timing is random; no measured scale]
+const PLANKTON_LIFE_SPREAD := 0.5  ## each one bursts at a random time from this share below to this share above the mean life, so the food keeps coming
+const BLOOM_JITTER := 0.25  ## the bloom's plankton appear at steady intervals, each this share early or late at random
+const PLANKTON_DRAW_RADIUS := 40.0  ## µm: about a small diatom
+const PLANKTON_MIN_PIXELS := 7.0  ## drawn at least this many screen pixels in radius
+const MAX_PLANKTON := 200
+const SUGGESTED_BLOOM_RATE := 24.0  ## plankton a sim-day that the goal text suggests (one an hour): 300 units an hour, about what the old feed gave
+const GOAL_UPKEEP_FACTOR := 3.0  ## how much costlier staying alive is once goal mode reaches experiment 2 (set by the screen; 1 elsewhere) [x10 killed every colony tested at once; x3 did not]
+const BLOOM_RATE_STEP := 1.0  ## the bloom rate moves in these steps (plankton a sim-day)
 const MIN_SOURCE_RATE := 0.5  ## nutrients per minute, like the global feed
 const MAX_SOURCE_RATE := 60.0
 const SOURCE_NEARBY := 60.0  ## how close counts as "near" a source in its details
@@ -29,6 +40,8 @@ const MAX_STEP := 20.0  ## the longest single step, in seconds: growth, uptake a
 const RING_PIXELS := 12.0  ## the radius of a selection or hover ring, in screen pixels
 const RING_GROW_ABOVE := 0.5  ## the ring only grows once its subject is more than this share of the ring's diameter ...
 const RING_GROW_TO := 0.25  ## ... and then to the size where the subject is this share of it
+const MAX_TRAIL_PIXELS := 80.0  ## the longest trail a fast bup is drawn with, in screen pixels
+const TRAIL_FADE_PIXELS := 10.0  ## a trail is a third as bright this many screen pixels behind the bup, however fast it went
 const HAZE_REFRESH_MSEC := 100  ## how often the picture of the dissolved nutrient is rebuilt
 const STEER_ALPHA := 0.35 * 255.0  ## the most opaque the steering map gets (where a bup is certain to steer up the slope)
 const MIN_STEER_ARC := deg_to_rad(15.0)  ## the narrowest arc on the selection ring: how reliably its drift tends one way
@@ -48,17 +61,23 @@ const HISTORY_SERIES := ["pop", "speed", "sense", "metabolism", "size", "harm"] 
 
 const BUP_SHADER := """
 shader_type canvas_item;
-varying vec3 body;  // length, width and the margin round them, in µm
-void vertex() { body = INSTANCE_CUSTOM.xyz; }
+uniform float fade_pixels = 10.0;  // how far behind a bup its trail falls to about a third as bright, in screen pixels
+varying vec4 body;  // length, width and the margin round them, and the trail behind, in µm
+void vertex() { body = INSTANCE_CUSTOM; }
 void fragment() {
-	// A capsule (a rod with round ends) inside a quad a margin larger, with its edge antialiased
-	// over one screen pixel. A body thinner than a pixel stays visible, only fainter.
-	vec2 p = (UV - vec2(0.5)) * (body.xy + vec2(2.0 * body.z));
-	float half_straight = max(body.x * 0.5 - body.y * 0.5, 0.0);
+	// A capsule (a rod with round ends, lengthened by the trail of a fast one) inside a quad a margin larger, with its
+	// edge antialiased over one screen pixel. A body thinner than a pixel stays visible, only fainter.
+	float total = body.x + body.w;
+	vec2 p = (UV - vec2(0.5)) * vec2(total + 2.0 * body.z, body.y + 2.0 * body.z);
+	float half_straight = max(total * 0.5 - body.y * 0.5, 0.0);
 	vec2 q = vec2(max(abs(p.x) - half_straight, 0.0), p.y);
 	float d = length(q) - body.y * 0.5;
 	float pixel = max(fwidth(p.y), 1e-6);
 	COLOR.a *= clamp(0.5 - d / pixel, 0.0, 1.0);
+	// The trail fades with the distance behind the body, at the same rate on screen however far the bup travelled: a
+	// longer trail (a faster bup) simply has a fainter tail, not a longer visible one.
+	float behind = max(total * 0.5 - body.x - p.x, 0.0);
+	COLOR.a *= body.w > 0.0 ? exp(-behind / (fade_pixels * pixel)) : 1.0;
 }
 """
 var sim := BupSim.new()  ## the native simulation core
@@ -75,6 +94,17 @@ var bup_limit := StartConditions.DEFAULT_BUP_LIMIT:  ## the most bups the dish h
 var nutrients_placed := 0  ## how many units of nutrient the player has dropped in by hand
 var sources: Array[NutrientSource] = []
 var food_rate := 3.0  ## units of nutrient fed in per minute, spread evenly over the dish
+var bloom_rate := 0.0:  ## plankton appearing a sim-day (24 hours), at steady intervals, at random places
+	set(value):
+		if value > 0.0 and bloom_rate <= 0.0:
+			_bloom_due = time  # (turned on: the first appears at once)
+		bloom_rate = value
+var _bloom_due := 0.0  ## when the bloom's next plankton appears
+var upkeep_factor := 1.0:  ## multiplies what staying alive costs every bup (its base and per-mass maintenance)
+	set(value):
+		upkeep_factor = maxf(value, 0.0)
+		sim.set_upkeep_scale(upkeep_factor)
+var plankton: Array[Plankton] = []
 var time := 0.0:
 	set(value):
 		time = value
@@ -89,6 +119,8 @@ var pick_mode := PickMode.ALL:  ## the select tool ignores whatever this leaves 
 			selected_id = -1
 		if not looks_at_sources():
 			selected_source = null
+		if not looks_at_plankton():
+			selected_plankton = null
 var hovered_id := -1  ## the bup under the pointer, or -1
 var selected_id := -1:  ## the bup that was clicked, or -1
 	set(value):
@@ -97,6 +129,8 @@ var selected_id := -1:  ## the bup that was clicked, or -1
 			selection_changed.emit()
 var selected_source: NutrientSource = null
 var hovered_source: NutrientSource = null
+var selected_plankton: Plankton = null
+var hovered_plankton: Plankton = null
 var place_preview_pos := Vector2.ZERO
 var place_preview_radius := -1.0  ## < 0 hides the placement preview
 var place_preview_erases := false  ## the preview is the eraser's brush
@@ -144,6 +178,7 @@ func _build_children() -> void:
 	var material := ShaderMaterial.new()
 	material.shader = Shader.new()
 	material.shader.code = BUP_SHADER
+	material.set_shader_parameter("fade_pixels", TRAIL_FADE_PIXELS)
 	var mesh := QuadMesh.new()
 	mesh.size = Vector2.ONE
 	var multimesh := MultiMesh.new()
@@ -164,7 +199,7 @@ func _build_children() -> void:
 ## Redraws the dish only when something it shows may have changed: the picture of the medium is rebuilt a few times a
 ## second, and the sources, the size and the zoom show at once. Most frames change none of these.
 func refresh_drawing() -> void:
-	var key := [Time.get_ticks_msec() / HAZE_REFRESH_MSEC, sources.size(), radius, pixel(), selected_id]
+	var key := [Time.get_ticks_msec() / HAZE_REFRESH_MSEC, sources.size(), plankton.size(), radius, pixel(), selected_id]
 	if key != _draw_key:
 		_draw_key = key
 		queue_redraw()
@@ -213,6 +248,7 @@ func _process(delta: float) -> void:
 func _reset_runtime_state() -> void:
 	selected_id = -1
 	selected_source = null
+	selected_plankton = null
 	clear_hover()
 	_extinct_signalled = false
 	_reset_history()
@@ -238,6 +274,9 @@ func strike(start: StartConditions = null) -> void:
 	time = 0.0
 	nutrients_placed = 0
 	sources.clear()
+	plankton.clear()
+	bloom_rate = clampf(start.bloom_rate, 0.0, StartConditions.MAX_BLOOM_RATE)
+	upkeep_factor = 1.0
 	_reset_runtime_state()
 	radius = clampf(start.dish_radius, StartConditions.MIN_SIM_RADIUS, StartConditions.MAX_DISH_RADIUS)
 	sim.reset(radius, -1)  # a new dish: no bups, no nutrient, the random stream carries on
@@ -308,6 +347,7 @@ func advance(seconds: float, budget_usec := 0) -> float:
 
 func step(delta: float) -> void:
 	time += delta
+	_step_plankton(delta)
 	var positions := PackedVector2Array()
 	var rates := PackedFloat32Array()
 	for source in sources:
@@ -490,15 +530,21 @@ func source_at(world_pos: Vector2, slack: float = 0.0) -> NutrientSource:
 func select_at(world_pos: Vector2, slack: float = 0.0) -> void:
 	selected_source = source_at(world_pos, slack) if looks_at_sources() else null
 	selected_id = cell_at(world_pos, slack) if selected_source == null and looks_at_bups() else -1
+	selected_plankton = plankton_at(world_pos, slack) if selected_source == null and selected_id < 0 and looks_at_plankton() else null
 
 
 func hover_at(world_pos: Vector2, slack: float = 0.0) -> void:
 	hovered_source = source_at(world_pos, slack) if looks_at_sources() else null
 	hovered_id = cell_at(world_pos, slack) if hovered_source == null and looks_at_bups() else -1
+	hovered_plankton = plankton_at(world_pos, slack) if hovered_source == null and hovered_id < 0 and looks_at_plankton() else null
 
 
 func looks_at_sources() -> bool:
 	return pick_mode == PickMode.ALL or pick_mode == PickMode.SOURCES
+
+
+func looks_at_plankton() -> bool:
+	return pick_mode == PickMode.ALL or pick_mode == PickMode.PLANKTON
 
 
 func looks_at_bups() -> bool:
@@ -514,6 +560,7 @@ func looks_at_medium() -> bool:
 func clear_hover() -> void:
 	hovered_id = -1
 	hovered_source = null
+	hovered_plankton = null
 	place_preview_erases = false
 	place_preview_marker = false
 
@@ -541,6 +588,73 @@ func place_source(world_pos: Vector2, rate: float) -> bool:
 	sources.append(NutrientSource.new(world_pos, clampf(rate, MIN_SOURCE_RATE, MAX_SOURCE_RATE)))
 	edit_count += 1
 	return true
+
+
+## The plankton under a world position (within its drawn size, plus `slack`), or null.
+func plankton_at(world_pos: Vector2, slack: float = 0.0) -> Plankton:
+	var local := world_pos - global_position
+	var best: Plankton = null
+	var best_d2 := INF
+	var reach := plankton_draw_radius() + slack
+	for cell in plankton:
+		var d2 := cell.pos.distance_squared_to(local)
+		if d2 <= reach * reach and d2 < best_d2:
+			best = cell
+			best_d2 = d2
+	return best
+
+
+## What there is to know about a plankton: how long it has floated, what it holds, where it is, and what is near.
+## (Not when it will burst: that is not known.)
+func plankton_details(cell: Plankton) -> Dictionary:
+	var near := sim.nearest_and_count(cell.pos, SOURCE_NEARBY)
+	return {
+		"age": time - cell.born_at,
+		"units": cell.units,
+		"offset": cell.pos,
+		"distance": cell.pos.length(),
+		"concentration": field.sample(cell.pos),
+		"nearest_bup": near.x,
+	}
+
+
+## Puts a plankton in the dish. False when the dish holds as many as it can, or the spot can't take one.
+func place_plankton(world_pos: Vector2) -> bool:
+	if plankton.size() >= MAX_PLANKTON or not can_place_at(world_pos):
+		return false
+	_add_plankton(world_pos - global_position)
+	return true
+
+
+func _add_plankton(local: Vector2) -> void:
+	var life := PLANKTON_MEAN_LIFE * (1.0 + PLANKTON_LIFE_SPREAD * (2.0 * sim.random_float() - 1.0))
+	plankton.append(Plankton.new(local, time, time + life, PLANKTON_UNITS, sim.random_float() * TAU))
+	edit_count += 1
+
+
+## The plankton: the bloom adds one at a random place at each steady interval (so there are no long gaps with none
+## coming), and any whose time has come burst, at random times, leaving their nutrient in the medium.
+func _step_plankton(_delta: float) -> void:
+	if bloom_rate > 0.0:
+		var interval := 86400.0 / bloom_rate
+		var arrivals := 0
+		while time >= _bloom_due and arrivals < 50:  # (a few at most per step)
+			if plankton.size() < MAX_PLANKTON:
+				_add_plankton(sim.random_point(radius * 0.95))
+			_bloom_due += interval * (1.0 + BLOOM_JITTER * (2.0 * sim.random_float() - 1.0))
+			arrivals += 1
+		if time >= _bloom_due:  # (far behind, say the rate was just raised a great deal: start over from now)
+			_bloom_due = time + interval
+	for i in range(plankton.size() - 1, -1, -1):
+		var cell := plankton[i]
+		if cell.burst_at <= time:
+			field.deposit_disc(cell.pos, PLANKTON_PATCH_RADIUS, cell.units * NUTRIENT_ENERGY)
+			plankton.remove_at(i)
+			if selected_plankton == cell:
+				selected_plankton = null
+			if hovered_plankton == cell:
+				hovered_plankton = null
+			edit_count += 1
 
 
 ## What there is to know about a source: its rate and output so far, where it lies, the
@@ -621,6 +735,9 @@ func to_dict() -> Dictionary:
 	var saved_sources := []
 	for source in sources:
 		saved_sources.append({"pos": _vec_to_array(source.pos - global_position), "rate": source.rate, "emitted": source.emitted})
+	var saved_plankton := []
+	for cell in plankton:
+		saved_plankton.append({"pos": _vec_to_array(cell.pos), "born_at": cell.born_at, "burst_at": cell.burst_at, "units": cell.units, "shape": cell.shape})
 	return {
 		"next_id": sim.get_next_id(),
 		"lineage": sim.lineage_export(),
@@ -632,6 +749,10 @@ func to_dict() -> Dictionary:
 		"cells": saved_cells,
 		"field": Array(field.values()),
 		"sources": saved_sources,
+		"bloom_rate": bloom_rate,
+		"bloom_due": _bloom_due,
+		"upkeep_factor": upkeep_factor,
+		"plankton": saved_plankton,
 		"history": history,
 	}
 
@@ -641,7 +762,7 @@ func to_dict() -> Dictionary:
 func from_dict(d: Dictionary) -> bool:
 	if not (d.get("cells") is Array):
 		return false
-	for key in ["radius", "bup_limit", "nutrients_placed", "time", "food_rate"]:
+	for key in ["radius", "bup_limit", "nutrients_placed", "time", "food_rate", "bloom_rate"]:
 		if d.has(key) and not Validate.is_number(d[key]):
 			return false
 	var loaded_cells := []
@@ -662,6 +783,17 @@ func from_dict(d: Dictionary) -> bool:
 			source.emitted = maxf(float(saved["emitted"]), 0.0)
 		loaded_sources.append(source)
 	loaded_sources.resize(mini(loaded_sources.size(), MAX_SOURCES))
+	var loaded_plankton: Array[Plankton] = []
+	var saved_plankton = d.get("plankton", [])
+	if not (saved_plankton is Array):
+		return false
+	for saved in saved_plankton:
+		if not (saved is Dictionary) or not Validate.is_vec2(saved.get("pos")) or not Validate.is_number(saved.get("burst_at")) or not Validate.is_number(saved.get("units")):
+			return false
+		var shape := float(saved["shape"]) if Validate.is_number(saved.get("shape")) else 0.0
+		var born := float(saved["born_at"]) if Validate.is_number(saved.get("born_at")) else 0.0
+		loaded_plankton.append(Plankton.new(_array_to_vec(saved["pos"]), born, float(saved["burst_at"]), maxf(float(saved["units"]), 0.0), shape))
+	loaded_plankton.resize(mini(loaded_plankton.size(), MAX_PLANKTON))
 	var loaded_radius := clampf(float(d.get("radius", DEFAULT_RADIUS)), StartConditions.MIN_SIM_RADIUS, StartConditions.MAX_DISH_RADIUS)
 	var loaded_limit := clampi(int(d.get("bup_limit", cap_for(loaded_radius))), 1, StartConditions.MAX_BUP_LIMIT)
 	var field_size := NutrientField.size_for(loaded_radius)
@@ -705,8 +837,12 @@ func from_dict(d: Dictionary) -> bool:
 		sim.lineage_import(saved_lineage.filter(_is_saved_record))
 	field.load_values(saved_field)
 	sources = loaded_sources
+	plankton = loaded_plankton
+	bloom_rate = clampf(float(d.get("bloom_rate", 0.0)), 0.0, StartConditions.MAX_BLOOM_RATE)
+	upkeep_factor = clampf(float(d.get("upkeep_factor", 1.0)), 1.0, 100.0)
 	nutrients_placed = int(d.get("nutrients_placed", 0))
 	time = float(d.get("time", 0.0))
+	_bloom_due = float(d["bloom_due"]) if Validate.is_number(d.get("bloom_due")) else time
 	food_rate = clampf(float(d.get("food_rate", food_rate)), 0.0, StartConditions.MAX_NUTRIENT_RATE)
 	_reset_runtime_state()
 	for key in loaded_history:
@@ -767,6 +903,23 @@ func _draw_source(source: NutrientSource) -> void:
 	draw_circle(p, r * 2.0, Color(0.95, 0.8, 0.35, 0.18))
 	draw_circle(p, r, Color(1.0, 0.85, 0.4, 1.0))
 	draw_circle(p, r * 0.45, Color(1.0, 0.97, 0.8, 1.0))
+
+
+func plankton_draw_radius() -> float:
+	return maxf(PLANKTON_DRAW_RADIUS, PLANKTON_MIN_PIXELS * pixel())
+
+
+## An amorphous green outline: no two are quite alike, and it is faint inside, so the nutrient haze shows through.
+func _draw_plankton(cell: Plankton) -> void:
+	var r := plankton_draw_radius()
+	var outline := PackedVector2Array()
+	for k in 17:
+		var a := TAU * k / 16.0
+		var wobble := 1.0 + 0.16 * sin(2.0 * a + cell.shape) + 0.1 * sin(3.0 * a + 2.0 * cell.shape)
+		outline.append(cell.pos + Vector2.from_angle(a) * r * wobble)  # (the last point repeats the first, closing the outline)
+	draw_colored_polygon(outline.slice(0, 16), Color(0.5, 0.9, 0.45, 0.1))
+	draw_polyline(outline, Color(0.55, 0.95, 0.5, 0.85), 1.5 * pixel())
+	draw_circle(cell.pos + Vector2.from_angle(cell.shape) * r * 0.25, r * 0.18, Color(0.55, 0.95, 0.5, 0.55))
 
 
 ## The dissolved nutrient as a faint amber haze, so gradients (and the depleted zones around a
@@ -841,6 +994,8 @@ func _draw() -> void:
 	_draw_steering()
 	for source in sources:
 		_draw_source(source)
+	for cell in plankton:
+		_draw_plankton(cell)
 	# The bups are a child node drawn on top of this; the rings and the lightning flash on top of them.
 
 
@@ -870,6 +1025,10 @@ func draw_overlay(canvas: CanvasItem) -> void:
 		draw_ring(canvas, selected_source.pos - global_position, source_draw_radius(), Color(1, 0.75, 0.3, 0.95))
 	if hovered_source != null and hovered_source != selected_source:
 		draw_ring(canvas, hovered_source.pos - global_position, source_draw_radius(), Color(1, 1, 1, 0.9))
+	if selected_plankton != null:
+		draw_ring(canvas, selected_plankton.pos, plankton_draw_radius(), Color(1, 0.75, 0.3, 0.95))
+	if hovered_plankton != null and hovered_plankton != selected_plankton:
+		draw_ring(canvas, hovered_plankton.pos, plankton_draw_radius(), Color(1, 1, 1, 0.9))
 	if place_preview_radius >= 0.0:
 		var brush := Color(1, 0.3, 0.25, 0.9) if place_preview_erases else Color(1, 0.9, 0.5, 0.8)
 		if place_preview_marker:

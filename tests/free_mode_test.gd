@@ -41,7 +41,7 @@ func _init() -> void:
 	var d := _make_dish()
 	d.strike()
 	check(d.population() == 4, "default bups = 4, got %d" % d.population())
-	check(absf(TestUtil.units(d) - 60.0) < 0.5, "default starting nutrient = 60 units, got %.1f" % TestUtil.units(d))
+	check(absf(TestUtil.units(d) - 10000.0) < 0.5, "default starting nutrient = 10,000 units, got %.1f" % TestUtil.units(d))
 	check(d.radius == 10000.0 and d.bup_limit == 20000, "the default dish is 10 mm in radius with room for 20,000 bups, got %.0f and %d" % [d.radius, d.bup_limit])
 
 	# --- Counts and clamping.
@@ -75,7 +75,7 @@ func _init() -> void:
 	d.strike(r)
 	check(d.food_rate == StartConditions.MAX_NUTRIENT_RATE, "rate clamped to max")
 	d.strike(_small())
-	check(d.food_rate == 3.0, "default rate is 3/min, got %.1f" % d.food_rate)
+	check(d.food_rate == 0.0, "no feed by default, got %.1f" % d.food_rate)
 
 	# --- The feed adds nutrient evenly at the chosen rate.
 	d.strike(_small())
@@ -471,7 +471,60 @@ func _init() -> void:
 	check(absf(d.field.sample(d.global_position + Vector2(150, 150) - d.global_position) - middle_before) < middle_before * 0.01, "...and not at all outside it")
 	check(absf((500.0 - d.field.total()) / Dish.NUTRIENT_ENERGY - removed) < 0.01, "erasing reports the units it removed")
 
-	# --- Selecting and inspecting: bups and sources are picked, the medium is read anywhere.
+	# --- Plankton: placed by hand, as many as the dish holds, they float until they burst into nutrient; a bloom adds more at random.
+	var bloom := _make_dish()
+	bloom.strike(_small())
+	bloom.field.reset(bloom.radius)
+	var bloom_spot := bloom.global_position + Vector2(40, 30)
+	check(bloom.plankton.is_empty() and bloom.bloom_rate == 0.0, "a new dish has no plankton in the water and no bloom")
+	check(bloom.place_plankton(bloom_spot) and bloom.plankton.size() == 1, "a plankton can be placed")
+	check(not bloom.place_plankton(bloom.global_position + Vector2(bloom.radius + 10.0, 0)), "plankton can't be placed outside the dish")
+	var lifetime: float = bloom.plankton[0].burst_at - bloom.time
+	check(lifetime >= Dish.PLANKTON_MEAN_LIFE * (1.0 - Dish.PLANKTON_LIFE_SPREAD) and lifetime <= Dish.PLANKTON_MEAN_LIFE * (1.0 + Dish.PLANKTON_LIFE_SPREAD), "it bursts at a random time within a set span of the mean life (%.0f s)" % lifetime)
+	var before_burst := TestUtil.units(bloom)
+	bloom.plankton[0].burst_at = bloom.time + 1.0
+	bloom.step(2.0)
+	check(bloom.plankton.is_empty() and absf(TestUtil.units(bloom) - before_burst - Dish.PLANKTON_UNITS) < 1.0, "a plankton that bursts is gone and leaves its %.0f units of nutrient (%.1f)" % [Dish.PLANKTON_UNITS, TestUtil.units(bloom) - before_burst])
+	for i in 30:
+		bloom.place_plankton(bloom_spot)
+	check(bloom.plankton.size() == 30, "there is no limit on how many the player places but the dish's (%d)" % bloom.plankton.size())
+	bloom.plankton.clear()
+	bloom.bloom_rate = 480.0
+	bloom.advance(1800.0)
+	check(bloom.plankton.size() >= 8 and bloom.plankton.size() <= 12, "a bloom of 480 a day (20 an hour) adds one every 3 minutes, so about ten are floating after half an hour (%d)" % bloom.plankton.size())
+	# The bursts, which are what feed the colony, come at steady enough intervals: no long gaps with nothing.
+	var steady := _make_dish()
+	steady.strike(_small())
+	steady.clear_bups()
+	steady.bloom_rate = 24.0
+	var gaps := []
+	var last_burst := 0.0
+	var floating := steady.plankton.size()
+	for i in int(72.0 * 3600.0 / 20.0):
+		steady.step(20.0)
+		if steady.plankton.size() < floating:  # (one burst, at least, since the last step)
+			gaps.append(steady.time - last_burst)
+			last_burst = steady.time
+		floating = steady.plankton.size()
+	var longest := 0.0
+	for g: float in gaps:
+		longest = maxf(longest, g)
+	check(gaps.size() >= 40 and longest < 3.0 * 3600.0, "at 24 a day the nutrient arrives about hourly with no gap past 3 hours (%d bursts, longest gap %.1f h)" % [gaps.size(), longest / 3600.0])
+	bloom.bloom_rate = 0.0
+	bloom.plankton.clear()
+	bloom.advance(600.0)
+	check(bloom.plankton.is_empty(), "with no bloom nothing appears by itself")
+	bloom.place_plankton(bloom_spot)
+	var cost_before: float = bloom.bup_info(bloom.sim.bup_ids()[0])["upkeep"]
+	bloom.upkeep_factor = 10.0
+	var cost_after: float = bloom.bup_info(bloom.sim.bup_ids()[0])["upkeep"]
+	check(cost_after > 5.0 * cost_before and cost_after < 10.0 * cost_before, "a higher upkeep factor makes staying alive cost more (%.5f to %.5f a second)" % [cost_before, cost_after])
+	bloom.bloom_rate = 7.0  # (a day)
+	var bloom_copy := _make_dish()
+	check(bloom_copy.from_dict(TestUtil.saved(bloom)) and bloom_copy.plankton.size() == 1 and is_equal_approx(bloom_copy.plankton[0].burst_at, bloom.plankton[0].burst_at) and bloom_copy.bloom_rate == 7.0, "plankton and the bloom rate survive save and load")
+	check(StartConditions.from_dict({"bloom_rate": 9999}).bloom_rate == StartConditions.MAX_BLOOM_RATE and StartConditions.new().bloom_rate == 0.0, "the bloom rate is a start condition: none by default, clamped when loaded")
+
+# --- Selecting and inspecting: bups and sources are picked, the medium is read anywhere.
 	d.strike(_small())
 	d.clear_bups()
 	d.field.reset(d.radius)
@@ -812,16 +865,16 @@ func _init() -> void:
 	check(m.dish.population() == 150 and absf(TestUtil.units(m.dish) - 40.0) < 2.0 and m.dish.food_rate == 11.0, "free scene started with chosen conditions (%d bups, %.0f nutrient, rate %.0f)" % [m.dish.population(), TestUtil.units(m.dish), m.dish.food_rate])
 	for i in 60:
 		await process_frame
-	check(m.tracker.index == 0, "no goal progress in free mode (pop %d >= 100 would complete goal 1)" % m.dish.population())
+	check(m.tracker.index == 0, "no goal progress in free mode (pop %d >= 1,000 would complete goal 1)" % m.dish.population())
 	check(not m.goal_panel.visible, "free mode has no goal panel")
 	var hud_text: String = m.hud.get_parsed_text()
-	check(hud_text.contains("BUPS  150 / ") and hud_text.contains("DISH  0.3 mm"), "the readout shows the current population against the limit, and the current dish size ('%s')" % hud_text.get_slice("\n", 1))
+	check(hud_text.contains("bups  150 / ") and hud_text.contains("dish  0.3 mm"), "the readout shows the current population against the limit, and the current dish size ('%s')" % hud_text.get_slice("\n", 1))
 	m.dish.change_limit(2000)
 	m.dish.grow_to(1500.0)
 	await process_frame
 	await process_frame
 	hud_text = m.hud.get_parsed_text()
-	check(hud_text.contains("/ 2,000") and hud_text.contains("DISH  1.5 mm"), "...and follows a change of limit or size ('%s')" % hud_text.get_slice("\n", 1))
+	check(hud_text.contains("/ 2,000") and hud_text.contains("dish  1.5 mm"), "...and follows a change of limit or size ('%s')" % hud_text.get_slice("\n", 1))
 	m._open_menu()
 	check(m.pause_menu.initial_panel.visible and m.pause_menu.initial_bups.value_label.text == "150" and m.pause_menu.initial_nutrients.value_label.text == "40" and m.pause_menu.initial_rate.value_label.text == "11/min" and m.pause_menu.initial_dish.value_label.text == "0.3 mm" and m.pause_menu.initial_limit.value_label.text == UiText.thousands(chosen.bup_limit), "the Escape menu records how the dish started, unchanged by later changes (dish %s)" % m.pause_menu.initial_dish.value_label.text)
 	check(m.pause_menu.initial_bups.name_label.text == "Bups" and m.pause_menu.initial_rate.name_label.text == "Nutrient feed", "its rows carry their labels")
@@ -863,7 +916,7 @@ func _init() -> void:
 	root.add_child(m3)
 	# Checked straight after _ready, before the first frame: once frames run, the sim feeds
 	# and eats nutrient, so the amounts would depend on how long the first frame took.
-	check(not m3.free_mode and m3.dish.population() == 4 and absf(TestUtil.units(m3.dish) - 60.0) < 0.5, "goal mode default start")
+	check(not m3.free_mode and m3.dish.population() == 4 and absf(TestUtil.units(m3.dish) - 10000.0) < 0.5 and m3.dish.food_rate == 0.0, "goal mode default start: seeded with nutrient, no feed")
 	await process_frame
 	check(m3.goal_panel.visible and m3.goal_panel.get_parsed_text().begins_with("EXPERIMENT 1 / "), "goal mode shows the goal panel")
 	check(not m3.hud.get_parsed_text().contains("DISH"), "goal mode's readout has no dish line")

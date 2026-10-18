@@ -161,9 +161,9 @@ func _draw() -> void:
 		draw_string(font, Vector2(x - 20.0, plot.end.y + 15.0), format_time(t), HORIZONTAL_ALIGNMENT_CENTER, 40.0, tick_size, muted)
 
 	# Legend doubles as the axis titles, coloured to match the axis each belongs to.
-	draw_string(font, Vector2(6.0, 16.0), "bups", HORIZONTAL_ALIGNMENT_LEFT, -1, legend_size, population_color)
-	draw_string(font, Vector2(plot.position.x, 16.0), "time", HORIZONTAL_ALIGNMENT_CENTER, plot.size.x, legend_size, muted)
-	draw_string(font, Vector2(0.0, 16.0), "%s [T]" % trait_name, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 6.0, legend_size, trait_color)
+	draw_string(font, Vector2(6.0, 16.0), Strings.t("graph.bups"), HORIZONTAL_ALIGNMENT_LEFT, -1, legend_size, population_color)
+	draw_string(font, Vector2(plot.position.x, 16.0), Strings.t("graph.time"), HORIZONTAL_ALIGNMENT_CENTER, plot.size.x, legend_size, muted)
+	draw_string(font, Vector2(0.0, 16.0), Strings.t("graph.trait", [Strings.t("genes.graph_" + trait_name)]), HORIZONTAL_ALIGNMENT_RIGHT, size.x - 6.0, legend_size, trait_color)
 
 	_plot_line(pops, plot, 0.0, pop_max, x_min, window, population_color)
 	_plot_line(vals, plot, lo, hi, x_min, window, trait_color)

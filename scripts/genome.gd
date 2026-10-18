@@ -52,7 +52,14 @@ const MEAN_HARM := 0.03  ## average cost of a harmful mutation, as a fraction of
 const MEAN_REPAIR := 0.02
 
 ## How each gene is shown: its short label and decimals, so every readout agrees.
-const LABELS := {"speed": "speed", "sense": "sense", "metabolism": "metab", "size": "size"}
+const LABELED := ["speed", "sense", "metabolism", "size"]  ## the traits the readouts list, in order
+
+
+## A trait's name as the readouts show it (see text/strings.cfg).
+static func label(gene: String) -> String:
+	return Strings.t("genes." + gene)
+
+
 const DECIMALS := {"speed": 0, "sense": 0, "metabolism": 2, "size": 1}
 ## Where each gene is in a bup's info (BupSim.bup_info): its body size is `size`, so the size gene is not.
 const INFO_KEYS := {"speed": "speed", "sense": "sense", "metabolism": "metabolism", "size": "size_gene"}

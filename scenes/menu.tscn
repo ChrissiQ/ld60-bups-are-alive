@@ -24,7 +24,7 @@ anchor_right = 1.0
 offset_top = 70.0
 offset_bottom = 170.0
 grow_horizontal = 2
-text = "BUPS ARE ALIVE"
+text = "@menu.title"
 horizontal_alignment = 1
 vertical_alignment = 1
 
@@ -56,27 +56,27 @@ grow_vertical = 2
 [node name="NewButton" type="Button" parent="Buttons"]
 custom_minimum_size = Vector2(320, 48)
 layout_mode = 2
-text = "New Experiment"
+text = "@menu.new_experiment"
 
 [node name="LoadButton" type="Button" parent="Buttons"]
 custom_minimum_size = Vector2(320, 48)
 layout_mode = 2
-text = "Load Experiment"
+text = "@menu.load_experiment"
 
 [node name="FreeButton" type="Button" parent="Buttons"]
 custom_minimum_size = Vector2(320, 48)
 layout_mode = 2
-text = "Free Mode"
+text = "@menu.free_mode"
 
 [node name="ControlsButton" type="Button" parent="Buttons"]
 custom_minimum_size = Vector2(320, 48)
 layout_mode = 2
-text = "Controls"
+text = "@menu.controls"
 
 [node name="QuitButton" type="Button" parent="Buttons"]
 custom_minimum_size = Vector2(320, 48)
 layout_mode = 2
-text = "Quit"
+text = "@menu.quit"
 
 [node name="ControlsPanel" type="PanelContainer" parent="."]
 visible = false
@@ -100,7 +100,7 @@ layout_mode = 2
 [node name="Heading" type="Label" parent="ControlsPanel/Box"]
 theme_type_variation = &"Heading"
 layout_mode = 2
-text = "LABORATORY CONTROLS"
+text = "@menu.controls_title"
 horizontal_alignment = 1
 
 [node name="Keys" type="GridContainer" parent="ControlsPanel/Box"]
@@ -110,104 +110,104 @@ columns = 2
 [node name="Key1" type="Label" parent="ControlsPanel/Box/Keys"]
 layout_mode = 2
 theme_type_variation = &"Bright"
-text = "SPACE"
+text = "@menu.controls_key_1"
 
 [node name="Desc1" type="Label" parent="ControlsPanel/Box/Keys"]
 layout_mode = 2
-text = "pause / resume"
+text = "@menu.controls_text_1"
 
 [node name="Key2" type="Label" parent="ControlsPanel/Box/Keys"]
 layout_mode = 2
 theme_type_variation = &"Bright"
-text = "1 / 2 / 3"
+text = "@menu.controls_key_2"
 
 [node name="Desc2" type="Label" parent="ControlsPanel/Box/Keys"]
 layout_mode = 2
-text = "speed: x1, x3, x8"
+text = "@menu.controls_text_2"
 
 [node name="Key3" type="Label" parent="ControlsPanel/Box/Keys"]
 layout_mode = 2
 theme_type_variation = &"Bright"
-text = "I"
+text = "@menu.controls_key_3"
 
 [node name="Desc3" type="Label" parent="ControlsPanel/Box/Keys"]
 layout_mode = 2
-text = "info tool: click a bup or nutrient to inspect it"
+text = "@menu.controls_text_3"
 
 [node name="Key4" type="Label" parent="ControlsPanel/Box/Keys"]
 layout_mode = 2
 theme_type_variation = &"Bright"
-text = "H"
+text = "@menu.controls_key_4"
 
 [node name="Desc4" type="Label" parent="ControlsPanel/Box/Keys"]
 layout_mode = 2
-text = "pan tool (dragging pans in every tool)"
+text = "@menu.controls_text_4"
 
 [node name="Key5" type="Label" parent="ControlsPanel/Box/Keys"]
 layout_mode = 2
 theme_type_variation = &"Bright"
-text = "N"
+text = "@menu.controls_key_5"
 
 [node name="Desc5" type="Label" parent="ControlsPanel/Box/Keys"]
 layout_mode = 2
-text = "nutrient tool: click to drop food"
+text = "@menu.controls_text_5"
 
 [node name="Key6" type="Label" parent="ControlsPanel/Box/Keys"]
 layout_mode = 2
 theme_type_variation = &"Bright"
-text = "+ / -"
+text = "@menu.controls_key_6"
 
 [node name="Desc6" type="Label" parent="ControlsPanel/Box/Keys"]
 layout_mode = 2
-text = "zoom (or the mouse wheel)"
+text = "@menu.controls_text_6"
 
 [node name="Key7" type="Label" parent="ControlsPanel/Box/Keys"]
 layout_mode = 2
 theme_type_variation = &"Bright"
-text = "UP / DOWN"
+text = "@menu.controls_key_7"
 
 [node name="Desc7" type="Label" parent="ControlsPanel/Box/Keys"]
 layout_mode = 2
-text = "more / fewer nutrients over time"
+text = "@menu.controls_text_7"
 
 [node name="Key8" type="Label" parent="ControlsPanel/Box/Keys"]
 layout_mode = 2
 theme_type_variation = &"Bright"
-text = "T"
+text = "@menu.controls_key_8"
 
 [node name="Desc8" type="Label" parent="ControlsPanel/Box/Keys"]
 layout_mode = 2
-text = "change the graph's trait"
+text = "@menu.controls_text_8"
 
 [node name="Key9" type="Label" parent="ControlsPanel/Box/Keys"]
 layout_mode = 2
 theme_type_variation = &"Bright"
-text = "R"
+text = "@menu.controls_key_9"
 
 [node name="Desc9" type="Label" parent="ControlsPanel/Box/Keys"]
 layout_mode = 2
-text = "strike the dish with lightning again"
+text = "@menu.controls_text_9"
 
 [node name="Key10" type="Label" parent="ControlsPanel/Box/Keys"]
 layout_mode = 2
 theme_type_variation = &"Bright"
-text = "ESC"
+text = "@menu.controls_key_10"
 
 [node name="Desc10" type="Label" parent="ControlsPanel/Box/Keys"]
 layout_mode = 2
-text = "return to this menu (saves your experiment)"
+text = "@menu.controls_text_10"
 
 [node name="BackButton" type="Button" parent="ControlsPanel/Box"]
 custom_minimum_size = Vector2(0, 44)
 layout_mode = 2
-text = "Back to the Lab"
+text = "@menu.back"
 
 [node name="ConfirmDialog" type="ConfirmationDialog" parent="."]
-title = "Start over?"
+title = "@menu.start_over_title"
 initial_position = 2
 size = Vector2i(460, 130)
 visible = false
-ok_button_text = "Fresh dish, please"
-dialog_text = "Your saved bups will be gently, regretfully dissolved. Begin a new experiment?"
-cancel_button_text = "Keep my bups"
+ok_button_text = "@menu.start_over_ok"
+dialog_text = "@menu.start_over_text"
+cancel_button_text = "@menu.start_over_cancel"
 dialog_autowrap = true

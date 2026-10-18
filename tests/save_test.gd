@@ -31,7 +31,7 @@ func _init() -> void:
 	if a.food_rate != b.food_rate: failures.append("food_rate")
 	var stats_a := a.population_stats()
 	var stats_b := b.population_stats()
-	for key: String in Genome.LABELS.keys() + ["mutations", "harm"]:
+	for key: String in Genome.LABELED + ["mutations", "harm"]:
 		if absf(stats_a[key] - stats_b[key]) > 0.001: failures.append("mean %s" % key)
 	if b.sources.size() != 1 or absf(b.sources[0].rate - 4.0) > 0.001 or absf(b.sources[0].emitted - a.sources[0].emitted) > 0.01 or b.sources[0].pos.distance_to(a.sources[0].pos) > 0.01: failures.append("nutrient source")
 	if absf(a.field.total() - b.field.total()) > 0.01 * maxf(a.field.total(), 1.0): failures.append("dissolved nutrient")

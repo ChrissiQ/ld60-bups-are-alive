@@ -15,7 +15,7 @@ signal value_changed(value: float)
 	set(text):
 		label_text = text
 		if is_node_ready():
-			label.text = text
+			label.text = Strings.resolve(text)
 
 ## Column widths. The defaults suit the setup and menu screens; a narrow panel sets smaller ones in its scene,
 ## so a row never makes its panel wider than the other things in it.
@@ -23,9 +23,13 @@ signal value_changed(value: float)
 @export var slider_min_width := 180.0
 @export var value_min_width := 88.0
 @export var unit_min_width := 100.0
+## A small row for a sidebar: the readout's text size, and no reset button.
+@export var compact := false
+## What hovering the name says (blank: nothing).
+@export var label_tip := ""
 const DISABLED_ALPHA := 0.45  ## how faint a row is when it can't be changed
 
-var disabled_reason := "Fixed"  ## what hovering a row that can't change says
+var disabled_reason := Strings.t("ui.fixed")  ## what hovering a row that can't change says
 
 @onready var reset_button: Button = $Reset
 @onready var label: Label = $Label
@@ -46,11 +50,21 @@ var value: float:
 
 
 func _ready() -> void:
+	if compact:
+		theme_type_variation = &"TightRow"  # (less space between the parts, notably between the number and its unit)
+		reset_button.visible = false
+		label.theme_type_variation = &"ReadoutLabel"
+		unit_label.theme_type_variation = &"ReadoutLabel"
+		value_field.theme_type_variation = &"ReadoutField"
+		slider.custom_minimum_size.y = 18.0
 	label.custom_minimum_size.x = label_min_width
+	if label_tip != "":
+		label.tooltip_text = Strings.resolve(label_tip)
+		label.mouse_filter = Control.MOUSE_FILTER_PASS  # (a label ignores the mouse, and so its tooltip, unless told to not)
 	slider.custom_minimum_size.x = slider_min_width
 	value_field.custom_minimum_size.x = value_min_width
 	unit_label.custom_minimum_size.x = unit_min_width
-	label.text = label_text
+	label.text = Strings.resolve(label_text)
 	slider.value_changed.connect(_on_slider_changed)
 	reset_button.pressed.connect(func() -> void: slider.value = default_value)
 	value_field.text_submitted.connect(func(_text: String) -> void: value_field.release_focus())  # which commits (below)
@@ -101,7 +115,7 @@ func _update_text() -> void:
 		return  # the player is typing: leave their text alone until they commit it
 	value_field.text = _format(slider.value)
 	unit_label.text = suffix
-	reset_button.tooltip_text = "Use default (%s)" % _format_with_unit(default_value)
+	reset_button.tooltip_text = Strings.t("ui.use_default", [_format_with_unit(default_value)])
 
 
 ## Typing starts from the bare number: no thousands commas or unit to delete first.
@@ -142,6 +156,12 @@ func _on_field_key(event: InputEvent) -> void:
 
 ## Whether the row can be changed at all. When it can't, it is faint and says why on hover, so a slider that
 ## looks movable never does nothing.
+## Locks or unlocks the row from outside (a range of one value does it from within): a locked row stays, faint, and says
+## `disabled_reason` when hovered.
+func set_enabled(enabled: bool) -> void:
+	_set_changeable(enabled)
+
+
 func _set_changeable(changeable: bool) -> void:
 	slider.editable = changeable
 	value_field.editable = changeable
@@ -150,5 +170,5 @@ func _set_changeable(changeable: bool) -> void:
 	var hint := "" if changeable else disabled_reason
 	slider.tooltip_text = hint
 	value_field.tooltip_text = hint
-	label.tooltip_text = hint
-	label.mouse_filter = Control.MOUSE_FILTER_PASS if not changeable else Control.MOUSE_FILTER_IGNORE
+	label.tooltip_text = hint if not changeable or label_tip == "" else Strings.resolve(label_tip)
+	label.mouse_filter = Control.MOUSE_FILTER_PASS if (not changeable or label_tip != "") else Control.MOUSE_FILTER_IGNORE

@@ -8,15 +8,17 @@ const MAX_BUPS := 100  ## the most founders a dish starts with (each can be name
 const MIN_BUP_LIMIT := 10
 const DEFAULT_BUP_LIMIT := 20000  ## what goal mode uses, and free mode starts with
 const MAX_BUP_LIMIT := 100000  ## how far the limit slider goes: how many the machine can run is for the player to find out
-const MAX_NUTRIENTS := 2000  ## units of nutrient already dissolved in the dish at the start
+const MAX_NUTRIENTS := 50000  ## units of nutrient already dissolved in the dish at the start
 const MAX_NUTRIENT_RATE := 30.0
+const MAX_BLOOM_RATE := 240.0  ## plankton blooming a sim-day (ten an hour)
 const MIN_DISH_RADIUS := 1000.0  ## µm: 1 mm, the smallest dish a player can choose (smaller ones are not much use)
 const MIN_SIM_RADIUS := 150.0  ## µm: the smallest dish the simulation itself will run (the tests and old saves use small ones)
 const MAX_DISH_RADIUS := 12000.0  ## µm: 12 mm in radius, 24 mm across (a real petri dish is about 90 mm)
 
 var bups := 4
-var nutrients := 60  ## units of nutrient dissolved in the dish at the start, spread evenly
-var nutrient_rate := 3.0  ## units of nutrient fed in per minute, spread evenly
+var nutrients := 10000  ## units of nutrient dissolved in the dish at the start, spread evenly: enough that a few founders grow past the first goal (1,000 bups) with room to spare (measured with this default: all of 110 runs reached 1,000, at about 25-27 sim-hours; twice the nutrient gets there in about 12)
+var nutrient_rate := 0.0  ## units of nutrient fed in per minute, spread evenly (none by default: the starting nutrient is the medium they begin in)
+var bloom_rate := 0.0  ## plankton appearing a sim-day, at random places, each bursting into nutrient some time later
 var dish_radius := Dish.DEFAULT_RADIUS  ## physical size of the dish
 ## What the player chose for the founders, in order: {"name": "", "color": "#rrggbb"}. Founders beyond the list, and
 ## any with nothing chosen, start unnamed and in the default colour.
@@ -42,7 +44,7 @@ func copy() -> StartConditions:
 
 
 func to_dict() -> Dictionary:
-	return {"bups": bups, "nutrients": nutrients, "nutrient_rate": nutrient_rate, "dish_radius": dish_radius, "bup_limit": bup_limit, "founders": founders.slice(0, bups).duplicate(true)}  # (only the founders there are: nothing hidden is carried over)
+	return {"bups": bups, "nutrients": nutrients, "nutrient_rate": nutrient_rate, "bloom_rate": bloom_rate, "dish_radius": dish_radius, "bup_limit": bup_limit, "founders": founders.slice(0, bups).duplicate(true)}  # (only the founders there are: nothing hidden is carried over)
 
 
 ## Anything missing, malformed or out of range falls back to the default / the nearest valid value.
@@ -51,6 +53,7 @@ static func from_dict(d: Dictionary) -> StartConditions:
 	c.bups = clampi(int(_number(d, "bups", c.bups)), MIN_BUPS, MAX_BUPS)
 	c.nutrients = clampi(int(_number(d, "nutrients", c.nutrients)), 0, MAX_NUTRIENTS)
 	c.nutrient_rate = clampf(_number(d, "nutrient_rate", c.nutrient_rate), 0.0, MAX_NUTRIENT_RATE)
+	c.bloom_rate = clampf(_number(d, "bloom_rate", c.bloom_rate), 0.0, MAX_BLOOM_RATE)
 	c.dish_radius = clampf(_number(d, "dish_radius", c.dish_radius), MIN_DISH_RADIUS, MAX_DISH_RADIUS)
 	c.bup_limit = clampi(int(_number(d, "bup_limit", c.bup_limit)), MIN_BUP_LIMIT, MAX_BUP_LIMIT)
 	c.bup_limit = maxi(c.bup_limit, c.bups)  # the dish holds at least its founders

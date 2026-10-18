@@ -31,7 +31,7 @@ grow_vertical = 2
 theme_type_variation = &"StoryHeading"
 layout_mode = 2
 bbcode_enabled = true
-text = "[b]OCTOBER [color=#ffffff]1964[/color].  A STORMY NIGHT.[/b]"
+text = "@intro.heading"
 fit_content = true
 scroll_active = false
 
@@ -39,21 +39,13 @@ scroll_active = false
 theme_type_variation = &"Story"
 custom_minimum_size = Vector2(980, 0)
 layout_mode = 2
-text = "You were in the middle of an experiment (something involving a petri dish, a little nutrient broth, and a great deal of misplaced confidence) when the lightning struck.
-
-It should have shattered the glass. Instead, the dish hummed. And then something in it moved.
-
-Abiogenesis. Real, wriggling, slightly smug life, conjured from nothing in your own laboratory. You have named them Bups.
-
-They are small. They are hungry. They will divide, and mutate, and whichever Bups cope best will inherit the dish. You cannot command them. But the dish is yours: the food, the pressure, the conditions. Manage it carefully, run your experiments, and guide your Bups toward becoming a successful new form of life.
-
-Do try not to let them die. The paperwork is dreadful."
+text = "@intro.body"
 autowrap_mode = 3
 
 [node name="Prompt" type="Label" parent="Box"]
 theme_type_variation = &"Hint"
 layout_mode = 2
-text = "SPACE or click to begin   ·   ESC to skip"
+text = "@intro.prompt"
 horizontal_alignment = 1
 
 [node name="Flash" type="ColorRect" parent="."]

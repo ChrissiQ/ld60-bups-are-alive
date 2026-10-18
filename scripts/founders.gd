@@ -15,6 +15,7 @@ var _colors: Array[ColorPickerButton] = []
 
 
 func _ready() -> void:
+	Strings.apply(self)  # (the texts the scene gives as @section.name)
 	_start = Session.free_start.copy()
 	for i in _start.bups:
 		_add_row(i)
@@ -30,7 +31,7 @@ func _add_row(index: int) -> void:
 	var chosen: Dictionary = _start.founders[index] if index < _start.founders.size() else {}
 	var row := HBoxContainer.new()
 	var number := Label.new()
-	number.text = "#%d" % (index + 1)
+	number.text = Strings.t("founders.number", [index + 1])
 	number.custom_minimum_size.x = 64.0
 	number.theme_type_variation = &"Bright"
 	row.add_child(number)
@@ -43,7 +44,7 @@ func _add_row(index: int) -> void:
 	row.add_child(name_edit)
 	var picker := ColorPicking.make_button()
 	picker.color = Genome.color_from_hex(chosen.get("color"))
-	picker.tooltip_text = "Colour"
+	picker.tooltip_text = Strings.t("founders.colour_tip")
 	row.add_child(picker)
 	list.add_child(row)
 	_names.append(name_edit)

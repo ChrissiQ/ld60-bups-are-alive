@@ -18,7 +18,7 @@ offset_left = 48.0
 offset_top = 36.0
 offset_right = 600.0
 offset_bottom = 110.0
-text = "THE FOUNDERS"
+text = "@founders.title"
 
 [node name="Subtitle" type="Label" parent="."]
 theme_type_variation = &"Accent"
@@ -27,7 +27,7 @@ offset_left = 50.0
 offset_top = 112.0
 offset_right = 900.0
 offset_bottom = 140.0
-text = "Founder names and colours"
+text = "@founders.subtitle"
 
 [node name="Panel" type="PanelContainer" parent="."]
 layout_mode = 1
@@ -52,20 +52,20 @@ layout_mode = 2
 layout_mode = 2
 size_flags_horizontal = 3
 theme_type_variation = &"Bright"
-text = "FOUNDING BUPS"
+text = "@founders.panel"
 vertical_alignment = 1
 
 [node name="SpreadButton" type="Button" parent="Panel/Box/Header"]
 layout_mode = 2
 theme_type_variation = &"DialogButton"
-tooltip_text = "Hues evenly spaced"
-text = "Spread colours"
+tooltip_text = "@founders.spread_tip"
+text = "@founders.spread"
 
 [node name="RandomButton" type="Button" parent="Panel/Box/Header"]
 layout_mode = 2
 theme_type_variation = &"DialogButton"
-tooltip_text = "Random colour for each"
-text = "Random colours"
+tooltip_text = "@founders.random_tip"
+text = "@founders.random"
 
 [node name="Scroll" type="ScrollContainer" parent="Panel/Box"]
 custom_minimum_size = Vector2(560, 300)
@@ -83,11 +83,11 @@ layout_mode = 2
 custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Back"
+text = "@founders.back"
 
 [node name="StartButton" type="Button" parent="Panel/Box/Actions"]
 custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
 size_flags_horizontal = 3
 theme_type_variation = &"PrimaryButton"
-text = "START!"
+text = "@founders.start"

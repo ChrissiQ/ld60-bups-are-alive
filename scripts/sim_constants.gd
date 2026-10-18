@@ -83,6 +83,7 @@ static func build() -> Dictionary:
 		"max_harm": Genome.MAX_HARM,
 		"min_length_px": Cell.MIN_VISIBLE_LENGTH_PX,
 		"min_width_px": Cell.MIN_VISIBLE_WIDTH_PX,
+		"max_trail_px": Dish.MAX_TRAIL_PIXELS,
 		"founder_hue": Genome.founder()["hue"],
 		"founder_sat": Genome.founder()["sat"],
 		"founder_val": Genome.founder()["val"],

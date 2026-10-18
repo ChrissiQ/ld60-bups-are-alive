@@ -35,6 +35,7 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("reset", "dish_radius", "seed"), &BupSim::reset);
 	ClassDB::bind_method(D_METHOD("set_seed", "seed"), &BupSim::set_seed);
 	ClassDB::bind_method(D_METHOD("set_limit", "bup_limit"), &BupSim::set_limit);
+	ClassDB::bind_method(D_METHOD("set_upkeep_scale", "scale"), &BupSim::set_upkeep_scale);
 	ClassDB::bind_method(D_METHOD("grow", "new_radius"), &BupSim::grow);
 	ClassDB::bind_method(D_METHOD("get_field"), &BupSim::get_field);
 	ClassDB::bind_method(D_METHOD("random_float"), &BupSim::random_float);
@@ -611,7 +612,7 @@ double BupSim::drawn_width(double pixel_um) const {
 }
 
 double BupSim::upkeep(const Bup &b) const {
-	return G.base_upkeep + G.maintenance_per_mass * b.mass + b.drag_upkeep * size_of(b) + G.sense_upkeep * b.genes[1];
+	return upkeep_scale * (G.base_upkeep + G.maintenance_per_mass * b.mass) + b.drag_upkeep * size_of(b) + G.sense_upkeep * b.genes[1];
 }
 
 double BupSim::max_energy(const Bup &b) const {
@@ -983,7 +984,10 @@ String BupSim::custom_name(int64_t id) const {
 	return it == records.end() ? String() : it->second.name;
 }
 
-PackedFloat32Array BupSim::render_buffer(double pixel_um, int capacity) const {
+// One instance for each bup, for the MultiMesh. A bup that has moved farther than its own length since the last picture
+// is drawn as a streak: the body at its place now, and a tail fading back to where it was then. Picture after picture the
+// streaks join up, so a fast bup reads as one object leaving a path, not as a scatter of separate dots.
+PackedFloat32Array BupSim::render_buffer(double pixel_um, int capacity) {
 	double margin = pixel_um; // a pixel all round
 	const int stride = 16; // transform (8) + colour (4) + custom data (4)
 	PackedFloat32Array out;
@@ -992,18 +996,32 @@ PackedFloat32Array BupSim::render_buffer(double pixel_um, int capacity) const {
 	std::fill(w, w + (size_t)capacity * stride, 0.0f);
 	int n = std::min(capacity, (int)bups.size());
 	for (int i = 0; i < n; i++) {
-		const Bup &b = bups[i];
+		Bup &b = bups[i];
 		float *p = w + (size_t)i * stride;
 		double length = drawn_length(b, pixel_um), width = drawn_width(pixel_um);
-		// The quad is the body plus a margin all round (about a pixel), so that a body thinner than a
-		// pixel still covers some pixel centres; the shader draws the exact capsule inside it.
-		double quad_length = length + 2.0 * margin, quad_width = width + 2.0 * margin;
-		p[0] = (float)(b.dx * quad_length);
-		p[1] = (float)(-b.dy * quad_width);
-		p[3] = b.x;
-		p[4] = (float)(b.dy * quad_length);
-		p[5] = (float)(b.dx * quad_width);
-		p[7] = b.y;
+		// The trail: back along the way it came since the last picture (none for a new bup, or one that has hardly moved).
+		double ux = b.dx, uy = b.dy, trail = 0.0;
+		if (!std::isnan(b.px)) {
+			double mx = (double)b.x - b.px, my = (double)b.y - b.py;
+			double moved = std::sqrt(mx * mx + my * my);
+			if (moved > length) {
+				ux = mx / moved;
+				uy = my / moved;
+				trail = std::min(moved, G.max_trail_px * pixel_um);
+			}
+		}
+		b.px = b.x;
+		b.py = b.y;
+		// The quad is the body (and its trail) plus a margin all round (about a pixel), so that a body thinner than a
+		// pixel still covers some pixel centres; the shader draws the exact capsule inside it. Its middle is half a
+		// trail behind the body.
+		double quad_length = length + trail + 2.0 * margin, quad_width = width + 2.0 * margin;
+		p[0] = (float)(ux * quad_length);
+		p[1] = (float)(-uy * quad_width);
+		p[3] = (float)(b.x - ux * trail * 0.5);
+		p[4] = (float)(uy * quad_length);
+		p[5] = (float)(ux * quad_width);
+		p[7] = (float)(b.y - uy * trail * 0.5);
 		// colour: the bup's own hue, saturation and value
 		Color c = Color::from_hsv(b.hue, b.sat, b.val);
 		p[8] = c.r;
@@ -1013,6 +1031,7 @@ PackedFloat32Array BupSim::render_buffer(double pixel_um, int capacity) const {
 		p[12] = (float)length; // the body, for the shader that draws the capsule
 		p[13] = (float)width;
 		p[14] = (float)margin;
+		p[15] = (float)trail;
 	}
 	return out;
 }

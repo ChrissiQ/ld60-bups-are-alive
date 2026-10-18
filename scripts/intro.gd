@@ -15,6 +15,7 @@ var _leaving := false
 
 
 func _ready() -> void:
+	Strings.apply(self)  # (the texts the scene gives as @section.name)
 	body.visible_characters = 0
 	prompt.modulate.a = 0.0
 	# Lightning: a hard flash, then a smaller flicker as it fades.

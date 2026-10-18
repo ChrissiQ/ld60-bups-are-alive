@@ -24,7 +24,7 @@ offset_left = 48.0
 offset_top = 36.0
 offset_right = 600.0
 offset_bottom = 110.0
-text = "FREE MODE"
+text = "@free_setup.title"
 
 [node name="Panel" type="PanelContainer" parent="."]
 layout_mode = 1
@@ -49,7 +49,7 @@ layout_mode = 2
 layout_mode = 2
 size_flags_horizontal = 3
 theme_type_variation = &"Bright"
-text = "STARTING CONDITIONS"
+text = "@free_setup.header"
 vertical_alignment = 1
 
 [node name="ResetButton" type="Button" parent="Panel/Box/Header"]
@@ -61,23 +61,27 @@ icon_alignment = 1
 
 [node name="BupsRow" parent="Panel/Box" instance=ExtResource("5")]
 layout_mode = 2
-label_text = "Bups"
+label_text = "@free_setup.bups"
 
 [node name="NutrientsRow" parent="Panel/Box" instance=ExtResource("5")]
 layout_mode = 2
-label_text = "Start nutrient"
+label_text = "@free_setup.start_nutrient"
 
 [node name="RateRow" parent="Panel/Box" instance=ExtResource("5")]
 layout_mode = 2
-label_text = "Nutrient feed"
+label_text = "@free_setup.nutrient_feed"
+
+[node name="BloomRow" parent="Panel/Box" instance=ExtResource("5")]
+layout_mode = 2
+label_text = "@free_setup.plankton_bloom"
 
 [node name="DishRow" parent="Panel/Box" instance=ExtResource("5")]
 layout_mode = 2
-label_text = "Dish radius"
+label_text = "@free_setup.dish_radius"
 
 [node name="LimitRow" parent="Panel/Box" instance=ExtResource("5")]
 layout_mode = 2
-label_text = "Bup limit"
+label_text = "@free_setup.bup_limit"
 
 [node name="Actions" type="HBoxContainer" parent="Panel/Box"]
 layout_mode = 2
@@ -86,11 +90,11 @@ layout_mode = 2
 custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Back"
+text = "@free_setup.back"
 
 [node name="GoButton" type="Button" parent="Panel/Box/Actions"]
 custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
 size_flags_horizontal = 3
 theme_type_variation = &"PrimaryButton"
-text = "NEXT"
+text = "@free_setup.next"

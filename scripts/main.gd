@@ -21,6 +21,9 @@ const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) stil
 @onready var graph: Control = $HUD/Graph
 @onready var toolbar: Toolbar = $HUD/Toolbars/Toolbar
 @onready var tool_options: ToolOptions = $HUD/Toolbars/ToolOptions
+@onready var rate_panel: PanelContainer = $HUD/RatePanel  ## under the readout: the two ways nutrient arrives by itself
+@onready var feed_row: SettingRow = $HUD/RatePanel/Rows/FeedRow
+@onready var bloom_row: SettingRow = $HUD/RatePanel/Rows/BloomRow  ## how often plankton appear
 @onready var info_panel: PanelContainer = $HUD/InfoPanel
 @onready var info_text: RichTextLabel = $HUD/InfoPanel/Box/InfoText
 @onready var top_row: HBoxContainer = $HUD/InfoPanel/Box/TopRow
@@ -67,6 +70,7 @@ var _drag_threshold: float = ProjectSettings.get_setting("gui/common/drag_thresh
 
 
 func _ready() -> void:
+	Strings.apply(self)  # (the texts the scene gives as @section.name)
 	dish.extinct.connect(_on_extinct)
 	tracker.goal_completed.connect(_on_goal_completed)
 	toolbar.tool_selected.connect(_on_tool_selected)
@@ -84,8 +88,13 @@ func _ready() -> void:
 	pause_menu.bup_limit_chosen.connect(dish.change_limit)
 	graph.dish = dish
 	banner.text = ""
-	source_rate_row.configure(Dish.MIN_SOURCE_RATE, Dish.MAX_SOURCE_RATE, 0.1, 10.0, "/min")
+	source_rate_row.configure(Dish.MIN_SOURCE_RATE, Dish.MAX_SOURCE_RATE, 0.1, 10.0, Strings.t("hud.source_rate_unit"))
 	source_rate_row.value_changed.connect(_on_source_rate_changed)
+	feed_row.configure(0.0, StartConditions.MAX_NUTRIENT_RATE, 1.0, 0.0, Strings.t("hud.rate_unit_feed"))
+	feed_row.value_changed.connect(func(v: float) -> void: dish.food_rate = v)
+	bloom_row.configure(0.0, StartConditions.MAX_BLOOM_RATE, Dish.BLOOM_RATE_STEP, 0.0, Strings.t("hud.rate_unit_bloom"))
+	bloom_row.disabled_reason = Strings.t("hud.rate_bloom_locked")
+	bloom_row.value_changed.connect(func(v: float) -> void: dish.bloom_rate = v)
 	delete_source_button.pressed.connect(_delete_selected_source)
 	delete_source_button.focus_mode = Control.FOCUS_NONE
 	follow_button.pressed.connect(_toggle_follow)
@@ -126,8 +135,8 @@ func _tools_unlocked() -> bool:
 
 func _sync_tool_locks() -> void:
 	var locked := not _tools_unlocked()
-	for locked_tool in [Toolbar.Tool.NUTRIENT, Toolbar.Tool.SOURCE, Toolbar.Tool.ERASE]:
-		toolbar.set_tool_locked(locked_tool, locked, "unlocks with experiment 2")
+	for locked_tool in [Toolbar.Tool.NUTRIENT, Toolbar.Tool.SOURCE, Toolbar.Tool.ERASE, Toolbar.Tool.PLANKTON]:
+		toolbar.set_tool_locked(locked_tool, locked, Strings.t("toolbar.locked_reason"))
 
 
 ## A red ring around the window while paused, so it's never unclear why nothing is moving.
@@ -174,6 +183,7 @@ func _process(delta: float) -> void:
 	dish.refresh_drawing()
 	graph.refresh()
 	_update_hud()
+	_sync_bloom_panel()
 
 
 ## What the select tool is over at a world point, under the pick mode: a bup, a source, or else the medium itself.
@@ -211,6 +221,11 @@ func _update_pointer() -> void:
 				dish.place_preview_pos = world
 				dish.place_preview_radius = dish.source_draw_radius()
 				dish.place_preview_marker = true  # a ring like a selection's: same size at any zoom
+		Toolbar.Tool.PLANKTON:
+			if dish.can_place_at(world):
+				dish.place_preview_pos = world
+				dish.place_preview_radius = dish.plankton_draw_radius()
+				dish.place_preview_marker = true
 		Toolbar.Tool.ERASE:
 			dish.place_preview_pos = world
 			dish.place_preview_radius = tool_options.brush_radius()
@@ -226,23 +241,26 @@ func _update_info_panel() -> void:
 		dish.selected_id = -1  # its record is gone (a restart, say)
 	if dish.selected_source != null and not dish.sources.has(dish.selected_source):
 		dish.selected_source = null
-	# A clicked bup or source is pinned to the panel. Until one is, the panel follows the pointer:
+	if dish.selected_plankton != null and not dish.plankton.has(dish.selected_plankton):
+		dish.selected_plankton = null  # (it burst)
+	# A clicked bup, source or plankton is pinned to the panel. Until one is, the panel follows the pointer:
 	# whatever it is over, or else the nutrient at that spot.
-	var pinned := dish.selected_id >= 0 or dish.selected_source != null
+	var pinned := dish.selected_id >= 0 or dish.selected_source != null or dish.selected_plankton != null
 	var bup_id: int = dish.selected_id if pinned else dish.hovered_id
 	var source: NutrientSource = dish.selected_source if pinned else dish.hovered_source
+	var floating: Plankton = dish.selected_plankton if pinned else dish.hovered_plankton
 	var editing := dish.selected_source != null and dish.selected_id < 0
 	var alive_info: Dictionary = dish.bup_info(bup_id) if bup_id >= 0 else {}  # (fetched once: the panels below are built from it)
 	var dead := bup_id >= 0 and alive_info.is_empty()  # a selected bup that has died stays up, as a record
 	var lineage_open: bool = bup_id >= 0 and bup_id == dish.selected_id and _stack.size() > 0 and _stack.back()["view"] == "lineage"
-	info_panel.visible = (bup_id >= 0 or source != null or (not pinned and _hovering_point)) and not lineage_open
+	info_panel.visible = (bup_id >= 0 or source != null or floating != null or (not pinned and _hovering_point)) and not lineage_open
 	info_panel.theme_type_variation = &"DeceasedPanel" if dead else &""
 	lineage_panel.visible = lineage_open
 	lineage_panel.theme_type_variation = &"DeceasedPanel" if dead else &""
 	source_rate_row.visible = editing
 	delete_source_button.visible = editing
 	follow_button.visible = dish.selected_id >= 0 and not dead  # a bup can be followed once it is selected, not just hovered
-	follow_button.text = "Stop following" if following_id >= 0 else "Follow"
+	follow_button.text = Strings.t("hud.stop_following") if following_id >= 0 else Strings.t("hud.follow")
 	top_row.visible = bup_id >= 0
 	lineage_button.visible = bup_id >= 0 and bup_id == dish.selected_id
 	if bup_id < 0:
@@ -258,6 +276,9 @@ func _update_info_panel() -> void:
 		if editing:
 			_show_source_rate(source)
 		_set_rich(info_text, _source_text(dish.source_details(source)), "source %d" % source.get_instance_id())
+	elif floating != null:
+		_point_stamp = []
+		_set_rich(info_text, _plankton_text(dish.plankton_details(floating)), "plankton %d" % floating.get_instance_id())
 	elif _hovering_point:
 		var point_stamp := [_hover_point, dish.time, dish.edit_count]
 		if point_stamp != _point_stamp:  # (the readout is worked out again only when the spot or the dish has changed)
@@ -295,21 +316,30 @@ func _on_source_rate_changed(rate: float) -> void:
 		dish.selected_source.rate = rate
 
 
+func _plankton_text(d: Dictionary) -> String:
+	var offset: Vector2 = d["offset"]
+	var nearest: float = d["nearest_bup"]
+	return Strings.t("panel.plankton", [
+		SimClock.format_minutes(int(d["age"] / 60.0)), d["units"], offset.x, offset.y, d["distance"], _concentration_text(d["concentration"]),
+		_away_text(nearest),
+	])
+
+
 func _source_text(d: Dictionary) -> String:
 	var offset: Vector2 = d["offset"]
 	var nearest: float = d["nearest_bup"]
-	return "NUTRIENT SOURCE\nreleased so far  %.0f\nposition  %.0f, %.0f\nfrom centre  %.0f\nconcentration  %s\nnearest bup  %s\nbups within %.0f  %d" % [
+	return Strings.t("panel.source", [
 		d["emitted"], offset.x, offset.y, d["distance"], _concentration_text(d["concentration"]),
-		"%.0f away" % nearest if nearest >= 0.0 else "none",
+		_away_text(nearest),
 		Dish.SOURCE_NEARBY, d["nearby"],
-	]
+	])
 
 
 ## A concentration in the unit the player works in: units of nutrient per square millimetre (the unit of a dose, a feed
 ## and a source), not the simulation's energy per square micrometre, which is far too small to read.
 func _concentration_text(energy_per_um2: float) -> String:
 	var units := energy_per_um2 * 1.0e6 / Dish.NUTRIENT_ENERGY
-	return ("%.1f" if units < 10.0 else "%.0f") % units + " units/mm²"
+	return Strings.t("panel.concentration", [("%.1f" if units < 10.0 else "%.0f") % units])
 
 
 ## The medium at a spot: how much nutrient, which way it rises and how steeply (as a share of
@@ -319,44 +349,49 @@ func _point_text(d: Dictionary) -> String:
 	var concentration: float = d["concentration"]
 	var gradient: Vector2 = d["gradient"]
 	var change := gradient.length() / maxf(concentration, 1e-6) * 100.0  # the fraction it changes by over 100 units
-	var slope := "flat"
+	var slope := Strings.t("panel.gradient_flat")
 	if concentration > 0.0005 and change >= 0.02:
-		var compass := ["E", "SE", "S", "SW", "W", "NW", "N", "NE"]  # the screen's y axis points down
-		slope = "rising to the %s  %.0f%% per 100" % [compass[posmod(roundi(gradient.angle() / (TAU / 8.0)), 8)], change * 100.0]
+		var compass := ["e", "se", "s", "sw", "w", "nw", "n", "ne"]  # the screen's y axis points down
+		slope = Strings.t("panel.gradient_rising", [Strings.t("panel.compass_" + compass[posmod(roundi(gradient.angle() / (TAU / 8.0)), 8)]), change * 100.0])
 	var source: float = d["nearest_source"]
 	var bup: float = d["nearest_bup"]
-	return "NUTRIENT\nconcentration  %s\ngradient  %s\nposition  %.0f, %.0f\nfrom centre  %.0f\nnearest source  %s\nnearest bup  %s" % [
+	return Strings.t("panel.nutrient", [
 		_concentration_text(concentration), slope, offset.x, offset.y, d["distance"],
-		"%.0f away" % source if source >= 0.0 else "none",
-		"%.0f away" % bup if bup >= 0.0 else "none",
-	]
+		_away_text(source),
+		_away_text(bup),
+	])
 
 
 ## How reliably a bup drifts up the slope where it is (the chance a step goes up rather than down), in a word.
 func _steering_word(chance: float) -> String:
 	if chance < 0.55:
-		return "blind"
+		return Strings.t("panel.steering_blind")
 	if chance < 0.7:
-		return "faint"
-	return "clear" if chance < 0.9 else "sure"
+		return Strings.t("panel.steering_faint")
+	return Strings.t("panel.steering_clear") if chance < 0.9 else Strings.t("panel.steering_sure")
+
+
+## How far away something is, for the panels: "none" when there is nothing of that kind in the dish.
+func _away_text(distance: float) -> String:
+	return Strings.t("panel.away", [distance]) if distance >= 0.0 else Strings.t("panel.none")
 
 
 func _info_text(b: Dictionary) -> String:
-	var text := "generation %d   born %s\nenergy %d / %.0f\n" % [b["generation"], SimClock.format_minutes(b["born"]), maxi(1, roundi(b["energy"])), b["max_energy"]]  # a living bup never reads 0
-	text += "steering here  %s\n" % _steering_word(b["steering"])
+	var text := Strings.t("panel.bup", [b["generation"], SimClock.format_minutes(b["born"]), maxi(1, roundi(b["energy"])), b["max_energy"]])  # (a living bup never reads 0)
+	text += Strings.t("panel.steering", [_steering_word(b["steering"])])
 	return text + _traits_text(b)
 
 
 ## The genes, mutations and harm of a bup (alive or dead), the same lines in either panel.
 func _traits_text(b: Dictionary) -> String:
 	var text := ""
-	for gene: String in Genome.LABELS:
-		text += "\n%s  %s" % [Genome.LABELS[gene].rpad(5), Genome.format(gene, b[Genome.INFO_KEYS[gene]])]
-	return text + "\n\nmutations in lineage  %d\nharm  %.1f%%" % [b["mutations"], Genome.harm_share(b["harm"]) * 100.0]
+	for gene: String in Genome.LABELED:
+		text += Strings.t("panel.gene_line", [Genome.label(gene).rpad(5), Genome.format(gene, b[Genome.INFO_KEYS[gene]])])
+	return text + Strings.t("panel.bup_tail", [b["mutations"], Genome.harm_share(b["harm"]) * 100.0])
 
 
 func _deceased_text(b: Dictionary) -> String:
-	var text := "status: deceased\nborn %s   died %s\ngeneration %d   energy capacity %.0f\n" % [SimClock.format_minutes(b["born"]), SimClock.format_minutes(b["died"]), b["generation"], b["max_energy"]]
+	var text := Strings.t("panel.deceased", [SimClock.format_minutes(b["born"]), SimClock.format_minutes(b["died"]), b["generation"], b["max_energy"]])
 	return text + _traits_text(b)
 
 
@@ -366,7 +401,7 @@ func _on_pick_mode_selected(mode: Dish.PickMode) -> void:
 
 
 func _on_tool_selected(new_tool: Toolbar.Tool) -> void:
-	if new_tool != Toolbar.Tool.SELECT and (not _stack.is_empty() or dish.selected_source != null):
+	if new_tool != Toolbar.Tool.SELECT and (not _stack.is_empty() or dish.selected_source != null or dish.selected_plankton != null):
 		_clear_selection()  # using another tool closes whatever was open on a bup or source
 	tool = new_tool
 	tool_options.show_for(tool)
@@ -374,7 +409,7 @@ func _on_tool_selected(new_tool: Toolbar.Tool) -> void:
 	match tool:
 		Toolbar.Tool.PAN:
 			Input.set_default_cursor_shape(Input.CURSOR_DRAG)
-		Toolbar.Tool.NUTRIENT, Toolbar.Tool.SOURCE, Toolbar.Tool.ERASE:
+		Toolbar.Tool.NUTRIENT, Toolbar.Tool.SOURCE, Toolbar.Tool.ERASE, Toolbar.Tool.PLANKTON:
 			Input.set_default_cursor_shape(Input.CURSOR_CROSS)
 		_:
 			Input.set_default_cursor_shape(Input.CURSOR_ARROW)
@@ -396,10 +431,6 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _on_key(event: InputEventKey) -> void:
 	match event.keycode:
-		KEY_UP:
-			dish.food_rate = minf(dish.food_rate + 1.0, StartConditions.MAX_NUTRIENT_RATE)
-		KEY_DOWN:
-			dish.food_rate = maxf(dish.food_rate - 1.0, 0.0)
 		KEY_T:
 			graph.cycle_trait()
 		KEY_DELETE, KEY_BACKSPACE:
@@ -417,7 +448,7 @@ func _escape() -> void:
 	if _stack.size() > 1:  # a lineage (or a bup reached through one) is open: back one step
 		_set_stack(_stack.slice(0, _stack.size() - 1))
 		dish.selected_id = _stack.back()["id"]
-	elif dish.selected_id >= 0 or dish.selected_source != null:
+	elif dish.selected_id >= 0 or dish.selected_source != null or dish.selected_plankton != null:
 		_clear_selection()
 	else:
 		_open_menu()
@@ -428,6 +459,7 @@ func _clear_selection() -> void:
 	_set_stack([])
 	dish.selected_id = -1
 	dish.selected_source = null
+	dish.selected_plankton = null
 	following_id = -1
 
 
@@ -479,16 +511,16 @@ func _show_lineage(id: int) -> void:
 	if _lineage_shown.get("id") == id and _lineage_shown.get("key") == key:
 		return
 	_lineage_shown = {"id": id, "key": key}
-	lineage_title.text = "Lineage of %s" % dish.bup_name(id)
+	lineage_title.text = Strings.t("panel.lineage_title", [dish.bup_name(id)])
 	for child in lineage_entries.get_children():
 		lineage_entries.remove_child(child)
 		child.queue_free()
 	for k in chain.size():
 		var ancestor: int = chain[k]
 		var info := dish.lineage_info(ancestor)
-		var line := "%s\nborn %s" % [dish.bup_name(ancestor), SimClock.format_minutes(info["born"])]  # (the times on a second row, so nothing is cut off)
+		var line := Strings.t("panel.lineage_entry", [dish.bup_name(ancestor), SimClock.format_minutes(info["born"])])  # (the times on a second row, so nothing is cut off)
 		if not info["alive"]:
-			line += "   died %s" % SimClock.format_minutes(info["died"])
+			line += Strings.t("panel.lineage_died", [SimClock.format_minutes(info["died"])])
 		var row := HBoxContainer.new()
 		var swatch := ColorRect.new()  # the bup's colour, so a clade can be followed by eye
 		swatch.color = Genome.color_of(info)
@@ -582,9 +614,12 @@ func _click(world: Vector2) -> void:
 				dish.selected_source = dish.sources[-1]
 			elif world.distance_to(dish.global_position) <= dish.radius:
 				if dish.sources.size() >= Dish.MAX_SOURCES:
-					_show_banner("Source limit reached", 1.5)
+					_show_banner(Strings.t("hud.banner_source_limit"), 1.5)
 				else:
-					_show_banner("Too close to the edge", 1.5)
+					_show_banner(Strings.t("hud.banner_edge"), 1.5)
+		Toolbar.Tool.PLANKTON:
+			if not dish.place_plankton(world) and dish.plankton.size() >= Dish.MAX_PLANKTON:
+				_show_banner(Strings.t("hud.banner_plankton_limit"), 1.5)
 		Toolbar.Tool.ERASE:
 			if world.distance_to(dish.global_position) <= dish.radius:
 				dish.erase_nutrient(world, tool_options.brush_radius())
@@ -612,6 +647,8 @@ func _selected_world_pos() -> Variant:
 		return dish.bup_world_pos(dish.selected_id)
 	if dish.selected_source != null:
 		return dish.selected_source.pos
+	if dish.selected_plankton != null:
+		return dish.global_position + dish.selected_plankton.pos
 	return null
 
 
@@ -621,13 +658,28 @@ func _show_banner(text: String, seconds: float) -> void:
 
 
 func _on_goal_completed(goal: Goal) -> void:
+	if tracker.index == 1:
+		dish.upkeep_factor = Dish.GOAL_UPKEEP_FACTOR  # experiment 2: staying alive costs more
+	toolbar.set_paused(true)  # so the colony isn't left running while the player reads and sets up what comes next
 	_sync_tool_locks()
-	_show_banner("EXPERIMENT COMPLETE\n%s" % goal.title, BANNER_SECONDS)
+	_show_banner(Strings.t("hud.banner_complete", [goal.title]), BANNER_SECONDS)
 	save_game()
 
 
 func _on_extinct() -> void:
-	_show_banner("EXTINCT   R restart", 1e9)
+	_show_banner(Strings.t("hud.banner_extinct"), 1e9)
+
+
+## The rate box sits just under the readout. The feed is always there; the bloom comes with plankton. Both follow the dish.
+func _sync_bloom_panel() -> void:
+	rate_panel.position.y = hud.position.y + hud.get_content_height() + 16.0
+	var plankton_unlocked := _tools_unlocked()
+	if plankton_unlocked != bloom_row.slider.editable:  # (the bloom stays in the box, faint, until plankton unlock)
+		bloom_row.set_enabled(plankton_unlocked)
+	if not is_equal_approx(feed_row.value, dish.food_rate):
+		feed_row.set_value_silently(dish.food_rate)
+	if not is_equal_approx(bloom_row.value, dish.bloom_rate):
+		bloom_row.set_value_silently(dish.bloom_rate)
 
 
 func _update_hud() -> void:
@@ -637,40 +689,40 @@ func _update_hud() -> void:
 		return
 	var stats := dish.population_stats()
 	var genes := ""
-	for gene: String in Genome.LABELS:
-		genes += "%s  %s\n" % [Genome.LABELS[gene].rpad(5), Genome.format(gene, stats[gene])]
-	_set_rich(hud, "%s\nTIME  %s\nPLAYBACK  %s\nNUTRIENT  %.0f/min\nPLACED  %d\n\n%smutations/lineage  %.1f\nharm  %.1f%%\n\nUP/DOWN  nutrient rate\nT  graph trait\nR  restart\nESC  menu" % [
+	for gene: String in Genome.LABELED:
+		genes += "%s  %s\n" % [Genome.label(gene).rpad(5), Genome.format(gene, stats[gene])]
+	_set_rich(hud, Strings.t("hud.readout", [
 		_dish_lines(), SimClock.format(dish.time), _playback_text(),
-		dish.food_rate, dish.nutrients_placed, genes,
+		dish.nutrients_placed, genes,
 		stats["mutations"], stats["harm"] * 100.0,
-	], "hud %s" % sim_speed)
+	]), "hud %s" % sim_speed)
 
 
 ## The top of the readout: how many bups there are, and (in free mode, where the player changes them) the dish's
 ## current size and bup limit.
 func _dish_lines() -> String:
 	if not free_mode:
-		return "BUPS  %d" % dish.population()
-	return "BUPS  %d / %d\nDISH  %s" % [dish.population(), dish.bup_limit, UiText.mm(dish.radius)]
+		return Strings.t("hud.readout_bups", [dish.population()])
+	return Strings.t("hud.readout_bups_limit", [dish.population(), dish.bup_limit, UiText.mm(dish.radius)])
 
 
 ## The playback speed, and the speed actually achieved when the simulation can't keep up with it.
 func _playback_text() -> String:
 	if paused:
-		return "paused"
+		return Strings.t("hud.playback_paused")
 	if sim_speed > 1.0 and achieved_speed < 0.85 * sim_speed:
-		return "x%d (running x%d)" % [int(sim_speed), int(achieved_speed)]
-	return "x%d" % int(sim_speed)
+		return Strings.t("hud.playback_slow", [int(sim_speed), int(achieved_speed)])
+	return Strings.t("hud.playback_speed", [int(sim_speed)])
 
 
 func _goal_text() -> String:
 	var goal := tracker.current()
 	if goal == null:
-		return "ALL EXPERIMENTS COMPLETE\n\nMore to come."
-	var s := "EXPERIMENT %d / %d\n%s\n\n%s\n\n%s" % [
-		tracker.index + 1, tracker.goals.size(), goal.title, goal.text, goal.status.call(dish)]
+		return Strings.t("hud.goal_all_done")
+	var s := Strings.t("hud.goal_panel", [
+		tracker.index + 1, tracker.goals.size(), goal.title, goal.text, goal.status.call(dish)])
 	if goal.hold_time > 0.0 and tracker.held > 0.0:
-		s += "\nholding %s / %s" % [SimClock.format(tracker.held), SimClock.format(goal.hold_time)]
+		s += Strings.t("hud.goal_holding", [SimClock.format(tracker.held), SimClock.format(goal.hold_time)])
 	return s
 
 

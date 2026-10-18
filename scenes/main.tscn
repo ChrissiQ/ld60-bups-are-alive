@@ -23,9 +23,11 @@
 [ext_resource type="PackedScene" path="res://ui/bup_name_row.tscn" id="bup_name_row"]
 [ext_resource type="Texture2D" path="res://icons/lineage.svg" id="lineage_icon"]
 [ext_resource type="Texture2D" path="res://icons/pick_all.svg" id="pick_all_icon"]
+[ext_resource type="Texture2D" path="res://icons/tool_plankton.svg" id="plankton_icon"]
 [ext_resource type="Texture2D" path="res://icons/pick_background.svg" id="pick_background_icon"]
 [ext_resource type="Texture2D" path="res://icons/pick_bup.svg" id="pick_bup_icon"]
 [ext_resource type="Texture2D" path="res://icons/pick_source.svg" id="pick_source_icon"]
+[ext_resource type="Texture2D" path="res://icons/pick_plankton.svg" id="pick_plankton_icon"]
 
 [node name="Main" type="Node2D" unique_id=510029721]
 script = ExtResource("1")
@@ -39,8 +41,8 @@ script = ExtResource("2")
 
 [node name="Readout" type="RichTextLabel" parent="HUD" unique_id=945527870]
 theme_type_variation = &"Readout"
-offset_left = 16.0
-offset_top = 12.0
+offset_left = 20.0
+offset_top = 16.0
 offset_right = 420.0
 offset_bottom = 300.0
 mouse_filter = 2
@@ -55,9 +57,9 @@ custom_minimum_size = Vector2(324, 0)
 anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
-offset_left = -340.0
-offset_top = 12.0
-offset_right = -16.0
+offset_left = -344.0
+offset_top = 16.0
+offset_right = -20.0
 offset_bottom = 200.0
 grow_horizontal = 0
 autowrap_mode = 3
@@ -81,10 +83,10 @@ layout_mode = 3
 anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
-offset_left = 16.0
-offset_top = -190.0
-offset_right = 440.0
-offset_bottom = -16.0
+offset_left = 20.0
+offset_top = -194.0
+offset_right = 444.0
+offset_bottom = -20.0
 grow_vertical = 0
 script = ExtResource("3")
 
@@ -93,8 +95,8 @@ theme_type_variation = &"FlushStack"
 anchors_preset = 5
 anchor_left = 0.5
 anchor_right = 0.5
-offset_top = 16.0
-offset_bottom = 16.0
+offset_top = 20.0
+offset_bottom = 20.0
 grow_horizontal = 2
 mouse_filter = 2
 
@@ -137,6 +139,12 @@ icon_alignment = 1
 layout_mode = 2
 theme_type_variation = &"ToolButton"
 icon = ExtResource("erase_icon")
+icon_alignment = 1
+
+[node name="PlanktonButton" type="Button" parent="HUD/Toolbars/Toolbar/Row"]
+layout_mode = 2
+theme_type_variation = &"ToolButton"
+icon = ExtResource("plankton_icon")
 icon_alignment = 1
 
 [node name="Separator1" type="VSeparator" parent="HUD/Toolbars/Toolbar/Row"]
@@ -231,6 +239,13 @@ toggle_mode = true
 icon = ExtResource("pick_source_icon")
 icon_alignment = 1
 
+[node name="PickPlanktonButton" type="Button" parent="HUD/Toolbars/ToolOptions/SelectOptions/Modes"]
+layout_mode = 2
+theme_type_variation = &"ToolButton"
+toggle_mode = true
+icon = ExtResource("pick_plankton_icon")
+icon_alignment = 1
+
 [node name="NutrientOptions" type="Control" parent="HUD/Toolbars/ToolOptions"]
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
@@ -288,10 +303,10 @@ anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -350.0
-offset_top = -16.0
-offset_right = -16.0
-offset_bottom = -16.0
+offset_left = -354.0
+offset_top = -20.0
+offset_right = -20.0
+offset_bottom = -20.0
 grow_horizontal = 0
 grow_vertical = 0
 
@@ -311,7 +326,7 @@ size_flags_horizontal = 3
 layout_mode = 2
 size_flags_vertical = 4
 theme_type_variation = &"IconButton"
-tooltip_text = "Lineage"
+tooltip_text = "@hud.lineage_tip"
 icon = ExtResource("lineage_icon")
 icon_alignment = 1
 
@@ -328,7 +343,7 @@ autowrap_mode = 3
 [node name="SourceRate" parent="HUD/InfoPanel/Box" instance=ExtResource("setting_row")]
 visible = false
 layout_mode = 2
-label_text = "Rate"
+label_text = "@hud.source_rate"
 label_min_width = 44.0
 slider_min_width = 84.0
 value_min_width = 64.0
@@ -338,13 +353,13 @@ unit_min_width = 40.0
 visible = false
 layout_mode = 2
 theme_type_variation = &"DialogButton"
-text = "Delete source"
+text = "@hud.delete_source"
 
 [node name="Follow" type="Button" parent="HUD/InfoPanel/Box"]
 visible = false
 layout_mode = 2
 theme_type_variation = &"DialogButton"
-text = "Follow"
+text = "@hud.follow"
 
 [node name="LineagePanel" type="PanelContainer" parent="HUD"]
 visible = false
@@ -353,10 +368,10 @@ anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -350.0
-offset_top = -16.0
-offset_right = -16.0
-offset_bottom = -16.0
+offset_left = -354.0
+offset_top = -20.0
+offset_right = -20.0
+offset_bottom = -20.0
 grow_horizontal = 0
 grow_vertical = 0
 
@@ -377,6 +392,38 @@ horizontal_scroll_mode = 0
 [node name="Entries" type="VBoxContainer" parent="HUD/LineagePanel/Box/Scroll"]
 layout_mode = 2
 size_flags_horizontal = 3
+
+[node name="RatePanel" type="PanelContainer" parent="HUD"]
+theme_type_variation = &"CompactPanel"
+offset_left = 10.0
+offset_top = 230.0
+offset_right = 244.0
+offset_bottom = 280.0
+mouse_filter = 2
+
+[node name="Rows" type="VBoxContainer" parent="HUD/RatePanel"]
+layout_mode = 2
+theme_type_variation = &"SnugStack"
+
+[node name="BloomRow" parent="HUD/RatePanel/Rows" instance=ExtResource("setting_row")]
+layout_mode = 2
+label_text = "@hud.rate_bloom"
+label_tip = "@hud.rate_bloom_tip"
+compact = true
+label_min_width = 50.0
+slider_min_width = 64.0
+value_min_width = 44.0
+unit_min_width = 34.0
+
+[node name="FeedRow" parent="HUD/RatePanel/Rows" instance=ExtResource("setting_row")]
+layout_mode = 2
+label_text = "@hud.rate_feed"
+label_tip = "@hud.rate_feed_tip"
+compact = true
+label_min_width = 50.0
+slider_min_width = 64.0
+value_min_width = 44.0
+unit_min_width = 34.0
 
 [node name="PauseRing" type="Panel" parent="HUD"]
 theme_type_variation = &"RingPanel"
@@ -400,10 +447,10 @@ anchor_bottom = 1.0
 offset_left = -200.0
 offset_top = -88.0
 offset_right = 200.0
-offset_bottom = -16.0
+offset_bottom = -20.0
 grow_horizontal = 2
 grow_vertical = 0
-text = "PAUSED"
+text = "@hud.paused"
 horizontal_alignment = 1
 vertical_alignment = 2
 
