@@ -5,8 +5,13 @@
 
 # Native extension build products (godot-cpp is a nested clone; the API dump is generated)
 native/godot-cpp/
-native/bin/
+# (the folder itself is kept, so a fresh clone has somewhere to put the built libraries)
+native/bin/*
+!native/bin/.gitkeep
 native/extension_api.json
 native/.sconsign.dblite
 *.o
 *.os
+
+# Mac OS
+.DS_Store
