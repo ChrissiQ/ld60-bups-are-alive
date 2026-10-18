@@ -120,6 +120,11 @@ corner_radius_top_right = 4
 corner_radius_bottom_right = 4
 corner_radius_bottom_left = 4
 
+[sub_resource type="StyleBoxEmpty" id="dialog_text_pad"]
+content_margin_left = 8.0
+content_margin_right = 8.0
+content_margin_bottom = 27.0
+
 [sub_resource type="StyleBoxFlat" id="dialog_btn_normal"]
 content_margin_left = 22.0
 content_margin_top = 11.0
@@ -167,6 +172,28 @@ corner_radius_top_left = 4
 corner_radius_top_right = 4
 corner_radius_bottom_right = 4
 corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxEmpty" id="scroll_track"]
+content_margin_left = 10.0
+content_margin_right = 10.0
+
+[sub_resource type="StyleBoxFlat" id="scroll_grabber"]
+content_margin_left = 10.0
+content_margin_right = 10.0
+bg_color = Color(0.3, 0.75, 0.45, 0.35)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
+[sub_resource type="StyleBoxFlat" id="scroll_grabber_hi"]
+content_margin_left = 10.0
+content_margin_right = 10.0
+bg_color = Color(0.45, 1, 0.6, 0.7)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
 
 [sub_resource type="StyleBoxFlat" id="icon_hover"]
 content_margin_left = 4.0
@@ -574,6 +601,7 @@ default_font = ExtResource("f500")
 default_font_size = 18
 Accent/base_type = &"Label"
 Accent/colors/font_color = Color(1, 0.75, 0.3, 1)
+AcceptDialog/constants/buttons_min_width = 120
 AcceptDialog/font_sizes/title_font_size = 24
 AcceptDialog/styles/panel = SubResource("dialog_panel")
 Alert/base_type = &"Label"
@@ -628,6 +656,7 @@ CompactField/constants/minimum_character_width = 1
 CompactField/font_sizes/font_size = 14
 CompactSpinBox/base_type = &"SpinBox"
 CompactSpinBox/constants/buttons_width = 12
+ConfirmationDialog/constants/buttons_min_width = 120
 ConfirmationDialog/font_sizes/title_font_size = 24
 ConfirmationDialog/styles/panel = SubResource("dialog_panel")
 DialogButton/base_type = &"Button"
@@ -638,6 +667,7 @@ DialogButton/styles/normal = SubResource("dialog_btn_normal")
 DialogButton/styles/pressed = SubResource("dialog_btn_pressed")
 DialogText/base_type = &"Label"
 DialogText/font_sizes/font_size = 16
+DialogText/styles/normal = SubResource("dialog_text_pad")
 Display/base_type = &"Label"
 Display/colors/font_color = Color(0.45, 1, 0.6, 1)
 Display/colors/font_outline_color = Color(0.1, 0.4, 0.2, 1)
@@ -649,6 +679,11 @@ FlushStack/constants/separation = 0
 GridContainer/constants/h_separation = 24
 GridContainer/constants/v_separation = 6
 HBoxContainer/constants/separation = 14
+VScrollBar/styles/scroll = SubResource("scroll_track")
+VScrollBar/styles/scroll_focus = SubResource("scroll_track")
+VScrollBar/styles/grabber = SubResource("scroll_grabber")
+VScrollBar/styles/grabber_highlight = SubResource("scroll_grabber_hi")
+VScrollBar/styles/grabber_pressed = SubResource("scroll_grabber_hi")
 HSlider/styles/grabber_area = SubResource("slider_fill")
 HSlider/styles/grabber_area_highlight = SubResource("slider_fill_hi")
 HSlider/styles/slider = SubResource("slider_track")

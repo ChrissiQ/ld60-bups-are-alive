@@ -995,6 +995,9 @@ PackedFloat32Array BupSim::render_buffer(double pixel_um, int capacity) {
 	float *w = out.ptrw();
 	std::fill(w, w + (size_t)capacity * stride, 0.0f);
 	int n = std::min(capacity, (int)bups.size());
+	for (int i = n; i < (int)bups.size(); i++) { // not drawn this time: no trail from this picture's gap when they are
+		bups[i].px = bups[i].py = std::numeric_limits<float>::quiet_NaN();
+	}
 	for (int i = 0; i < n; i++) {
 		Bup &b = bups[i];
 		float *p = w + (size_t)i * stride;

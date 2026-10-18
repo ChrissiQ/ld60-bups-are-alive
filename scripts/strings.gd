@@ -4,7 +4,7 @@ extends RefCounted
 ## Ask for a text by its section and name:
 ##
 ##     Strings.t("hud.paused")                     # "PAUSED"
-##     Strings.t("panel.generation", [83, "158h"])  # a text with numbers in it: the file holds the %d / %s / %.0f
+##     Strings.t("goals.living_status", [412, 1000])  # a text with numbers in it: the file holds the %d / %s / %.0f
 ##
 ## In a scene, give a node's text (or tooltip, dialog title...) as "@section.name"; the scene's script calls
 ## `Strings.apply(self)` first thing in `_ready`, which swaps in the text for every such node under it.
@@ -16,6 +16,7 @@ extends RefCounted
 const FILE := "res://text/strings.cfg"
 
 static var _config: ConfigFile = null
+static var _places: Dictionary = {}  ## how many places for values each text asked for with numbers has (it is asked for every frame)
 static var missing: Array[String] = []  ## texts asked for that the file does not have (a test fails on any)
 
 
@@ -25,6 +26,9 @@ static func _file() -> ConfigFile:
 		var error := _config.load(FILE)
 		if error != OK:
 			push_error("Could not read %s (error %d)" % [FILE, error])
+		if OS.is_debug_build():  # (tests/strings_test.gd checks it too; a finished game need not read the file twice)
+			for problem in problems():
+				push_error(problem)
 	return _config
 
 
@@ -33,7 +37,9 @@ static func t(key: String, args: Array = []) -> String:
 	var text := raw(key)
 	if args.is_empty():
 		return text
-	var places := count_places(text)
+	if not _places.has(text):
+		_places[text] = count_places(text)
+	var places: int = _places[text]
 	if places != args.size():
 		push_error("The text '%s' has %d places for numbers but was given %d" % [key, places, args.size()])
 		return text
@@ -45,13 +51,12 @@ static func raw(key: String) -> String:
 	var dot := key.find(".")
 	var section := key.substr(0, dot) if dot >= 0 else ""
 	var name := key.substr(dot + 1) if dot >= 0 else key
-	var config := _file()
-	if not config.has_section_key(section, name):
+	if not has_key(key):
 		if not missing.has(key):
 			missing.append(key)
 			push_error("No text '%s' in %s" % [key, FILE])
 		return key
-	return str(config.get_value(section, name))
+	return str(_file().get_value(section, name))
 
 
 const PROPERTIES := ["text", "tooltip_text", "placeholder_text", "title", "dialog_text", "ok_button_text", "cancel_button_text"]  ## what a scene can give as "@section.name"
@@ -66,6 +71,29 @@ static func apply(root: Node) -> void:
 				root.set(property, resolve(value))
 	for child in root.get_children():
 		apply(child)
+
+
+## Lines of the file whose text did not load, each with what to look for. (A quote mark inside a text without a backslash
+## before it ends the text there, and the file stops loading from that line on: everything after it is then missing.)
+static func problems() -> Array[String]:
+	var out: Array[String] = []
+	var config := ConfigFile.new()
+	config.load(FILE)
+	var section := ""
+	var line_number := 0
+	var section_line := RegEx.create_from_string("^\\[([A-Za-z0-9_]+)\\]")
+	var text_line := RegEx.create_from_string("^([A-Za-z0-9_]+)\\s*=\\s*\"")
+	for line in FileAccess.get_file_as_string(FILE).split("\n"):
+		line_number += 1
+		var heading := section_line.search(line)
+		if heading != null:
+			section = heading.get_string(1)
+			continue
+		var entry := text_line.search(line)
+		if entry != null and not config.has_section_key(section, entry.get_string(1)):
+			out.append("%s line %d: '%s.%s' did not load. Look at that text, and above it, for a quote mark inside a text that needs a backslash before it (write \\\" for a quote mark), and nothing after that point loaded." % [FILE, line_number, section, entry.get_string(1)])
+			break  # (the first one is the cause; the rest follow from it)
+	return out
 
 
 static func has_key(key: String) -> bool:

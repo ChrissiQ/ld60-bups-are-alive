@@ -9,6 +9,7 @@ const ZOOM_MIN := 0.015  ## low enough to fit the largest dish (12000 µm in rad
 const ZOOM_MAX := 4.0
 const ZOOM_BUTTON_STEP := 1.25
 const ZOOM_WHEEL_STEP := 1.1
+const RATE_PANEL_GAP := 16.0  ## screen pixels between the readout and the feed and bloom box under it
 const FIT_MARGIN := 40.0  ## screen pixels kept clear at the sides when framing the dish
 const TOOLBAR_CLEARANCE := 120.0  ## screen pixels kept clear above the dish for the toolbars
 const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) still counts as pointing at it
@@ -239,13 +240,9 @@ func _pick_slack() -> float:
 func _update_info_panel() -> void:
 	if dish.selected_id >= 0 and not dish.has_record(dish.selected_id):
 		dish.selected_id = -1  # its record is gone (a restart, say)
-	if dish.selected_source != null and not dish.sources.has(dish.selected_source):
-		dish.selected_source = null
-	if dish.selected_plankton != null and not dish.plankton.has(dish.selected_plankton):
-		dish.selected_plankton = null  # (it burst)
 	# A clicked bup, source or plankton is pinned to the panel. Until one is, the panel follows the pointer:
 	# whatever it is over, or else the nutrient at that spot.
-	var pinned := dish.selected_id >= 0 or dish.selected_source != null or dish.selected_plankton != null
+	var pinned := dish.has_selection()
 	var bup_id: int = dish.selected_id if pinned else dish.hovered_id
 	var source: NutrientSource = dish.selected_source if pinned else dish.hovered_source
 	var floating: Plankton = dish.selected_plankton if pinned else dish.hovered_plankton
@@ -401,7 +398,7 @@ func _on_pick_mode_selected(mode: Dish.PickMode) -> void:
 
 
 func _on_tool_selected(new_tool: Toolbar.Tool) -> void:
-	if new_tool != Toolbar.Tool.SELECT and (not _stack.is_empty() or dish.selected_source != null or dish.selected_plankton != null):
+	if new_tool != Toolbar.Tool.SELECT and (not _stack.is_empty() or dish.has_selected_thing()):
 		_clear_selection()  # using another tool closes whatever was open on a bup or source
 	tool = new_tool
 	tool_options.show_for(tool)
@@ -448,7 +445,7 @@ func _escape() -> void:
 	if _stack.size() > 1:  # a lineage (or a bup reached through one) is open: back one step
 		_set_stack(_stack.slice(0, _stack.size() - 1))
 		dish.selected_id = _stack.back()["id"]
-	elif dish.selected_id >= 0 or dish.selected_source != null or dish.selected_plankton != null:
+	elif dish.has_selection():
 		_clear_selection()
 	else:
 		_open_menu()
@@ -457,9 +454,7 @@ func _escape() -> void:
 ## Lets go of everything selected: the bup (with whatever views were opened on it) and any source.
 func _clear_selection() -> void:
 	_set_stack([])
-	dish.selected_id = -1
-	dish.selected_source = null
-	dish.selected_plankton = null
+	dish.clear_selection()
 	following_id = -1
 
 
@@ -618,8 +613,8 @@ func _click(world: Vector2) -> void:
 				else:
 					_show_banner(Strings.t("hud.banner_edge"), 1.5)
 		Toolbar.Tool.PLANKTON:
-			if not dish.place_plankton(world) and dish.plankton.size() >= Dish.MAX_PLANKTON:
-				_show_banner(Strings.t("hud.banner_plankton_limit"), 1.5)
+			if not dish.place_plankton(world) and world.distance_to(dish.global_position) <= dish.radius:
+				_show_banner(Strings.t("hud.banner_plankton_limit" if dish.plankton.size() >= Dish.MAX_PLANKTON else "hud.banner_edge"), 1.5)
 		Toolbar.Tool.ERASE:
 			if world.distance_to(dish.global_position) <= dish.radius:
 				dish.erase_nutrient(world, tool_options.brush_radius())
@@ -658,8 +653,8 @@ func _show_banner(text: String, seconds: float) -> void:
 
 
 func _on_goal_completed(goal: Goal) -> void:
-	if tracker.index == 1:
-		dish.upkeep_factor = Dish.GOAL_UPKEEP_FACTOR  # experiment 2: staying alive costs more
+	if tracker.index >= 1:
+		dish.upkeep_factor = Dish.GOAL_UPKEEP_FACTOR  # experiment 2 and after: staying alive costs more
 	toolbar.set_paused(true)  # so the colony isn't left running while the player reads and sets up what comes next
 	_sync_tool_locks()
 	_show_banner(Strings.t("hud.banner_complete", [goal.title]), BANNER_SECONDS)
@@ -672,7 +667,7 @@ func _on_extinct() -> void:
 
 ## The rate box sits just under the readout. The feed is always there; the bloom comes with plankton. Both follow the dish.
 func _sync_bloom_panel() -> void:
-	rate_panel.position.y = hud.position.y + hud.get_content_height() + 16.0
+	rate_panel.position.y = hud.position.y + hud.get_content_height() + RATE_PANEL_GAP
 	var plankton_unlocked := _tools_unlocked()
 	if plankton_unlocked != bloom_row.slider.editable:  # (the bloom stays in the box, faint, until plankton unlock)
 		bloom_row.set_enabled(plankton_unlocked)

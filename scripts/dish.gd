@@ -26,6 +26,7 @@ const PLANKTON_MIN_PIXELS := 7.0  ## drawn at least this many screen pixels in r
 const MAX_PLANKTON := 200
 const SUGGESTED_BLOOM_RATE := 24.0  ## plankton a sim-day that the goal text suggests (one an hour): 300 units an hour, about what the old feed gave
 const GOAL_UPKEEP_FACTOR := 3.0  ## how much costlier staying alive is once goal mode reaches experiment 2 (set by the screen; 1 elsewhere) [x10 killed every colony tested at once; x3 did not]
+const MAX_BLOOM_ARRIVALS_PER_STEP := 50  ## the most plankton one step lets the bloom add (a few at most; a rate raised a great deal starts over)
 const BLOOM_RATE_STEP := 1.0  ## the bloom rate moves in these steps (plankton a sim-day)
 const MIN_SOURCE_RATE := 0.5  ## nutrients per minute, like the global feed
 const MAX_SOURCE_RATE := 60.0
@@ -93,12 +94,14 @@ var bup_limit := StartConditions.DEFAULT_BUP_LIMIT:  ## the most bups the dish h
 		_sync_render_capacity()
 var nutrients_placed := 0  ## how many units of nutrient the player has dropped in by hand
 var sources: Array[NutrientSource] = []
-var food_rate := 3.0  ## units of nutrient fed in per minute, spread evenly over the dish
+var food_rate := 3.0:  ## units of nutrient fed in per minute, spread evenly over the dish
+	set(value):
+		food_rate = clampf(value, 0.0, StartConditions.MAX_NUTRIENT_RATE)
 var bloom_rate := 0.0:  ## plankton appearing a sim-day (24 hours), at steady intervals, at random places
 	set(value):
 		if value > 0.0 and bloom_rate <= 0.0:
 			_bloom_due = time  # (turned on: the first appears at once)
-		bloom_rate = value
+		bloom_rate = clampf(value, 0.0, StartConditions.MAX_BLOOM_RATE)
 var _bloom_due := 0.0  ## when the bloom's next plankton appears
 var upkeep_factor := 1.0:  ## multiplies what staying alive costs every bup (its base and per-mass maintenance)
 	set(value):
@@ -199,7 +202,7 @@ func _build_children() -> void:
 ## Redraws the dish only when something it shows may have changed: the picture of the medium is rebuilt a few times a
 ## second, and the sources, the size and the zoom show at once. Most frames change none of these.
 func refresh_drawing() -> void:
-	var key := [Time.get_ticks_msec() / HAZE_REFRESH_MSEC, sources.size(), plankton.size(), radius, pixel(), selected_id]
+	var key := [Time.get_ticks_msec() / HAZE_REFRESH_MSEC, sources.size(), edit_count, radius, pixel(), selected_id]
 	if key != _draw_key:
 		_draw_key = key
 		queue_redraw()
@@ -246,9 +249,7 @@ func _process(delta: float) -> void:
 
 ## Everything that belongs to one run of a dish and must start fresh with a new or loaded dish.
 func _reset_runtime_state() -> void:
-	selected_id = -1
-	selected_source = null
-	selected_plankton = null
+	clear_selection()
 	clear_hover()
 	_extinct_signalled = false
 	_reset_history()
@@ -275,13 +276,13 @@ func strike(start: StartConditions = null) -> void:
 	nutrients_placed = 0
 	sources.clear()
 	plankton.clear()
-	bloom_rate = clampf(start.bloom_rate, 0.0, StartConditions.MAX_BLOOM_RATE)
+	bloom_rate = start.bloom_rate
 	upkeep_factor = 1.0
 	_reset_runtime_state()
 	radius = clampf(start.dish_radius, StartConditions.MIN_SIM_RADIUS, StartConditions.MAX_DISH_RADIUS)
 	sim.reset(radius, -1)  # a new dish: no bups, no nutrient, the random stream carries on
 	bup_limit = start.bup_limit
-	food_rate = clampf(start.nutrient_rate, 0.0, StartConditions.MAX_NUTRIENT_RATE)
+	food_rate = start.nutrient_rate
 	var bups := clampi(start.bups, 1, bup_limit)
 	var spread := minf(radius * 0.8, 40.0 + 10.0 * sqrt(maxf(bups - 4.0, 0.0)))
 	for i in bups:
@@ -347,7 +348,7 @@ func advance(seconds: float, budget_usec := 0) -> float:
 
 func step(delta: float) -> void:
 	time += delta
-	_step_plankton(delta)
+	_step_plankton()
 	var positions := PackedVector2Array()
 	var rates := PackedFloat32Array()
 	for source in sources:
@@ -511,32 +512,64 @@ func source_draw_radius() -> float:
 	return maxf(SOURCE_DRAW_RADIUS, SOURCE_MIN_PIXELS * pixel())
 
 
-## The source nearest a world position within reach, or null.
-func source_at(world_pos: Vector2, slack: float = 0.0) -> NutrientSource:
-	var best: NutrientSource = null
+## The one of `things` (anything with a `pos`) nearest `point` within `reach`, or null.
+static func _nearest_within(things: Array, point: Vector2, reach: float) -> Variant:
+	var best: Variant = null
 	var best_d2 := INF
-	var reach := maxf(SOURCE_PICK_RADIUS, SOURCE_PICK_PIXELS * pixel()) + slack
-	for source in sources:
-		var d2 := source.pos.distance_squared_to(world_pos)
+	for thing in things:
+		var d2: float = thing.pos.distance_squared_to(point)
 		if d2 <= reach * reach and d2 < best_d2:
-			best = source
+			best = thing
 			best_d2 = d2
 	return best
+
+
+## The source nearest a world position within reach, or null.
+func source_at(world_pos: Vector2, slack: float = 0.0) -> NutrientSource:
+	return _nearest_within(sources, world_pos, maxf(SOURCE_PICK_RADIUS, SOURCE_PICK_PIXELS * pixel()) + slack)
 
 
 ## Select-tool picking. Where they overlap a source wins over a bup (a source is small and
 ## usually crowded by bups, so if there is one under the pointer it is what is being aimed at);
 ## picking empty ground selects nothing, which is how a selection is let go.
 func select_at(world_pos: Vector2, slack: float = 0.0) -> void:
-	selected_source = source_at(world_pos, slack) if looks_at_sources() else null
-	selected_id = cell_at(world_pos, slack) if selected_source == null and looks_at_bups() else -1
-	selected_plankton = plankton_at(world_pos, slack) if selected_source == null and selected_id < 0 and looks_at_plankton() else null
+	var picked := _pick(world_pos, slack)
+	selected_source = picked["source"]
+	selected_id = picked["bup"]
+	selected_plankton = picked["plankton"]
 
 
 func hover_at(world_pos: Vector2, slack: float = 0.0) -> void:
-	hovered_source = source_at(world_pos, slack) if looks_at_sources() else null
-	hovered_id = cell_at(world_pos, slack) if hovered_source == null and looks_at_bups() else -1
-	hovered_plankton = plankton_at(world_pos, slack) if hovered_source == null and hovered_id < 0 and looks_at_plankton() else null
+	var picked := _pick(world_pos, slack)
+	hovered_source = picked["source"]
+	hovered_id = picked["bup"]
+	hovered_plankton = picked["plankton"]
+
+
+## What is under a world position, of the kinds the pick mode looks at: only the first of a source, a bup and a plankton
+## (in that order) that is there, the others being none.
+func _pick(world_pos: Vector2, slack: float) -> Dictionary:
+	var source: NutrientSource = source_at(world_pos, slack) if looks_at_sources() else null
+	var bup := cell_at(world_pos, slack) if source == null and looks_at_bups() else -1
+	var floating: Plankton = plankton_at(world_pos, slack) if source == null and bup < 0 and looks_at_plankton() else null
+	return {"source": source, "bup": bup, "plankton": floating}
+
+
+## Whether a bup, a source or a plankton is selected.
+func has_selection() -> bool:
+	return selected_id >= 0 or has_selected_thing()
+
+
+## Whether a source or a plankton is selected (what is picked besides a bup).
+func has_selected_thing() -> bool:
+	return selected_source != null or selected_plankton != null
+
+
+## Lets go of everything selected.
+func clear_selection() -> void:
+	selected_id = -1
+	selected_source = null
+	selected_plankton = null
 
 
 func looks_at_sources() -> bool:
@@ -592,29 +625,28 @@ func place_source(world_pos: Vector2, rate: float) -> bool:
 
 ## The plankton under a world position (within its drawn size, plus `slack`), or null.
 func plankton_at(world_pos: Vector2, slack: float = 0.0) -> Plankton:
-	var local := world_pos - global_position
-	var best: Plankton = null
-	var best_d2 := INF
-	var reach := plankton_draw_radius() + slack
-	for cell in plankton:
-		var d2 := cell.pos.distance_squared_to(local)
-		if d2 <= reach * reach and d2 < best_d2:
-			best = cell
-			best_d2 = d2
-	return best
+	return _nearest_within(plankton, world_pos - global_position, plankton_draw_radius() + slack)
 
 
 ## What there is to know about a plankton: how long it has floated, what it holds, where it is, and what is near.
 ## (Not when it will burst: that is not known.)
 func plankton_details(cell: Plankton) -> Dictionary:
-	var near := sim.nearest_and_count(cell.pos, SOURCE_NEARBY)
+	var details := _spot_details(cell.pos)
+	details["age"] = time - cell.born_at
+	details["units"] = cell.units
+	return details
+
+
+## What there is to know about a spot in the dish, given its place within it: where it is, the concentration there, and how
+## many bups are close by and how far the nearest is.
+func _spot_details(local: Vector2) -> Dictionary:
+	var near := sim.nearest_and_count(local, SOURCE_NEARBY)
 	return {
-		"age": time - cell.born_at,
-		"units": cell.units,
-		"offset": cell.pos,
-		"distance": cell.pos.length(),
-		"concentration": field.sample(cell.pos),
+		"offset": local,
+		"distance": local.length(),
+		"concentration": field.sample(local),
 		"nearest_bup": near.x,
+		"nearby": int(near.y),
 	}
 
 
@@ -634,11 +666,11 @@ func _add_plankton(local: Vector2) -> void:
 
 ## The plankton: the bloom adds one at a random place at each steady interval (so there are no long gaps with none
 ## coming), and any whose time has come burst, at random times, leaving their nutrient in the medium.
-func _step_plankton(_delta: float) -> void:
+func _step_plankton() -> void:
 	if bloom_rate > 0.0:
 		var interval := 86400.0 / bloom_rate
 		var arrivals := 0
-		while time >= _bloom_due and arrivals < 50:  # (a few at most per step)
+		while time >= _bloom_due and arrivals < MAX_BLOOM_ARRIVALS_PER_STEP:
 			if plankton.size() < MAX_PLANKTON:
 				_add_plankton(sim.random_point(radius * 0.95))
 			_bloom_due += interval * (1.0 + BLOOM_JITTER * (2.0 * sim.random_float() - 1.0))
@@ -660,16 +692,10 @@ func _step_plankton(_delta: float) -> void:
 ## What there is to know about a source: its rate and output so far, where it lies, the
 ## concentration at it, and how many bups are close by.
 func source_details(source: NutrientSource) -> Dictionary:
-	var near := sim.nearest_and_count(source.pos - global_position, SOURCE_NEARBY)
-	return {
-		"rate": source.rate,
-		"emitted": source.emitted,
-		"offset": source.pos - global_position,
-		"distance": source.pos.distance_to(global_position),
-		"concentration": field.sample(source.pos - global_position),
-		"nearest_bup": near.x,
-		"nearby": int(near.y),
-	}
+	var details := _spot_details(source.pos - global_position)
+	details["rate"] = source.rate
+	details["emitted"] = source.emitted
+	return details
 
 
 ## What there is to know about the medium at a world point: how much nutrient is there, which
@@ -838,12 +864,12 @@ func from_dict(d: Dictionary) -> bool:
 	field.load_values(saved_field)
 	sources = loaded_sources
 	plankton = loaded_plankton
-	bloom_rate = clampf(float(d.get("bloom_rate", 0.0)), 0.0, StartConditions.MAX_BLOOM_RATE)
-	upkeep_factor = clampf(float(d.get("upkeep_factor", 1.0)), 1.0, 100.0)
+	bloom_rate = float(d["bloom_rate"]) if Validate.is_number(d.get("bloom_rate")) else 0.0
+	upkeep_factor = clampf(float(d["upkeep_factor"]) if Validate.is_number(d.get("upkeep_factor")) else 1.0, 1.0, 100.0)
 	nutrients_placed = int(d.get("nutrients_placed", 0))
 	time = float(d.get("time", 0.0))
 	_bloom_due = float(d["bloom_due"]) if Validate.is_number(d.get("bloom_due")) else time
-	food_rate = clampf(float(d.get("food_rate", food_rate)), 0.0, StartConditions.MAX_NUTRIENT_RATE)
+	food_rate = float(d["food_rate"]) if Validate.is_number(d.get("food_rate")) else food_rate
 	_reset_runtime_state()
 	for key in loaded_history:
 		history[key] = loaded_history[key]
@@ -977,6 +1003,14 @@ static func ring_radius_pixels(subject_px: float) -> float:
 	return RING_PIXELS
 
 
+## The rings on a selected and a hovered source or plankton (`offset` takes a thing's `pos` to the dish's own coordinates).
+func _draw_pick_rings(canvas: CanvasItem, selected: Variant, hovered: Variant, offset: Vector2, radius: float) -> void:
+	if selected != null:
+		draw_ring(canvas, selected.pos - offset, radius, Color(1, 0.75, 0.3, 0.95))
+	if hovered != null and hovered != selected:
+		draw_ring(canvas, hovered.pos - offset, radius, Color(1, 1, 1, 0.9))
+
+
 ## A thin ring marking a bup or source: GUI, so the same size and line at every zoom (see
 ## ring_radius_pixels for the one case where it grows).
 func draw_ring(canvas: CanvasItem, center: Vector2, object_radius: float, color: Color) -> void:
@@ -1021,14 +1055,8 @@ func draw_overlay(canvas: CanvasItem) -> void:
 		_draw_steering_arc(canvas, selected_id)
 	if hovered_id >= 0 and hovered_id != selected_id and sim.has_bup(hovered_id):
 		draw_ring(canvas, sim.bup_pos(hovered_id), sim.bup_radius(hovered_id, px), Color(1, 1, 1, 0.9))
-	if selected_source != null:
-		draw_ring(canvas, selected_source.pos - global_position, source_draw_radius(), Color(1, 0.75, 0.3, 0.95))
-	if hovered_source != null and hovered_source != selected_source:
-		draw_ring(canvas, hovered_source.pos - global_position, source_draw_radius(), Color(1, 1, 1, 0.9))
-	if selected_plankton != null:
-		draw_ring(canvas, selected_plankton.pos, plankton_draw_radius(), Color(1, 0.75, 0.3, 0.95))
-	if hovered_plankton != null and hovered_plankton != selected_plankton:
-		draw_ring(canvas, hovered_plankton.pos, plankton_draw_radius(), Color(1, 1, 1, 0.9))
+	_draw_pick_rings(canvas, selected_source, hovered_source, global_position, source_draw_radius())
+	_draw_pick_rings(canvas, selected_plankton, hovered_plankton, Vector2.ZERO, plankton_draw_radius())
 	if place_preview_radius >= 0.0:
 		var brush := Color(1, 0.3, 0.25, 0.9) if place_preview_erases else Color(1, 0.9, 0.5, 0.8)
 		if place_preview_marker:

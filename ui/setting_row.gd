@@ -58,13 +58,11 @@ func _ready() -> void:
 		value_field.theme_type_variation = &"ReadoutField"
 		slider.custom_minimum_size.y = 18.0
 	label.custom_minimum_size.x = label_min_width
-	if label_tip != "":
-		label.tooltip_text = Strings.resolve(label_tip)
-		label.mouse_filter = Control.MOUSE_FILTER_PASS  # (a label ignores the mouse, and so its tooltip, unless told to not)
 	slider.custom_minimum_size.x = slider_min_width
 	value_field.custom_minimum_size.x = value_min_width
 	unit_label.custom_minimum_size.x = unit_min_width
 	label.text = Strings.resolve(label_text)
+	_set_changeable(true)  # (sets the label's tooltip, which a label shows only if it is told to take the mouse)
 	slider.value_changed.connect(_on_slider_changed)
 	reset_button.pressed.connect(func() -> void: slider.value = default_value)
 	value_field.text_submitted.connect(func(_text: String) -> void: value_field.release_focus())  # which commits (below)
@@ -154,14 +152,14 @@ func _on_field_key(event: InputEvent) -> void:
 	value_field.select_all()
 
 
-## Whether the row can be changed at all. When it can't, it is faint and says why on hover, so a slider that
-## looks movable never does nothing.
 ## Locks or unlocks the row from outside (a range of one value does it from within): a locked row stays, faint, and says
 ## `disabled_reason` when hovered.
 func set_enabled(enabled: bool) -> void:
 	_set_changeable(enabled)
 
 
+## Whether the row can be changed at all. When it can't, it is faint and says why on hover, so a slider that
+## looks movable never does nothing.
 func _set_changeable(changeable: bool) -> void:
 	slider.editable = changeable
 	value_field.editable = changeable

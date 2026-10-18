@@ -161,15 +161,6 @@ text = "@menu.controls_key_6"
 layout_mode = 2
 text = "@menu.controls_text_6"
 
-[node name="Key7" type="Label" parent="ControlsPanel/Box/Keys"]
-layout_mode = 2
-theme_type_variation = &"Bright"
-text = "@menu.controls_key_7"
-
-[node name="Desc7" type="Label" parent="ControlsPanel/Box/Keys"]
-layout_mode = 2
-text = "@menu.controls_text_7"
-
 [node name="Key8" type="Label" parent="ControlsPanel/Box/Keys"]
 layout_mode = 2
 theme_type_variation = &"Bright"

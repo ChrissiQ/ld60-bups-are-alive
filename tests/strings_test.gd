@@ -55,6 +55,7 @@ func _walk(node: Node, found: Array) -> void:
 
 func _init() -> void:
 	check(Strings.has_key("hud.paused") and Strings.t("hud.paused") == "PAUSED", "the file loads and gives a text")
+	check(Strings.problems().is_empty(), "every text in the file loads: %s" % [Strings.problems()])
 	var asked := _asked_for()
 	check(asked.size() > 100, "the code and scenes ask for the texts (found %d)" % asked.size())
 	for key: String in asked:

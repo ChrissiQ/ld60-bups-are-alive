@@ -489,9 +489,11 @@ func _init() -> void:
 		bloom.place_plankton(bloom_spot)
 	check(bloom.plankton.size() == 30, "there is no limit on how many the player places but the dish's (%d)" % bloom.plankton.size())
 	bloom.plankton.clear()
-	bloom.bloom_rate = 480.0
-	bloom.advance(1800.0)
-	check(bloom.plankton.size() >= 8 and bloom.plankton.size() <= 12, "a bloom of 480 a day (20 an hour) adds one every 3 minutes, so about ten are floating after half an hour (%d)" % bloom.plankton.size())
+	bloom.bloom_rate = 240.0
+	bloom.advance(3600.0)
+	check(bloom.plankton.size() >= 8 and bloom.plankton.size() <= 12, "a bloom of 240 a day (10 an hour) adds one every 6 minutes, so about ten are floating after an hour (%d)" % bloom.plankton.size())
+	bloom.bloom_rate = 1000.0
+	check(bloom.bloom_rate == StartConditions.MAX_BLOOM_RATE, "the bloom rate cannot be set above the most the game allows")
 	# The bursts, which are what feed the colony, come at steady enough intervals: no long gaps with nothing.
 	var steady := _make_dish()
 	steady.strike(_small())
