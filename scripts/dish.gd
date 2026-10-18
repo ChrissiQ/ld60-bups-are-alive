@@ -12,7 +12,7 @@ enum PickMode { ALL, BACKGROUND, BUPS, SOURCES }  ## what the select tool looks 
 
 signal selection_changed  ## the selected bup is now another (or none)
 
-const DEFAULT_RADIUS := 6000.0  ## µm: 6 mm, the largest dish
+const DEFAULT_RADIUS := 10000.0  ## µm: 10 mm, the dish goal mode uses and free mode starts with
 const NUTRIENT_SCATTER := 5.0  ## radius a dose spreads over, per sqrt(nutrient) in it
 const MAX_CELLS := 300  ## the smallest carrying limit; see `cap_for`. Past the limit each birth displaces a random bup (a Moran process)
 const MAX_SOURCES := 12
@@ -67,7 +67,7 @@ var radius := DEFAULT_RADIUS:  ## physical size of the dish; it changes only wit
 	set(value):
 		radius = value
 		_sync_render_capacity()
-var bup_limit := cap_for(DEFAULT_RADIUS):  ## the most bups the dish holds (chosen in free mode)
+var bup_limit := StartConditions.DEFAULT_BUP_LIMIT:  ## the most bups the dish holds (chosen in free mode)
 	set(value):
 		bup_limit = clampi(value, 1, StartConditions.MAX_BUP_LIMIT)
 		sim.set_limit(bup_limit)

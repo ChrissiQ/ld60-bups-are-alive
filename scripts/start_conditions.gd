@@ -6,6 +6,7 @@ const MIN_BUPS := 1
 const UM_PER_MM := 1000.0  ## the dish is chosen and shown in mm; the game works in µm
 const MAX_BUPS := 100  ## the most founders a dish starts with (each can be named and coloured before the start)
 const MIN_BUP_LIMIT := 10
+const DEFAULT_BUP_LIMIT := 20000  ## what goal mode uses, and free mode starts with
 const MAX_BUP_LIMIT := 100000  ## how far the limit slider goes: how many the machine can run is for the player to find out
 const MAX_NUTRIENTS := 2000  ## units of nutrient already dissolved in the dish at the start
 const MAX_NUTRIENT_RATE := 30.0
@@ -20,7 +21,7 @@ var dish_radius := Dish.DEFAULT_RADIUS  ## physical size of the dish
 ## What the player chose for the founders, in order: {"name": "", "color": "#rrggbb"}. Founders beyond the list, and
 ## any with nothing chosen, start unnamed and in the default colour.
 var founders: Array = []
-var bup_limit := Dish.cap_for(Dish.DEFAULT_RADIUS)  ## the most bups the dish holds: past it each birth displaces a random bup
+var bup_limit := DEFAULT_BUP_LIMIT  ## the most bups the dish holds: past it each birth displaces a random bup
 
 
 ## Where free mode remembers the player's last choices (separate from the experiment save).

@@ -42,7 +42,7 @@ func _init() -> void:
 	d.strike()
 	check(d.population() == 4, "default bups = 4, got %d" % d.population())
 	check(absf(TestUtil.units(d) - 60.0) < 0.5, "default starting nutrient = 60 units, got %.1f" % TestUtil.units(d))
-	check(d.radius == 6000.0, "the default dish is 6 mm in radius, got %.0f" % d.radius)
+	check(d.radius == 10000.0 and d.bup_limit == 20000, "the default dish is 10 mm in radius with room for 20,000 bups, got %.0f and %d" % [d.radius, d.bup_limit])
 
 	# --- Counts and clamping.
 	var s := _small()
