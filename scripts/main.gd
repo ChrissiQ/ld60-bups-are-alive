@@ -366,8 +366,8 @@ func _on_pick_mode_selected(mode: Dish.PickMode) -> void:
 
 
 func _on_tool_selected(new_tool: Toolbar.Tool) -> void:
-	if new_tool != Toolbar.Tool.SELECT and not _stack.is_empty():
-		_clear_selection()  # using another tool closes whatever was open on a bup
+	if new_tool != Toolbar.Tool.SELECT and (not _stack.is_empty() or dish.selected_source != null):
+		_clear_selection()  # using another tool closes whatever was open on a bup or source
 	tool = new_tool
 	tool_options.show_for(tool)
 	_sync_toolbar_shape()
@@ -577,6 +577,7 @@ func _click(world: Vector2) -> void:
 			if dish.place_source(world, tool_options.source_rate()):
 				# The new source is what the player will want to look at or adjust next.
 				toolbar.select_tool(Toolbar.Tool.SELECT)
+				tool_options.pick_buttons[Dish.PickMode.ALL].button_pressed = true  # (a mode that skips sources would hide the one just placed)
 				dish.selected_id = -1
 				dish.selected_source = dish.sources[-1]
 			elif world.distance_to(dish.global_position) <= dish.radius:

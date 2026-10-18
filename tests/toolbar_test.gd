@@ -706,6 +706,14 @@ func _init() -> void:
 	check(absf(TestUtil.units(m.dish) - field_before - 12.5) < 0.5, "a source keeps releasing nutrient into the medium at its rate (%.1f units in 1 min)" % (TestUtil.units(m.dish) - field_before))
 	_click(m, _screen(m, m.dish.global_position + Vector2(900, 900)))
 	check(m.dish.sources.size() == 1, "a click outside the dish places no source")
+	# A source placed while the select tool is set to look at bups only: the mode goes back to Select all so the new source is really selected.
+	m.tool_options.pick_buttons[Dish.PickMode.BUPS].button_pressed = true
+	m.toolbar.select_tool(Toolbar.Tool.SOURCE)
+	_click(m, _screen(m, m.dish.global_position + Vector2(-80, -60)))
+	check(m.dish.sources.size() == 2 and m.dish.pick_mode == Dish.PickMode.ALL and m.tool_options.pick_buttons[Dish.PickMode.ALL].button_pressed and m.dish.selected_source == m.dish.sources[1], "placing a source from Bups mode switches the mode back to Select all, with the source selected")
+	m.toolbar.select_tool(Toolbar.Tool.PAN)
+	check(m.dish.selected_source == null and not m.source_rate_row.is_visible_in_tree(), "using another tool lets go of a selected source, as it does a bup")
+	m.dish.remove_source(m.dish.sources[1])
 	m.toolbar.select_tool(Toolbar.Tool.SELECT)
 	_click(m, _screen(m, spot + Vector2(3, 2)))
 	await process_frame
