@@ -3,6 +3,7 @@
 [ext_resource type="Script" path="res://scripts/pause_menu.gd" id="1"]
 [ext_resource type="PackedScene" path="res://ui/setting_row.tscn" id="2"]
 [ext_resource type="PackedScene" path="res://ui/stat_row.tscn" id="3"]
+[ext_resource type="PackedScene" path="res://ui/controls_panel.tscn" id="4"]
 
 [node name="PauseMenu" type="Control"]
 visible = false
@@ -90,6 +91,12 @@ layout_mode = 2
 size_flags_horizontal = 4
 text = "@pause.resume"
 
+[node name="ControlsButton" type="Button" parent="Content/Buttons"]
+custom_minimum_size = Vector2(320, 48)
+layout_mode = 2
+size_flags_horizontal = 4
+text = "@pause.controls"
+
 [node name="QuitButton" type="Button" parent="Content/Buttons"]
 custom_minimum_size = Vector2(320, 48)
 layout_mode = 2
@@ -142,6 +149,8 @@ label_text = "@pause.record_dish_radius"
 [node name="LimitRow" parent="Initial/Box" instance=ExtResource("3")]
 layout_mode = 2
 label_text = "@pause.record_bup_limit"
+
+[node name="ControlsPanel" parent="." instance=ExtResource("4")]
 
 [node name="ConfirmDialog" type="ConfirmationDialog" parent="."]
 title = "@pause.confirm_title"

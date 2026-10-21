@@ -37,6 +37,7 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_limit", "bup_limit"), &BupSim::set_limit);
 	ClassDB::bind_method(D_METHOD("set_upkeep_scale", "scale"), &BupSim::set_upkeep_scale);
 	ClassDB::bind_method(D_METHOD("grow", "new_radius"), &BupSim::grow);
+	ClassDB::bind_method(D_METHOD("shrink", "new_radius"), &BupSim::shrink);
 	ClassDB::bind_method(D_METHOD("get_field"), &BupSim::get_field);
 	ClassDB::bind_method(D_METHOD("random_float"), &BupSim::random_float);
 	ClassDB::bind_method(D_METHOD("random_point", "reach"), &BupSim::random_point);
@@ -183,6 +184,32 @@ void BupSim::grow(double new_radius) {
 	}
 	radius = new_radius;
 	field->resize(new_radius);
+}
+
+// The dish shrinks about its centre. A bup whose centre is past the new edge dies like any other death (so its family
+// record is freed unless a living descendant or an open view still needs it); one straddling the edge is moved inside.
+int BupSim::shrink(double new_radius) {
+	if (new_radius >= radius || new_radius <= 0.0) {
+		return 0;
+	}
+	radius = new_radius;
+	field->resize(new_radius);
+	size_t keep = 0;
+	int culled = 0;
+	for (size_t i = 0; i < bups.size(); i++) {
+		if (std::sqrt((double)bups[i].x * bups[i].x + (double)bups[i].y * bups[i].y) > new_radius) {
+			record_death(bups[i]);
+			culled++;
+			continue;
+		}
+		if (keep != i) {
+			bups[keep] = bups[i];
+		}
+		keep_inside(bups[keep]);
+		keep++;
+	}
+	bups.resize(keep);
+	return culled;
 }
 
 Vector2 BupSim::random_point(double reach) {

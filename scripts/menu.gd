@@ -10,8 +10,7 @@ extends Control
 @onready var free_button: Button = $Buttons/FreeButton
 @onready var controls_button: Button = $Buttons/ControlsButton
 @onready var quit_button: Button = $Buttons/QuitButton
-@onready var controls_panel: PanelContainer = $ControlsPanel
-@onready var back_button: Button = $ControlsPanel/Box/BackButton
+@onready var controls_panel: ControlsPanel = $ControlsPanel
 @onready var confirm: ConfirmationDialog = $ConfirmDialog
 
 var _flicker_left := 0.0
@@ -31,7 +30,7 @@ func _ready() -> void:
 	load_button.pressed.connect(_on_load_pressed)
 	free_button.pressed.connect(_on_free_pressed)
 	controls_button.pressed.connect(_show_controls.bind(true))
-	back_button.pressed.connect(_show_controls.bind(false))
+	controls_panel.back_requested.connect(_show_controls.bind(false))
 	quit_button.pressed.connect(get_tree().quit)
 	confirm.confirmed.connect(_start_new)
 	# Wrap keyboard navigation: up from the first item lands on the last, and vice versa.
@@ -78,7 +77,7 @@ func _show_controls(visible_now: bool) -> void:
 	title.visible = not visible_now
 	tagline.visible = not visible_now
 	if visible_now:
-		back_button.grab_focus()
+		controls_panel.focus_back()
 	else:
 		controls_button.grab_focus()
 

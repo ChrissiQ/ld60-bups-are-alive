@@ -77,7 +77,7 @@ func _init() -> void:
 	var crowd := []
 	for i in 300:
 		crowd.append({"name": "x"})
-	check(StartConditions.from_dict({"founders": crowd}).founders.size() == StartConditions.MAX_BUPS and StartConditions.MAX_BUPS == 100, "at most 100 founders")
+	check(StartConditions.from_dict({"founders": crowd}).founders.size() == StartConditions.MAX_BUPS and StartConditions.MAX_BUPS == 250, "at most 250 founders")
 	_write_raw('{"bups": 12}')
 	var partial := StartConditions.load_saved()
 	check(partial.bups == 12 and partial.nutrients == StartConditions.new().nutrients, "missing keys fall back individually")

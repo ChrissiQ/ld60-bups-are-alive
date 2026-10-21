@@ -205,11 +205,11 @@ func _init() -> void:
 
 	# --- Select tool: click selects, empty click deselects, middle button pans.
 	var picks: Dictionary = m.tool_options.pick_buttons
-	var pick_names := ["Select all", "Background", "Bups", "Nutrient sources", "Plankton"]
+	var pick_names := ["Inspect all", "Background", "Bups", "Nutrient sources", "Plankton"]
 	var picks_ok: bool = m.tool_options.visible and picks.size() == 5 and picks[0].button_pressed
 	for i in picks.size():
 		picks_ok = picks_ok and picks[i].icon != null and picks[i].text == "" and picks[i].tooltip_text == pick_names[i]
-	check(picks_ok, "the select tool has a tray of five icon buttons (no text) named on hover, with Select all chosen")
+	check(picks_ok, "the select tool has a tray of five icon buttons (no text) named on hover, with Inspect all chosen")
 	var bup: int = m.dish.bup_ids()[0]
 	m.dish.sim.set_bup_pos(bup, Vector2(20, 10))
 	_click(m, centre + Vector2(20, 10))
@@ -324,6 +324,20 @@ func _init() -> void:
 	check(m.camera.zoom.x > 1.0, "wheel up zooms in")
 	_button(m, MOUSE_BUTTON_WHEEL_DOWN, true, centre)
 	check(is_equal_approx(m.camera.zoom.x, 1.0), "wheel down zooms back out")
+	var pinch := InputEventMagnifyGesture.new()
+	pinch.factor = 1.2
+	m._unhandled_input(pinch)
+	check(m.camera.zoom.x > 1.1, "a trackpad pinch apart zooms in (%.2f)" % m.camera.zoom.x)
+	pinch.factor = 1.0 / 1.2
+	m._unhandled_input(pinch)
+	check(is_equal_approx(m.camera.zoom.x, 1.0), "...and together zooms back out")
+	var scroll := InputEventPanGesture.new()
+	scroll.delta = Vector2(0.0, -10.0)
+	m._unhandled_input(scroll)
+	check(m.camera.zoom.x > 1.0, "a trackpad two-finger scroll up zooms in, like the wheel (%.2f)" % m.camera.zoom.x)
+	scroll.delta = Vector2(0.0, 10.0)
+	m._unhandled_input(scroll)
+	check(is_equal_approx(m.camera.zoom.x, 1.0), "...and down zooms back out")
 	m.camera.zoom = Vector2.ONE
 	m.toolbar.zoom_in_button.pressed.emit()
 	check(is_equal_approx(m.camera.zoom.x, m.ZOOM_BUTTON_STEP), "zoom-in button steps zoom")
@@ -645,17 +659,19 @@ func _init() -> void:
 	m._process(0.1)
 	check(m.dish.time > time_open, "...and the game runs again")
 
-	# --- The free-mode menu: enlarge the dish and change the bup limit, never below what exists.
+	# --- The free-mode menu: resize the dish and change the bup limit (never below the bups there are).
 	await _key(KEY_ESCAPE)
 	check(m.pause_menu.settings.visible, "free mode's menu shows the dish settings")
-	check(is_equal_approx(m.pause_menu.dish_row.slider.min_value, m.dish.radius / StartConditions.UM_PER_MM) and m.pause_menu.dish_row.slider.max_value == StartConditions.MAX_DISH_RADIUS / StartConditions.UM_PER_MM, "the dish radius can only grow (from %.0f)" % m.dish.radius)
+	check(is_equal_approx(m.pause_menu.dish_row.slider.min_value, StartConditions.MIN_DISH_RADIUS / StartConditions.UM_PER_MM) and m.pause_menu.dish_row.slider.max_value == StartConditions.MAX_DISH_RADIUS / StartConditions.UM_PER_MM, "the dish radius can be any size from the smallest to the largest")
 	check(m.pause_menu.limit_row.slider.min_value >= m.dish.population() and m.pause_menu.limit_row.slider.max_value == StartConditions.MAX_BUP_LIMIT, "the bup limit can't go below the bups there are")
 	var bups_then: int = m.dish.population()
 	m.dish.field.deposit(Vector2(30, 30), 160.0)
 	var nutrient_then := TestUtil.units(m.dish)
 	var radius_then: float = m.dish.radius
-	m.pause_menu.dish_row.slider.value = radius_then / StartConditions.UM_PER_MM + 0.5
-	check(is_equal_approx(m.dish.radius, radius_then + 500.0) and m.dish.population() == bups_then, "choosing a larger dish enlarges it and keeps every bup")
+	m.pause_menu.dish_row.slider.value = 2.0
+	check(is_equal_approx(m.dish.radius, radius_then), "a size is taken only once the slider has been still for a moment")
+	await create_timer(m.pause_menu.DISH_SETTLE_SECONDS + 0.2).timeout
+	check(is_equal_approx(m.dish.radius, 2000.0) and m.dish.population() == bups_then, "choosing a larger dish enlarges it and keeps every bup (radius %.0f from %.0f, %d bups from %d)" % [m.dish.radius, radius_then, m.dish.population(), bups_then])
 	check(absf(TestUtil.units(m.dish) - nutrient_then) < 0.001 * maxf(nutrient_then, 1.0) + 0.01, "...and all the nutrient (%.2f then, %.2f now)" % [nutrient_then, TestUtil.units(m.dish)])
 	m.pause_menu.limit_row.slider.value = m.pause_menu.limit_row.slider.min_value + 500.0
 	check(m.dish.bup_limit == int(m.pause_menu.limit_row.slider.min_value) + 500, "choosing a limit changes it")
@@ -667,7 +683,7 @@ func _init() -> void:
 
 	# --- Tooltips, shortcuts, focus.
 	var expected := {
-		m.toolbar.select_button: "(S)", m.toolbar.pan_button: "(H)", m.toolbar.nutrient_button: "(N)",
+		m.toolbar.select_button: "(I)", m.toolbar.pan_button: "(H)", m.toolbar.nutrient_button: "(N)",
 		m.toolbar.zoom_in_button: "(+)", m.toolbar.zoom_out_button: "(-)", m.toolbar.pause_button: "(Space)",
 		m.toolbar.speed_1_button: "(1)", m.toolbar.speed_100_button: "(2)", m.toolbar.speed_1000_button: "(3)",
 	}
@@ -680,8 +696,22 @@ func _init() -> void:
 	check(m.tool == Toolbar.Tool.NUTRIENT, "N key selects the nutrient tool")
 	await _key(KEY_H)
 	check(m.tool == Toolbar.Tool.PAN, "H key selects the pan tool")
-	await _key(KEY_S)
-	check(m.tool == Toolbar.Tool.SELECT, "S key selects the select tool")
+	await _key(KEY_I)
+	check(m.tool == Toolbar.Tool.SELECT, "I key selects the select tool")
+	# W, A, S and D pan the view while held (and S no longer picks a tool).
+	var pan_before: Vector2 = m.camera.position
+	m.camera.zoom = Vector2.ONE
+	for pressed in [true, false]:
+		var e := InputEventKey.new()
+		e.physical_keycode = KEY_D
+		e.keycode = KEY_D
+		e.pressed = pressed
+		Input.parse_input_event(e)
+		for i in 10:
+			await process_frame
+	check(m.camera.position.x > pan_before.x + 5.0 and absf(m.camera.position.y - pan_before.y) < 0.01, "holding D pans the view to the right (%s to %s)" % [pan_before, m.camera.position])
+	check(m.tool == Toolbar.Tool.SELECT, "S, A, D and W are not tool shortcuts")
+	m.camera.position = pan_before
 	check(_exclusive(m.toolbar), "exactly one playback button is selected at the start")
 	await _key(KEY_SPACE)
 	check(m.paused and m.pause_ring.visible and _exclusive(m.toolbar) and m.toolbar.pause_button.button_pressed, "Space pauses, shows the ring, and only Pause is lit")
@@ -787,7 +817,7 @@ func _init() -> void:
 	check(absf(m.dish.field.sample(wiped + Vector2(120, 0)) - before_erase) < before_erase * 0.02, "erasing outside the dish does nothing")
 	m.toolbar.set_paused(false)
 	for i in Dish.MAX_SOURCES + 3:
-		m.dish.place_source(m.dish.global_position + Vector2(i * 10 - 100, 150), 5.0)
+		m.dish.place_source(m.dish.global_position + Vector2(i % 50 * 2 - 50, i / 50 * 2 - 20), 5.0)  # (all within the small dish)
 	check(m.dish.sources.size() == Dish.MAX_SOURCES, "the dish holds at most %d sources" % Dish.MAX_SOURCES)
 	m.dish.sources.clear()
 	m.toolbar.select_tool(Toolbar.Tool.SELECT)

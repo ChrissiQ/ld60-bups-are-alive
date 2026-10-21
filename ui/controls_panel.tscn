@@ -1,0 +1,128 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://ui/controls_panel.gd" id="1"]
+
+[node name="ControlsPanel" type="PanelContainer"]
+script = ExtResource("1")
+visible = false
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -330.0
+offset_top = -215.0
+offset_right = 330.0
+offset_bottom = 215.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Box" type="VBoxContainer" parent="."]
+theme_type_variation = &"RoomyStack"
+layout_mode = 2
+
+[node name="Heading" type="Label" parent="Box"]
+theme_type_variation = &"Heading"
+layout_mode = 2
+text = "@menu.controls_title"
+horizontal_alignment = 1
+
+[node name="Keys" type="GridContainer" parent="Box"]
+layout_mode = 2
+columns = 2
+
+[node name="Key1" type="Label" parent="Box/Keys"]
+layout_mode = 2
+theme_type_variation = &"Bright"
+text = "@menu.controls_key_1"
+
+[node name="Desc1" type="Label" parent="Box/Keys"]
+layout_mode = 2
+text = "@menu.controls_text_1"
+
+[node name="Key2" type="Label" parent="Box/Keys"]
+layout_mode = 2
+theme_type_variation = &"Bright"
+text = "@menu.controls_key_2"
+
+[node name="Desc2" type="Label" parent="Box/Keys"]
+layout_mode = 2
+text = "@menu.controls_text_2"
+
+[node name="Key3" type="Label" parent="Box/Keys"]
+layout_mode = 2
+theme_type_variation = &"Bright"
+text = "@menu.controls_key_3"
+
+[node name="Desc3" type="Label" parent="Box/Keys"]
+layout_mode = 2
+text = "@menu.controls_text_3"
+
+[node name="Key4" type="Label" parent="Box/Keys"]
+layout_mode = 2
+theme_type_variation = &"Bright"
+text = "@menu.controls_key_4"
+
+[node name="Desc4" type="Label" parent="Box/Keys"]
+layout_mode = 2
+text = "@menu.controls_text_4"
+
+[node name="Key5" type="Label" parent="Box/Keys"]
+layout_mode = 2
+theme_type_variation = &"Bright"
+text = "@menu.controls_key_5"
+
+[node name="Desc5" type="Label" parent="Box/Keys"]
+layout_mode = 2
+text = "@menu.controls_text_5"
+
+[node name="Key6" type="Label" parent="Box/Keys"]
+layout_mode = 2
+theme_type_variation = &"Bright"
+text = "@menu.controls_key_6"
+
+[node name="Desc6" type="Label" parent="Box/Keys"]
+layout_mode = 2
+text = "@menu.controls_text_6"
+
+[node name="Key7" type="Label" parent="Box/Keys"]
+layout_mode = 2
+theme_type_variation = &"Bright"
+text = "@menu.controls_key_7"
+
+[node name="Desc7" type="Label" parent="Box/Keys"]
+layout_mode = 2
+text = "@menu.controls_text_7"
+
+[node name="Key8" type="Label" parent="Box/Keys"]
+layout_mode = 2
+theme_type_variation = &"Bright"
+text = "@menu.controls_key_8"
+
+[node name="Desc8" type="Label" parent="Box/Keys"]
+layout_mode = 2
+text = "@menu.controls_text_8"
+
+[node name="Key9" type="Label" parent="Box/Keys"]
+layout_mode = 2
+theme_type_variation = &"Bright"
+text = "@menu.controls_key_9"
+
+[node name="Desc9" type="Label" parent="Box/Keys"]
+layout_mode = 2
+text = "@menu.controls_text_9"
+
+[node name="Key10" type="Label" parent="Box/Keys"]
+layout_mode = 2
+theme_type_variation = &"Bright"
+text = "@menu.controls_key_10"
+
+[node name="Desc10" type="Label" parent="Box/Keys"]
+layout_mode = 2
+text = "@menu.controls_text_10"
+
+[node name="BackButton" type="Button" parent="Box"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+text = "@menu.back"

@@ -4,16 +4,16 @@ extends RefCounted
 
 const MIN_BUPS := 1
 const UM_PER_MM := 1000.0  ## the dish is chosen and shown in mm; the game works in µm
-const MAX_BUPS := 100  ## the most founders a dish starts with (each can be named and coloured before the start)
+const MAX_BUPS := 250  ## the most founders a dish starts with (each can be named and coloured before the start)
 const MIN_BUP_LIMIT := 10
 const DEFAULT_BUP_LIMIT := 20000  ## what goal mode uses, and free mode starts with
 const MAX_BUP_LIMIT := 100000  ## how far the limit slider goes: how many the machine can run is for the player to find out
-const MAX_NUTRIENTS := 50000  ## units of nutrient already dissolved in the dish at the start
+const MAX_NUTRIENTS := 1000000  ## units of nutrient already dissolved in the dish at the start
 const MAX_NUTRIENT_RATE := 30.0
-const MAX_BLOOM_RATE := 240.0  ## plankton blooming a sim-day (ten an hour)
+const MAX_BLOOM_RATE := 500.0  ## plankton blooming a sim-day (about one every three minutes)
 const MIN_DISH_RADIUS := 1000.0  ## µm: 1 mm, the smallest dish a player can choose (smaller ones are not much use)
 const MIN_SIM_RADIUS := 150.0  ## µm: the smallest dish the simulation itself will run (the tests and old saves use small ones)
-const MAX_DISH_RADIUS := 12000.0  ## µm: 12 mm in radius, 24 mm across (a real petri dish is about 90 mm)
+const MAX_DISH_RADIUS := 90000.0  ## µm: 90 mm in radius, 180 mm across; the nutrient grid has the same number of cells at any size, so a big dish has coarse ones (1.8 mm each here)
 
 var bups := 4
 var nutrients := 10000  ## units of nutrient dissolved in the dish at the start, spread evenly: enough that a few founders grow past the first goal (1,000 bups) with room to spare (measured with this default: all of 110 runs reached 1,000, at about 25-27 sim-hours; twice the nutrient gets there in about 12)

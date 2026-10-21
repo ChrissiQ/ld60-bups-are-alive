@@ -50,7 +50,7 @@ func _init() -> void:
 	check(d.population() == 120, "120 bups, got %d" % d.population())
 	check(absf(TestUtil.units(d) - 150.0) < 0.5, "150 units of starting nutrient, got %.1f" % TestUtil.units(d))
 	s.bups = 9999
-	s.nutrients = 999999
+	s.nutrients = 9999999  # (more than the most the game allows)
 	d.strike(s)
 	check(d.population() == Dish.MAX_CELLS, "bups clamped to MAX_CELLS")
 	check(absf(TestUtil.units(d) - StartConditions.MAX_NUTRIENTS) < 0.5, "starting nutrient clamped to its maximum")
@@ -369,8 +369,8 @@ func _init() -> void:
 		mass_before += m_i
 		centre_before += growing.field.cell_centre(i) * m_i
 	centre_before /= mass_before
-	growing.grow_to(1500.0)
-	check(growing.radius == 1500.0 and growing.field.size == NutrientField.size_for(1500.0), "grow_to enlarges the dish and its grid")
+	growing.resize_to(1500.0)
+	check(growing.radius == 1500.0 and growing.field.size == NutrientField.size_for(1500.0), "resize_to enlarges the dish and its grid")
 	check(growing.bup_ids() == ids_before, "...keeping every bup")
 	var same_places := true
 	for i in ids_before.size():
@@ -393,15 +393,57 @@ func _init() -> void:
 	check(nutrient_centre.distance_to(centre_before) < 2.0, "...the nutrient's centre of mass hasn't moved (%s then, %s now)" % [centre_before, nutrient_centre])
 	check(farthest <= 300.0 + growing.field.spacing, "...and it still reaches only as far as the old dish did (%.0f µm of 300; cells %.0f µm)" % [farthest, growing.field.spacing])
 	check(growing.field.sample(Vector2(900.0, 0.0)) == 0.0, "...with nothing in the new space around it")
-	growing.grow_to(800.0)
-	check(growing.radius == 1500.0, "a dish never shrinks")
-	growing.grow_to(99999.0)
+	growing.resize_to(99999.0)
 	check(growing.radius == StartConditions.MAX_DISH_RADIUS, "...and never outgrows the largest")
 	growing.change_limit(1)
 	check(growing.bup_limit == growing.population(), "the bup limit can't be set below the bups there are (%d)" % growing.bup_limit)
 	growing.advance(60.0)
 	check(growing.population() > 0, "an enlarged dish keeps running")
 	growing.free()
+
+	# --- A dish can shrink about its centre: what is past the new edge goes, the rest keeps its density.
+	var shrinking := _make_dish()
+	var shrink_start := StartConditions.new()
+	shrink_start.dish_radius = 3000.0
+	shrink_start.nutrients = 30000
+	shrinking.strike(shrink_start)
+	shrinking.clear_bups()
+	var kept_ids: Array[int] = []
+	var lost_ids: Array[int] = []
+	for offset in [Vector2(500, 0), Vector2(0, -1200)]:
+		kept_ids.append(shrinking.add_bup(shrinking.global_position + offset, Genome.founder(), 30.0))
+	for offset in [Vector2(2000, 0), Vector2(-2500, 100)]:
+		lost_ids.append(shrinking.add_bup(shrinking.global_position + offset, Genome.founder(), 30.0))
+	shrinking.place_source(shrinking.global_position + Vector2(500, 0), 5.0)
+	shrinking.place_source(shrinking.global_position + Vector2(2200, 0), 5.0)
+	shrinking.plankton.append(Plankton.new(Vector2(1000, 0), 0.0, 1e9, 300.0, 0.0))
+	shrinking.plankton.append(Plankton.new(Vector2(2500, 0), 0.0, 1e9, 300.0, 0.0))
+	shrinking.food_rate = 8.0
+	shrinking.bloom_rate = 40.0
+	var density_before := shrinking.field.sample(Vector2.ZERO)
+	shrinking.resize_to(1500.0)
+	check(shrinking.radius == 1500.0 and shrinking.field.size == NutrientField.size_for(1500.0), "a dish shrinks to the size asked")
+	var survivors_inside := true
+	for id in shrinking.sim.bup_ids():
+		survivors_inside = survivors_inside and shrinking.bup_world_pos(id).distance_to(shrinking.global_position) <= 1500.0
+	check(shrinking.population() == 2 and survivors_inside, "bups past the new edge die and the rest are inside (%d left)" % shrinking.population())
+	var kept_alive := true
+	for id in kept_ids:
+		kept_alive = kept_alive and shrinking.has_bup(id) and shrinking.has_record(id)
+	var lost_gone := true
+	for id in lost_ids:
+		lost_gone = lost_gone and not shrinking.has_bup(id) and not shrinking.has_record(id)
+	check(kept_alive and lost_gone, "the bups inside live on, and the dead ones' records are freed (no descendants, not open anywhere)")
+	check(shrinking.sources.size() == 1 and shrinking.plankton.size() == 1, "sources and plankton past the edge go (%d sources, %d plankton left)" % [shrinking.sources.size(), shrinking.plankton.size()])
+	check(is_equal_approx(shrinking.food_rate, 2.0) and is_equal_approx(shrinking.bloom_rate, 10.0), "the feed and the bloom follow the area, a quarter here (%.2f, %.2f)" % [shrinking.food_rate, shrinking.bloom_rate])
+	check(absf(shrinking.field.sample(Vector2.ZERO) - density_before) < 0.06 * density_before, "the nutrient left keeps its concentration (%.4f then, %.4f now)" % [density_before, shrinking.field.sample(Vector2.ZERO)])
+	shrinking.resize_to(10.0)
+	check(shrinking.radius == StartConditions.MIN_DISH_RADIUS, "and never below the smallest dish")
+	shrinking.resize_to(3000.0)
+	check(is_equal_approx(shrinking.food_rate, 2.0 * 4.0 * (StartConditions.MIN_DISH_RADIUS * StartConditions.MIN_DISH_RADIUS) / (1500.0 * 1500.0) * (3000.0 * 3000.0) / (StartConditions.MIN_DISH_RADIUS * StartConditions.MIN_DISH_RADIUS) / 4.0), "growing again scales the feed back up with the area")
+	shrinking.advance(60.0)
+	check(shrinking.population() <= 2, "a shrunken dish keeps running")
+	shrinking.free()
 
 	# --- The bup limit is a start condition: chosen, enforced, saved, and clamped when loaded.
 	var limited := _make_dish()
@@ -415,7 +457,7 @@ func _init() -> void:
 	var limit_copy := _make_dish()
 	check(limit_copy.from_dict(TestUtil.saved(limited)) and limit_copy.bup_limit == 50, "the limit survives save and load")
 	check(StartConditions.from_dict({"bup_limit": 99999999}).bup_limit == StartConditions.MAX_BUP_LIMIT and StartConditions.from_dict({"bup_limit": 1}).bup_limit == StartConditions.MIN_BUP_LIMIT, "a saved limit is clamped to the slider's range")
-	check(StartConditions.MAX_DISH_RADIUS == 12000.0 and StartConditions.MAX_BUP_LIMIT == 100000, "free mode offers dishes up to 12000 µm and limits up to 100000")
+	check(StartConditions.MAX_DISH_RADIUS == 90000.0 and StartConditions.MAX_BUP_LIMIT == 100000, "free mode offers dishes up to 90000 µm and limits up to 100000")
 	limited.free()
 	limit_copy.free()
 
@@ -490,6 +532,23 @@ func _init() -> void:
 	bloom.bloom_rate = 240.0
 	bloom.advance(3600.0)
 	check(bloom.plankton.size() >= 8 and bloom.plankton.size() <= 12, "a bloom of 240 a day (10 an hour) adds one every 6 minutes, so about ten are floating after an hour (%d)" % bloom.plankton.size())
+	# They arrive on a fixed schedule: exactly one every 6 minutes, whatever else is random.
+	var drip := _make_dish()
+	drip.strike(_small())
+	drip.clear_bups()
+	drip.bloom_rate = 240.0
+	var arrivals_seen: Array[float] = []
+	var seen_ids := {}
+	for i in int(3600.0 / 10.0):
+		drip.step(10.0)
+		for cell in drip.plankton:
+			if not seen_ids.has(cell.get_instance_id()):
+				seen_ids[cell.get_instance_id()] = true
+				arrivals_seen.append(drip.time)
+	var even := arrivals_seen.size() >= 9
+	for i in range(1, arrivals_seen.size()):
+		even = even and absf((arrivals_seen[i] - arrivals_seen[i - 1]) - 360.0) < 10.5
+	check(even, "the bloom drips plankton in on a fixed schedule, one every 6 minutes (%s)" % [arrivals_seen]) 
 	bloom.bloom_rate = 1000.0
 	check(bloom.bloom_rate == StartConditions.MAX_BLOOM_RATE, "the bloom rate cannot be set above the most the game allows")
 	# The bursts, which are what feed the colony, come at steady enough intervals: no long gaps with nothing.
@@ -510,6 +569,14 @@ func _init() -> void:
 	for g: float in gaps:
 		longest = maxf(longest, g)
 	check(gaps.size() >= 40 and longest < 3.0 * 3600.0, "at 24 a day the nutrient arrives about hourly with no gap past 3 hours (%d bursts, longest gap %.1f h)" % [gaps.size(), longest / 3600.0])
+	# A paused dish is redrawn once with no trails: the picture made while time moved may carry them.
+	bloom._process(0.0)
+	bloom.step(5.0)
+	bloom._process(0.0)
+	check(bloom._trails_may_show, "a picture made as time moved may carry trails")
+	var stamp_then: Array = bloom._render_stamp
+	bloom._process(0.0)
+	check(not bloom._trails_may_show and bloom._render_stamp == stamp_then, "the next picture, with nothing moving, is made once more, and then no trails remain")
 	bloom.bloom_rate = 0.0
 	bloom.plankton.clear()
 	bloom.advance(600.0)
@@ -870,7 +937,7 @@ func _init() -> void:
 	var hud_text: String = m.hud.get_parsed_text()
 	check(hud_text.contains("bups  150 / ") and hud_text.contains("dish  0.3 mm"), "the readout shows the current population against the limit, and the current dish size ('%s')" % hud_text.get_slice("\n", 1))
 	m.dish.change_limit(2000)
-	m.dish.grow_to(1500.0)
+	m.dish.resize_to(1500.0)
 	await process_frame
 	await process_frame
 	hud_text = m.hud.get_parsed_text()
@@ -879,11 +946,11 @@ func _init() -> void:
 	check(m.pause_menu.initial_panel.visible and m.pause_menu.initial_bups.value_label.text == "150" and m.pause_menu.initial_nutrients.value_label.text == "40" and m.pause_menu.initial_rate.value_label.text == "11/min" and m.pause_menu.initial_dish.value_label.text == "0.3 mm" and m.pause_menu.initial_limit.value_label.text == UiText.thousands(chosen.bup_limit), "the Escape menu records how the dish started, unchanged by later changes (dish %s)" % m.pause_menu.initial_dish.value_label.text)
 	check(m.pause_menu.initial_bups.name_label.text == "Bups" and m.pause_menu.initial_rate.name_label.text == "Nutrient feed", "its rows carry their labels")
 	m._close_menu()
-	# A slider that can't move is faint, disabled and says why (the dish can't shrink, so at its largest there is nothing to choose).
-	m.dish.grow_to(StartConditions.MAX_DISH_RADIUS)
+	# The dish-size slider covers every size, so a dish at its largest can still shrink.
+	m.dish.resize_to(StartConditions.MAX_DISH_RADIUS)
 	m._open_menu()
-	check(not m.pause_menu.dish_row.slider.editable and not m.pause_menu.dish_row.value_field.editable and m.pause_menu.dish_row.reset_button.disabled and m.pause_menu.dish_row.modulate.a < 1.0 and m.pause_menu.dish_row.slider.tooltip_text != "", "a dish already at its largest has a disabled, faint dish row that says why")
-	check(m.pause_menu.limit_row.slider.editable, "...while the limit row, which can still change, stays live")
+	check(m.pause_menu.dish_row.slider.editable and is_equal_approx(m.pause_menu.dish_row.slider.min_value, StartConditions.MIN_DISH_RADIUS / StartConditions.UM_PER_MM) and is_equal_approx(m.pause_menu.dish_row.slider.value, StartConditions.MAX_DISH_RADIUS / StartConditions.UM_PER_MM), "a dish at its largest still has a live dish row, from the smallest size up to the largest")
+	check(m.pause_menu.limit_row.slider.editable, "...and the limit row is live too")
 	m._close_menu()
 	m.save_game()
 	m._on_goal_completed(m.tracker.goals[0])  # would normally save

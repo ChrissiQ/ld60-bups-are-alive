@@ -31,7 +31,7 @@ var _last_play: Button  ## the speed button to resume with
 
 func _ready() -> void:
 	var tools := ButtonGroup.new()
-	_setup_tool(select_button, Tool.SELECT, tools, Strings.t("toolbar.select"), "S", [KEY_S])
+	_setup_tool(select_button, Tool.SELECT, tools, Strings.t("toolbar.select"), "I", [KEY_I])
 	_setup_tool(pan_button, Tool.PAN, tools, Strings.t("toolbar.pan"), "H", [KEY_H])
 	_setup_tool(nutrient_button, Tool.NUTRIENT, tools, Strings.t("toolbar.nutrient"), "N", [KEY_N])
 	_setup_tool(source_button, Tool.SOURCE, tools, Strings.t("toolbar.source"), "F", [KEY_F])

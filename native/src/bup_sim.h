@@ -124,6 +124,7 @@ public:
 	void set_limit(int bup_limit) { limit = bup_limit; }
 	void set_upkeep_scale(double scale) { upkeep_scale = scale; }
 	void grow(double new_radius); // a larger dish; the bups and the nutrient stay
+	int shrink(double new_radius); // a smaller dish about the same centre: bups past the new edge die (the number is returned), the nutrient there goes
 	Ref<NutrientField> get_field() const { return field; }
 	double random_float() { return uniform(); }
 	Vector2 random_point(double reach);

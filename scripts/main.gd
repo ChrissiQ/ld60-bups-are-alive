@@ -5,10 +5,13 @@ const MAX_FRAME_SECONDS := 0.1  ## the longest frame the sim will catch up on, s
 const LIVE_TEXT_MSEC := 100  ## at high playback speed the readouts are rewritten this often at most: faster is a flicker, not information
 const LIVE_TEXT_FROM_SPEED := 100.0  ## the playback speed from which that applies
 const FRAME_BUDGET_USEC := 9000  ## the most time the simulation may spend per frame; past it the sim falls behind its speed instead of the game stuttering
-const ZOOM_MIN := 0.015  ## low enough to fit the largest dish (12000 µm in radius) in a window
-const ZOOM_MAX := 4.0
+const ZOOM_MIN := 0.002  ## low enough to fit the largest dish (90000 µm in radius) in a window
+const ZOOM_MAX := 12.0  ## close enough that a bup (a few µm) fills a good part of the window
 const ZOOM_BUTTON_STEP := 1.25
 const ZOOM_WHEEL_STEP := 1.1
+const ZOOM_PINCH_GAIN := 1.0  ## a trackpad pinch zooms by its own factor, to this power
+const ZOOM_TRACKPAD_SCROLL := 0.05  ## a two-finger scroll zooms by ZOOM_WHEEL_STEP to the power of this for each unit it moves
+const PAN_KEY_PIXELS := 600.0  ## screen pixels a second the view moves while a pan key (W, A, S or D) is held
 const RATE_PANEL_GAP := 16.0  ## screen pixels between the readout and the feed and bloom box under it
 const FIT_MARGIN := 40.0  ## screen pixels kept clear at the sides when framing the dish
 const TOOLBAR_CLEARANCE := 120.0  ## screen pixels kept clear above the dish for the toolbars
@@ -84,7 +87,7 @@ func _ready() -> void:
 	toolbar.pause_toggled.connect(_set_paused)
 	pause_menu.resume_requested.connect(_close_menu)
 	pause_menu.quit_requested.connect(_quit_to_menu)
-	pause_menu.dish_radius_chosen.connect(dish.grow_to)
+	pause_menu.dish_radius_chosen.connect(_resize_dish)
 	pause_menu.bup_limit_chosen.connect(dish.change_limit)
 	graph.dish = dish
 	banner.text = ""
@@ -167,6 +170,8 @@ func _notification(what: int) -> void:
 
 
 func _process(delta: float) -> void:
+	if not menu_open:
+		_pan_with_keys(delta)
 	if not paused and not menu_open:
 		# The playback speed is how many seconds of simulation pass per real second.
 		var frame := minf(delta, MAX_FRAME_SECONDS)
@@ -415,13 +420,17 @@ func _on_tool_selected(new_tool: Toolbar.Tool) -> void:
 ## Only input the GUI didn't consume arrives here, so clicks on the toolbar never reach the dish.
 func _unhandled_input(event: InputEvent) -> void:
 	if menu_open:  # only Escape reaches the game while the menu is up, and it closes the menu
-		if UiInput.is_escape_press(event):
+		if UiInput.is_escape_press(event) and not pause_menu.close_controls():
 			_close_menu()
 		return
 	if event is InputEventMouseButton:
 		_on_mouse_button(event)
 	elif event is InputEventMouseMotion:
 		_on_mouse_motion(event)
+	elif event is InputEventMagnifyGesture:  # a trackpad pinch: apart zooms in
+		_zoom_by(pow(event.factor, ZOOM_PINCH_GAIN))
+	elif event is InputEventPanGesture:  # a trackpad's two-finger scroll, which stands in for the mouse wheel (up zooms in)
+		_zoom_by(pow(ZOOM_WHEEL_STEP, -event.delta.y * ZOOM_TRACKPAD_SCROLL))
 	elif event is InputEventKey and event.pressed and not event.echo:
 		_on_key(event)
 
@@ -546,6 +555,12 @@ func _close_menu() -> void:
 	pause_menu.close()
 
 
+## The player chose another size for the dish (in the pause menu): the view stays inside it.
+func _resize_dish(new_radius: float) -> void:
+	dish.resize_to(new_radius)
+	camera.position = camera.position.limit_length(dish.radius)
+
+
 ## A goal-mode experiment is saved on the way out; free mode is not saved.
 func _quit_to_menu() -> void:
 	save_game()
@@ -589,9 +604,26 @@ func _on_mouse_motion(event: InputEventMouseMotion) -> void:
 	if not _dragging and event.position.distance_to(_press_position) > _drag_threshold:
 		_dragging = true
 	if _dragging:
-		following_id = -1  # panning by hand takes over from following
-		camera.position -= event.relative / camera.zoom.x
-		camera.position = camera.position.limit_length(dish.radius)  # don't lose the dish
+		_pan_camera(-event.relative / camera.zoom.x)
+
+
+## Moves the view by `world_delta`, but never off the dish. Panning by hand takes over from following.
+func _pan_camera(world_delta: Vector2) -> void:
+	following_id = -1
+	camera.position = (camera.position + world_delta).limit_length(dish.radius)
+
+
+## W, A, S and D move the view while held. The keys are taken by their place on the keyboard, so they are the same four
+## on any layout; nothing happens while a text box has the keyboard, or with Ctrl, Alt or Cmd held (those are shortcuts).
+func _pan_with_keys(delta: float) -> void:
+	var focus := get_viewport().gui_get_focus_owner()
+	if focus is LineEdit or focus is TextEdit or Input.is_key_pressed(KEY_CTRL) or Input.is_key_pressed(KEY_ALT) or Input.is_key_pressed(KEY_META):
+		return
+	var direction := Vector2(
+		float(Input.is_physical_key_pressed(KEY_D)) - float(Input.is_physical_key_pressed(KEY_A)),
+		float(Input.is_physical_key_pressed(KEY_S)) - float(Input.is_physical_key_pressed(KEY_W)))
+	if direction != Vector2.ZERO:
+		_pan_camera(direction.normalized() * PAN_KEY_PIXELS * delta / camera.zoom.x)
 
 
 func _click(world: Vector2) -> void:

@@ -64,9 +64,11 @@ void NutrientField::build(double dish_radius, int cells_across) {
 	}
 }
 
-// The dish grows: the nutrient stays where it is, on the new grid. Each new cell takes the old field's
-// (smoothed) value at its centre, and the whole is scaled to hold exactly the nutrient there was.
+// The dish changes size: the nutrient stays where it is, on the new grid. Each new cell takes the old field's
+// (smoothed) value at its centre. A larger dish is then scaled to hold exactly the nutrient there was; a smaller one
+// keeps the concentration where it was, and the nutrient past the new edge is gone.
 void NutrientField::resize(double dish_radius) {
+	bool shrinking = dish_radius < radius;
 	std::vector<float> old_conc = conc;
 	int old_n = n;
 	double old_spacing = spacing, old_origin = origin, old_total = total();
@@ -96,7 +98,7 @@ void NutrientField::resize(double dish_radius) {
 		}
 	}
 	double new_total = total();
-	if (new_total > 0.0) {
+	if (!shrinking && new_total > 0.0) {
 		float scale = (float)(old_total / new_total);
 		for (float &c : conc) {
 			c *= scale;

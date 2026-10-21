@@ -15,15 +15,14 @@ signal selection_changed  ## the selected bup is now another (or none)
 const DEFAULT_RADIUS := 10000.0  ## µm: 10 mm, the dish goal mode uses and free mode starts with
 const NUTRIENT_SCATTER := 5.0  ## radius a dose spreads over, per sqrt(nutrient) in it
 const MAX_CELLS := 300  ## the smallest carrying limit; see `cap_for`. Past the limit each birth displaces a random bup (a Moran process)
-const MAX_SOURCES := 12
+const MAX_SOURCES := 1000
 const PLANKTON_UNITS := 300.0  ## nutrient a plankton releases when it bursts [choice: a patch a few minutes of chemotaxis can use; see SUGGESTED_BLOOM_RATE]
 const PLANKTON_PATCH_RADIUS := 250.0  ## µm the released nutrient starts out spread over (a lysed cell's cloud: Stocker et al. 2008 used ~300 µm)
 const PLANKTON_MEAN_LIFE := 3600.0  ## s a plankton floats on average before bursting [choice: lysis timing is random; no measured scale]
 const PLANKTON_LIFE_SPREAD := 0.5  ## each one bursts at a random time from this share below to this share above the mean life, so the food keeps coming
-const BLOOM_JITTER := 0.25  ## the bloom's plankton appear at steady intervals, each this share early or late at random
 const PLANKTON_DRAW_RADIUS := 40.0  ## µm: about a small diatom
-const PLANKTON_MIN_PIXELS := 7.0  ## drawn at least this many screen pixels in radius
-const MAX_PLANKTON := 200
+const PLANKTON_MIN_PIXELS := 3.0  ## drawn at least this many screen pixels in radius
+const MAX_PLANKTON := 1000
 const SUGGESTED_BLOOM_RATE := 24.0  ## plankton a sim-day that the goal text suggests (one an hour): 300 units an hour, about what the old feed gave
 const GOAL_UPKEEP_FACTOR := 3.0  ## how much costlier staying alive is once goal mode reaches experiment 2 (set by the screen; 1 elsewhere) [x10 killed every colony tested at once; x3 did not]
 const MAX_BLOOM_ARRIVALS_PER_STEP := 50  ## the most plankton one step lets the bloom add (a few at most; a rate raised a great deal starts over)
@@ -83,7 +82,7 @@ void fragment() {
 """
 var sim := BupSim.new()  ## the native simulation core
 var field: NutrientField = sim.get_field()  ## the dissolved nutrient (owned by the simulation)
-var radius := DEFAULT_RADIUS:  ## physical size of the dish; it changes only with a new dish (`strike`, a load) or `grow_to`
+var radius := DEFAULT_RADIUS:  ## physical size of the dish; it changes only with a new dish (`strike`, a load) or `resize_to`
 	set(value):
 		radius = value
 		_sync_render_capacity()
@@ -149,6 +148,7 @@ var edit_count := 0  ## bumped by every change made to the dish by hand (a bup o
 var _draw_key := []  ## what the dish was last drawn from (see `refresh_drawing`)
 var _render_stamp := []  ## what the bups' picture was last built from
 var _render_stale := true  ## the bups were changed by hand (added, removed, a new dish), so the picture must be rebuilt
+var _trails_may_show := false  ## the last picture was made as time moved, so bups in it may be drawn with trails
 var _haze: ImageTexture = null
 var _haze_built := 0
 var _steer: ImageTexture = null  ## where the selected bup could steer (see `_draw_steering`)
@@ -239,9 +239,11 @@ func _process(delta: float) -> void:
 		# The picture is rebuilt only when what it shows may have changed: time has passed, or the bups, the zoom or
 		# the pixel size have. (While paused nothing has, however many bups there are.)
 		var stamp := [time, sim.bup_count(), pixel()]
-		if _render_stale or stamp != _render_stamp:
+		var changed: bool = stamp != _render_stamp
+		if _render_stale or changed or _trails_may_show:
 			_render_stamp = stamp
 			_render_stale = false
+			_trails_may_show = changed  # (a picture made as time moved may carry trails; the next one, when nothing has moved since, clears them: so a paused dish shows none)
 			multimesh.visible_instance_count = mini(sim.bup_count(), multimesh.instance_count)
 			multimesh.buffer = sim.render_buffer(pixel(), multimesh.instance_count)
 		_overlay.queue_redraw()
@@ -284,7 +286,7 @@ func strike(start: StartConditions = null) -> void:
 	bup_limit = start.bup_limit
 	food_rate = start.nutrient_rate
 	var bups := clampi(start.bups, 1, bup_limit)
-	var spread := minf(radius * 0.8, 40.0 + 10.0 * sqrt(maxf(bups - 4.0, 0.0)))
+	var spread := minf(radius * 0.8, 40.0 + 40.0 * sqrt(maxf(bups - 4.0, 0.0)))  # (the founders start in a disc that grows with their number, 4 in a spot 40 µm across, 100 across about 430 µm)
 	for i in bups:
 		var founder := Genome.founder()
 		var chosen: Dictionary = start.founders[i] if i < start.founders.size() else {}  # the player's name and colour for this one
@@ -298,14 +300,35 @@ func strike(start: StartConditions = null) -> void:
 	field.fill(clampi(start.nutrients, 0, StartConditions.MAX_NUTRIENTS) * NUTRIENT_ENERGY)  # the medium the colony starts in
 
 
-## Enlarges the dish with everything in it: the bups, the nutrient (spread over the new grid, none of it
-## lost) and the sources stay where they are. A dish never shrinks, since that would cut bups off.
-func grow_to(new_radius: float) -> void:
-	new_radius = minf(new_radius, StartConditions.MAX_DISH_RADIUS)
-	if new_radius <= radius:
+## Changes the dish's size about its centre, with everything in it.
+## Larger: the bups, the nutrient (spread over the new grid, none of it lost) and the sources stay where they are.
+## Smaller: everything past the new edge goes. Bups there die like any other death (a family record with no living
+## descendants, and not open in a panel, is freed with them), and so do the sources and plankton and the nutrient there.
+## Either way the feed and the bloom change in step with the area, so they stay as dense as they were.
+func resize_to(new_radius: float) -> void:
+	new_radius = clampf(new_radius, StartConditions.MIN_DISH_RADIUS, StartConditions.MAX_DISH_RADIUS)
+	if is_equal_approx(new_radius, radius):
 		return
-	sim.grow(new_radius)  # the bups and the nutrient stay
+	var area_ratio := (new_radius * new_radius) / (radius * radius)
+	if new_radius > radius:
+		sim.grow(new_radius)  # the bups and the nutrient stay
+	else:
+		sim.shrink(new_radius)
+		for source in sources.duplicate():
+			if source.pos.distance_to(global_position) > new_radius:
+				remove_source(source)
+		for i in range(plankton.size() - 1, -1, -1):
+			if plankton[i].pos.length() > new_radius:
+				if selected_plankton == plankton[i]:
+					selected_plankton = null
+				if hovered_plankton == plankton[i]:
+					hovered_plankton = null
+				plankton.remove_at(i)
 	radius = new_radius
+	food_rate *= area_ratio
+	bloom_rate *= area_ratio
+	edit_count += 1
+	_render_stale = true
 	queue_redraw()
 
 
@@ -673,7 +696,7 @@ func _step_plankton() -> void:
 		while time >= _bloom_due and arrivals < MAX_BLOOM_ARRIVALS_PER_STEP:
 			if plankton.size() < MAX_PLANKTON:
 				_add_plankton(sim.random_point(radius * 0.95))
-			_bloom_due += interval * (1.0 + BLOOM_JITTER * (2.0 * sim.random_float() - 1.0))
+			_bloom_due += interval  # (exactly on schedule: only where it lands, and how long it floats, are random)
 			arrivals += 1
 		if time >= _bloom_due:  # (far behind, say the rate was just raised a great deal: start over from now)
 			_bloom_due = time + interval
