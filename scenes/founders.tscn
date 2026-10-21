@@ -20,15 +20,6 @@ offset_right = 600.0
 offset_bottom = 110.0
 text = "@founders.title"
 
-[node name="Subtitle" type="Label" parent="."]
-theme_type_variation = &"Accent"
-layout_mode = 0
-offset_left = 50.0
-offset_top = 112.0
-offset_right = 900.0
-offset_bottom = 140.0
-text = "@founders.subtitle"
-
 [node name="Panel" type="PanelContainer" parent="."]
 layout_mode = 1
 anchors_preset = 4

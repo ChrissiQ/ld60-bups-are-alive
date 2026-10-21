@@ -29,20 +29,8 @@ const NAME_FILES := ["res://scripts/bup_names.gd", "res://scripts/cell.gd", "res
 const NAME_INTERNALS := ["\\btitle_for\\(", "\\bdefault_name\\(", "BupNames\\.clean\\("]  ## (regular expressions: Dish's own bup_default_name( is fine)
 const SCENE_PATHS_FILE := "res://scripts/scenes.gd"  ## the only script that may spell out a screen's path
 
-var failures: Array = []
-
-
 func fail(where: String, line: int, what: String, fix: String) -> void:
-	failures.append("%s%s: %s  ->  %s" % [where, ":%d" % line if line > 0 else "", what, fix])
-
-
-func _files(dirs: Array, exts: Array) -> Array:
-	var out := []
-	for dir in dirs:
-		for f in DirAccess.get_files_at(dir):
-			if f.get_extension() in exts:
-				out.append(dir.path_join(f))
-	return out
+	TestUtil.failures.append("%s%s: %s  ->  %s" % [where, ":%d" % line if line > 0 else "", what, fix])
 
 
 ## Variation name -> base type, read from the theme file.
@@ -100,7 +88,7 @@ func _init() -> void:
 	var resource_rx := RegEx.create_from_string("^\\[ext_resource type=\"PackedScene\"(?: uid=\"[^\"]*\")? path=\"([^\"]+)\" id=\"([^\"]+)\"")
 	var scenes_checked := 0
 
-	for path in _files(SCENE_DIRS, ["tscn"]):
+	for path in TestUtil.files(SCENE_DIRS, ["tscn"]):
 		scenes_checked += 1
 		var lines := FileAccess.get_file_as_string(path).split("\n")
 		var node_name := ""
@@ -145,7 +133,7 @@ func _init() -> void:
 	var named_rx := RegEx.create_from_string("&\"([A-Z]\\w+)\"")
 	var color_rx := RegEx.create_from_string("\\bColor8?\\(\\s*[-\\d.]|\\bColor\\.[A-Za-z_]+\\b|#[0-9a-fA-F]{6}\\b")
 	var scripts_checked := 0
-	for path in _files(SCRIPT_DIRS, ["gd"]):
+	for path in TestUtil.files(SCRIPT_DIRS, ["gd"]):
 		scripts_checked += 1
 		var lines := FileAccess.get_file_as_string(path).split("\n")
 		for i in lines.size():
@@ -171,10 +159,4 @@ func _init() -> void:
 	if scenes_checked < 5 or scripts_checked < 10:
 		fail("lint", 0, "scanned only %d scenes and %d scripts" % [scenes_checked, scripts_checked], "the scan paths are wrong")
 
-	if failures.is_empty():
-		print("UI LINT OK  (%d scenes, %d scripts, %d theme variations)" % [scenes_checked, scripts_checked, variations.size()])
-	else:
-		print("UI LINT FAILED - %d problem(s):" % failures.size())
-		for f in failures:
-			print("  - ", f)
-	quit(0 if failures.is_empty() else 1)
+	TestUtil.finish(self, "UI LINT OK  (%d scenes, %d scripts, %d theme variations)" % [scenes_checked, scripts_checked, variations.size()], "UI LINT FAILED - %d problem(s):" % TestUtil.failures.size())

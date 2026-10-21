@@ -3,12 +3,10 @@ extends SceneTree
 ## Checks start conditions, nutrient layouts, and that free mode has no goals and no saving.
 ## Backs up the real save in memory and restores it if anything touches it.
 
-var failures: Array = []
 
 
 func check(ok: bool, what: String) -> void:
-	if not ok:
-		failures.append(what)
+	TestUtil.check(ok, what)
 
 
 func _make_dish() -> Dish:
@@ -925,10 +923,4 @@ func _init() -> void:
 	m3.queue_free()
 	Session.mode = Session.Mode.GOALS
 
-	if failures.is_empty():
-		print("FREE MODE TESTS OK")
-	else:
-		print("FAILED:")
-		for f in failures:
-			print("  - ", f)
-	quit(0 if failures.is_empty() else 1)
+	TestUtil.finish(self, "FREE MODE TESTS OK")

@@ -15,12 +15,13 @@ signal value_changed(value: float)
 	set(text):
 		label_text = text
 		if is_node_ready():
-			label.text = Strings.resolve(text)
+			label.text = text
 
 ## Column widths. The defaults suit the setup and menu screens; a narrow panel sets smaller ones in its scene,
 ## so a row never makes its panel wider than the other things in it.
 @export var label_min_width := 148.0
 @export var slider_min_width := 180.0
+@export var slider_min_height := 28.0
 @export var value_min_width := 88.0
 @export var unit_min_width := 100.0
 ## A small row for a sidebar: the readout's text size, and no reset button.
@@ -56,12 +57,11 @@ func _ready() -> void:
 		label.theme_type_variation = &"ReadoutLabel"
 		unit_label.theme_type_variation = &"ReadoutLabel"
 		value_field.theme_type_variation = &"ReadoutField"
-		slider.custom_minimum_size.y = 18.0
 	label.custom_minimum_size.x = label_min_width
-	slider.custom_minimum_size.x = slider_min_width
+	slider.custom_minimum_size = Vector2(slider_min_width, slider_min_height)
 	value_field.custom_minimum_size.x = value_min_width
 	unit_label.custom_minimum_size.x = unit_min_width
-	label.text = Strings.resolve(label_text)
+	label.text = label_text
 	_set_changeable(true)  # (sets the label's tooltip, which a label shows only if it is told to take the mouse)
 	slider.value_changed.connect(_on_slider_changed)
 	reset_button.pressed.connect(func() -> void: slider.value = default_value)
@@ -168,5 +168,5 @@ func _set_changeable(changeable: bool) -> void:
 	var hint := "" if changeable else disabled_reason
 	slider.tooltip_text = hint
 	value_field.tooltip_text = hint
-	label.tooltip_text = hint if not changeable or label_tip == "" else Strings.resolve(label_tip)
+	label.tooltip_text = hint if not changeable or label_tip == "" else label_tip
 	label.mouse_filter = Control.MOUSE_FILTER_PASS if (not changeable or label_tip != "") else Control.MOUSE_FILTER_IGNORE

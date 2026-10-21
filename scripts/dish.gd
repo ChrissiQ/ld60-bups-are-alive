@@ -821,7 +821,7 @@ func from_dict(d: Dictionary) -> bool:
 		loaded_plankton.append(Plankton.new(_array_to_vec(saved["pos"]), born, float(saved["burst_at"]), maxf(float(saved["units"]), 0.0), shape))
 	loaded_plankton.resize(mini(loaded_plankton.size(), MAX_PLANKTON))
 	var loaded_radius := clampf(float(d.get("radius", DEFAULT_RADIUS)), StartConditions.MIN_SIM_RADIUS, StartConditions.MAX_DISH_RADIUS)
-	var loaded_limit := clampi(int(d.get("bup_limit", cap_for(loaded_radius))), 1, StartConditions.MAX_BUP_LIMIT)
+	var loaded_limit := clampi(int(d.get("bup_limit", StartConditions.DEFAULT_BUP_LIMIT)), 1, StartConditions.MAX_BUP_LIMIT)
 	var field_size := NutrientField.size_for(loaded_radius)
 	var saved_field = d.get("field", [])
 	if saved_field is Array and not is_equal_approx(loaded_radius, float(d.get("radius", DEFAULT_RADIUS))):
@@ -938,14 +938,11 @@ func plankton_draw_radius() -> float:
 ## An amorphous green outline: no two are quite alike, and it is faint inside, so the nutrient haze shows through.
 func _draw_plankton(cell: Plankton) -> void:
 	var r := plankton_draw_radius()
-	var outline := PackedVector2Array()
-	for k in 17:
-		var a := TAU * k / 16.0
-		var wobble := 1.0 + 0.16 * sin(2.0 * a + cell.shape) + 0.1 * sin(3.0 * a + 2.0 * cell.shape)
-		outline.append(cell.pos + Vector2.from_angle(a) * r * wobble)  # (the last point repeats the first, closing the outline)
-	draw_colored_polygon(outline.slice(0, 16), Color(0.5, 0.9, 0.45, 0.1))
-	draw_polyline(outline, Color(0.55, 0.95, 0.5, 0.85), 1.5 * pixel())
-	draw_circle(cell.pos + Vector2.from_angle(cell.shape) * r * 0.25, r * 0.18, Color(0.55, 0.95, 0.5, 0.55))
+	draw_set_transform(cell.pos, 0.0, Vector2(r, r))  # (the outline is kept for a radius of 1)
+	draw_colored_polygon(cell.outline.slice(0, 16), Color(0.5, 0.9, 0.45, 0.1))  # (the last point repeats the first)
+	draw_polyline(cell.outline, Color(0.55, 0.95, 0.5, 0.85), 1.5 * pixel() / r)
+	draw_circle(Vector2.from_angle(cell.shape) * 0.25, 0.18, Color(0.55, 0.95, 0.5, 0.55))
+	draw_set_transform(Vector2.ZERO)
 
 
 ## The dissolved nutrient as a faint amber haze, so gradients (and the depleted zones around a

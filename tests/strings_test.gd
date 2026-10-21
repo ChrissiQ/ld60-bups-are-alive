@@ -4,20 +4,10 @@ extends SceneTree
 ## there, that a texts' numbers (%d, %s...) can be told apart from percent signs, and that no scene shows a raw "@key".
 
 const SCENES := ["menu", "intro", "founders", "free_setup", "pause_menu", "main"]
-var failures: Array = []
 
 
 func check(ok: bool, what: String) -> void:
-	if not ok:
-		failures.append(what)
-
-
-func _files(dir: String, ext: String) -> Array:
-	var out := []
-	for f in DirAccess.get_files_at(dir):
-		if f.get_extension() == ext:
-			out.append(dir.path_join(f))
-	return out
+	TestUtil.check(ok, what)
 
 
 ## Every "@section.name" in the scene files, and every Strings.t / raw / has_key("section.name") in the scripts.
@@ -25,13 +15,13 @@ func _asked_for() -> Dictionary:
 	var asked := {}  # key -> where
 	var scene_key := RegEx.create_from_string('"@([a-z0-9_]+\\.[a-z0-9_]+)"')
 	for dir in ["res://scenes", "res://ui"]:
-		for path: String in _files(dir, "tscn"):
+		for path: String in TestUtil.files([dir], ["tscn"]):
 			for m in scene_key.search_all(FileAccess.get_file_as_string(path)):
 				asked[m.get_string(1)] = path
 	var code_key := RegEx.create_from_string('Strings\\.(?:t|raw|has_key)\\("([a-z0-9_]+\\.[a-z0-9_]+)"')
 	var dynamic := RegEx.create_from_string('Strings\\.t\\("([a-z0-9_]+\\.[a-z0-9_]+_)" \\+')
 	for dir in ["res://scripts", "res://ui"]:
-		for path: String in _files(dir, "gd"):
+		for path: String in TestUtil.files([dir], ["gd"]):
 			if path.ends_with("/strings.gd"):
 				continue  # (its notes use example keys)
 			var source := FileAccess.get_file_as_string(path)
@@ -82,7 +72,10 @@ func _init() -> void:
 	check(Strings.t("hud.readout_bups", [7]) == "bups  7", "a text with a place is filled in")
 	check(Strings.list("menu", "quip").size() >= 3, "the title screen has some lines to pick from")
 
-	# Nothing the scenes show is left as a raw "@key".
+	# Nothing the scenes show is left as a raw "@key" (the TextSweep autoload does it); and TextSweep comes before
+	# DialogStyle, so that a dialog is sized with its text.
+	var project := FileAccess.get_file_as_string("res://project.godot")
+	check(project.contains("TextSweep=") and project.find("TextSweep=") < project.find("DialogStyle="), "project.godot starts TextSweep before DialogStyle")
 	Session.free_start = StartConditions.new()
 	for scene in SCENES:
 		var node: Node = load("res://scenes/%s.tscn" % scene).instantiate()
@@ -95,10 +88,4 @@ func _init() -> void:
 		await process_frame
 	check(Strings.missing.is_empty(), "no text was asked for that the file lacks: %s" % [Strings.missing])
 
-	if failures.is_empty():
-		print("STRINGS TESTS OK  (%d texts asked for)" % asked.size())
-	else:
-		print("FAILED:")
-		for f in failures:
-			print("  - ", f)
-	quit(0 if failures.is_empty() else 1)
+	TestUtil.finish(self, "STRINGS TESTS OK  (%d texts asked for)" % asked.size())

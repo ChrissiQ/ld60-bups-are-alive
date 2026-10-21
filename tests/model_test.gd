@@ -5,12 +5,8 @@ extends SceneTree
 
 const DT := 0.05  ## a short step, so bups run and tumble for real
 
-var failures: Array = []
-
-
 func check(ok: bool, what: String) -> void:
-	if not ok:
-		failures.append(what)
+	TestUtil.check(ok, what)
 
 
 var sim := BupSim.new()  ## the native core, for the single-bup checks (dishes bring their own)
@@ -421,14 +417,7 @@ func _init() -> void:
 	var short := clock_dish.advance(10000.0, 1)  # a one-microsecond budget: stops after its first step
 	check(short > 0.0 and short <= Dish.MAX_STEP + 0.001, "with a budget it stops early and reports what it did (%.2f s of 10000)" % short)
 
-	if failures.is_empty():
-		print("MODEL TESTS OK")
-		quit(0)
-	else:
-		print("FAILED:")
-		for f in failures:
-			print("  - ", f)
-		quit(1)
+	TestUtil.finish(self, "MODEL TESTS OK")
 
 
 

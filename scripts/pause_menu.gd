@@ -30,7 +30,6 @@ var _opening := false  ## true while the rows are being set up, so that doesn't 
 
 
 func _ready() -> void:
-	Strings.apply(self)  # (the texts the scene gives as @section.name)
 	resume_button.pressed.connect(resume_requested.emit)
 	quit_button.pressed.connect(_on_quit_pressed)
 	confirm.confirmed.connect(quit_requested.emit)

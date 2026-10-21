@@ -3,12 +3,10 @@ extends SceneTree
 ## Drives the game screen with synthetic input: click vs drag, tools, zoom, shortcuts.
 ## Uses free mode so nothing can touch the real save file.
 
-var failures: Array = []
 
 
 func check(ok: bool, what: String) -> void:
-	if not ok:
-		failures.append(what)
+	TestUtil.check(ok, what)
 
 
 func _button(m: Node, index: MouseButton, pressed: bool, pos: Vector2) -> void:
@@ -869,13 +867,7 @@ func _init() -> void:
 	g.queue_free()
 	Session.mode = Session.Mode.GOALS
 
-	if failures.is_empty():
-		print("TOOLBAR TESTS OK")
-	else:
-		print("FAILED:")
-		for f in failures:
-			print("  - ", f)
-	quit(0 if failures.is_empty() else 1)
+	TestUtil.finish(self, "TOOLBAR TESTS OK")
 
 
 

@@ -17,6 +17,7 @@ config/icon="res://icon.svg"
 
 [autoload]
 
+TextSweep="*res://scripts/text_sweep.gd"
 DialogStyle="*res://scripts/dialog_style.gd"
 
 [display]

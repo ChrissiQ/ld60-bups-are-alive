@@ -412,6 +412,7 @@ label_tip = "@hud.rate_bloom_tip"
 compact = true
 label_min_width = 50.0
 slider_min_width = 64.0
+slider_min_height = 18.0
 value_min_width = 44.0
 unit_min_width = 34.0
 
@@ -422,6 +423,7 @@ label_tip = "@hud.rate_feed_tip"
 compact = true
 label_min_width = 50.0
 slider_min_width = 64.0
+slider_min_height = 18.0
 value_min_width = 44.0
 unit_min_width = 34.0
 

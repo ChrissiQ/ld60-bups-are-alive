@@ -19,7 +19,6 @@ var _start: StartConditions  ## working copy; only committed on GO
 
 
 func _ready() -> void:
-	Strings.apply(self)  # (the texts the scene gives as @section.name)
 	_start = Session.free_start.copy()
 	var defaults := StartConditions.new()
 

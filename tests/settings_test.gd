@@ -4,12 +4,10 @@ extends SceneTree
 ## settings and experiment save are never touched.
 
 const TEMP := "user://test_free_settings.json"
-var failures: Array = []
 
 
 func check(ok: bool, what: String) -> void:
-	if not ok:
-		failures.append(what)
+	TestUtil.check(ok, what)
 
 
 func _same(a: StartConditions, b: StartConditions) -> bool:
@@ -196,10 +194,4 @@ func _init() -> void:
 
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(TEMP))
 	StartConditions.settings_path = real_path
-	if failures.is_empty():
-		print("SETTINGS TESTS OK")
-	else:
-		print("FAILED:")
-		for f in failures:
-			print("  - ", f)
-	quit(0 if failures.is_empty() else 1)
+	TestUtil.finish(self, "SETTINGS TESTS OK")

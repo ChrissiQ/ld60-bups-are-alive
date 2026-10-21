@@ -5,21 +5,11 @@ extends SceneTree
 
 const THEME := "res://scenes/menu_theme.tres"
 const FAMILY := "res://fonts/CommitMono-"
-var failures: Array = []
 var used := {}  ## font resource path -> how many text controls use it
 
 
 func check(ok: bool, what: String) -> void:
-	if not ok:
-		failures.append(what)
-
-
-func _files(dir: String, exts: Array) -> Array:
-	var out := []
-	for f in DirAccess.get_files_at(dir):
-		if f.get_extension() in exts:
-			out.append(dir.path_join(f))
-	return out
+	TestUtil.check(ok, what)
 
 
 func _note(who: String, font: Font) -> void:
@@ -53,12 +43,12 @@ func _init() -> void:
 	var ofl := FileAccess.get_file_as_string("res://fonts/OFL.txt")
 	check(ofl.contains("SIL OPEN FONT LICENSE Version 1.1") and ofl.contains("Eigil Nikolajsen"), "the OFL license text ships with the fonts (required by the license)")
 	check(FileAccess.file_exists("res://fonts/README.txt"), "fonts/README.txt records the source")
-	check(_files("res://fonts", ["otf", "ttf", "woff", "woff2"]).size() == 4, "exactly the four Commit Mono weights are bundled")
+	check(TestUtil.files(["res://fonts"], ["otf", "ttf", "woff", "woff2"]).size() == 4, "exactly the four Commit Mono weights are bundled")
 
 	# 2. Nothing defines or overrides a font anywhere else.
 	var scanned := 0
 	for dir in ["res://scenes", "res://scripts"]:
-		for path in _files(dir, ["tscn", "tres", "gd"]):
+		for path in TestUtil.files([dir], ["tscn", "tres", "gd"]):
 			var text := FileAccess.get_file_as_string(path)
 			scanned += 1
 			for needle in ["SystemFont", "FontVariation", "theme_override_fonts", "load_dynamic_font", ".ttf", ".woff"]:
@@ -121,13 +111,7 @@ func _init() -> void:
 	check(border.bg_color == Color(0.25, 0.25, 0.25) and is_equal_approx(border.expand_margin_top, dialog.get_theme_constant("title_height") - 4.0), "dialog keeps its grey, with the bar grown to fit the larger title (expand %.0f, title bar %d)" % [border.expand_margin_top, dialog.get_theme_constant("title_height")])
 	dialog.hide()
 
-	if failures.is_empty():
-		var parts := []
-		for k in used:
-			parts.append("%s x%d" % [k.get_file(), used[k]])
-		print("FONTS TESTS OK  (%s)" % ", ".join(parts))
-	else:
-		print("FAILED:")
-		for f in failures:
-			print("  - ", f)
-	quit(0 if failures.is_empty() else 1)
+	var parts := []
+	for k in used:
+		parts.append("%s x%d" % [k.get_file(), used[k]])
+	TestUtil.finish(self, "FONTS TESTS OK  (%s)" % ", ".join(parts))

@@ -32,7 +32,6 @@ var _user_scrolled := false
 
 
 func _ready() -> void:
-	Strings.apply(self)  # (the texts the scene gives as @section.name)
 	_reserve_layout()
 	scroll.gui_input.connect(_on_scroll_input)
 	prompt.modulate.a = 0.0

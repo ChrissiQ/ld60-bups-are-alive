@@ -21,7 +21,6 @@ var _finishing := false  ## true while typing is being ended, so losing focus do
 
 
 func _ready() -> void:
-	Strings.apply(self)  # (the texts the scene gives as @section.name)
 	edit.max_length = BupNames.MAX_LENGTH
 	rename_button.pressed.connect(_begin_editing)
 	rename_button.focus_mode = Control.FOCUS_NONE

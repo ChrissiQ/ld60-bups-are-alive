@@ -18,7 +18,6 @@ var _flicker_left := 0.0
 
 
 func _ready() -> void:
-	Strings.apply(self)  # (the texts the scene gives as @section.name)
 	var quips := Strings.list("menu", "quip")
 	tagline.text = quips[randi() % quips.size()] if not quips.is_empty() else ""
 	dish.position = _dish_center()

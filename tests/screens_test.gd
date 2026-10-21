@@ -2,12 +2,10 @@ extends SceneTree
 ## Run: godot --headless --path . -s tests/screens_test.gd
 ## Cross-screen consistency: shared scene paths, and the same Escape behaviour everywhere.
 
-var failures: Array = []
 
 
 func check(ok: bool, what: String) -> void:
-	if not ok:
-		failures.append(what)
+	TestUtil.check(ok, what)
 
 
 func _escape(echo: bool) -> InputEventKey:
@@ -40,10 +38,4 @@ func _init() -> void:
 	menu._unhandled_input(_escape(false))
 	check(not menu.controls_panel.visible and menu.buttons.visible, "one Escape press closes it and brings the buttons back")
 
-	if failures.is_empty():
-		print("SCREENS TESTS OK")
-	else:
-		print("FAILED:")
-		for f in failures:
-			print("  - ", f)
-	quit(0 if failures.is_empty() else 1)
+	TestUtil.finish(self, "SCREENS TESTS OK")

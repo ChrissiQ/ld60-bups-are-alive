@@ -15,7 +15,6 @@ var _colors: Array[ColorPickerButton] = []
 
 
 func _ready() -> void:
-	Strings.apply(self)  # (the texts the scene gives as @section.name)
 	_start = Session.free_start.copy()
 	for i in _start.bups:
 		_add_row(i)

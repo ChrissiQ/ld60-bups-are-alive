@@ -71,7 +71,6 @@ var _drag_threshold: float = ProjectSettings.get_setting("gui/common/drag_thresh
 
 
 func _ready() -> void:
-	Strings.apply(self)  # (the texts the scene gives as @section.name)
 	dish.extinct.connect(_on_extinct)
 	tracker.goal_completed.connect(_on_goal_completed)
 	toolbar.tool_selected.connect(_on_tool_selected)
@@ -101,6 +100,7 @@ func _ready() -> void:
 	follow_button.pressed.connect(_toggle_follow)
 	lineage_button.pressed.connect(_open_lineage)
 	follow_button.focus_mode = Control.FOCUS_NONE
+	hud.resized.connect(_place_rate_panel)  # (the window changed shape)
 	_on_tool_selected(toolbar.current_tool())  # the toolbar decides the starting tool
 	_on_pick_mode_selected(tool_options.pick_mode())  # and its tray the starting mode
 	goal_panel.visible = not free_mode  # (free mode has no goals; how its dish began is on the Escape menu)
@@ -272,10 +272,10 @@ func _update_info_panel() -> void:
 		_point_stamp = []
 		if editing:
 			_show_source_rate(source)
-		_set_rich(info_text, _source_text(dish.source_details(source)), "source %d" % source.get_instance_id())
+		_set_rich_when_due(info_text, "source %d" % source.get_instance_id(), func() -> String: return _source_text(dish.source_details(source)))
 	elif floating != null:
 		_point_stamp = []
-		_set_rich(info_text, _plankton_text(dish.plankton_details(floating)), "plankton %d" % floating.get_instance_id())
+		_set_rich_when_due(info_text, "plankton %d" % floating.get_instance_id(), func() -> String: return _plankton_text(dish.plankton_details(floating)))
 	elif _hovering_point:
 		var point_stamp := [_hover_point, dish.time, dish.edit_count]
 		if point_stamp != _point_stamp:  # (the readout is worked out again only when the spot or the dish has changed)
@@ -667,7 +667,6 @@ func _on_extinct() -> void:
 
 ## The rate box sits just under the readout. The feed is always there; the bloom comes with plankton. Both follow the dish.
 func _sync_bloom_panel() -> void:
-	rate_panel.position.y = hud.position.y + hud.get_content_height() + RATE_PANEL_GAP
 	var plankton_unlocked := _tools_unlocked()
 	if plankton_unlocked != bloom_row.slider.editable:  # (the bloom stays in the box, faint, until plankton unlock)
 		bloom_row.set_enabled(plankton_unlocked)
@@ -679,18 +678,27 @@ func _sync_bloom_panel() -> void:
 
 func _update_hud() -> void:
 	if not free_mode:
-		_set_rich(goal_panel, _goal_text(), "goal")
+		_set_rich_when_due(goal_panel, "goal", _goal_text)
 	if dish.population() == 0:
 		return
+	var about := "hud %s" % sim_speed
+	if not _readout_due(hud, about):
+		return  # (nothing below is worth working out: the text would not be shown yet)
 	var stats := dish.population_stats()
 	var genes := ""
 	for gene: String in Genome.LABELED:
 		genes += "%s  %s\n" % [Genome.label(gene).rpad(5), Genome.format(gene, stats[gene])]
-	_set_rich(hud, Strings.t("hud.readout", [
+	if _set_rich(hud, Strings.t("hud.readout", [
 		_dish_lines(), SimClock.format(dish.time), _playback_text(),
 		dish.nutrients_placed, genes,
 		stats["mutations"], stats["harm"] * 100.0,
-	]), "hud %s" % sim_speed)
+	]), about):
+		_place_rate_panel()  # (the readout's height changes with its text)
+
+
+## The rate box sits just under the readout.
+func _place_rate_panel() -> void:
+	rate_panel.position.y = hud.position.y + hud.get_content_height() + RATE_PANEL_GAP
 
 
 ## The top of the readout: how many bups there are, and (in free mode, where the player changes them) the dish's
@@ -725,17 +733,28 @@ func _goal_text() -> String:
 ## regex pass) and the re-parse only run when the text has actually changed.
 ## Sets a readout's text. `about` says what the text is about (a bup, the medium at a point...): while the same thing
 ## stays shown at high playback speed, its figures change at most every LIVE_TEXT_MSEC, since they would only flicker.
-func _set_rich(label: RichTextLabel, text: String, about: String) -> void:
-	if label.get_meta("raw", "") == text:
-		return
-	var now := Time.get_ticks_msec()
-	var live := not paused and sim_speed >= LIVE_TEXT_FROM_SPEED
-	if live and label.get_meta("about", "") == about and now - label.get_meta("set_at", 0) < LIVE_TEXT_MSEC:
-		return
+## True when the text was changed.
+func _set_rich(label: RichTextLabel, text: String, about: String) -> bool:
+	if label.get_meta("raw", "") == text or not _readout_due(label, about):
+		return false
 	label.set_meta("about", about)
-	label.set_meta("set_at", now)
+	label.set_meta("set_at", Time.get_ticks_msec())
 	label.set_meta("raw", text)
 	label.text = UiText.numbers(text)
+	return true
+
+
+## Whether a readout would take new text about `about` now (see _set_rich). Asked before working the text out, so that
+## at high playback speed, where most frames change nothing, it is not worked out for nothing.
+func _readout_due(label: RichTextLabel, about: String) -> bool:
+	var live := not paused and sim_speed >= LIVE_TEXT_FROM_SPEED
+	return not (live and label.get_meta("about", "") == about and Time.get_ticks_msec() - label.get_meta("set_at", 0) < LIVE_TEXT_MSEC)
+
+
+## _set_rich with the text worked out (by `make_text`) only if it is due.
+func _set_rich_when_due(label: RichTextLabel, about: String, make_text: Callable) -> void:
+	if _readout_due(label, about):
+		_set_rich(label, make_text.call(), about)
 
 
 ## The toolbar and its tray read as one piece: square the bar's bottom corners while open.

@@ -8,6 +8,7 @@ var born_at: float  ## simulation time (s) at which it appeared
 var burst_at: float  ## simulation time (s) at which it bursts (the player is not told)
 var units: float  ## nutrient released when it does
 var shape: float  ## makes each one's outline a little different
+var outline := PackedVector2Array()  ## that outline for a radius of 1, closed (the last point repeats the first)
 
 
 func _init(p_pos: Vector2, p_born_at: float, p_burst_at: float, p_units: float, p_shape: float) -> void:
@@ -16,3 +17,7 @@ func _init(p_pos: Vector2, p_born_at: float, p_burst_at: float, p_units: float, 
 	burst_at = p_burst_at
 	units = p_units
 	shape = p_shape
+	for k in 17:
+		var a := TAU * k / 16.0
+		var wobble := 1.0 + 0.16 * sin(2.0 * a + shape) + 0.1 * sin(3.0 * a + 2.0 * shape)
+		outline.append(Vector2.from_angle(a) * wobble)

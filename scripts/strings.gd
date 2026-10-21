@@ -6,12 +6,13 @@ extends RefCounted
 ##     Strings.t("hud.paused")                     # "PAUSED"
 ##     Strings.t("goals.living_status", [412, 1000])  # a text with numbers in it: the file holds the %d / %s / %.0f
 ##
-## In a scene, give a node's text (or tooltip, dialog title...) as "@section.name"; the scene's script calls
-## `Strings.apply(self)` first thing in `_ready`, which swaps in the text for every such node under it.
+## In a scene, give a node's text (or tooltip, dialog title...) as "@section.name"; the TextSweep autoload swaps in the
+## text as each node comes into the game, before its own `_ready`, so a script needs to do nothing.
 ##
 ## A text that is asked for with no numbers is used as written. A text asked for with numbers must hold exactly that many
-## of them, in order (%d a whole number, %s words, %.0f a number rounded to a whole one, %.1f to one decimal, and %% for a
-## percent sign), or the game says so and shows the text as it is. tests/strings_test.gd checks all of this.
+## of them, in order (%d a whole number, %s words, %.0f a number rounded to a whole one, %.1f to one decimal), or the game
+## says so and shows the text as it is. In either kind of text, %% is a percent sign (a lone % in a text with no numbers is
+## one too). tests/strings_test.gd checks all of this.
 
 const FILE := "res://text/strings.cfg"
 
@@ -36,7 +37,7 @@ static func _file() -> ConfigFile:
 static func t(key: String, args: Array = []) -> String:
 	var text := raw(key)
 	if args.is_empty():
-		return text
+		return text.replace("%%", "%")  # (as in a text with numbers, where the % operator does it)
 	if not _places.has(text):
 		_places[text] = count_places(text)
 	var places: int = _places[text]
@@ -59,16 +60,23 @@ static func raw(key: String) -> String:
 	return str(_file().get_value(section, name))
 
 
-const PROPERTIES := ["text", "tooltip_text", "placeholder_text", "title", "dialog_text", "ok_button_text", "cancel_button_text"]  ## what a scene can give as "@section.name"
+const PROPERTIES := ["text", "tooltip_text", "placeholder_text", "title", "dialog_text", "ok_button_text", "cancel_button_text", "label_text", "label_tip"]  ## what a scene can give as "@section.name"
 
 
-## Swaps "@section.name" for its text in everything under `root` (and `root` itself) that a scene put on screen.
-static func apply(root: Node) -> void:
+## Swaps "@section.name" for its text in `node` alone, if it is something a scene puts on screen.
+static func apply_to(node: Node) -> void:
+	if not (node is Control or node is Window):
+		return
 	for property: String in PROPERTIES:
-		if property in root:
-			var value: Variant = root.get(property)
+		if property in node:
+			var value: Variant = node.get(property)
 			if value is String and value.begins_with("@"):
-				root.set(property, resolve(value))
+				node.set(property, resolve(value))
+
+
+## The same for everything under `root`, and `root` itself.
+static func apply(root: Node) -> void:
+	apply_to(root)
 	for child in root.get_children():
 		apply(child)
 

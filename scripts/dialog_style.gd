@@ -12,6 +12,7 @@ extends Node
 
 const TEXT_VARIATION := &"DialogText"
 const BUTTON_VARIATION := &"DialogButton"
+const PREPARE_FRAMES := 2  ## frames a dialog is given to settle before it is prepared
 
 
 func _ready() -> void:
@@ -40,12 +41,7 @@ static func style_existing(node: Node) -> void:
 
 
 static func apply(dialog: AcceptDialog) -> void:
-	if not dialog.has_meta("wanted_width"):
-		dialog.set_meta("wanted_width", dialog.size.x)  # (the width the scene gave it: a window only ever grows to fit its first, unfinished texts, so this is how it is brought back)
 	dialog.min_size = Vector2i(dialog.size.x, dialog.min_size.y)  # (a scene gives a dialog its width: keep it, so the message wraps at that width from the first layout and the height follows the lines)
-	var rewiden := _restore_width.bind(dialog)
-	if not dialog.about_to_popup.is_connected(rewiden):
-		dialog.about_to_popup.connect(rewiden)
 	var refit := _fit_height.bind(dialog)
 	if not dialog.visibility_changed.is_connected(refit):  # (a dialog can be styled again: by the sweep and by its coming into the tree)
 		dialog.visibility_changed.connect(refit)
@@ -53,20 +49,17 @@ static func apply(dialog: AcceptDialog) -> void:
 	dialog.get_ok_button().theme_type_variation = BUTTON_VARIATION
 	if dialog is ConfirmationDialog:
 		dialog.get_cancel_button().theme_type_variation = BUTTON_VARIATION
-	_settle_width(dialog)
+	_prepare(dialog)
 
 
-## The window widens to fit its first, unfinished texts (a scene's own keys, before they are swapped for the real words)
-## and never narrows again on its own: bring it back to the width the scene gave it, before anyone opens it.
-static func _settle_width(dialog: AcceptDialog) -> void:
-	if await _wait_frames(dialog, 4) and not dialog.visible:
-		_restore_width(dialog)
+## A dialog that is not showing is laid out with its message across the window's full width, so it counts fewer lines than
+## it has once it is open, and would open that much too short and then grow. Having it count again once it has settled
+## (and been put back to the scene's width and centred) makes it open at its full size.
+static func _prepare(dialog: AcceptDialog) -> void:
+	if await _wait_frames(dialog, PREPARE_FRAMES) and not dialog.visible:
+		dialog.size = Vector2i(dialog.min_size.x, dialog.size.y)  # (the window widens while it is first laid out, and never narrows again on its own: bring it back to the width the scene gave it)
 		dialog.move_to_center()
-		dialog.get_label().update_minimum_size()  # (a hidden dialog keeps the height it was first laid out at, for fewer lines than its text takes; this has it counted again, so that it opens at its full height)
-
-
-static func _wanted_width(dialog: AcceptDialog) -> int:
-	return dialog.get_meta("wanted_width", dialog.size.x)
+		dialog.get_label().update_minimum_size()
 
 
 ## Waits `frames` frames; false if the dialog has gone from the tree in the meantime.
@@ -78,17 +71,13 @@ static func _wait_frames(dialog: AcceptDialog, frames: int) -> bool:
 	return is_instance_valid(dialog)
 
 
-static func _restore_width(dialog: AcceptDialog) -> void:
-	dialog.size = Vector2i(_wanted_width(dialog), dialog.size.y)
-
-
 ## A message that wraps is laid out only once the dialog is open, so the height it first got is for fewer lines than it
 ## needs: shrink the window to its content again once it has wrapped, so the space under the message is always the same.
 static func _fit_height(dialog: AcceptDialog) -> void:
 	if not dialog.visible:
 		return
 	if await _wait_frames(dialog, 2) and dialog.visible:
-		dialog.size = Vector2i(_wanted_width(dialog), 0)
+		dialog.size = Vector2i(dialog.min_size.x, 0)
 		dialog.move_to_center()  # (it was centred when it opened, at whatever size it had then)
 
 

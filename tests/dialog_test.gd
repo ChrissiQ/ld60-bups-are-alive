@@ -3,12 +3,10 @@ extends Node
 ## (Run as a scene, not with -s: scripts run with -s don't start the project's autoloads.)
 ## Any dialog, created with no styling code at all, must come out in the game's dialog style.
 
-var failures: Array = []
 
 
 func check(ok: bool, what: String) -> void:
-	if not ok:
-		failures.append(what)
+	TestUtil.check(ok, what)
 
 
 func _ready() -> void:
@@ -110,10 +108,4 @@ func _ready() -> void:
 	await get_tree().process_frame
 	check(inner.theme_type_variation == &"", "a button in the dialog's content is left alone")
 
-	if failures.is_empty():
-		print("DIALOG TESTS OK")
-	else:
-		print("FAILED:")
-		for f in failures:
-			print("  - ", f)
-	get_tree().quit(0 if failures.is_empty() else 1)
+	TestUtil.finish(get_tree(), "DIALOG TESTS OK")
