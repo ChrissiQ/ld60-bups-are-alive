@@ -439,6 +439,8 @@ func _on_key(event: InputEventKey) -> void:
 	match event.keycode:
 		KEY_T:
 			graph.cycle_trait()
+		KEY_G:
+			graph.cycle_span()
 		KEY_DELETE, KEY_BACKSPACE:
 			if _tools_unlocked():
 				_delete_selected_source()

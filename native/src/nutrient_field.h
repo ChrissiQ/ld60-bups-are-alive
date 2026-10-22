@@ -22,6 +22,7 @@ class NutrientField : public RefCounted {
 	double spacing = 12.5, origin = 300.0, radius = 300.0;
 	std::vector<float> conc;
 	std::vector<uint8_t> inside;
+	std::vector<float> eff; // a copy of the field with the rim cells' stand-in values filled in, for many readers at once (see snapshot)
 	std::vector<double> cp, dp;
 	int inside_count = 0;
 
@@ -62,6 +63,24 @@ public:
 
 	// for the simulation core, which works in doubles without going through Vector2
 	void read_xy(double x, double y, double &c, double &gx, double &gy) const;
+	// `snapshot` copies the concentrations (each rim cell standing in the value of its nearest inside cell, as read_xy
+	// takes it) so that `read_snapshot_xy` gives exactly what read_xy would, without the per-cell checks, and safely from
+	// many threads at once while nothing changes the field.
+	void snapshot();
+	inline void read_snapshot_xy(double x, double y, double &c, double &gx, double &gy) const {
+		double fx = std::clamp((x + origin) / spacing - 0.5, 0.0, n - 1.001);
+		double fy = std::clamp((y + origin) / spacing - 0.5, 0.0, n - 1.001);
+		int x0 = (int)fx, y0 = (int)fy;
+		double tx = fx - x0, ty = fy - y0;
+		const float *row = eff.data() + (size_t)y0 * n + x0;
+		double c00 = row[0], c10 = row[1], c01 = row[n], c11 = row[n + 1];
+		double top = c00 + (c10 - c00) * tx;
+		double bottom = c01 + (c11 - c01) * tx;
+		c = top + (bottom - top) * ty;
+		gx = ((c10 - c00) + ((c11 - c01) - (c10 - c00)) * ty) / spacing;
+		gy = (bottom - top) / spacing;
+	}
+	double concentration_xy(double x, double y) const; // just the concentration of read_xy
 	double take_xy(double x, double y, double energy);
 	void deposit_xy(double x, double y, double energy);
 };

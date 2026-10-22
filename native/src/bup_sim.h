@@ -23,6 +23,44 @@
 
 namespace godot {
 
+// A random stream: splitmix64, with Marsaglia's polar method for normals (two independent normals per draw: one is
+// returned, the other kept for the next call). The simulation has one of its own, and each chunk of bups that is moved in
+// parallel gets another, seeded from it, so that a run comes out the same on any number of threads.
+struct Rng {
+	uint64_t state = 1;
+	double spare = 0.0; // the second normal of the last polar draw, if `has_spare`
+	bool has_spare = false;
+
+	void seed(uint64_t value) {
+		state = value;
+		has_spare = false;
+	}
+	uint64_t next_bits() {
+		state += 0x9E3779B97F4A7C15ULL;
+		uint64_t z = state;
+		z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+		z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+		return z ^ (z >> 31);
+	}
+	double uniform() { return (double)(next_bits() >> 11) * (1.0 / 9007199254740992.0); }
+	double gaussian() {
+		if (has_spare) {
+			has_spare = false;
+			return spare;
+		}
+		double u, v, s;
+		do {
+			u = 2.0 * uniform() - 1.0;
+			v = 2.0 * uniform() - 1.0;
+			s = u * u + v * v;
+		} while (s >= 1.0 || s == 0.0);
+		double scale = std::sqrt(-2.0 * std::log(s) / s);
+		spare = v * scale;
+		has_spare = true;
+		return u * scale;
+	}
+};
+
 class BupSim : public RefCounted {
 	GDCLASS(BupSim, RefCounted)
 
@@ -74,13 +112,12 @@ class BupSim : public RefCounted {
 	std::vector<Bup> bups;
 	Ref<NutrientField> field;
 	int64_t next_id = 1;
-	uint64_t rng_state = 1;
+	Rng rng; // the simulation's own random stream
 	double diffuse_accum = 0.0, feed_energy = 0.0;
 
-	double uniform();
-	double gaussian();
-	double spare_normal = 0.0; // the second normal of the last polar draw, if `has_spare`
-	bool has_spare = false;
+	int64_t death_gap(double p);
+	double uniform() { return rng.uniform(); }
+	double gaussian() { return rng.gaussian(); }
 	int poisson(double mean);
 	double gamma(double shape);
 	void note_mutation(Genome &g);
@@ -105,10 +142,26 @@ class BupSim : public RefCounted {
 	double estimate_error(const Bup &b, double concentration) const;
 	double tumble_rate(Bup &b, double concentration, double delta, double noise);
 	double drift_fraction(const Bup &b, double log_gradient, double concentration, double noise) const;
-	void metabolise(Bup &b, double delta);
-	void swim_by_runs(Bup &b, double delta);
-	void swim_by_drift(Bup &b, double delta);
-	void keep_inside(Bup &b);
+	void pay_upkeep_and_grow(Bup &b, double delta); // one bup's step of living: it pays its upkeep from its reserve and grows with what is left
+	void swim_by_runs(Bup &b, double delta, Rng &r);
+	void keep_inside(Bup &b, Rng &r);
+	void keep_inside(Bup &b) { keep_inside(b, rng); }
+
+	// Moving the bups is the bulk of a step and each bup's move depends only on its own state and on the (not yet changed)
+	// nutrient field, so it is done in chunks of bups, in parallel. A chunk's random numbers come from its own stream
+	// (seeded from one draw of the simulation's), so the result does not depend on how many threads there are.
+	static constexpr int SWIM_CHUNK = 512;
+	struct SwimJob {
+		BupSim *sim;
+		double delta, sub; // the step, and one of its motion sub-steps
+		bool fine; // runs and tumbles (a short step), or drift-diffusion
+		int moves; // sub-steps
+		uint64_t seed;
+	};
+	static void run_swim_chunk(void *job, uint32_t chunk);
+	void swim_chunk(const SwimJob &job, uint32_t chunk);
+	void drift_chunk(const SwimJob &job, size_t first, size_t last, Rng &r);
+	int threads = 0; // 0: as many as the machine has; 1: just this one (the results are the same)
 	int cap() const;
 	int limit = 0; // the most bups the dish holds; 0 means the default for its radius
 	double radius = 300.0;
@@ -123,6 +176,7 @@ public:
 	void set_seed(int64_t seed);
 	void set_limit(int bup_limit) { limit = bup_limit; }
 	void set_upkeep_scale(double scale) { upkeep_scale = scale; }
+	void set_threads(int count) { threads = count; }
 	void grow(double new_radius); // a larger dish; the bups and the nutrient stay
 	int shrink(double new_radius); // a smaller dish about the same centre: bups past the new edge die (the number is returned), the nutrient there goes
 	Ref<NutrientField> get_field() const { return field; }
@@ -161,7 +215,7 @@ public:
 	double bup_upkeep(int64_t id) const;
 	double bup_max_energy(int64_t id) const;
 	double bup_uptake(int64_t id, double concentration, double delta) const;
-	void bup_metabolise(int64_t id, double delta);
+	void bup_pay_upkeep_and_grow(int64_t id, double delta);
 	void bup_eat(int64_t id, double food_energy);
 	bool bup_ready(int64_t id) const;
 	Vector2 bup_split(int64_t id, double keep);

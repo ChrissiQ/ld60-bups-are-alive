@@ -89,8 +89,8 @@ func _init() -> void:
 	check(_energy(fast) < _energy(slow), "a fast metabolism yields less energy per food")
 	var fast_body := _cell(1.8, 4.0, 20.0, 50.0, -1.0, 90.0)
 	var slow_body := _cell(0.5, 4.0, 20.0, 50.0, -1.0, 90.0)
-	sim.bup_metabolise(fast_body, 600.0)  # ten minutes
-	sim.bup_metabolise(slow_body, 600.0)
+	sim.bup_pay_upkeep_and_grow(fast_body, 600.0)  # ten minutes
+	sim.bup_pay_upkeep_and_grow(slow_body, 600.0)
 	check(_mass(fast_body) > _mass(slow_body), "given the same fuel, a fast metabolism grows faster")
 	var harmed := _cell()
 	var g := Genome.founder()
@@ -107,7 +107,7 @@ func _init() -> void:
 	sim.set_bup_energy(body, 100.0)
 	for i in 100:  # a hundred minutes, with the reserve kept topped up
 		sim.set_bup_energy(body, maxf(_energy(body), 100.0))
-		sim.bup_metabolise(body, 60.0)
+		sim.bup_pay_upkeep_and_grow(body, 60.0)
 	check(_mass(body) > start_mass and sim.bup_ready(body), "a fed bup grows to its genome's size and is ready to divide")
 	var before := _energy(body)
 	var big_mass := _mass(body)
@@ -140,7 +140,7 @@ func _init() -> void:
 	for born in [6.0, 9.0, 14.0]:
 		var adder := sim.add_bup(Vector2.ZERO, Genome.founder(), 200.0, sqrt(born), born, 0, Vector2.RIGHT)
 		for i in 3000:
-			sim.bup_metabolise(adder, 60.0)
+			sim.bup_pay_upkeep_and_grow(adder, 60.0)
 			sim.set_bup_energy(adder, maxf(_energy(adder), 150.0))
 			if sim.bup_ready(adder):
 				break
@@ -149,8 +149,8 @@ func _init() -> void:
 	# Growth is exponential: a bigger body adds more per second.
 	var small_one := sim.add_bup(Vector2.ZERO, Genome.founder(), 200.0, 2.0, 100.0, 0, Vector2.RIGHT)
 	var large_one := sim.add_bup(Vector2.ZERO, Genome.founder(), 200.0, 4.0, 100.0, 0, Vector2.RIGHT)
-	sim.bup_metabolise(small_one, 600.0)
-	sim.bup_metabolise(large_one, 600.0)
+	sim.bup_pay_upkeep_and_grow(small_one, 600.0)
+	sim.bup_pay_upkeep_and_grow(large_one, 600.0)
 	check(_mass(large_one) - 16.0 > 3.0 * (_mass(small_one) - 4.0), "growth is proportional to mass")
 
 	# --- Uptake is Monod: saturating in concentration, and larger bodies take up more.
@@ -400,7 +400,7 @@ func _init() -> void:
 	var grown_from := _mass(grower)
 	for i in 40:  # 40 minutes in 1-minute steps, reserve kept full
 		sim.set_bup_energy(grower, 150.0)
-		sim.bup_metabolise(grower, 60.0)
+		sim.bup_pay_upkeep_and_grow(grower, 60.0)
 	check(_mass(grower) / grown_from > 1.9 and _mass(grower) / grown_from < 2.1, "a fed bup doubles its mass in about 40 minutes (x%.2f)" % (_mass(grower) / grown_from))
 	var typical := sim.add_bup(Vector2.ZERO, Genome.founder(), 50.0, sqrt(Cell.REFERENCE_MASS), -1.0, 0, Vector2.RIGHT)
 	var upkeep_share := sim.bup_upkeep(typical) / Cell.FAST_BUDGET
@@ -416,6 +416,36 @@ func _init() -> void:
 	check(is_equal_approx(covered, 100.0) and is_equal_approx(clock_dish.time, 100.0), "advance covers the time asked for (%.1f s)" % covered)
 	var short := clock_dish.advance(10000.0, 1)  # a one-microsecond budget: stops after its first step
 	check(short > 0.0 and short <= Dish.MAX_STEP + 0.001, "with a budget it stops early and reports what it did (%.2f s of 10000)" % short)
+
+	# --- The bups are moved in parallel, in chunks, each with a random stream of its own: a run is the same on one thread
+	# as on all of them (both in the long steps of fast playback and the short ones of slow playback).
+	var finals := []
+	for threads in [1, 0]:
+		var run_dish := Dish.new()
+		root.add_child(run_dish)
+		run_dish.position = Vector2(500, 400)
+		run_dish.set_seed(9)
+		run_dish.sim.set_threads(threads)
+		var run_start := StartConditions.new()
+		run_start.dish_radius = 3000.0
+		run_start.nutrients = 200000
+		run_start.bups = 5
+		run_start.bup_limit = 5000
+		run_dish.strike(run_start)
+		for i in 2400:  # (more bups than one chunk: several run at once)
+			run_dish.add_bup(run_dish.global_position + Vector2(i % 60 * 9 - 270, i / 60 * 9 - 180), Genome.founder(), 40.0)
+		for i in 12:
+			run_dish.step(20.0)
+		for i in 20:
+			run_dish.step(0.2)
+		var ids: Array = Array(run_dish.sim.bup_ids())
+		ids.sort()
+		var where := []
+		for id in ids:
+			where.append(run_dish.bup_world_pos(id))
+		finals.append([ids, where])
+		run_dish.queue_free()
+	check(finals[0][0].size() > 2000 and finals[0][0] == finals[1][0] and finals[0][1] == finals[1][1], "one thread and all of them give the same bups in the same places (%d bups)" % finals[0][0].size())
 
 	TestUtil.finish(self, "MODEL TESTS OK")
 

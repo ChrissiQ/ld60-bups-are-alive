@@ -1,5 +1,7 @@
 #include "bup_sim.h"
 
+#include <godot_cpp/classes/worker_thread_pool.hpp>
+
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/error_macros.hpp>
 #include <godot_cpp/core/math.hpp>
@@ -38,6 +40,7 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_upkeep_scale", "scale"), &BupSim::set_upkeep_scale);
 	ClassDB::bind_method(D_METHOD("grow", "new_radius"), &BupSim::grow);
 	ClassDB::bind_method(D_METHOD("shrink", "new_radius"), &BupSim::shrink);
+	ClassDB::bind_method(D_METHOD("set_threads", "count"), &BupSim::set_threads);
 	ClassDB::bind_method(D_METHOD("get_field"), &BupSim::get_field);
 	ClassDB::bind_method(D_METHOD("random_float"), &BupSim::random_float);
 	ClassDB::bind_method(D_METHOD("random_point", "reach"), &BupSim::random_point);
@@ -64,7 +67,7 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("bup_upkeep", "id"), &BupSim::bup_upkeep);
 	ClassDB::bind_method(D_METHOD("bup_max_energy", "id"), &BupSim::bup_max_energy);
 	ClassDB::bind_method(D_METHOD("bup_uptake", "id", "concentration", "delta"), &BupSim::bup_uptake);
-	ClassDB::bind_method(D_METHOD("bup_metabolise", "id", "delta"), &BupSim::bup_metabolise);
+	ClassDB::bind_method(D_METHOD("bup_pay_upkeep_and_grow", "id", "delta"), &BupSim::bup_pay_upkeep_and_grow);
 	ClassDB::bind_method(D_METHOD("bup_eat", "id", "food_energy"), &BupSim::bup_eat);
 	ClassDB::bind_method(D_METHOD("bup_ready", "id"), &BupSim::bup_ready);
 	ClassDB::bind_method(D_METHOD("bup_split", "id", "keep"), &BupSim::bup_split);
@@ -100,33 +103,6 @@ String BupSim::configure(const Dictionary &constants) {
 
 // ---- random numbers -------------------------------------------------------------------------
 
-double BupSim::uniform() {
-	rng_state += 0x9E3779B97F4A7C15ULL; // splitmix64
-	uint64_t z = rng_state;
-	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
-	z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
-	z = z ^ (z >> 31);
-	return (double)(z >> 11) * (1.0 / 9007199254740992.0);
-}
-
-// Marsaglia's polar method makes two independent normals per draw: one is returned, the other kept for the next call.
-double BupSim::gaussian() {
-	if (has_spare) {
-		has_spare = false;
-		return spare_normal;
-	}
-	double u, v, s;
-	do {
-		u = 2.0 * uniform() - 1.0;
-		v = 2.0 * uniform() - 1.0;
-		s = u * u + v * v;
-	} while (s >= 1.0 || s == 0.0);
-	double scale = std::sqrt(-2.0 * std::log(s) / s);
-	spare_normal = v * scale;
-	has_spare = true;
-	return u * scale;
-}
-
 int BupSim::poisson(double mean) {
 	double limit = std::exp(-mean);
 	int count = 0;
@@ -159,8 +135,7 @@ double BupSim::gamma(double shape) {
 }
 
 void BupSim::set_seed(int64_t seed) {
-	rng_state = (uint64_t)seed * 2654435761ULL + 12345ULL;
-	has_spare = false;
+	rng.seed((uint64_t)seed * 2654435761ULL + 12345ULL);
 }
 
 void BupSim::reset(double dish_radius, int64_t seed) {
@@ -674,7 +649,7 @@ double BupSim::drift_fraction(const Bup &b, double log_gradient, double concentr
 	return G.max_drift_fraction * std::tanh((registered + estimate_error(b, concentration) * G.drift_noise * noise) / G.drift_half);
 }
 
-void BupSim::metabolise(Bup &b, double delta) {
+void BupSim::pay_upkeep_and_grow(Bup &b, double delta) {
 	b.energy -= (float)(upkeep(b) * delta);
 	if (b.energy <= G.maintenance_floor) {
 		return;
@@ -686,19 +661,19 @@ void BupSim::metabolise(Bup &b, double delta) {
 
 // Run and tumble: a bup knows nothing of where food is. It senses the concentration where it is
 // (on a log scale), compares it with its own recent past, and tumbles less often while it improves.
-void BupSim::swim_by_runs(Bup &b, double delta) {
+void BupSim::swim_by_runs(Bup &b, double delta, Rng &r) {
 	double c, gx, gy;
-	field->read_xy(b.x, b.y, c, gx, gy);
-	double rate = tumble_rate(b, c, delta, gaussian());
+	field->read_snapshot_xy(b.x, b.y, c, gx, gy);
+	double rate = tumble_rate(b, c, delta, r.gaussian());
 	if (b.tumbling > 0.0f) { // while tumbling a bup doesn't swim
 		b.tumbling -= (float)delta;
 		return;
 	}
 	double dx = b.dx, dy = b.dy;
-	if (uniform() < rate * delta) {
+	if (r.uniform() < rate * delta) {
 		b.tumbling = (float)G.tumble_seconds;
-		double turn = gaussian() * G.tumble_turn_spread + G.tumble_turn_mean;
-		if (uniform() >= 0.5) {
+		double turn = r.gaussian() * G.tumble_turn_spread + G.tumble_turn_mean;
+		if (r.uniform() >= 0.5) {
 			turn = -turn;
 		}
 		double cs = std::cos(turn), sn = std::sin(turn);
@@ -706,7 +681,7 @@ void BupSim::swim_by_runs(Bup &b, double delta) {
 		dx = nx;
 		dy = ny;
 	} else {
-		double turn = gaussian() * G.rotational_diffusion * std::sqrt(delta);
+		double turn = r.gaussian() * G.rotational_diffusion * std::sqrt(delta);
 		double cs = std::cos(turn), sn = std::sin(turn);
 		double nx = dx * cs - dy * sn, ny = dx * sn + dy * cs;
 		dx = nx;
@@ -723,32 +698,8 @@ void BupSim::swim_by_runs(Bup &b, double delta) {
 	b.y += (float)(dy * b.genes[0] * delta);
 }
 
-// The same walk for a step that spans many runs: what a run-and-tumble swimmer averages to is a
-// random walk with the swimmer's effective diffusion, plus a drift up the gradient.
-void BupSim::swim_by_drift(Bup &b, double delta) {
-	b.primed = false; // the signal memory isn't kept up while drifting, so it starts afresh if runs and tumbles resume
-	double c, gx, gy;
-	field->read_xy(b.x, b.y, c, gx, gy);
-	double lx = gx / (G.detection_floor + c), ly = gy / (G.detection_floor + c);
-	double spread = std::sqrt(2.0 * b.effective_diffusion * delta);
-	double sx = gaussian() * spread, sy = gaussian() * spread;
-	double glen = std::sqrt(lx * lx + ly * ly);
-	if (glen > 1e-9) {
-		double drift = b.genes[0] * drift_fraction(b, glen, c, gaussian()) * delta / glen;
-		sx += lx * drift;
-		sy += ly * drift;
-	}
-	b.x += (float)sx;
-	b.y += (float)sy;
-	double sl = std::sqrt(sx * sx + sy * sy);
-	if (sl > 1e-6) {
-		b.dx = (float)(sx / sl);
-		b.dy = (float)(sy / sl);
-	}
-}
-
 // The wall: a swimmer that reaches it is turned along it, and slides until a tumble frees it.
-void BupSim::keep_inside(Bup &b) {
+void BupSim::keep_inside(Bup &b, Rng &r) {
 	double limit = radius - body_radius(b);
 	double dist = std::sqrt((double)b.x * b.x + (double)b.y * b.y);
 	if (dist <= limit) {
@@ -761,7 +712,7 @@ void BupSim::keep_inside(Bup &b) {
 	double ax = b.dx - nx * dot, ay = b.dy - ny * dot;
 	double al = std::sqrt(ax * ax + ay * ay);
 	if (al < 0.1) {
-		double s = uniform() < 0.5 ? 1.0 : -1.0;
+		double s = r.uniform() < 0.5 ? 1.0 : -1.0;
 		ax = -ny * s;
 		ay = nx * s;
 		al = 1.0;
@@ -802,9 +753,9 @@ PackedByteArray BupSim::bup_steer_bytes(int64_t id, double max_alpha) const {
 double BupSim::bup_radius(int64_t id, double pixel_um) const { WITH_BUP(id, 0.0) return 0.5 * drawn_length(b, pixel_um); }
 bool BupSim::bup_ready(int64_t id) const { WITH_BUP(id, false) return ready_to_divide(b); }
 
-void BupSim::bup_metabolise(int64_t id, double delta) {
+void BupSim::bup_pay_upkeep_and_grow(int64_t id, double delta) {
 	if (Bup *b = get(id)) {
-		metabolise(*b, delta);
+		pay_upkeep_and_grow(*b, delta);
 	}
 }
 
@@ -895,6 +846,127 @@ Vector2 BupSim::nearest_and_count(const Vector2 &local, double near) const {
 
 // ---- the step ------------------------------------------------------------------------------
 
+// How many chances of probability `p` pass before the next success (geometric): the gap to the next bup that dies.
+int64_t BupSim::death_gap(double p) {
+	if (p <= 0.0) {
+		return INT64_MAX;
+	}
+	double gap = std::floor(std::log(std::max(uniform(), 1e-300)) / std::log1p(-std::min(p, 1.0 - 1e-12)));
+	return gap >= 9.0e18 ? INT64_MAX : (int64_t)gap;
+}
+
+void BupSim::run_swim_chunk(void *job, uint32_t chunk) {
+	const SwimJob *j = (const SwimJob *)job;
+	j->sim->swim_chunk(*j, chunk);
+}
+
+// Moves the bups of one chunk, and has each pay its upkeep and grow. Touches nothing but those bups (and its own random stream), and only
+// reads the field's snapshot, so chunks can run at the same time.
+void BupSim::swim_chunk(const SwimJob &job, uint32_t chunk) {
+	size_t first = (size_t)chunk * SWIM_CHUNK, last = std::min(first + SWIM_CHUNK, bups.size());
+	Rng r;
+	r.seed(job.seed + (uint64_t)(chunk + 1) * 0xD1B54A32D192ED03ULL);
+	r.next_bits(); // (so that streams from nearby seeds are well apart)
+	if (job.fine) {
+		for (size_t i = first; i < last; i++) {
+			Bup &b = bups[i];
+			swim_by_runs(b, job.sub, r);
+			keep_inside(b, r);
+			pay_upkeep_and_grow(b, job.delta);
+		}
+		return;
+	}
+	drift_chunk(job, first, last, r);
+	for (size_t i = first; i < last; i++) {
+		pay_upkeep_and_grow(bups[i], job.delta);
+	}
+}
+
+// The walk of a step that spans many runs, for the bups first..last: what a run-and-tumble swimmer averages to is a
+// random walk with the swimmer's effective diffusion, plus a drift up the gradient. Each sub-step a bup reads the nutrient
+// where it is, takes a Gaussian step of the diffusion's size, and adds the drift (the fraction of its speed it registers
+// from the log-gradient, with the noise of its senses), and is kept inside the wall. The sub-steps go across all the bups
+// in turn, rather than all of one bup's after another: each bup's step is a chain of dependent work (read the field,
+// divide, square root, tanh), and with several bups in turn the processor can overlap those chains. What stays the same
+// for a bup for the whole step is worked out once, the heading is only put in the bup when the wall needs it (and at the
+// end), and the wall is first tested without a square root.
+void BupSim::drift_chunk(const SwimJob &job, size_t first, size_t last, Rng &r) {
+	struct Lane {
+		float x, y;
+		double spread, sense_k, speed, near_wall2;
+		double hx, hy, hl; // the latest displacement long enough to set a heading, not yet put in the bup's dx, dy
+		bool pending;
+	};
+	const size_t count = last - first;
+	std::vector<Lane> lanes(count);
+	const double floor_c = G.detection_floor, max_drift = G.max_drift_fraction, drift_noise = G.drift_noise, drift_half = G.drift_half;
+	const double noise_ref = G.noise_reference, gain = drift_gain(), sub = job.sub;
+	for (size_t i = 0; i < count; i++) {
+		Bup &b = bups[first + i];
+		b.primed = false; // (the signal memory isn't kept up while drifting)
+		Lane &l = lanes[i];
+		l.x = b.x;
+		l.y = b.y;
+		l.spread = std::sqrt(2.0 * (double)b.effective_diffusion * sub);
+		l.sense_k = G.gradient_noise * (G.reference_sense / sense_range(b));
+		l.speed = b.genes[0];
+		double limit = radius - body_radius(b);
+		l.near_wall2 = limit > 0.0 ? limit * limit * (1.0 - 1e-9) : -1.0; // (any bup nearer the wall than this gets the exact test)
+		l.hx = l.hy = l.hl = 0.0;
+		l.pending = false;
+	}
+	for (int m = 0; m < job.moves; m++) {
+		for (size_t i = 0; i < count; i++) {
+			Lane &l = lanes[i];
+			double c, gx, gy;
+			field->read_snapshot_xy(l.x, l.y, c, gx, gy);
+			double lx = gx / (floor_c + c), ly = gy / (floor_c + c);
+			double sx = r.gaussian() * l.spread, sy = r.gaussian() * l.spread;
+			double glen = std::sqrt(lx * lx + ly * ly);
+			if (glen > 1e-9) {
+				double error = std::min(l.sense_k * std::sqrt(noise_ref / std::max(c, 1e-5)), 5.0);
+				double fraction = max_drift * std::tanh((l.speed * glen * gain + error * drift_noise * r.gaussian()) / drift_half);
+				double drift = l.speed * fraction * sub / glen;
+				sx += lx * drift;
+				sy += ly * drift;
+			}
+			l.x += (float)sx;
+			l.y += (float)sy;
+			double sl = std::sqrt(sx * sx + sy * sy);
+			if (sl > 1e-6) {
+				l.hx = sx;
+				l.hy = sy;
+				l.hl = sl;
+				l.pending = true;
+			}
+			if ((double)l.x * l.x + (double)l.y * l.y > l.near_wall2) { // at the wall: the exact test and the turn, on the bup itself
+				Bup &b = bups[first + i];
+				b.x = l.x;
+				b.y = l.y;
+				if (l.pending) {
+					b.dx = (float)(l.hx / l.hl);
+					b.dy = (float)(l.hy / l.hl);
+					l.pending = false;
+				}
+				keep_inside(b, r);
+				l.x = b.x;
+				l.y = b.y;
+			}
+		}
+	}
+	for (size_t i = 0; i < count; i++) {
+		Bup &b = bups[first + i];
+		const Lane &l = lanes[i];
+		b.x = l.x;
+		b.y = l.y;
+		if (l.pending) {
+			b.dx = (float)(l.hx / l.hl);
+			b.dy = (float)(l.hy / l.hl);
+		}
+	}
+}
+
+
 void BupSim::step(double delta, const PackedVector2Array &source_pos, const PackedFloat32Array &source_rates, double feed_per_minute, double sim_time) {
 	if (sim_time >= 0.0) {
 		now_seconds = sim_time;
@@ -912,32 +984,49 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 		diffuse_accum = 0.0;
 	}
 
-	bool fine = delta <= G.fine_step;
-	int moves = fine ? 1 : std::max(1, (int)std::ceil(delta / G.motion_step));
-	double sub = delta / moves;
+	// First every bup moves, pays its upkeep and grows, in parallel (see SwimJob), each reading the nutrient as it is at the start of
+	// the step. Then, one at a time, they take up nutrient, die and divide.
+	SwimJob job;
+	job.sim = this;
+	job.delta = delta;
+	job.fine = delta <= G.fine_step;
+	job.moves = job.fine ? 1 : std::max(1, (int)std::ceil(delta / G.motion_step));
+	job.sub = delta / job.moves;
+	job.seed = rng.next_bits();
+	field->snapshot();
+	int chunks = ((int)bups.size() + SWIM_CHUNK - 1) / SWIM_CHUNK;
+	WorkerThreadPool *pool = WorkerThreadPool::get_singleton();
+	if (threads == 1 || chunks <= 1 || pool == nullptr) {
+		for (int chunk = 0; chunk < chunks; chunk++) {
+			swim_chunk(job, (uint32_t)chunk);
+		}
+	} else {
+		WorkerThreadPool::GroupID group = pool->add_native_group_task(&BupSim::run_swim_chunk, &job, chunks, threads > 1 ? threads : -1, true, "bups swim");
+		pool->wait_for_group_task_completion(group);
+	}
+
 	size_t keep = 0;
 	std::vector<Bup> newborn;
+	// Each bup that has energy left has the same small chance of dying of something else this step. Rather than a random
+	// number for each, the number of such bups until the next death is drawn (the gaps between independent chances of p are
+	// geometric): the same odds for every bup, and one draw for each death instead of one for each bup.
+	const double death_chance = G.death_rate * delta;
+	int64_t until_death = death_gap(death_chance);
 	for (size_t i = 0; i < bups.size(); i++) {
-		Bup b = bups[i];
-		for (int m = 0; m < moves; m++) {
-			if (fine) {
-				swim_by_runs(b, sub);
-			} else {
-				swim_by_drift(b, sub);
-			}
-			keep_inside(b);
-		}
-		metabolise(b, delta);
+		Bup &b = bups[i];
 		{ // take up nutrient from the medium where the bup is
-			double c, gx, gy;
-			field->read_xy(b.x, b.y, c, gx, gy);
-			double wanted = uptake_wanted(b, c, delta);
+			double wanted = uptake_wanted(b, field->concentration_xy(b.x, b.y), delta);
 			if (wanted > 0.0) {
 				double got = field->take_xy(b.x, b.y, wanted);
 				eat(b, got);
 			}
 		}
-		if (b.energy <= 0.0f || uniform() < G.death_rate * delta) {
+		bool dies = b.energy <= 0.0f;
+		if (!dies && until_death-- == 0) {
+			dies = true;
+			until_death = death_gap(death_chance);
+		}
+		if (dies) {
 			record_death(b);
 			continue; // died
 		}
@@ -973,7 +1062,10 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 				newborn.push_back(child);
 			}
 		}
-		bups[keep++] = b;
+		if (keep != i) {
+			bups[keep] = b;
+		}
+		keep++;
 	}
 	bups.resize(keep);
 	// At the carrying limit a birth takes the place of a random bup, so reproduction (not a blocked

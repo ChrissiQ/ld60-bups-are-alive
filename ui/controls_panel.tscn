@@ -122,6 +122,15 @@ text = "@menu.controls_key_10"
 layout_mode = 2
 text = "@menu.controls_text_10"
 
+[node name="Key11" type="Label" parent="Box/Keys"]
+layout_mode = 2
+theme_type_variation = &"Bright"
+text = "@menu.controls_key_11"
+
+[node name="Desc11" type="Label" parent="Box/Keys"]
+layout_mode = 2
+text = "@menu.controls_text_11"
+
 [node name="BackButton" type="Button" parent="Box"]
 custom_minimum_size = Vector2(0, 44)
 layout_mode = 2

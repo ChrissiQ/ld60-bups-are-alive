@@ -655,7 +655,55 @@ func _init() -> void:
 	check(HistoryGraph.window_seconds(86400.0) == 72.0 * 3600.0 and HistoryGraph.window_seconds(200000.0) == 72.0 * 3600.0, "...and 72 hours once the run reaches 24")
 	check(HistoryGraph.window_start(100.0) == 0.0 and HistoryGraph.window_start(200000.0) == 0.0, "the window starts at zero until the run outgrows it")
 	check(HistoryGraph.window_start(300000.0) == 300000.0 - 72.0 * 3600.0, "then it follows the newest sample (%s)" % HistoryGraph.window_start(300000.0))
-	check(Dish.HISTORY_LEN * Dish.HISTORY_INTERVAL == 72.0 * 3600.0, "the dish keeps 72 hours of samples")
+	# The graph's spans, and the whole run in a bounded history.
+	var spans := HistoryGraph.new()
+	check(spans.span == HistoryGraph.Span.AUTO, "the graph grows its own window until told otherwise")
+	var order := []
+	for i in 5:
+		spans.cycle_span()
+		order.append(spans.span)
+	check(order == [HistoryGraph.Span.LAST_24, HistoryGraph.Span.LAST_72, HistoryGraph.Span.LAST_WEEK, HistoryGraph.Span.ALL, HistoryGraph.Span.AUTO], "G goes through 24h, 72h, week, the whole run, and back to its own")
+	spans.free()
+	check(HistoryGraph.span_seconds(HistoryGraph.Span.LAST_72, 100.0) == 72.0 * 3600.0 and HistoryGraph.span_seconds(HistoryGraph.Span.LAST_WEEK, 100.0) == 168.0 * 3600.0, "a fixed span is as long as it says")
+	check(HistoryGraph.span_seconds(HistoryGraph.Span.ALL, 600000.0) == 600000.0 and HistoryGraph.span_seconds(HistoryGraph.Span.ALL, 10.0) == HistoryGraph.MIN_ALL_WINDOW, "the whole-run span is the run so far (never under an hour)")
+	check(HistoryGraph.window_start_for(HistoryGraph.Span.LAST_24, 50.0 * 3600.0) == 26.0 * 3600.0 and HistoryGraph.window_start_for(HistoryGraph.Span.LAST_24, 10.0 * 3600.0) == 0.0 and HistoryGraph.window_start_for(HistoryGraph.Span.ALL, 900000.0) == 0.0, "a last-N window follows the newest sample once the run outgrows it; the whole run starts at zero")
+	check(HistoryGraph.tick_step(24.0 * 3600.0) == 4.0 * 3600.0 and HistoryGraph.tick_step(72.0 * 3600.0) == 12.0 * 3600.0 and HistoryGraph.tick_step(168.0 * 3600.0) == 48.0 * 3600.0, "time ticks are spaced for the window")
+	check(HistoryGraph.tick_step(2.0 * 86400.0, 24.0) == 86400.0, "ticks counted in days are whole days apart")
+	check(not HistoryGraph.ticks_in_days(HistoryGraph.Span.LAST_WEEK, 168.0 * 3600.0) and HistoryGraph.ticks_in_days(HistoryGraph.Span.ALL, 8.0 * 86400.0) and HistoryGraph.ticks_in_days(HistoryGraph.Span.AUTO, 8.0 * 86400.0) and not HistoryGraph.ticks_in_days(HistoryGraph.Span.ALL, 3600.0), "the axis counts days past a week, and for the whole run once it is a couple of days")
+	check(HistoryGraph.format_time(86400.0 * 3.0, true) == "3d" and HistoryGraph.format_time(86400.0 * 1500.0, true) == "1,500d" and HistoryGraph.format_time(3600.0 * 5.0) == "5h", "days and hours on the ticks")
+	# The history goes on after the colony dies out, so its time stays true: the population drops to zero and the traits stay.
+	var gone := _make_dish()
+	gone.strike(_small())
+	for i in 40:
+		gone.step(20.0)
+	var recorded: int = gone.history["pop"].size()
+	var sense_then: float = gone.history["sense"][-1]
+	gone.clear_bups()
+	for i in 40:
+		gone.step(20.0)
+	check(gone.history["pop"].size() > recorded and gone.history["pop"][-1] == 0 and gone.history["sense"][-1] == sense_then and gone.history["pop"].size() == int(gone.time / Dish.HISTORY_INTERVAL), "the history keeps its time after the colony dies out (%d samples for %.0f s)" % [gone.history["pop"].size(), gone.time])
+	gone.free()
+	var whole := _make_dish()
+	whole.strike(_small())
+	whole.clear_bups()
+	whole.add_bup(whole.global_position, Genome.founder(), 30.0)
+	var samples := 6000
+	var sum_pop := 0.0
+	for i in samples:
+		whole._record_history()
+		sum_pop += whole.history["pop"][-1]
+	var whole_n: int = whole.history_all["pop"].size()
+	check(whole_n < Dish.HISTORY_ALL_LEN and whole.history_all_factor == 8 and whole_n * whole.history_all_factor <= samples and (whole_n + 1) * whole.history_all_factor > samples, "the whole-run history stays under its limit by merging pairs (%d samples, each of %d)" % [whole_n, whole.history_all_factor])
+	check(whole.history["pop"].size() == Dish.HISTORY_LEN, "the fine history keeps its week")
+	var mean_all := 0.0
+	for v in whole.history_all["pop"]:
+		mean_all += v
+	check(absf(mean_all / whole_n - sum_pop / samples) < 0.01, "...and its samples are means, so they keep the average")
+	var whole_copy := _make_dish()
+	check(whole_copy.from_dict(TestUtil.saved(whole)) and whole_copy.history_all["pop"].size() == whole_n and whole_copy.history_all_factor == whole.history_all_factor, "the whole-run history survives save and load")
+	whole.free()
+	whole_copy.free()
+	check(Dish.HISTORY_LEN * Dish.HISTORY_INTERVAL == 168.0 * 3600.0, "the dish keeps a week of samples")
 	check(HistoryGraph.harm_axis_max([]) == 10.0 and HistoryGraph.harm_axis_max([4.0, 9.9]) == 10.0 and HistoryGraph.harm_axis_max([12.0]) == 20.0 and HistoryGraph.harm_axis_max([35.0]) == 50.0 and HistoryGraph.harm_axis_max([5.0, 99.0]) == 100.0, "the harm axis grows to hold the data, up to 100%")
 	check(HistoryGraph.tick_text(0.4, 2.0) == "0.4" and HistoryGraph.tick_text(10.0, 120.0) == "10" and HistoryGraph.tick_text(150.0, 150.0) == "150", "trait ticks use sensible decimals")
 	var graph := HistoryGraph.new()

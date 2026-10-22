@@ -56,7 +56,8 @@ const FIELD_MIN_ACROSS := 48  ## small dishes keep a fine grid (a 300 µm dish g
 const FIELD_MAX_ACROSS := 100  ## a cost limit: the solve takes time in proportion to the cells (about 0.1 ms for this grid, once per step), and top playback speed depends on it
 const RENDER_MIN_CAPACITY := 256  ## the fewest bups the picture has room for
 const HISTORY_INTERVAL := 120.0  ## seconds between samples of the history graph
-const HISTORY_LEN := 2160  ## 72 hours of samples: the longest span the graph shows
+const HISTORY_LEN := 5040  ## 168 hours (a week) of samples: the longest span of the fine history the graph shows
+const HISTORY_ALL_LEN := 1024  ## how many samples the whole-run history holds before its neighbours are merged in pairs (see `history_all`)
 const HISTORY_SERIES := ["pop", "speed", "sense", "metabolism", "size", "harm"]  ## population, each gene's mean, and mean harm (%)
 
 const BUP_SHADER := """
@@ -140,6 +141,13 @@ var place_preview_marker := false  ## the preview marks a single point (a source
 
 ## Sampled every HISTORY_INTERVAL sim-seconds; oldest samples drop off the front.
 var history := {}
+## The whole run, in no more than HISTORY_ALL_LEN samples: each is the mean of `history_all_factor` samples of `history`,
+## and when it fills up the neighbours are merged in pairs and the factor doubles. So a run of any length is kept, thinner
+## the longer it gets. Sample i ends at (i + 1) * history_all_factor * HISTORY_INTERVAL.
+var history_all := {}
+var history_all_factor := 1
+var _all_sums := {}  ## the running sums for the next whole-run sample
+var _all_count := 0  ## how many samples of `history` are in them
 
 ## Bumped whenever the history gains or loses a sample, so views can redraw only on change.
 var history_version := 0
@@ -259,8 +267,14 @@ func _reset_runtime_state() -> void:
 
 func _reset_history() -> void:
 	history = {}
+	history_all = {}
+	_all_sums = {}
 	for series in HISTORY_SERIES:
 		history[series] = []
+		history_all[series] = []
+		_all_sums[series] = 0.0
+	history_all_factor = 1
+	_all_count = 0
 	_history_accum = 0.0
 	history_version += 1
 
@@ -379,27 +393,51 @@ func step(delta: float) -> void:
 		rates.append(source.rate)
 		source.emitted += source.rate / 60.0 * delta
 	sim.step(delta, positions, rates, food_rate, time)  # (time, so births and deaths are stamped with it)
-	if sim.bup_count() == 0 and time > 0.0:
-		if not _extinct_signalled:  # once, on the way down, not on every step after
-			_extinct_signalled = true
-			extinct.emit()
-		return
 	_history_accum += delta
 	if _history_accum >= HISTORY_INTERVAL:
 		_history_accum -= HISTORY_INTERVAL
-		_record_history()
+		_record_history()  # (also once the colony has died out, so the graph's time stays true)
+	if sim.bup_count() == 0 and time > 0.0 and not _extinct_signalled:  # once, on the way down, not on every step after
+		_extinct_signalled = true
+		extinct.emit()
 
 
 func _record_history() -> void:
 	var stats := sim.population_stats()
 	history["pop"].append(stats["count"])
-	for gene in Genome.GENES:
-		history[gene].append(stats[gene])
-	history["harm"].append(stats["harm"] * 100.0)
+	if stats["count"] == 0 and not history["harm"].is_empty():  # (nobody left to average: the traits stay as they last were)
+		for series in HISTORY_SERIES:
+			if series != "pop":
+				history[series].append(history[series][-1])
+	else:
+		for gene in Genome.GENES:
+			history[gene].append(stats[gene])
+		history["harm"].append(stats["harm"] * 100.0)
 	if history["pop"].size() > HISTORY_LEN:
 		for series in history.values():
 			series.pop_front()
+	for series in HISTORY_SERIES:
+		_all_sums[series] += history[series][-1]
+	_all_count += 1
+	if _all_count >= history_all_factor:
+		for series in HISTORY_SERIES:
+			history_all[series].append(_all_sums[series] / _all_count)
+			_all_sums[series] = 0.0
+		_all_count = 0
+		if history_all["pop"].size() >= HISTORY_ALL_LEN:
+			_thin_history_all()
 	history_version += 1
+
+
+## Merges the whole-run history's neighbours in pairs (each the mean of two), so it holds twice the time in half the samples.
+func _thin_history_all() -> void:
+	for series in HISTORY_SERIES:
+		var samples: Array = history_all[series]
+		var merged := []
+		for i in range(0, samples.size() - 1, 2):
+			merged.append((samples[i] + samples[i + 1]) * 0.5)
+		history_all[series] = merged
+	history_all_factor *= 2
 
 
 # --- The bups --------------------------------------------------------------------------------
@@ -803,6 +841,8 @@ func to_dict() -> Dictionary:
 		"upkeep_factor": upkeep_factor,
 		"plankton": saved_plankton,
 		"history": history,
+		"history_all": history_all,
+		"history_all_factor": history_all_factor,
 	}
 
 
@@ -868,6 +908,20 @@ func from_dict(d: Dictionary) -> bool:
 			if not Validate.is_number(v):
 				return false
 		loaded_history[key] = series.slice(maxi(0, series.size() - HISTORY_LEN))
+	var loaded_all := {}
+	var loaded_factor := 1
+	var saved_all = d.get("history_all")
+	if saved_all is Dictionary and Validate.is_number(d.get("history_all_factor")) and float(d["history_all_factor"]) >= 1.0:
+		loaded_factor = int(d["history_all_factor"])
+		for key in HISTORY_SERIES:
+			var series = saved_all.get(key)
+			if not (series is Array):
+				loaded_all = {}
+				break
+			for v in series:
+				if not Validate.is_number(v):
+					return false
+			loaded_all[key] = series
 
 	# Everything checked out; now it is safe to replace the dish's state.
 	radius = loaded_radius
@@ -896,6 +950,14 @@ func from_dict(d: Dictionary) -> bool:
 	_reset_runtime_state()
 	for key in loaded_history:
 		history[key] = loaded_history[key]
+	if loaded_all.is_empty():  # (a save without the whole run: what the fine history holds is all there is)
+		loaded_factor = 1
+		for key in HISTORY_SERIES:
+			loaded_all[key] = history[key].duplicate()
+	history_all = loaded_all
+	history_all_factor = loaded_factor
+	while history_all["pop"].size() >= HISTORY_ALL_LEN:
+		_thin_history_all()
 	# Samples are taken on multiples of the interval, so resume the timer part-way through one.
 	_history_accum = fposmod(time, HISTORY_INTERVAL)
 	return true

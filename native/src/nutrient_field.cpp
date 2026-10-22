@@ -127,6 +127,15 @@ int NutrientField::nearest_inside(int ix, int iy) const {
 	return best;
 }
 
+void NutrientField::snapshot() {
+	eff.resize((size_t)n * n);
+	for (int iy = 0; iy < n; iy++) {
+		for (int ix = 0; ix < n; ix++) {
+			eff[(size_t)iy * n + ix] = (float)cell_value(ix, iy);
+		}
+	}
+}
+
 double NutrientField::cell_value(int ix, int iy) const {
 	int i = iy * n + ix;
 	if (!inside[i]) {
@@ -236,6 +245,17 @@ void NutrientField::read_xy(double x, double y, double &c, double &gx, double &g
 	c = top + (bottom - top) * ty;
 	gx = ((c10 - c00) + ((c11 - c01) - (c10 - c00)) * ty) / spacing;
 	gy = (bottom - top) / spacing;
+}
+
+double NutrientField::concentration_xy(double x, double y) const {
+	double fx = std::clamp((x + origin) / spacing - 0.5, 0.0, n - 1.001);
+	double fy = std::clamp((y + origin) / spacing - 0.5, 0.0, n - 1.001);
+	int x0 = (int)fx, y0 = (int)fy;
+	double tx = fx - x0, ty = fy - y0;
+	double c00 = cell_value(x0, y0), c10 = cell_value(x0 + 1, y0), c01 = cell_value(x0, y0 + 1), c11 = cell_value(x0 + 1, y0 + 1);
+	double top = c00 + (c10 - c00) * tx;
+	double bottom = c01 + (c11 - c01) * tx;
+	return top + (bottom - top) * ty;
 }
 
 double NutrientField::sample(const Vector2 &local) const {
