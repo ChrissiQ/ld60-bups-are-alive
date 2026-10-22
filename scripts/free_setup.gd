@@ -16,6 +16,7 @@ const PLANKTON_SETTLE_SECONDS := 0.5  ## how long the settings are still before 
 @onready var rate_row: SettingRow = $Panel/Box/Scroll/Rows/RateRow
 @onready var bloom_row: SettingRow = $Panel/Box/Scroll/Rows/BloomRow
 @onready var dish_row: SettingRow = $Panel/Box/Scroll/Rows/DishRow
+@onready var tutorial_toggle: Button = $Panel/Box/Scroll/Rows/TutorialToggle  ## whether the guided tour runs when the dish starts
 @onready var advanced_toggle: Button = $Panel/Box/Scroll/Rows/AdvancedToggle
 @onready var advanced_reset: Button = $Panel/Box/Scroll/Rows/Advanced/NoteRow/AdvancedReset  ## inside the advanced options: puts them (only) back to their defaults
 @onready var advanced: VBoxContainer = $Panel/Box/Scroll/Rows/Advanced  ## options for testing the simulation itself, hidden until asked for
@@ -67,6 +68,10 @@ func _ready() -> void:
 	dish_row.value_changed.connect(func(v: float) -> void: _start.dish_radius = snappedf(v * StartConditions.UM_PER_MM, 1.0); _refresh())
 	detail_row.value_changed.connect(func(v: float) -> void: _start.nutrient_resolution = int(v); _refresh(); _update_advanced_label())
 	thickness_row.value_changed.connect(func(v: float) -> void: _start.medium_thickness = v; _refresh(); _update_advanced_label())
+	tutorial_toggle.tooltip_text = Strings.t("free_setup.tutorial_tip")
+	tutorial_toggle.set_pressed_no_signal(_start.tutorial)
+	_update_tutorial_label()
+	tutorial_toggle.toggled.connect(func(on: bool) -> void: _start.tutorial = on; _update_tutorial_label())
 	advanced_toggle.pressed.connect(func() -> void:
 		advanced.visible = not advanced.visible
 		_update_advanced_label()
@@ -122,6 +127,10 @@ func _fit_scroll() -> void:
 	scroll.get_v_scroll_bar().modulate.a = 1.0 if wanted > scroll.custom_minimum_size.y + 0.5 else 0.0  # (nothing to scroll: the strip stays, the bar does not show)
 
 
+func _update_tutorial_label() -> void:
+	tutorial_toggle.text = Strings.t("free_setup.tutorial_on" if _start.tutorial else "free_setup.tutorial_off")
+
+
 ## The advanced options' heading says whether they are open, and, so that a changed one is not forgotten while it is shut,
 ## whether any is not at its usual value.
 func _update_advanced_label() -> void:
@@ -166,10 +175,12 @@ func _refresh() -> void:
 func _reset_to_defaults() -> void:
 	for row: SettingRow in [bups_row, nutrients_row, rate_row, bloom_row, dish_row, detail_row, thickness_row, limit_row]:
 		row.value = row.default_value
+	tutorial_toggle.button_pressed = false
 
 
 func _go() -> void:
 	var chosen := _start.copy()
+	Session.tutorial_wanted = chosen.tutorial
 	Session.free_start = chosen
 	chosen.save()  # so the next launch starts from these
 	Session.mode = Session.Mode.FREE

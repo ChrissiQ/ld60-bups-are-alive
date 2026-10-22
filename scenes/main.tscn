@@ -23,6 +23,7 @@
 [ext_resource type="PackedScene" path="res://ui/bup_name_row.tscn" id="bup_name_row"]
 [ext_resource type="PackedScene" path="res://ui/watch_panel.tscn" id="watch_panel"]
 [ext_resource type="PackedScene" path="res://ui/layers_panel.tscn" id="layers_panel"]
+[ext_resource type="PackedScene" path="res://ui/tutorial.tscn" id="tutorial"]
 [ext_resource type="Texture2D" path="res://icons/lineage.svg" id="lineage_icon"]
 [ext_resource type="Texture2D" path="res://icons/watch.svg" id="watch_icon"]
 [ext_resource type="Texture2D" path="res://icons/back.svg" id="back_icon"]
@@ -484,6 +485,11 @@ grow_vertical = 0
 text = "@hud.paused"
 horizontal_alignment = 1
 vertical_alignment = 2
+
+[node name="TutorialLayer" type="CanvasLayer" parent="."]
+layer = 5
+
+[node name="Tutorial" parent="TutorialLayer" instance=ExtResource("tutorial")]
 
 [node name="MenuLayer" type="CanvasLayer" parent="."]
 layer = 10

@@ -17,6 +17,8 @@ const PAN_KEY_PIXELS := 600.0  ## screen pixels a second the view moves while a 
 const RATE_PANEL_GAP := 16.0  ## screen pixels between the readout and the feed and bloom box under it
 const FIT_MARGIN := 40.0  ## screen pixels kept clear at the sides when framing the dish
 const TOOLBAR_CLEARANCE := 120.0  ## screen pixels kept clear above the dish for the toolbars
+const TUTORIAL_ZOOM := 6.0  ## how close the tutorial brings the camera to a bup it asks the player to click
+const TUTORIAL_BUP_PIXELS := 18.0  ## the lit square round that bup is this far out on each side
 const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) still counts as pointing at it
 
 @onready var dish: Dish = $Dish
@@ -44,6 +46,7 @@ const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) stil
 @onready var follow_button: Button = $HUD/InfoPanel/Box/Follow
 @onready var watch_button: Button = $HUD/InfoPanel/Box/TopRow/WatchButton
 @onready var watch_panel: WatchPanel = $HUD/WatchPanel
+@onready var tutorial: Tutorial = $TutorialLayer/Tutorial  ## the guided tour, when it is wanted (see Session.tutorial_wanted)
 @onready var layers_panel: LayersPanel = $HUD/LayersPanel  ## what the dish shows: each kind of thing can be hidden
 @onready var hud_layer: CanvasLayer = $HUD
 @onready var pause_menu: PauseMenu = $MenuLayer/PauseMenu
@@ -67,6 +70,9 @@ var _stack: Array[Dictionary] = []
 var _lineage_shown := {}  ## what the lineage list was last built from, so it is only rebuilt when that changes
 var _pointer_stamp := []  ## what the hover and placement preview were last worked out from
 var _point_stamp := []  ## the same for the nutrient readout under the pointer
+var _tutorial_was_paused := false  ## whether the game was held before the tour began, which it goes back to
+var _tutorial_bup := -1  ## the bup the tour asked the player to pick, once it has set the view up for that (-1: it has not)
+var _tutorial_bup_was_watched := false
 var following_id := -1  ## the bup the camera is keeping in the middle of the view, or -1
 var _banner_left := 0.0
 var _hover_point := Vector2.ZERO  ## the spot in the dish the pointer is over, for the select tool's readout
@@ -127,6 +133,10 @@ func _ready() -> void:
 		tracker.from_dict(data["goals"])
 		_fit_camera()
 	_sync_tool_locks()
+	tutorial.closed.connect(_on_tutorial_closed)
+	if Session.tutorial_wanted:
+		Session.tutorial_wanted = false
+		_start_tutorial.call_deferred()  # (once the screen has been laid out, so the tour can point at it)
 
 
 func _exit_tree() -> void:
@@ -182,7 +192,9 @@ func _notification(what: int) -> void:
 
 
 func _process(delta: float) -> void:
-	if not menu_open:
+	if tutorial.active and not paused:
+		toolbar.set_paused(true)  # (the game waits while the tour is up, even on a step that asks the player to act)
+	if not menu_open and not tutorial.active:
 		_pan_with_keys(delta)
 	if not paused and not menu_open:
 		# The playback speed is how many seconds of simulation pass per real second.
@@ -779,6 +791,70 @@ func _update_hud() -> void:
 		stats["mutations"], stats["harm"] * 100.0,
 	]), about):
 		_place_rate_panel()  # (the readout's height changes with its text)
+
+
+## The tour of the screen: what each part does, in the order a first-time player needs it, asking for a click now and then so
+## that what only shows while it is in use (the info panel, the watch list, the lineage) is there to be explained.
+func _start_tutorial() -> void:
+	_tutorial_was_paused = paused
+	toolbar.set_paused(true)
+	var steps: Array[Dictionary] = []
+	steps.append(_tour("welcome"))
+	steps.append(_tour("dish", func() -> Rect2: return dish.get_global_transform_with_canvas() * Rect2(-dish.radius, -dish.radius, 2.0 * dish.radius, 2.0 * dish.radius)))
+	steps.append(_tour("readout", func() -> Rect2: return Rect2(hud.global_position, Vector2(210.0, hud.get_content_height()))))
+	if not free_mode:
+		steps.append(_tour("goal", func() -> Rect2: return goal_panel.get_global_rect()))
+	steps.append(_tour("rates", func() -> Rect2: return rate_panel.get_global_rect()))
+	steps.append(_tour("graph", func() -> Rect2: return graph.get_global_rect()))
+	steps.append(_tour("tools", func() -> Rect2: return toolbar.select_button.get_global_rect().merge(toolbar.plankton_button.get_global_rect()), Callable(), Callable(), "" if free_mode else Strings.t("tutorial.tools_locked")))
+	steps.append(_tour("tray", func() -> Rect2: return tool_options.get_global_rect()))
+	steps.append(_tour("time", func() -> Rect2: return toolbar.pause_button.get_global_rect().merge(toolbar.speed_ultra_button.get_global_rect())))
+	steps.append(_tour("layers", func() -> Rect2: return layers_panel.get_global_rect()))
+	steps.append(_tour("pick_bup", _tutorial_bup_rect, func() -> bool: return dish.selected_id >= 0, _tutorial_show_bup))
+	steps.append(_tour("info", func() -> Rect2: return info_panel.get_global_rect()))
+	steps.append(_tour("watch", func() -> Rect2: return watch_button.get_global_rect(), func() -> bool: return dish.is_watched(dish.selected_id)))
+	steps.append(_tour("watched", func() -> Rect2: return watch_panel.get_global_rect()))
+	steps.append(_tour("lineage_open", func() -> Rect2: return lineage_button.get_global_rect(), func() -> bool: return lineage_panel.visible))
+	steps.append(_tour("lineage", func() -> Rect2: return lineage_panel.get_global_rect(), func() -> bool: return not lineage_panel.visible))
+	steps.back()["escape_passes"] = true  # (Escape closes a lineage, which is what that step asks for)
+	steps.append(_tour("finish"))
+	tutorial.start(steps)
+
+
+## One step of the tour (see Tutorial): its text by key (with `extra` added), what it lights, what it waits for, what it does first.
+func _tour(key: String, target := Callable(), wait := Callable(), enter := Callable(), extra := "") -> Dictionary:
+	return {"title": Strings.t("tutorial.title_" + key), "text": Strings.t("tutorial." + key) + extra, "target": target, "wait": wait, "enter": enter}
+
+
+## Brings the camera close to a bup and makes sure a click on it would select it: the step that asks for that click.
+func _tutorial_show_bup() -> void:
+	toolbar.select_tool(Toolbar.Tool.SELECT)
+	tool_options.pick_buttons[Dish.PickMode.ALL].button_pressed = true
+	var ids := dish.bup_ids()
+	if ids.is_empty():
+		return
+	_tutorial_bup = ids[0]
+	_tutorial_bup_was_watched = dish.is_watched(_tutorial_bup)
+	camera.zoom = Vector2.ONE * TUTORIAL_ZOOM
+	camera.position = dish.global_position + (dish.bup_world_pos(_tutorial_bup) - dish.global_position).limit_length(dish.radius)
+
+
+func _tutorial_bup_rect() -> Rect2:
+	if not dish.has_bup(_tutorial_bup):
+		return Rect2()
+	var at := get_viewport().get_canvas_transform() * dish.bup_world_pos(_tutorial_bup)
+	return Rect2(at - Vector2.ONE * TUTORIAL_BUP_PIXELS, Vector2.ONE * 2.0 * TUTORIAL_BUP_PIXELS)
+
+
+## The tour ended, finished or skipped: whatever it set up goes back, so the screen looks as it did before it.
+func _on_tutorial_closed(_completed: bool) -> void:
+	if _tutorial_bup >= 0:
+		if not _tutorial_bup_was_watched:
+			dish.unwatch_bup(_tutorial_bup)
+		_tutorial_bup = -1
+		_clear_selection()
+		_fit_camera()
+	toolbar.set_paused(_tutorial_was_paused)
 
 
 ## The rate box sits just under the readout.

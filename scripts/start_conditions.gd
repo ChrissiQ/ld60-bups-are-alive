@@ -30,6 +30,7 @@ var nutrient_resolution := MIN_NUTRIENT_RESOLUTION  ## cells across the dish's n
 ## What the player chose for the founders, in order: {"name": "", "color": "#rrggbb"}. Founders beyond the list, and
 ## any with nothing chosen, start unnamed and in the default colour.
 var founders: Array = []
+var tutorial := false  ## the guided tour of the screen runs when the dish starts (goal mode decides that for itself)
 var bup_limit := DEFAULT_BUP_LIMIT  ## the most bups the dish holds: past it each birth displaces a random bup
 
 
@@ -51,7 +52,7 @@ func copy() -> StartConditions:
 
 
 func to_dict() -> Dictionary:
-	return {"bups": bups, "nutrient_density": nutrient_density, "feed_density": feed_density, "bloom_density": bloom_density, "dish_radius": dish_radius, "medium_thickness": medium_thickness, "nutrient_resolution": nutrient_resolution, "bup_limit": bup_limit, "founders": founders.slice(0, bups).duplicate(true)}  # (only the founders there are: nothing hidden is carried over)
+	return {"bups": bups, "nutrient_density": nutrient_density, "feed_density": feed_density, "bloom_density": bloom_density, "dish_radius": dish_radius, "medium_thickness": medium_thickness, "nutrient_resolution": nutrient_resolution, "bup_limit": bup_limit, "tutorial": tutorial, "founders": founders.slice(0, bups).duplicate(true)}  # (only the founders there are: nothing hidden is carried over)
 
 
 ## Anything missing, malformed or out of range falls back to the default / the nearest valid value.
@@ -66,6 +67,7 @@ static func from_dict(d: Dictionary) -> StartConditions:
 	c.nutrient_resolution = clampi(int(_number(d, "nutrient_resolution", c.nutrient_resolution)), MIN_NUTRIENT_RESOLUTION, MAX_NUTRIENT_RESOLUTION)
 	c.bup_limit = clampi(int(_number(d, "bup_limit", c.bup_limit)), MIN_BUP_LIMIT, MAX_BUP_LIMIT)
 	c.bup_limit = maxi(c.bup_limit, c.bups)  # the dish holds at least its founders
+	c.tutorial = d.get("tutorial") is bool and d["tutorial"]
 	var saved_founders: Variant = d.get("founders")
 	if saved_founders is Array:
 		for entry in saved_founders.slice(0, MAX_BUPS):

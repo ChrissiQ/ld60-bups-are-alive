@@ -93,6 +93,7 @@ func _start_new() -> void:
 	SaveGame.delete()
 	Session.mode = Session.Mode.GOALS
 	Session.load_requested = false
+	Session.tutorial_wanted = not Tutorial.seen()  # (a new game shows the tour until it has been shown once)
 	get_tree().change_scene_to_file(Scenes.INTRO)
 
 

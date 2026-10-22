@@ -93,6 +93,13 @@ label_text = "@free_setup.dish_radius"
 layout_mode = 2
 label_text = "@free_setup.bup_limit"
 
+[node name="TutorialToggle" type="Button" parent="Panel/Box/Scroll/Rows"]
+layout_mode = 2
+theme_type_variation = &"ListButton"
+toggle_mode = true
+alignment = 0
+text = "@free_setup.tutorial_off"
+
 [node name="AdvancedToggle" type="Button" parent="Panel/Box/Scroll/Rows"]
 layout_mode = 2
 theme_type_variation = &"ListButton"
