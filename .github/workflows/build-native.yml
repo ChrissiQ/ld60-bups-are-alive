@@ -1,14 +1,12 @@
 # Builds the native simulation (native/) for every platform the game ships on, so a player needs
-# nothing installed. It runs when native/ changes, by hand, and as the first step of release.yml
-# (which collects these libraries into the release).
+# nothing installed. It runs by hand (a check that the C++ still builds everywhere) and as the first step of
+# release.yml, which collects these libraries into the release. It does not run on pushes.
 #
 # It builds against godot-cpp's own bundled Godot 4.5 API (api_version=4.5, matching
 # compatibility_minimum in native/bups.gdextension), so no API dump is needed, and the result runs
 # on Godot 4.5 and later. godot-cpp is pinned to the commit the game was developed against.
 name: build-native
 on:
-  push:
-    paths: ["native/**", ".github/workflows/build-native.yml"]
   workflow_dispatch:
   workflow_call:
 env:
