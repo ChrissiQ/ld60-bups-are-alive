@@ -88,4 +88,23 @@ func _init() -> void:
 		await process_frame
 	check(Strings.missing.is_empty(), "no text was asked for that the file lacks: %s" % [Strings.missing])
 
+	# Raw files the game reads (not resources Godot imports) are left out of an exported game unless a preset's include filter names
+	# them, and then every text shows as its key: so each one a script names must be in every preset's filter.
+	var raw_file := RegEx.create_from_string('"res://([^"]+\\.(?:cfg|txt|json|csv))"')
+	var needed := {}
+	for dir in ["res://scripts", "res://ui"]:
+		for path: String in TestUtil.files([dir], ["gd"]):
+			for m in raw_file.search_all(FileAccess.get_file_as_string(path)):
+				needed[m.get_string(1)] = path
+	var presets := ConfigFile.new()
+	check(presets.load("res://export_presets.cfg") == OK and needed.has("text/strings.cfg"), "the export presets load, and the scripts read raw files (text/strings.cfg at least)")
+	for section in presets.get_sections():
+		if not section.begins_with("preset.") or section.ends_with(".options"):
+			continue
+		var filters := String(presets.get_value(section, "include_filter", "")).split(",")
+		for file: String in needed:
+			var included := false
+			for pattern in filters:
+				included = included or file.match(pattern.strip_edges())
+			check(included, "export preset '%s' includes %s (read by %s)" % [presets.get_value(section, "name", section), file, needed[file]])
 	TestUtil.finish(self, "STRINGS TESTS OK  (%d texts asked for)" % asked.size())

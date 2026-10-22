@@ -80,7 +80,7 @@ jobs:
             fi
             echo "## Downloads"
             echo
-            echo "- **Windows, Linux, macOS**: unzip and run. (macOS is not signed: right-click the app, then Open.)"
+            echo '- **Windows, Linux, macOS**: unzip and run. On macOS the app is not notarized, so if it says it is "damaged", run `xattr -cr "Bups Are Alive.app"` in Terminal and open it again.'
             echo "- **godot-project**: the source with the native code already built for Windows, Linux and macOS. Unzip it and open the folder in Godot ${GODOT_VERSION%.*} or later, then press play. Nothing to compile."
           } > notes.md
       - uses: softprops/action-gh-release@v2
