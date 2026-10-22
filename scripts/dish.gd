@@ -14,7 +14,7 @@ signal selection_changed  ## the selected bup is now another (or none)
 signal layers_changed  ## a layer was shown or hidden
 
 ## The kinds of thing the dish draws, each of which can be hidden (a view choice only: nothing here touches the simulation).
-## A hidden layer cannot be hovered or selected either.
+## A hidden layer cannot be hovered or picked, but what is already selected stays selected (hiding the bups to see the steering map of the selected one, say).
 enum Layer { MEDIUM, SOURCES, PLANKTON, BUPS, STEERING }  ## the nutrient haze, the feeders, the plankton, the bups, and the steering map and arc of the selected bup
 
 const DEFAULT_RADIUS := 10000.0  ## µm: 10 mm, the dish goal mode uses and free mode starts with
@@ -712,7 +712,7 @@ func layer_shown(layer: Layer) -> bool:
 	return not _layers_hidden.has(layer)
 
 
-## Shows or hides a layer. What it hides can no longer be pointed at, so a selection or hover on it is let go.
+## Shows or hides a layer. What it hides can no longer be pointed at (a hover on it is let go), but a selection stays.
 func show_layer(layer: Layer, shown: bool) -> void:
 	if shown == layer_shown(layer):
 		return
@@ -725,17 +725,13 @@ func show_layer(layer: Layer, shown: bool) -> void:
 			_bups_mesh.visible = shown
 			_render_stale = true  # (what was not drawn while hidden is drawn afresh)
 			if not shown:
-				selected_id = -1
 				hovered_id = -1
 		Layer.SOURCES:
 			if not shown:
-				selected_source = null
 				hovered_source = null
 		Layer.PLANKTON:
 			if not shown:
-				selected_plankton = null
 				hovered_plankton = null
-	selection_changed.emit()
 	layers_changed.emit()
 	queue_redraw()
 	_overlay.queue_redraw()

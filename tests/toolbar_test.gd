@@ -951,11 +951,14 @@ func _init() -> void:
 	g.dish.select_at(g.dish.global_position + Vector2(100, 100))
 	check(g.dish.selected_plankton != null, "a plankton can be selected while its layer shows")
 	layers.plankton_button.button_pressed = false
-	check(not g.dish.layer_shown(Dish.Layer.PLANKTON) and g.dish.selected_plankton == null, "hiding the plankton layer lets go of a selected plankton")
+	check(not g.dish.layer_shown(Dish.Layer.PLANKTON) and g.dish.selected_plankton != null, "hiding the plankton layer keeps a selected plankton selected")
 	g.dish.select_at(g.dish.global_position + Vector2(100, 100))
-	check(g.dish.selected_plankton == null, "and a hidden layer cannot be selected")
+	check(g.dish.selected_plankton == null, "but a hidden layer cannot be picked: a click where one is lets go of the selection")
+	var kept: int = g.dish.bup_ids()[0]
+	g.dish.selected_id = kept
 	layers.bups_button.button_pressed = false
 	check(not g.dish._bups_mesh.visible and not g.dish.looks_at_bups(), "hiding the bups hides their picture and they can no longer be pointed at")
+	check(g.dish.selected_id == kept and g.dish.layer_shown(Dish.Layer.STEERING), "but the selected bup stays selected, so its steering map can still be looked at with them hidden")
 	layers.bups_button.button_pressed = true
 	layers.plankton_button.button_pressed = true
 	check(g.dish._bups_mesh.visible and g.dish.looks_at_plankton(), "showing them again restores both")
