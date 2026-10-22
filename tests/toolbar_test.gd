@@ -634,6 +634,34 @@ func _init() -> void:
 	check(m._stack.is_empty(), "no selection, no stack")
 	m.dish.clear_bups()
 
+	# --- Watching: a Watch button in the inspect panel, a list above the graph, a click on an entry opens the bup.
+	var watched_one: int = m.dish.add_bup(m.dish.global_position + Vector2(20, 20), Genome.founder(), 100.0)
+	check(not m.watch_panel.visible, "no watch list is shown while nothing is watched")
+	m.dish.selected_id = watched_one
+	await process_frame
+	await process_frame
+	check(m.watch_button.visible and m.watch_button.tooltip_text == "Watch" and not m.watch_button.button_pressed, "a selected bup has a Watch icon, not lit")
+	m.watch_button.pressed.emit()
+	m._process(0.0)
+	check(m.dish.is_watched(watched_one) and m.watch_panel.visible and m.watch_button.tooltip_text == "Stop watching" and m.watch_panel.title.text == "WATCHING  1" and m.watch_button.button_pressed, "pressing it puts the bup on the list, which appears, and the icon lights and offers to take it off again")
+	m.dish.selected_id = -1
+	m.dish.remove_bup(watched_one)
+	await process_frame
+	m._process(0.0)
+	await create_timer(0.6).timeout
+	m._process(0.0)
+	check(m.dish.has_record(watched_one) and m.watch_panel._buttons[watched_one].text.contains("(deceased)"), "a watched bup that dies stays on the list, marked as deceased ('%s')" % m.watch_panel._buttons[watched_one].text)
+	m.watch_panel._buttons[watched_one].pressed.emit()
+	await process_frame
+	await process_frame
+	check(m.dish.selected_id == watched_one and m.info_panel.visible and m.info_panel.theme_type_variation == &"DeceasedPanel", "clicking its entry opens it in the inspect panel, as a deceased bup")
+	m.watch_button.pressed.emit()
+	m._process(0.0)
+	check(not m.dish.is_watched(watched_one) and not m.watch_panel.visible, "pressing the button again takes it off the list, which goes away when empty")
+	m.dish.selected_id = -1
+	await process_frame
+	m.dish.clear_bups()
+
 	# --- Escape: lets go of a selection first, then opens the menu, then closes it again.
 	m.dish.add_bup(m.dish.global_position + Vector2(40, 40), Genome.founder(), 30.0)
 	var picked: int = m.dish.bup_ids()[0]

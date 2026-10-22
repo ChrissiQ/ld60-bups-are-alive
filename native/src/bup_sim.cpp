@@ -53,7 +53,7 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("pin", "id"), &BupSim::pin);
 	ClassDB::bind_method(D_METHOD("unpin", "id"), &BupSim::unpin);
 	ClassDB::bind_method(D_METHOD("lineage_export"), &BupSim::lineage_export);
-	ClassDB::bind_method(D_METHOD("lineage_import", "saved"), &BupSim::lineage_import);
+	ClassDB::bind_method(D_METHOD("lineage_import", "saved", "pinned"), &BupSim::lineage_import, DEFVAL(PackedInt64Array()));
 	ClassDB::bind_method(D_METHOD("get_next_id"), &BupSim::get_next_id);
 	ClassDB::bind_method(D_METHOD("set_next_id", "value"), &BupSim::set_next_id);
 	ClassDB::bind_method(D_METHOD("bup_count"), &BupSim::bup_count);
@@ -458,7 +458,7 @@ Array BupSim::lineage_export() const {
 
 // A saved game's records: they replace those of the same numbers, and the counts that keep a dead
 // record are worked out again from the parents.
-void BupSim::lineage_import(const Array &saved) {
+void BupSim::lineage_import(const Array &saved, const PackedInt64Array &pinned) {
 	for (int i = 0; i < saved.size(); i++) {
 		Dictionary d = saved[i];
 		int64_t id = (int64_t)(double)d.get("id", 0);
@@ -497,6 +497,9 @@ void BupSim::lineage_import(const Array &saved) {
 		} else {
 			p->second.holds++;
 		}
+	}
+	for (int i = 0; i < pinned.size(); i++) { // (before the pruning below, so a dead bup that is being watched survives it)
+		pin(pinned[i]);
 	}
 	std::vector<int64_t> loose;
 	for (const auto &entry : records) {

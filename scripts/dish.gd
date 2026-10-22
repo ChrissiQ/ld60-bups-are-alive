@@ -23,6 +23,7 @@ const PLANKTON_LIFE_SPREAD := 0.5  ## each one bursts at a random time from this
 const PLANKTON_DRAW_RADIUS := 40.0  ## µm: about a small diatom
 const PLANKTON_MIN_PIXELS := 3.0  ## drawn at least this many screen pixels in radius
 const MAX_PLANKTON := 1000
+const MAX_WATCHED := 1000  ## the most bups on the watch list
 const SUGGESTED_BLOOM_RATE := 24.0  ## plankton a sim-day that the goal text suggests (one an hour): 300 units an hour, about what the old feed gave
 const GOAL_UPKEEP_FACTOR := 3.0  ## how much costlier staying alive is once goal mode reaches experiment 2 (set by the screen; 1 elsewhere) [x10 killed every colony tested at once; x3 did not]
 const MAX_BLOOM_ARRIVALS_PER_STEP := 50  ## the most plankton one step lets the bloom add (a few at most; a rate raised a great deal starts over)
@@ -259,6 +260,8 @@ func _process(delta: float) -> void:
 
 ## Everything that belongs to one run of a dish and must start fresh with a new or loaded dish.
 func _reset_runtime_state() -> void:
+	watched.clear()  # (the simulation was reset, so its records, and the pins on them, are gone)
+	watch_version += 1
 	clear_selection()
 	clear_hover()
 	_extinct_signalled = false
@@ -536,6 +539,33 @@ func has_record(id: int) -> bool:
 ## Asks for a bup's record (and its ancestors') to be kept after it dies, until it is unpinned.
 func pin_bup(id: int) -> void:
 	sim.pin(id)
+
+
+## The bups the player is watching, newest first (see watch_bup). Their records, and their ancestors', are kept.
+var watched: Array[int] = []
+var watch_version := 0  ## bumped whenever the list changes, so its panel can rebuild only then
+
+
+func is_watched(id: int) -> bool:
+	return watched.has(id)
+
+
+## Adds a bup, alive or dead, to the watch list, and keeps its record and its ancestors' until it is taken off. False if
+## it has no record, is already there, or the list is full.
+func watch_bup(id: int) -> bool:
+	if not has_record(id) or watched.has(id) or watched.size() >= MAX_WATCHED:
+		return false
+	pin_bup(id)
+	watched.push_front(id)
+	watch_version += 1
+	return true
+
+
+func unwatch_bup(id: int) -> void:
+	if watched.has(id):
+		watched.erase(id)
+		unpin_bup(id)  # (that may drop its record, if nothing else needs it now)
+		watch_version += 1
 
 
 func unpin_bup(id: int) -> void:
@@ -842,6 +872,7 @@ func to_dict() -> Dictionary:
 		"plankton": saved_plankton,
 		"history": history,
 		"history_all": history_all,
+		"watched": watched,
 		"history_all_factor": history_all_factor,
 	}
 
@@ -923,6 +954,13 @@ func from_dict(d: Dictionary) -> bool:
 					return false
 			loaded_all[key] = series
 
+	var loaded_watched := PackedInt64Array()  # the watch list, oldest first
+	var saved_watched = d.get("watched", [])
+	if saved_watched is Array:
+		for i in range(saved_watched.size() - 1, -1, -1):
+			if Validate.is_number(saved_watched[i]):
+				loaded_watched.append(int(saved_watched[i]))
+
 	# Everything checked out; now it is safe to replace the dish's state.
 	radius = loaded_radius
 	sim.reset(radius, -1)
@@ -937,7 +975,7 @@ func from_dict(d: Dictionary) -> bool:
 		sim.set_next_id(int(saved_next))  # so the next bup born doesn't take a number already used
 	var saved_lineage = d.get("lineage")
 	if saved_lineage is Array:
-		sim.lineage_import(saved_lineage.filter(_is_saved_record))
+		sim.lineage_import(saved_lineage.filter(_is_saved_record), loaded_watched)
 	field.load_values(saved_field)
 	sources = loaded_sources
 	plankton = loaded_plankton
@@ -958,6 +996,10 @@ func from_dict(d: Dictionary) -> bool:
 	history_all_factor = loaded_factor
 	while history_all["pop"].size() >= HISTORY_ALL_LEN:
 		_thin_history_all()
+	for id in loaded_watched:  # (the import pinned them, oldest first, so the newest ends up on top again)
+		if has_record(id) and not watched.has(id):
+			watched.push_front(id)
+	watch_version += 1
 	# Samples are taken on multiples of the interval, so resume the timer part-way through one.
 	_history_accum = fposmod(time, HISTORY_INTERVAL)
 	return true

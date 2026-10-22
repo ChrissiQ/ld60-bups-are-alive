@@ -307,6 +307,29 @@ func _init() -> void:
 	for i in 5:
 		all_changed = all_changed and not before_random[i].is_equal_approx(screen._colors[i].color)
 	check(all_changed and screen._names[0].text == "Finnigan", "Random colours gives every founder a new colour and leaves the names alone")
+	var colours_before_names := []
+	for picker in screen._colors:
+		colours_before_names.append(picker.color)
+	screen._randomise_names()
+	var picked := []
+	var names_ok := true
+	for edit in screen._names:
+		picked.append(edit.text)
+		names_ok = names_ok and edit.text != "" and not edit.text.contains(" ") and edit.text.length() <= 8
+	var colours_kept := true
+	for i in 5:
+		colours_kept = colours_kept and colours_before_names[i].is_equal_approx(screen._colors[i].color)
+	var distinct := {}
+	for n in picked:
+		distinct[n] = true
+	check(names_ok and distinct.size() == 5 and colours_kept, "Random names gives every founder a short one-word name of its own and leaves the colours (%s)" % [picked])
+	var name_list := BupNames.random_pool()
+	var list_ok := name_list.size() >= StartConditions.MAX_BUPS
+	var seen_names := {}
+	for n in name_list:
+		list_ok = list_ok and n == n.to_lower() and n.length() >= 2 and n.length() <= 8 and not n.contains(" ") and not seen_names.has(n)
+		seen_names[n] = true
+	check(list_ok, "the list of random names holds at least one for every possible founder (%d), each lowercase, one word, short, none twice" % name_list.size())
 	screen._names[2].text = "  Maeve "
 	screen._colors[2].color = Color.html("#3366cc")
 	var collected: Array = screen._collect()
@@ -400,6 +423,35 @@ func _init() -> void:
 	growing.advance(60.0)
 	check(growing.population() > 0, "an enlarged dish keeps running")
 	growing.free()
+
+	# --- The watch list: watched bups, and their ancestors, keep their records after they die, until taken off.
+	var watching := _make_dish()
+	watching.strike(_small())
+	watching.clear_bups()
+	var elder := watching.add_bup(watching.global_position, Genome.founder(), 30.0)
+	var young: int = watching.sim.add_bup(Vector2(5, 5), Genome.founder(), 30.0, -1.0, -1.0, 1, Vector2.RIGHT, -1, elder)
+	check(watching.watch_bup(young) and not watching.watch_bup(young) and watching.is_watched(young) and watching.watched == [young], "a bup goes on the watch list once")
+	watching.remove_bup(elder)
+	watching.remove_bup(young)
+	check(not watching.has_bup(young) and watching.has_record(young) and watching.has_record(elder), "a watched bup keeps its record after it dies, and so does its ancestor")
+	var saved_watch := TestUtil.saved(watching)
+	var watch_copy := _make_dish()
+	check(watch_copy.from_dict(saved_watch) and watch_copy.watched == [young] and watch_copy.has_record(young), "the watch list survives save and load")
+	watch_copy.free()
+	watching.unwatch_bup(young)
+	check(watching.watched.is_empty() and not watching.has_record(young) and not watching.has_record(elder), "taken off the list, the records go (nothing else needs them)")
+	check(not watching.watch_bup(123456), "a bup with no record can't be watched")
+	var crowd_ids: Array[int] = []
+	for i in Dish.MAX_WATCHED + 5:
+		crowd_ids.append(watching.add_bup(watching.global_position + Vector2(i % 20, i / 20) * 2.0, Genome.founder(), 30.0))
+	var added := 0
+	for id in crowd_ids:
+		if watching.watch_bup(id):
+			added += 1
+	check(added == Dish.MAX_WATCHED and watching.watched.size() == Dish.MAX_WATCHED, "the list holds %d and no more (%d)" % [Dish.MAX_WATCHED, added])
+	watching.strike(_small())
+	check(watching.watched.is_empty(), "a new dish starts with nothing watched")
+	watching.free()
 
 	# --- A dish can shrink about its centre: what is past the new edge goes, the rest keeps its density.
 	var shrinking := _make_dish()
@@ -645,7 +697,7 @@ func _init() -> void:
 	# --- History graph axes.
 	check(HistoryGraph.nice_ceil(0.0) == 10.0 and HistoryGraph.nice_ceil(10.0) == 10.0 and HistoryGraph.nice_ceil(11.0) == 20.0, "axis max rounds up to a round number (small)")
 	check(HistoryGraph.nice_ceil(73.0) == 100.0 and HistoryGraph.nice_ceil(101.0) == 150.0 and HistoryGraph.nice_ceil(301.0) == 500.0, "axis max rounds up to a round number (large)")
-	check(HistoryGraph.nice_ceil(1234.0) == 1300.0, "axis max beyond the table still rounds up (%s)" % HistoryGraph.nice_ceil(1234.0))
+	check(HistoryGraph.nice_ceil(1234.0) == 1600.0 and HistoryGraph.nice_ceil(35300.0) == 40000.0 and HistoryGraph.nice_ceil(100000.0) == 100000.0 and HistoryGraph.nice_ceil(9000.0) == 10000.0, "axis max beyond the table rounds up to a round number that halves to one (%s, %s)" % [HistoryGraph.nice_ceil(1234.0), HistoryGraph.nice_ceil(35300.0)])
 	check(SimClock.format(0) == "0:00" and SimClock.format(65) == "1:05" and SimClock.format(900) == "15:00" and SimClock.format(3600) == "1:00:00" and SimClock.format(3725) == "1:02:05", "the clock reads simulation time as m:ss, then h:mm:ss")
 	check(HistoryGraph.format_time(3600) == "1h" and HistoryGraph.format_time(7200) == "2h", "graph ticks count hours of simulation time")
 	check(HistoryGraph.time_ticks(0.0, 900.0, 300.0) == [0.0, 300.0, 600.0, 900.0], "time ticks over the first window")

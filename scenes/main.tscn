@@ -21,7 +21,9 @@
 [ext_resource type="PackedScene" path="res://ui/setting_row.tscn" id="setting_row"]
 [ext_resource type="PackedScene" path="res://scenes/pause_menu.tscn" id="pause_menu"]
 [ext_resource type="PackedScene" path="res://ui/bup_name_row.tscn" id="bup_name_row"]
+[ext_resource type="PackedScene" path="res://ui/watch_panel.tscn" id="watch_panel"]
 [ext_resource type="Texture2D" path="res://icons/lineage.svg" id="lineage_icon"]
+[ext_resource type="Texture2D" path="res://icons/watch.svg" id="watch_icon"]
 [ext_resource type="Texture2D" path="res://icons/pick_all.svg" id="pick_all_icon"]
 [ext_resource type="Texture2D" path="res://icons/tool_plankton.svg" id="plankton_icon"]
 [ext_resource type="Texture2D" path="res://icons/pick_background.svg" id="pick_background_icon"]
@@ -89,6 +91,8 @@ offset_right = 444.0
 offset_bottom = -20.0
 grow_vertical = 0
 script = ExtResource("3")
+
+[node name="WatchPanel" parent="HUD" instance=ExtResource("watch_panel")]
 
 [node name="Toolbars" type="VBoxContainer" parent="HUD"]
 theme_type_variation = &"FlushStack"
@@ -298,6 +302,7 @@ select_all_on_focus = true
 
 [node name="InfoPanel" type="PanelContainer" parent="HUD"]
 visible = false
+theme_type_variation = &"HudPanel"
 anchors_preset = 3
 anchor_left = 1.0
 anchor_top = 1.0
@@ -321,6 +326,15 @@ layout_mode = 2
 [node name="NameRow" parent="HUD/InfoPanel/Box/TopRow" instance=ExtResource("bup_name_row")]
 layout_mode = 2
 size_flags_horizontal = 3
+
+[node name="WatchButton" type="Button" parent="HUD/InfoPanel/Box/TopRow"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"IconButton"
+toggle_mode = true
+tooltip_text = "@hud.watch"
+icon = ExtResource("watch_icon")
+icon_alignment = 1
 
 [node name="LineageButton" type="Button" parent="HUD/InfoPanel/Box/TopRow"]
 layout_mode = 2
@@ -363,6 +377,7 @@ text = "@hud.follow"
 
 [node name="LineagePanel" type="PanelContainer" parent="HUD"]
 visible = false
+theme_type_variation = &"HudPanel"
 anchors_preset = 3
 anchor_left = 1.0
 anchor_top = 1.0

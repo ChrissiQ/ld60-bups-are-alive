@@ -174,12 +174,12 @@ corner_radius_bottom_right = 4
 corner_radius_bottom_left = 4
 
 [sub_resource type="StyleBoxEmpty" id="scroll_track"]
-content_margin_left = 10.0
-content_margin_right = 10.0
+content_margin_left = 3.0
+content_margin_right = 3.0
 
 [sub_resource type="StyleBoxFlat" id="scroll_grabber"]
-content_margin_left = 10.0
-content_margin_right = 10.0
+content_margin_left = 3.0
+content_margin_right = 3.0
 bg_color = Color(0.3, 0.75, 0.45, 0.35)
 corner_radius_top_left = 3
 corner_radius_top_right = 3
@@ -187,8 +187,8 @@ corner_radius_bottom_right = 3
 corner_radius_bottom_left = 3
 
 [sub_resource type="StyleBoxFlat" id="scroll_grabber_hi"]
-content_margin_left = 10.0
-content_margin_right = 10.0
+content_margin_left = 3.0
+content_margin_right = 3.0
 bg_color = Color(0.45, 1, 0.6, 0.7)
 corner_radius_top_left = 3
 corner_radius_top_right = 3
@@ -313,7 +313,7 @@ content_margin_left = 10.0
 content_margin_top = 8.0
 content_margin_right = 10.0
 content_margin_bottom = 8.0
-bg_color = Color(0.01, 0.04, 0.02, 0.96)
+bg_color = Color(0.01, 0.04, 0.02, 0.65)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
@@ -345,7 +345,7 @@ content_margin_left = 24.0
 content_margin_top = 20.0
 content_margin_right = 24.0
 content_margin_bottom = 20.0
-bg_color = Color(0.035, 0.04, 0.038, 0.96)
+bg_color = Color(0.035, 0.04, 0.038, 0.65)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
@@ -512,7 +512,7 @@ content_margin_left = 8.0
 content_margin_top = 6.0
 content_margin_right = 8.0
 content_margin_bottom = 6.0
-bg_color = Color(0.01, 0.04, 0.02, 0.96)
+bg_color = Color(0.01, 0.04, 0.02, 0.65)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
@@ -528,7 +528,7 @@ content_margin_left = 8.0
 content_margin_top = 6.0
 content_margin_right = 8.0
 content_margin_bottom = 6.0
-bg_color = Color(0.01, 0.04, 0.02, 0.96)
+bg_color = Color(0.01, 0.04, 0.02, 0.65)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
@@ -558,7 +558,7 @@ content_margin_left = 8.0
 content_margin_top = 6.0
 content_margin_right = 8.0
 content_margin_bottom = 6.0
-bg_color = Color(0.012, 0.04, 0.028, 0.96)
+bg_color = Color(0.012, 0.04, 0.028, 0.65)
 border_width_left = 2
 border_width_right = 2
 border_width_bottom = 2
@@ -595,6 +595,55 @@ expand_margin_left = 8.0
 expand_margin_top = 40.0
 expand_margin_right = 8.0
 expand_margin_bottom = 6.0
+
+[sub_resource type="StyleBoxFlat" id="hud_panel"]
+content_margin_left = 24.0
+content_margin_top = 20.0
+content_margin_right = 24.0
+content_margin_bottom = 20.0
+bg_color = Color(0.01, 0.04, 0.02, 0.65)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.45, 1, 0.6, 0.6)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="list_normal"]
+content_margin_left = 4.0
+content_margin_top = 1.0
+content_margin_right = 4.0
+content_margin_bottom = 1.0
+bg_color = Color(0, 0, 0, 0)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxFlat" id="list_hover"]
+content_margin_left = 4.0
+content_margin_top = 1.0
+content_margin_right = 4.0
+content_margin_bottom = 1.0
+bg_color = Color(0.09, 0.3, 0.16, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxFlat" id="list_pressed"]
+content_margin_left = 4.0
+content_margin_top = 1.0
+content_margin_right = 4.0
+content_margin_bottom = 1.0
+bg_color = Color(0.15, 0.45, 0.25, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
 
 [resource]
 default_font = ExtResource("f500")
@@ -693,7 +742,7 @@ Heading/font_sizes/font_size = 26
 Heading/fonts/font = ExtResource("f700")
 Hint/base_type = &"Label"
 Hint/colors/font_color = Color(0.85, 1, 0.9, 1)
-HistoryGraph/colors/background = Color(0.01, 0.04, 0.02, 0.85)
+HistoryGraph/colors/background = Color(0.01, 0.04, 0.02, 0.65)
 HistoryGraph/colors/border = Color(0.45, 1, 0.6, 0.35)
 HistoryGraph/colors/grid = Color(0.45, 1, 0.6, 0.12)
 HistoryGraph/colors/grid_faint = Color(0.45, 1, 0.6, 0.08)
@@ -812,3 +861,13 @@ Window/constants/title_height = 44
 Window/font_sizes/title_font_size = 24
 Window/styles/embedded_border = SubResource("embedded_border")
 Window/styles/embedded_unfocused_border = SubResource("embedded_unfocused_border")
+HudPanel/base_type = &"PanelContainer"
+HudPanel/styles/panel = SubResource("hud_panel")
+CompactListButton/base_type = &"Button"
+CompactListButton/colors/font_disabled_color = Color(1, 0.75, 0.3, 1)
+CompactListButton/font_sizes/font_size = 13
+CompactListButton/styles/disabled = SubResource("list_normal")
+CompactListButton/styles/hover = SubResource("list_hover")
+CompactListButton/styles/hover_pressed = SubResource("list_pressed")
+CompactListButton/styles/normal = SubResource("list_normal")
+CompactListButton/styles/pressed = SubResource("list_pressed")

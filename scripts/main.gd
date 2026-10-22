@@ -39,6 +39,8 @@ const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) stil
 @onready var source_rate_row: SettingRow = $HUD/InfoPanel/Box/SourceRate
 @onready var delete_source_button: Button = $HUD/InfoPanel/Box/DeleteSource
 @onready var follow_button: Button = $HUD/InfoPanel/Box/Follow
+@onready var watch_button: Button = $HUD/InfoPanel/Box/TopRow/WatchButton
+@onready var watch_panel: WatchPanel = $HUD/WatchPanel
 @onready var hud_layer: CanvasLayer = $HUD
 @onready var pause_menu: PauseMenu = $MenuLayer/PauseMenu
 @onready var pause_ring: Panel = $HUD/PauseRing
@@ -101,6 +103,10 @@ func _ready() -> void:
 	delete_source_button.pressed.connect(_delete_selected_source)
 	delete_source_button.focus_mode = Control.FOCUS_NONE
 	follow_button.pressed.connect(_toggle_follow)
+	watch_button.pressed.connect(_toggle_watch)
+	watch_button.focus_mode = Control.FOCUS_NONE
+	watch_panel.dish = dish
+	watch_panel.bup_chosen.connect(_open_watched)
 	lineage_button.pressed.connect(_open_lineage)
 	follow_button.focus_mode = Control.FOCUS_NONE
 	hud.resized.connect(_place_rate_panel)  # (the window changed shape)
@@ -188,6 +194,7 @@ func _process(delta: float) -> void:
 	_follow_selected()
 	dish.refresh_drawing()
 	graph.refresh()
+	watch_panel.refresh()
 	_update_hud()
 	_sync_bloom_panel()
 
@@ -256,15 +263,19 @@ func _update_info_panel() -> void:
 	var dead := bup_id >= 0 and alive_info.is_empty()  # a selected bup that has died stays up, as a record
 	var lineage_open: bool = bup_id >= 0 and bup_id == dish.selected_id and _stack.size() > 0 and _stack.back()["view"] == "lineage"
 	info_panel.visible = (bup_id >= 0 or source != null or floating != null or (not pinned and _hovering_point)) and not lineage_open
-	info_panel.theme_type_variation = &"DeceasedPanel" if dead else &""
+	info_panel.theme_type_variation = &"DeceasedPanel" if dead else &"HudPanel"
 	lineage_panel.visible = lineage_open
-	lineage_panel.theme_type_variation = &"DeceasedPanel" if dead else &""
+	lineage_panel.theme_type_variation = &"DeceasedPanel" if dead else &"HudPanel"
 	source_rate_row.visible = editing
 	delete_source_button.visible = editing
 	follow_button.visible = dish.selected_id >= 0 and not dead  # a bup can be followed once it is selected, not just hovered
+	var watched_now := dish.is_watched(dish.selected_id)
+	watch_button.set_pressed_no_signal(watched_now)  # (lit while the bup is on the list)
+	watch_button.tooltip_text = Strings.t("hud.unwatch") if watched_now else Strings.t("hud.watch")
 	follow_button.text = Strings.t("hud.stop_following") if following_id >= 0 else Strings.t("hud.follow")
 	top_row.visible = bup_id >= 0
 	lineage_button.visible = bup_id >= 0 and bup_id == dish.selected_id
+	watch_button.visible = lineage_button.visible  # (alive or dead: a record can be watched too)
 	if bup_id < 0:
 		name_row.cancel_editing()
 	if lineage_open:
@@ -286,6 +297,25 @@ func _update_info_panel() -> void:
 		if point_stamp != _point_stamp:  # (the readout is worked out again only when the spot or the dish has changed)
 			_point_stamp = point_stamp
 			_set_rich(info_text, _point_text(dish.nutrient_at(_hover_point)), "point")
+
+
+## The Watch button: the selected bup goes on the watch list, or comes off it.
+func _toggle_watch() -> void:
+	var id := dish.selected_id
+	if dish.is_watched(id):
+		dish.unwatch_bup(id)
+	else:
+		dish.watch_bup(id)
+
+
+## An entry of the watch list was clicked: that bup (living or not) in the inspect panel.
+func _open_watched(id: int) -> void:
+	if not dish.has_record(id):
+		return
+	toolbar.select_tool(Toolbar.Tool.SELECT)
+	tool_options.pick_buttons[Dish.PickMode.ALL].button_pressed = true  # (a mode that skips bups would let go of it again)
+	dish.selected_id = id
+	following_id = -1
 
 
 ## Follow: the camera keeps the selected bup in the middle of the view until the player stops it,

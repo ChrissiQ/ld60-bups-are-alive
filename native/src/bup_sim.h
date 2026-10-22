@@ -207,7 +207,7 @@ public:
 	bool pin(int64_t id);
 	void unpin(int64_t id);
 	Array lineage_export() const;
-	void lineage_import(const Array &saved);
+	void lineage_import(const Array &saved, const PackedInt64Array &pinned = PackedInt64Array()); // `pinned`: ids to keep a hold on, whatever else is pruned
 	void set_bup_energy(int64_t id, double energy);
 	void set_bup_pos(int64_t id, const Vector2 &pos);
 

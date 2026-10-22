@@ -10,6 +10,21 @@ extends RefCounted
 ## on anything else, so a panel can't end up calling a bup something the rest of the game doesn't.
 
 const MAX_LENGTH := 24
+const RANDOM_NAMES_FILE := "res://text/names.txt"  ## the names the founders screen picks from: one on each line (an export has to include it, like text/strings.cfg)
+
+static var _random_names: Array[String] = []
+
+
+## The silly names a founder can be given at random, in the file's order (empty if it can't be read).
+static func random_pool() -> Array[String]:
+	if _random_names.is_empty():
+		for line in FileAccess.get_file_as_string(RANDOM_NAMES_FILE).split("\n"):
+			var name := line.strip_edges()
+			if name != "":
+				_random_names.append(name)
+		if _random_names.is_empty():
+			push_error("No names in %s" % RANDOM_NAMES_FILE)
+	return _random_names
 
 ## "lil bup #578": its size word, going by the size its genome grows to, and its number.
 static func default_name(size_gene: float, id: int) -> String:

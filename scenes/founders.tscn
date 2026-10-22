@@ -36,27 +36,35 @@ grow_vertical = 2
 theme_type_variation = &"RoomyStack"
 layout_mode = 2
 
-[node name="Header" type="HBoxContainer" parent="Panel/Box"]
+[node name="Caption" type="Label" parent="Panel/Box"]
 layout_mode = 2
-
-[node name="Caption" type="Label" parent="Panel/Box/Header"]
-layout_mode = 2
-size_flags_horizontal = 3
 theme_type_variation = &"Bright"
 text = "@founders.panel"
-vertical_alignment = 1
 
-[node name="SpreadButton" type="Button" parent="Panel/Box/Header"]
+[node name="Tools" type="HBoxContainer" parent="Panel/Box"]
 layout_mode = 2
+theme_type_variation = &"TightRow"
+
+[node name="SpreadButton" type="Button" parent="Panel/Box/Tools"]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_type_variation = &"DialogButton"
 tooltip_text = "@founders.spread_tip"
 text = "@founders.spread"
 
-[node name="RandomButton" type="Button" parent="Panel/Box/Header"]
+[node name="RandomButton" type="Button" parent="Panel/Box/Tools"]
 layout_mode = 2
+size_flags_horizontal = 3
 theme_type_variation = &"DialogButton"
 tooltip_text = "@founders.random_tip"
 text = "@founders.random"
+
+[node name="NamesButton" type="Button" parent="Panel/Box/Tools"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"DialogButton"
+tooltip_text = "@founders.random_names_tip"
+text = "@founders.random_names"
 
 [node name="Scroll" type="ScrollContainer" parent="Panel/Box"]
 custom_minimum_size = Vector2(560, 300)

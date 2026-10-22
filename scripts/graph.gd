@@ -24,6 +24,7 @@ const SPAN_SECONDS := {Span.LAST_24: 24.0 * 3600.0, Span.LAST_72: 72.0 * 3600.0,
 const SPAN_LEGENDS := {Span.AUTO: "graph.time", Span.LAST_24: "graph.time_24", Span.LAST_72: "graph.time_72", Span.LAST_WEEK: "graph.time_week", Span.ALL: "graph.time_all"}
 const TICK_HOURS := [1.0, 2.0, 4.0, 6.0, 12.0, 24.0, 48.0, 96.0, 168.0, 336.0, 720.0, 1440.0, 4320.0, 8760.0, 17520.0, 43800.0, 87600.0]  ## the gaps the time ticks can have, in hours
 const POP_STEPS := [10.0, 20.0, 25.0, 50.0, 100.0, 150.0, 200.0, 300.0, 500.0]
+const BIG_STEPS := [1.0, 1.2, 1.6, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0]  ## the leading digits of the axis maximums past POP_STEPS
 
 var dish: Dish
 var trait_index := 1
@@ -67,12 +68,17 @@ static func harm_axis_max(samples: Array) -> float:
 	return HARM_STEPS[-1]
 
 
-## The smallest "round" axis maximum at or above `value`, so the scale doesn't jitter.
+## The smallest "round" axis maximum at or above `value`, so the scale doesn't jitter. Beyond the table it is one of
+## BIG_STEPS times a power of ten, each of which halves to a round number too (the axis has a tick at its middle).
 static func nice_ceil(value: float) -> float:
 	for step in POP_STEPS:
 		if value <= step:
 			return step
-	return ceilf(value / 100.0) * 100.0
+	var magnitude := pow(10.0, floorf(log(value) / log(10.0)))
+	for step in BIG_STEPS:
+		if value <= step * magnitude * 1.000001:
+			return step * magnitude
+	return 10.0 * magnitude
 
 
 ## The time on a tick: hours, or days (a day a tick or more apart, so whole days; see `ticks_in_days`).
@@ -165,12 +171,12 @@ func _draw() -> void:
 	var spec: Array = Genome.GENES.get(trait_name, [0.0, harm_axis_max(_values(vals))])
 	var lo: float = spec[0]
 	var hi: float = spec[1]
-	var plot := Rect2(MARGIN_LEFT, MARGIN_TOP, size.x - MARGIN_LEFT - MARGIN_RIGHT, size.y - MARGIN_TOP - MARGIN_BOTTOM)
-
 	var peak := 10.0
 	for p in pops:
 		peak = maxf(peak, p.y)
 	var pop_max := nice_ceil(peak)
+	var margin_left := maxf(MARGIN_LEFT, font.get_string_size(UiText.thousands(pop_max), HORIZONTAL_ALIGNMENT_LEFT, -1, tick_size).x + 10.0)  # (room for the widest population label)
+	var plot := Rect2(margin_left, MARGIN_TOP, size.x - margin_left - MARGIN_RIGHT, size.y - MARGIN_TOP - MARGIN_BOTTOM)
 	var in_days := ticks_in_days(span, window)
 	var tick := tick_step(window, 24.0 if in_days else 1.0)  # (days are whole days apart)
 

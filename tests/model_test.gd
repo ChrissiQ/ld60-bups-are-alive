@@ -388,12 +388,20 @@ func _init() -> void:
 	for h in after_72h:
 		spread_72 += (h - mean_72) * (h - mean_72)
 	spread_72 = sqrt(spread_72 / after_72h.size())
-	var reached_red := 0
+	var mean_500 := 0.0
 	for h in after_500h:
-		if h < 0.1 or h > 0.9:
-			reached_red += 1
-	check(spread_72 > 0.1, "by about 72 hours lineages have clearly drifted apart in colour (hue spread %.2f)" % spread_72)
-	check(reached_red > 300 * 0.05, "in a very long game some lineages have drifted from green all the way to red (%d of 300)" % reached_red)
+		mean_500 += h
+	mean_500 /= after_500h.size()
+	var spread_500 := 0.0
+	for h in after_500h:
+		spread_500 += (h - mean_500) * (h - mean_500)
+	spread_500 = sqrt(spread_500 / after_500h.size())
+	var kept_colour := 0
+	for h in after_500h:
+		if absf(h - Genome.founder()["hue"]) < 0.15:
+			kept_colour += 1
+	check(spread_72 > 0.02, "by about 72 hours lineages have begun to drift apart in colour (hue spread %.3f)" % spread_72)
+	check(spread_500 > spread_72 and spread_500 < 0.2 and kept_colour > 300 * 0.7, "colour changes slowly: by 500 hours most lineages are still near their founder's hue (%d of 300 within 0.15; spread %.3f)" % [kept_colour, spread_500])
 
 	# --- Real rates: doubling in 40 minutes, a few percent of the budget on upkeep, starvation survived for hours.
 	var grower := _cell()

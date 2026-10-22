@@ -1,0 +1,35 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://ui/watch_panel.gd" id="1"]
+
+[node name="WatchPanel" type="PanelContainer"]
+visible = false
+theme_type_variation = &"CompactPanel"
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = -372.0
+offset_right = 290.0
+offset_bottom = -202.0
+grow_vertical = 0
+script = ExtResource("1")
+
+[node name="Box" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_type_variation = &"SnugStack"
+
+[node name="Title" type="Label" parent="Box"]
+theme_type_variation = &"SmallBright"
+layout_mode = 2
+text = "@watch.title"
+
+[node name="Scroll" type="ScrollContainer" parent="Box"]
+custom_minimum_size = Vector2(0, 150)
+layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="Entries" type="VBoxContainer" parent="Box/Scroll"]
+layout_mode = 2
+theme_type_variation = &"FlushStack"
+size_flags_horizontal = 3

@@ -4,8 +4,9 @@ extends Control
 ## What is chosen is kept with the starting conditions, so the next launch (and a restart) starts the same way.
 
 @onready var list: VBoxContainer = $Panel/Box/Scroll/List
-@onready var random_button: Button = $Panel/Box/Header/RandomButton
-@onready var spread_button: Button = $Panel/Box/Header/SpreadButton
+@onready var random_button: Button = $Panel/Box/Tools/RandomButton
+@onready var spread_button: Button = $Panel/Box/Tools/SpreadButton
+@onready var names_button: Button = $Panel/Box/Tools/NamesButton
 @onready var back_button: Button = $Panel/Box/Actions/BackButton
 @onready var start_button: Button = $Panel/Box/Actions/StartButton
 
@@ -20,6 +21,7 @@ func _ready() -> void:
 		_add_row(i)
 	random_button.pressed.connect(_randomise_colors)
 	spread_button.pressed.connect(_spread_colors)
+	names_button.pressed.connect(_randomise_names)
 	back_button.pressed.connect(_back)
 	start_button.pressed.connect(_start_game)
 	if not _names.is_empty():
@@ -54,6 +56,16 @@ func _add_row(index: int) -> void:
 func _randomise_colors() -> void:
 	for picker in _colors:
 		picker.color = Genome.random_color()
+
+
+## Every founder a name from the list of silly ones (each used once, as there are more names than founders can be).
+func _randomise_names() -> void:
+	var pool := BupNames.random_pool().duplicate()  # (the shared list stays in its order)
+	if pool.is_empty():
+		return
+	pool.shuffle()
+	for i in _names.size():
+		_names[i].text = pool[i % pool.size()]
 
 
 ## Every founder a colour as far from the others as it can be: evenly spaced hues, full saturation and brightness.

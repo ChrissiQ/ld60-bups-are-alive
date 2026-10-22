@@ -32,11 +32,14 @@ const GENES := {
 const MAX_HARM := 5.0
 # A bup's colour is a neutral marker, not a trait selection acts on. Every mutation nudges it a little (hue
 # round the colour wheel, saturation and brightness within what shows against the dark dish), so lineages
-# drift apart in colour. About 15 mutations along a line by 72 hours and 30-60 by 500 hours (measured in
-# long runs): at 0.05 a hue spread of roughly +-70 degrees at 72 hours, and green can reach red in a long game.
-const HUE_STEP := 0.05  ## per mutation, as a fraction of the colour wheel (18 degrees)
-const SAT_STEP := 0.02
-const VAL_STEP := 0.02
+# drift apart in colour, slowly: a line has about 15 mutations by 72 hours, 120-190 by 400 hours and 500-800 by 3,000
+# (measured in long runs), and each step is small, so a clade keeps its founder's colour recognisably for hundreds of
+# hours: at 0.01 the hue has spread about +-14 degrees by 72 hours, +-50 by 400 and +-90 by 3,000, and the colour stays
+# saturated and bright (at the earlier 0.05 and 0.02 steps every hue was everywhere, and washed to off-white, within a
+# few hundred hours).
+const HUE_STEP := 0.01  ## per mutation, as a fraction of the colour wheel (3.6 degrees)
+const SAT_STEP := 0.005
+const VAL_STEP := 0.005
 const VAL_MIN := 0.25  ## brightness never drifts below this
 const RANDOM_VAL_MIN := 0.3  ## nor is a random colour picked darker than this
 const RANDOM_SAT_POWER := 0.7  ## 1 is an even spread; lower leans towards vivid (about 59% saturated on average, and greys at a third of an even spread's rate)
