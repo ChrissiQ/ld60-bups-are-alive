@@ -22,6 +22,8 @@ signal bup_limit_chosen(limit: int)
 @onready var initial_rate: StatRow = $Initial/Box/RateRow
 @onready var initial_bloom: StatRow = $Initial/Box/BloomRow
 @onready var initial_dish: StatRow = $Initial/Box/DishRow
+@onready var initial_detail: StatRow = $Initial/Box/DetailRow
+@onready var initial_thickness: StatRow = $Initial/Box/ThicknessRow
 @onready var initial_limit: StatRow = $Initial/Box/LimitRow
 @onready var dish_row: SettingRow = $Content/Settings/Box/DishRow
 @onready var limit_row: SettingRow = $Content/Settings/Box/LimitRow
@@ -64,8 +66,13 @@ func open(dish: Dish, free_mode: bool, started_as: StartConditions = null) -> vo
 		initial_bups.value_text = UiText.thousands(started_as.bups)
 		initial_nutrients.value_text = UiText.thousands(started_as.nutrient_density) + Strings.t("pause.per_mm2")
 		initial_rate.value_text = UiText.thousands(started_as.feed_density, 1) + Strings.t("pause.per_mm2_hour")
-		initial_bloom.value_text = UiText.thousands(started_as.bloom_rate) + Strings.t("pause.per_day")
+		initial_bloom.value_text = UiText.thousands(started_as.bloom_density, 2) + Strings.t("pause.per_mm2_day")
 		initial_dish.value_text = UiText.mm(started_as.dish_radius)
+		var defaults := StartConditions.new()  # (the advanced options are on the record only when they were not left as they were)
+		initial_detail.visible = started_as.nutrient_resolution != defaults.nutrient_resolution
+		initial_thickness.visible = not is_equal_approx(started_as.medium_thickness, defaults.medium_thickness)
+		initial_detail.value_text = UiText.thousands(started_as.nutrient_resolution) + Strings.t("pause.cells_across")
+		initial_thickness.value_text = UiText.thousands(started_as.medium_thickness) + Strings.t("pause.times_water")
 		initial_limit.value_text = UiText.thousands(started_as.bup_limit)
 	quit_button.text = Strings.t("pause.quit") if free_mode else Strings.t("pause.save_quit")
 	if free_mode:

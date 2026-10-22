@@ -146,6 +146,14 @@ label_text = "@pause.record_plankton_bloom"
 layout_mode = 2
 label_text = "@pause.record_dish_radius"
 
+[node name="DetailRow" parent="Initial/Box" instance=ExtResource("3")]
+layout_mode = 2
+label_text = "@pause.record_nutrient_detail"
+
+[node name="ThicknessRow" parent="Initial/Box" instance=ExtResource("3")]
+layout_mode = 2
+label_text = "@pause.record_medium_thickness"
+
 [node name="LimitRow" parent="Initial/Box" instance=ExtResource("3")]
 layout_mode = 2
 label_text = "@pause.record_bup_limit"

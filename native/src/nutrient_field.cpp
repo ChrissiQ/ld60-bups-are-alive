@@ -9,6 +9,11 @@ using namespace godot;
 
 void NutrientField::_bind_methods() {
 	ClassDB::bind_static_method("NutrientField", D_METHOD("size_for", "dish_radius"), &NutrientField::size_for);
+	ClassDB::bind_method(D_METHOD("size_for_radius", "dish_radius"), &NutrientField::size_for_radius);
+	ClassDB::bind_method(D_METHOD("set_max_across", "across"), &NutrientField::set_max_across);
+	ClassDB::bind_method(D_METHOD("get_max_across"), &NutrientField::get_max_across);
+	ClassDB::bind_method(D_METHOD("set_diffusion", "d"), &NutrientField::set_diffusion);
+	ClassDB::bind_method(D_METHOD("get_diffusion"), &NutrientField::get_diffusion);
 	ClassDB::bind_method(D_METHOD("reset", "dish_radius"), &NutrientField::reset);
 	ClassDB::bind_method(D_METHOD("resize", "dish_radius"), &NutrientField::resize);
 	ClassDB::bind_method(D_METHOD("get_size"), &NutrientField::get_size);
@@ -16,6 +21,13 @@ void NutrientField::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("accepts", "local"), &NutrientField::accepts);
 	ClassDB::bind_method(D_METHOD("deposit", "local", "energy"), &NutrientField::deposit);
 	ClassDB::bind_method(D_METHOD("deposit_disc", "local", "radius", "energy"), &NutrientField::deposit_disc);
+	ClassDB::bind_method(D_METHOD("add_cloud", "local", "radius", "energy"), &NutrientField::add_cloud);
+	ClassDB::bind_method(D_METHOD("advance_puffs", "dt"), &NutrientField::advance_puffs);
+	ClassDB::bind_method(D_METHOD("flush_emitters"), &NutrientField::flush_emitters);
+	ClassDB::bind_method(D_METHOD("puff_count"), &NutrientField::puff_count);
+	ClassDB::bind_method(D_METHOD("puffs_export"), &NutrientField::puffs_export);
+	ClassDB::bind_method(D_METHOD("puffs_import", "saved"), &NutrientField::puffs_import);
+	ClassDB::bind_method(D_METHOD("min_cloud_sigma", "x", "y"), &NutrientField::min_cloud_sigma);
 	ClassDB::bind_method(D_METHOD("erase_disc", "local", "radius", "strength"), &NutrientField::erase_disc);
 	ClassDB::bind_method(D_METHOD("sample", "local"), &NutrientField::sample);
 	ClassDB::bind_method(D_METHOD("read", "local"), &NutrientField::read);
@@ -40,11 +52,19 @@ int NutrientField::size_for(double dish_radius) {
 	return std::clamp(wanted, (int)G.field_min_across, (int)G.field_max_across);
 }
 
+int NutrientField::size_for_radius(double dish_radius) const {
+	int wanted = (int)std::ceil(2.0 * dish_radius / G.field_target_spacing);
+	return std::clamp(wanted, (int)G.field_min_across, std::max(get_max_across(), (int)G.field_min_across));
+}
+
 void NutrientField::reset(double dish_radius) {
-	build(dish_radius, size_for(dish_radius));
+	build(dish_radius, size_for_radius(dish_radius));
 }
 
 void NutrientField::build(double dish_radius, int cells_across) {
+	puffs.clear();
+	emitters.clear();
+	hash_dirty = true;
 	radius = dish_radius;
 	origin = dish_radius;
 	n = cells_across;
@@ -72,8 +92,15 @@ void NutrientField::resize(double dish_radius) {
 	bool shrinking = dish_radius < radius;
 	std::vector<float> old_conc = conc;
 	int old_n = n;
-	double old_spacing = spacing, old_origin = origin, old_total = total();
+	double old_spacing = spacing, old_origin = origin, old_total = grid_total();
+	std::vector<Puff> kept_clouds = puffs;
 	reset(dish_radius);
+	for (const Puff &p : kept_clouds) { // the clouds stay where they are (the ones past a smaller dish's edge go with the nutrient there)
+		if (p.x * p.x + p.y * p.y <= radius * radius) {
+			puffs.push_back(p);
+		}
+	}
+	hash_dirty = true;
 	if (old_total <= 0.0 || old_conc.empty()) {
 		return;
 	}
@@ -98,7 +125,7 @@ void NutrientField::resize(double dish_radius) {
 			conc[i] = (float)(top + (bottom - top) * ty);
 		}
 	}
-	double new_total = total();
+	double new_total = grid_total();
 	if (!shrinking && new_total > 0.0) {
 		float scale = (float)(old_total / new_total);
 		for (float &c : conc) {
@@ -135,7 +162,306 @@ void NutrientField::snapshot() {
 			eff[(size_t)iy * n + ix] = (float)cell_value(ix, iy);
 		}
 	}
+	rebuild_hash();
 }
+
+// ---- the clouds --------------------------------------------------------------------------------
+
+double NutrientField::puff_reach(const Puff &p) const {
+	double peak = p.mass / (2.0 * 3.14159265358979323846 * p.var);
+	double cut = std::max(G.cloud_cut * p.cut * G.detection_floor, 1e-30);
+	return peak > cut ? std::sqrt(2.0 * p.var * std::log(peak / cut)) : 0.0;
+}
+
+void NutrientField::rebuild_hash() const {
+	if (!hash_dirty) {
+		return;
+	}
+	hash_dirty = false;
+	size_t count = puffs.size();
+	bin_entries.clear();
+	if (count == 0) {
+		bin_start.assign(2, 0);
+		bins_across = 1;
+		return;
+	}
+	bin_size = 0.5 * spacing;
+	bins_across = std::max(1, (int)std::ceil(2.0 * radius / bin_size) + 1);
+	size_t bins = (size_t)bins_across * bins_across;
+	ha.resize(count);
+	hb.resize(count);
+	hreach2.resize(count);
+	hsigma.resize(count);
+	std::vector<int> lo_x(count), hi_x(count), lo_y(count), hi_y(count);
+	bin_start.assign(bins + 1, 0);
+	for (size_t i = 0; i < count; i++) { // (first how many bins each puff touches, to size the lists)
+		const Puff &p = puffs[i];
+		double reach = puff_reach(p);
+		ha[i] = 1.0 / (2.0 * 3.14159265358979323846 * p.var);
+		hb[i] = 0.5 / p.var;
+		hreach2[i] = reach * reach;
+		hsigma[i] = std::sqrt(p.var);
+		lo_x[i] = std::clamp((int)((p.x - reach + origin) / bin_size), 0, bins_across - 1);
+		hi_x[i] = std::clamp((int)((p.x + reach + origin) / bin_size), 0, bins_across - 1);
+		lo_y[i] = std::clamp((int)((p.y - reach + origin) / bin_size), 0, bins_across - 1);
+		hi_y[i] = std::clamp((int)((p.y + reach + origin) / bin_size), 0, bins_across - 1);
+		for (int by = lo_y[i]; by <= hi_y[i]; by++) {
+			for (int bx = lo_x[i]; bx <= hi_x[i]; bx++) {
+				bin_start[(size_t)by * bins_across + bx + 1]++;
+			}
+		}
+	}
+	for (size_t b = 0; b < bins; b++) {
+		bin_start[b + 1] += bin_start[b];
+	}
+	bin_entries.resize((size_t)bin_start[bins]);
+	std::vector<int> next(bin_start.begin(), bin_start.end() - 1);
+	for (size_t i = 0; i < count; i++) { // (then who is in each, in the order the puffs were added: the same on any run)
+		for (int by = lo_y[i]; by <= hi_y[i]; by++) {
+			for (int bx = lo_x[i]; bx <= hi_x[i]; bx++) {
+				bin_entries[(size_t)next[(size_t)by * bins_across + bx]++] = (int)i;
+			}
+		}
+	}
+}
+
+template <typename F>
+void NutrientField::each_puff(double x, double y, F fn) const {
+	int bx = std::clamp((int)((x + origin) / bin_size), 0, bins_across - 1);
+	int by = std::clamp((int)((y + origin) / bin_size), 0, bins_across - 1);
+	int b = by * bins_across + bx;
+	for (int e = bin_start[b]; e < bin_start[b + 1]; e++) {
+		int k = bin_entries[e];
+		const Puff &p = puffs[k];
+		double dx = x - p.x, dy = y - p.y, r2 = dx * dx + dy * dy;
+		if (r2 <= hreach2[k]) {
+			fn(k, dx, dy, r2);
+		}
+	}
+}
+
+void NutrientField::puff_sum(double x, double y, double &c, double &gx, double &gy) const {
+	each_puff(x, y, [&](int k, double dx, double dy, double r2) {
+		double ci = puffs[k].mass * ha[k] * fast_exp(-r2 * hb[k]);
+		c += ci;
+		gx -= ci * dx * 2.0 * hb[k]; // (the gradient of a Gaussian is -c r / var)
+		gy -= ci * dy * 2.0 * hb[k];
+	});
+}
+
+void NutrientField::puff_probe(double x, double y, double &c, double &gx, double &gy, double &sigma) const {
+	each_puff(x, y, [&](int k, double dx, double dy, double r2) {
+		double ci = puffs[k].mass * ha[k] * fast_exp(-r2 * hb[k]);
+		c += ci;
+		gx -= ci * dx * 2.0 * hb[k];
+		gy -= ci * dy * 2.0 * hb[k];
+		sigma = std::min(sigma, hsigma[k]);
+	});
+}
+
+double NutrientField::min_cloud_sigma(double x, double y) const {
+	rebuild_hash();
+	double smallest = 1.0e18;
+	if (!puffs.empty()) {
+		each_puff(x, y, [&](int k, double, double, double) { smallest = std::min(smallest, hsigma[k]); });
+	}
+	return smallest;
+}
+
+// Gives a cloud to the grid: its nutrient over the cells it covers, weighted as the cloud is (so what the cells hold
+// stands for the cloud as well as a grid can), all of it on the cells inside the dish.
+void NutrientField::deposit_gaussian(double x, double y, double mass, double var) {
+	double reach = 4.0 * std::sqrt(var); // (all of the cloud that matters)
+	int x0, x1, y0, y1;
+	disc_block(x, y, reach, x0, x1, y0, y1);
+	std::vector<std::pair<int, double>> weights;
+	double sum = 0.0;
+	for (int cy = y0; cy <= y1; cy++) {
+		for (int cx = x0; cx <= x1; cx++) {
+			int i = cy * n + cx;
+			if (!inside[i]) {
+				continue;
+			}
+			double dx = (cx + 0.5) * spacing - origin - x, dy = (cy + 0.5) * spacing - origin - y;
+			double w = std::exp(-(dx * dx + dy * dy) / (2.0 * var));
+			weights.push_back({ i, w });
+			sum += w;
+		}
+	}
+	if (sum <= 1e-12) {
+		deposit_xy(x, y, mass);
+		return;
+	}
+	for (const auto &w : weights) {
+		conc[w.first] += (float)(mass * w.second / sum / (spacing * spacing));
+	}
+}
+
+static const double MIN_CLOUD_VARIANCE = 100.0; // µm^2: a cloud is never thinner than 10 µm across (a dose of one nutrient lands on a point)
+static const size_t MAX_CLOUDS = 200000; // past this a new one goes onto the grid
+
+void NutrientField::add_puff(double x, double y, double mass, double var, double cut) {
+	if (puffs.size() >= MAX_CLOUDS) {
+		deposit_gaussian(x, y, mass, var);
+		return;
+	}
+	puffs.push_back({ x, y, mass, var, cut });
+	hash_dirty = true;
+	hash_age = 0.0;
+}
+
+void NutrientField::add_cloud(const Vector2 &local, double disc_radius, double energy) {
+	double var = std::max(0.25 * disc_radius * disc_radius, MIN_CLOUD_VARIANCE); // (a uniform disc has this variance on each axis)
+	if (!accepts(local) || std::sqrt(var) >= G.cloud_handover * spacing) { // a grid fine enough to hold it as it is
+		deposit_disc(local, disc_radius, energy);
+		return;
+	}
+	add_puff(local.x, local.y, energy, var);
+}
+
+static const double EMIT_INTERVAL = 60.0; // seconds between the clouds a steady source lets go of
+
+void NutrientField::release_emitter(Emitter &e) {
+	if (e.mass > 0.0) {
+		double var = std::max(get_diffusion() * e.age, MIN_CLOUD_VARIANCE); // (what was released over the time has spread, on average, for half of it)
+		if (inside_count > 0 && accepts(Vector2((float)e.x, (float)e.y))) {
+			add_puff(e.x, e.y, e.mass, var, 0.001); // (looked for out to a thousandth of the usual: see Puff::cut)
+		} else {
+			deposit_xy(e.x, e.y, e.mass);
+		}
+	}
+	e.mass = 0.0;
+	e.age = 0.0;
+}
+
+void NutrientField::emit_xy(double x, double y, double energy, double dt) {
+	if (std::sqrt(get_diffusion() * EMIT_INTERVAL) >= G.cloud_handover * spacing) { // a grid fine enough to hold the plume: straight onto it
+		deposit_xy(x, y, energy);
+		return;
+	}
+	float fx = (float)x, fy = (float)y;
+	uint32_t bx, by;
+	memcpy(&bx, &fx, 4);
+	memcpy(&by, &fy, 4);
+	Emitter &e = emitters[((uint64_t)bx << 32) | by];
+	e.x = x;
+	e.y = y;
+	e.mass += energy;
+	e.age += dt;
+	e.lived += dt;
+	e.epoch = emit_epoch;
+	if (e.age >= std::clamp(e.lived, 5.0, EMIT_INTERVAL)) { // (often at first, so that a new source shows soon)
+		release_emitter(e);
+	}
+}
+
+void NutrientField::end_emissions() {
+	for (auto it = emitters.begin(); it != emitters.end();) {
+		if (it->second.epoch != emit_epoch) { // its source is gone: what it kept is let go
+			release_emitter(it->second);
+			it = emitters.erase(it);
+		} else {
+			++it;
+		}
+	}
+}
+
+void NutrientField::flush_emitters() {
+	for (auto &item : emitters) {
+		release_emitter(item.second);
+	}
+}
+
+void NutrientField::advance_puffs(double dt) {
+	if (puffs.empty()) {
+		return;
+	}
+	double spread = 2.0 * get_diffusion() * dt;
+	double handover = G.cloud_handover * spacing;
+	std::vector<Puff> kept;
+	kept.reserve(puffs.size());
+	for (Puff p : puffs) {
+		p.var += spread;
+		if (p.mass <= 1e-9) {
+			continue; // eaten
+		}
+		if (std::sqrt(p.var) >= handover) {
+			deposit_gaussian(p.x, p.y, p.mass, p.var);
+		} else {
+			kept.push_back(p);
+		}
+	}
+	bool removed = kept.size() != puffs.size();
+	puffs.swap(kept);
+	hash_age += dt;
+	if (removed || hash_age >= 2.0) { // (a cloud's width changes by well under 1% in 2 s, so the lists can be a little behind it)
+		hash_dirty = true;
+		hash_age = 0.0;
+	}
+}
+
+Array NutrientField::puffs_export() const {
+	Array out;
+	for (const Puff &p : puffs) {
+		Array one;
+		one.push_back(p.x);
+		one.push_back(p.y);
+		one.push_back(p.mass);
+		one.push_back(p.var);
+		one.push_back(p.cut);
+		out.push_back(one);
+	}
+	return out;
+}
+
+void NutrientField::puffs_import(const Array &saved) {
+	puffs.clear();
+	for (int i = 0; i < saved.size(); i++) {
+		Variant v = saved[i];
+		if (v.get_type() != Variant::ARRAY) {
+			continue;
+		}
+		Array one = v;
+		if (one.size() != 4 && one.size() != 5) { // (a save from before the sources' clouds has four)
+			continue;
+		}
+		Puff p = { (double)one[0], (double)one[1], (double)one[2], (double)one[3], one.size() == 5 ? (double)one[4] : 1.0 };
+		if (p.var > 0.0 && p.mass > 0.0 && p.x * p.x + p.y * p.y <= radius * radius) {
+			puffs.push_back(p);
+		}
+	}
+	hash_dirty = true;
+}
+
+// The grid's concentrations with each cloud's added at the cell centres it reaches.
+std::vector<float> NutrientField::view_values() const {
+	std::vector<float> view = conc;
+	for (const Puff &p : puffs) {
+		double reach = puff_reach(p);
+		int x0, x1, y0, y1;
+		disc_block(p.x, p.y, reach, x0, x1, y0, y1);
+		for (int cy = y0; cy <= y1; cy++) {
+			for (int cx = x0; cx <= x1; cx++) {
+				int i = cy * n + cx;
+				if (!inside[i]) {
+					continue;
+				}
+				double dx = (cx + 0.5) * spacing - origin - p.x, dy = (cy + 0.5) * spacing - origin - p.y;
+				view[i] += (float)(p.mass / ((2.0 * 3.14159265358979323846) * p.var) * std::exp(-(dx * dx + dy * dy) / (2.0 * p.var)));
+			}
+		}
+	}
+	return view;
+}
+
+double NutrientField::view_cell(const std::vector<float> &view, int ix, int iy) const {
+	int i = iy * n + ix;
+	if (!inside[i]) {
+		i = nearest_inside(ix, iy);
+	}
+	return i < 0 ? 0.0 : (double)view[i];
+}
+
 
 double NutrientField::cell_value(int ix, int iy) const {
 	int i = iy * n + ix;
@@ -194,16 +520,30 @@ void NutrientField::deposit(const Vector2 &local, double energy) {
 	deposit_xy(local.x, local.y, energy);
 }
 
+// The cells whose centres could lie within `radius` of (x, y): a square block of the grid (clamped to it), so a small disc
+// on a big grid does not look at every cell.
+void NutrientField::disc_block(double x, double y, double radius, int &x0, int &x1, int &y0, int &y1) const {
+	x0 = std::max(0, (int)std::floor((x - radius + origin) / spacing - 0.5));
+	x1 = std::min(n - 1, (int)std::ceil((x + radius + origin) / spacing - 0.5));
+	y0 = std::max(0, (int)std::floor((y - radius + origin) / spacing - 0.5));
+	y1 = std::min(n - 1, (int)std::ceil((y + radius + origin) / spacing - 0.5));
+}
+
 void NutrientField::deposit_disc(const Vector2 &local, double disc_radius, double energy) {
 	std::vector<int> targets;
-	for (int i = 0; i < n * n; i++) {
-		if (!inside[i]) {
-			continue;
-		}
-		double cx = (i % n + 0.5) * spacing - origin, cy = (i / n + 0.5) * spacing - origin;
-		double dx = cx - local.x, dy = cy - local.y;
-		if (std::sqrt(dx * dx + dy * dy) <= disc_radius) {
-			targets.push_back(i);
+	int x0, x1, y0, y1;
+	disc_block(local.x, local.y, disc_radius, x0, x1, y0, y1);
+	for (int y = y0; y <= y1; y++) {
+		for (int x = x0; x <= x1; x++) {
+			int i = y * n + x;
+			if (!inside[i]) {
+				continue;
+			}
+			double cx = (x + 0.5) * spacing - origin, cy = (y + 0.5) * spacing - origin;
+			double dx = cx - local.x, dy = cy - local.y;
+			if (std::sqrt(dx * dx + dy * dy) <= disc_radius) {
+				targets.push_back(i);
+			}
 		}
 	}
 	if (targets.empty()) {
@@ -218,19 +558,33 @@ void NutrientField::deposit_disc(const Vector2 &local, double disc_radius, doubl
 
 double NutrientField::erase_disc(const Vector2 &local, double disc_radius, double strength) {
 	double removed = 0.0;
-	for (int i = 0; i < n * n; i++) {
-		if (!inside[i]) {
-			continue;
+	int x0, x1, y0, y1;
+	disc_block(local.x, local.y, disc_radius, x0, x1, y0, y1);
+	for (int y = y0; y <= y1; y++) {
+		for (int x = x0; x <= x1; x++) {
+			int i = y * n + x;
+			if (!inside[i]) {
+				continue;
+			}
+			double cx = (x + 0.5) * spacing - origin, cy = (y + 0.5) * spacing - origin;
+			double dx = cx - local.x, dy = cy - local.y;
+			double d = std::sqrt(dx * dx + dy * dy);
+			if (d >= disc_radius) {
+				continue;
+			}
+			double taken = conc[i] * strength * (1.0 - d / disc_radius);
+			conc[i] -= (float)taken;
+			removed += taken * spacing * spacing;
 		}
-		double cx = (i % n + 0.5) * spacing - origin, cy = (i / n + 0.5) * spacing - origin;
-		double dx = cx - local.x, dy = cy - local.y;
-		double d = std::sqrt(dx * dx + dy * dy);
-		if (d >= disc_radius) {
-			continue;
+	}
+	for (Puff &p : puffs) { // a cloud under the brush gives up the share its centre would
+		double d = std::sqrt((p.x - local.x) * (p.x - local.x) + (p.y - local.y) * (p.y - local.y));
+		if (d < disc_radius) {
+			double taken = p.mass * strength * (1.0 - d / disc_radius);
+			p.mass -= taken;
+			removed += taken;
+			hash_dirty = true;
 		}
-		double taken = conc[i] * strength * (1.0 - d / disc_radius);
-		conc[i] -= (float)taken;
-		removed += taken * spacing * spacing;
 	}
 	return removed;
 }
@@ -246,9 +600,23 @@ void NutrientField::read_xy(double x, double y, double &c, double &gx, double &g
 	c = top + (bottom - top) * ty;
 	gx = ((c10 - c00) + ((c11 - c01) - (c10 - c00)) * ty) / spacing;
 	gy = (bottom - top) / spacing;
+	rebuild_hash();
+	if (!puffs.empty()) {
+		puff_sum(x, y, c, gx, gy);
+	}
 }
 
 double NutrientField::concentration_xy(double x, double y) const {
+	double c = grid_concentration_xy(x, y);
+	rebuild_hash();
+	if (!puffs.empty()) {
+		double gx = 0.0, gy = 0.0;
+		puff_sum(x, y, c, gx, gy);
+	}
+	return c;
+}
+
+double NutrientField::grid_concentration_xy(double x, double y) const {
 	double fx = std::clamp((x + origin) / spacing - 0.5, 0.0, n - 1.001);
 	double fy = std::clamp((y + origin) / spacing - 0.5, 0.0, n - 1.001);
 	int x0 = (int)fx, y0 = (int)fy;
@@ -278,7 +646,66 @@ Vector2 NutrientField::gradient(const Vector2 &local) const {
 	return Vector2((float)((xp - xm) / (2.0 * h)), (float)((yp - ym) / (2.0 * h)));
 }
 
+// A bup takes what it wants from the nutrient where it is, from the grid's cell and from each cloud that reaches it in
+// proportion to how much of the concentration at that point each makes. Where no cloud reaches, it is the cell's alone.
+void NutrientField::cloud_share_xy(double x, double y, CloudShare &share) const {
+	share.count = 0;
+	share.more = false;
+	share.total = 0.0;
+	if (puffs.empty()) {
+		return;
+	}
+	each_puff(x, y, [&](int k, double, double, double r2) {
+		double ci = puffs[k].mass * ha[k] * fast_exp(-r2 * hb[k]);
+		share.total += ci;
+		if (share.count < 6) {
+			share.k[share.count] = k;
+			share.c[share.count] = ci;
+			share.count++;
+		} else {
+			share.more = true;
+		}
+	});
+}
+
+void NutrientField::concentration_parts_xy(double x, double y, double &from_grid, double &from_clouds, CloudShare &share) const {
+	from_grid = grid_concentration_xy(x, y);
+	rebuild_hash();
+	cloud_share_xy(x, y, share);
+	from_clouds = share.total;
+}
+
 double NutrientField::take_xy(double x, double y, double energy) {
+	double from_grid, from_clouds;
+	CloudShare share;
+	concentration_parts_xy(x, y, from_grid, from_clouds, share);
+	return take_parts_xy(x, y, energy, from_grid, from_clouds, share);
+}
+
+double NutrientField::take_parts_xy(double x, double y, double energy, double from_grid, double from_clouds, const CloudShare &share) {
+	if (from_clouds <= 0.0) {
+		return take_from_grid(x, y, energy);
+	}
+	double all = from_grid + from_clouds;
+	double taken = take_from_grid(x, y, energy * from_grid / all);
+	double wanted = energy * from_clouds / all;
+	if (!share.more) {
+		for (int s = 0; s < share.count; s++) {
+			double part = std::min(puffs[share.k[s]].mass, wanted * share.c[s] / from_clouds);
+			puffs[share.k[s]].mass -= part;
+			taken += part;
+		}
+		return taken;
+	}
+	each_puff(x, y, [&](int k, double, double, double r2) { // (more than the few kept: look again)
+		double part = std::min(puffs[k].mass, wanted * (puffs[k].mass * ha[k] * fast_exp(-r2 * hb[k])) / from_clouds);
+		puffs[k].mass -= part;
+		taken += part;
+	});
+	return taken;
+}
+
+double NutrientField::take_from_grid(double x, double y, double energy) {
 	int i = index_at(x, y);
 	if (!inside[i]) {
 		i = nearest_inside(i % n, i / n);
@@ -420,17 +847,28 @@ void NutrientField::sweep(bool along_rows, double k) {
 }
 
 void NutrientField::diffuse(double dt) {
-	double k = G.diffusion * dt / (spacing * spacing);
+	double k = get_diffusion() * dt / (spacing * spacing);
 	sweep(true, k);
 	sweep(false, k);
 }
 
-double NutrientField::total() const {
+double NutrientField::grid_total() const {
 	double sum = 0.0;
 	for (float c : conc) {
 		sum += c;
 	}
 	return sum * spacing * spacing;
+}
+
+double NutrientField::total() const {
+	double sum = grid_total();
+	for (const Puff &p : puffs) {
+		sum += p.mass;
+	}
+	for (const auto &item : emitters) {
+		sum += item.second.mass;
+	}
+	return sum;
 }
 
 PackedFloat32Array NutrientField::values() const {
@@ -447,8 +885,9 @@ PackedByteArray NutrientField::haze_bytes(double visible_above, double alpha_sca
 	PackedByteArray out;
 	out.resize((int64_t)conc.size() * 4);
 	uint8_t *w = out.ptrw();
+	std::vector<float> view = view_values();
 	for (size_t i = 0; i < conc.size(); i++) {
-		double c = conc[i];
+		double c = view[i];
 		uint8_t *p = w + i * 4;
 		if (c > visible_above) {
 			p[0] = 230;
@@ -463,11 +902,13 @@ PackedByteArray NutrientField::haze_bytes(double visible_above, double alpha_sca
 }
 
 // A cool tint where a swimmer of this speed and sense range could tell up the gradient from down it, stronger where it
-// does so more reliably (the chance of drifting up, above a coin toss), and nothing where it is only guessing.
+// does so more reliably (the chance of ending up further up the slope: see steering_chance), and nothing
+// where it is only guessing.
 PackedByteArray NutrientField::steer_bytes(double speed, double sense_range, double max_alpha) const {
 	PackedByteArray out;
 	out.resize((int64_t)conc.size() * 4);
 	uint8_t *w = out.ptrw();
+	std::vector<float> view = view_values();
 	for (int y = 0; y < n; y++) {
 		for (int x = 0; x < n; x++) {
 			size_t i = (size_t)y * n + x;
@@ -477,10 +918,9 @@ PackedByteArray NutrientField::steer_bytes(double speed, double sense_range, dou
 				continue;
 			}
 			int xm = std::max(x - 1, 0), xp = std::min(x + 1, n - 1), ym = std::max(y - 1, 0), yp = std::min(y + 1, n - 1);
-			double gx = (cell_value(xp, y) - cell_value(xm, y)) / ((xp - xm) * spacing);
-			double gy = (cell_value(x, yp) - cell_value(x, ym)) / ((yp - ym) * spacing);
-			double snr = steering_snr(speed, sense_range, conc[i], std::sqrt(gx * gx + gy * gy));
-			double reliable = std::erf(snr / std::sqrt(2.0)); // 2 * (chance of drifting up) - 1
+			double gx = (view_cell(view, xp, y) - view_cell(view, xm, y)) / ((xp - xm) * spacing);
+			double gy = (view_cell(view, x, yp) - view_cell(view, x, ym)) / ((yp - ym) * spacing);
+			double reliable = 2.0 * steering_chance(speed, sense_range, view[i], std::sqrt(gx * gx + gy * gy)) - 1.0; // (twice the chance above a coin toss: 0 where it only guesses, 1 where it is sure)
 			p[0] = 90;
 			p[1] = 190;
 			p[2] = 255;

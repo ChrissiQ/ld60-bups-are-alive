@@ -93,6 +93,8 @@ func _init() -> void:
 	setup.nutrients_row.slider.value = 90
 	setup.rate_row.slider.value = 3
 	setup.dish_row.slider.value = 2.5
+	setup.detail_row.slider.value = 250
+	setup.thickness_row.slider.value = 8
 	check(not FileAccess.file_exists(TEMP), "tweaking sliders alone saves nothing")
 	setup._go()
 	check(FileAccess.file_exists(TEMP), "GO saves the settings")
@@ -103,9 +105,85 @@ func _init() -> void:
 	var again: Control = load("res://scenes/free_setup.tscn").instantiate()
 	root.add_child(again)
 	await process_frame
-	check(again.bups_row.slider.value == 55 and again.nutrients_row.slider.value == 90 and again.rate_row.slider.value == 3 and is_equal_approx(again.dish_row.slider.value, 2.5),
+	check(again.bups_row.slider.value == 55 and again.nutrients_row.slider.value == 90 and again.rate_row.slider.value == 3 and is_equal_approx(again.dish_row.slider.value, 2.5) and again.detail_row.slider.value == 250 and again.thickness_row.slider.value == 8,
 		"next launch shows the previous choices (%d, %d, %d, %.1f)" % [again.bups_row.slider.value, again.nutrients_row.slider.value, again.rate_row.slider.value, again.dish_row.slider.value])
 	again.queue_free()
+
+	# The preview shows the plankton a bloom keeps floating, once the sliders have been still for a moment (not on every nudge).
+	var bloomy := StartConditions.new()
+	bloomy.dish_radius = 20000.0  # (a 20 mm dish: about 1,257 mm²)
+	bloomy.bloom_density = 0.5  # (about 628 a day, so about 26 floating at a time)
+	Session.free_start = bloomy
+	var preview: Control = load("res://scenes/free_setup.tscn").instantiate()
+	root.add_child(preview)
+	await process_frame
+	check(preview.dish.plankton.is_empty(), "the preview has no plankton the moment it is made")
+	await create_timer(preview.PLANKTON_SETTLE_SECONDS + 0.3).timeout
+	var floating: int = preview.dish.plankton.size()
+	check(floating == roundi(preview.dish.bloom_per_day() / 24.0) and floating > 20, "once still, the preview shows the plankton a bloom keeps floating (%d, a day's %.0f over 24)" % [floating, preview.dish.bloom_per_day()])
+	preview.bloom_row.slider.value = 1.0
+	await process_frame
+	check(preview.dish.plankton.is_empty(), "moving a slider rebuilds the preview, without them until it is still again")
+	await create_timer(preview.PLANKTON_SETTLE_SECONDS + 0.3).timeout
+	check(preview.dish.plankton.size() == roundi(preview.dish.bloom_per_day() / 24.0), "...and they come back for the new bloom (%d)" % preview.dish.plankton.size())
+	preview.bloom_row.slider.value = 0.0
+	await create_timer(preview.PLANKTON_SETTLE_SECONDS + 0.3).timeout
+	check(preview.dish.plankton.is_empty(), "no bloom, no plankton in the preview")
+	preview.queue_free()
+	await process_frame
+
+	# The advanced options have a reset of their own: it clears them and nothing else, and is there only while one is changed.
+	Session.free_start = StartConditions.new()
+	var adv: Control = load("res://scenes/free_setup.tscn").instantiate()
+	root.add_child(adv)
+	await process_frame
+	check(not adv.advanced_reset.is_visible_in_tree() and not adv.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "with the advanced options shut there is no reset showing, and with them as usual no 'changed'")
+	adv.bups_row.slider.value = 30
+	adv.detail_row.slider.value = 300
+	adv.thickness_row.slider.value = 3
+	check(not adv.advanced_reset.is_visible_in_tree() and adv.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "a changed advanced option shows 'changed' on the heading, and still no reset while they are shut")
+	adv.advanced_toggle.pressed.emit()
+	await process_frame
+	check(adv.advanced_reset.is_visible_in_tree() and adv.advanced_reset.tooltip_text == "Use defaults for the advanced options only", "the reset is inside, once they are opened")
+	adv.advanced_reset.pressed.emit()
+	check(adv.detail_row.slider.value == 100 and is_equal_approx(adv.thickness_row.slider.value, 25.0) and adv._start.nutrient_resolution == 100 and is_equal_approx(adv._start.medium_thickness, 25.0), "its reset puts the advanced options back to their defaults")
+	check(adv.bups_row.slider.value == 30 and adv._start.bups == 30, "...and leaves every other setting as it was")
+	check(not adv.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "...and 'changed' goes with them")
+	adv.queue_free()
+	await process_frame
+
+	# A number box: focus from the keyboard selects the whole number (typing replaces it); focus from a click selects nothing,
+	# so the mouse can then select part of it.
+	Session.free_start = StartConditions.new()
+	var boxes: Control = load("res://scenes/free_setup.tscn").instantiate()
+	root.add_child(boxes)
+	await process_frame
+	var box: LineEdit = boxes.bloom_row.value_field
+	box.grab_focus()
+	await process_frame
+	check(box.has_selection() and box.get_selected_text() == box.text and box.text != "", "focus from the keyboard selects the whole number ('%s')" % box.get_selected_text())
+	box.release_focus()
+	await process_frame
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = Vector2(-5000, -5000)  # (nowhere near anything)
+	Input.parse_input_event(press)
+	Input.flush_buffered_events()  # (so the button is down as far as the box can tell)
+	box.grab_focus()
+	await process_frame
+	check(not box.has_selection(), "focus from a click selects nothing, so part of the number can be selected")
+	var lift := press.duplicate()
+	lift.pressed = false
+	Input.parse_input_event(lift)
+	Input.flush_buffered_events()
+	box.release_focus()
+	await process_frame
+	box.grab_focus()
+	await process_frame
+	check(box.has_selection(), "and the next focus from the keyboard selects it all again")
+	boxes.queue_free()
+	await process_frame
 
 	# Reset to default: loads defaults into the sliders only; nothing is saved or forgotten.
 	var prev := StartConditions.new()
@@ -161,7 +239,7 @@ func _init() -> void:
 	var pairs := [[reopened.bups_row.reset_button, reopened.bups_row.value_field, "BupsRow/Label"], [reopened.nutrients_row.reset_button, reopened.nutrients_row.value_field, "NutrientsRow/Label"],
 		[reopened.rate_row.reset_button, reopened.rate_row.value_field, "RateRow/Label"], [reopened.dish_row.reset_button, reopened.dish_row.value_field, "DishRow/Label"]]
 	for pair in pairs:
-		var label: Control = reopened.get_node("Panel/Box/" + pair[2])
+		var label: Control = reopened.get_node("Panel/Box/Scroll/Rows/" + pair[2])
 		check(pair[0].global_position.x < label.global_position.x, "%s is left of its label" % pair[0].name)
 		check(pair[0].global_position.x + pair[0].size.x < pair[1].global_position.x - 100.0, "%s is well away from the number" % pair[0].name)
 	check(reopened.get_node("Panel/Box/Header/SectionLabel").global_position.x <= reopened.bups_row.reset_button.global_position.x + 8.0, "caption lines up with the left column")

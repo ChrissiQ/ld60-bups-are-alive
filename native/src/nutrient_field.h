@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <cstdint>
+#include <map>
 #include <vector>
 
 namespace godot {
@@ -19,12 +20,56 @@ class NutrientField : public RefCounted {
 	GDCLASS(NutrientField, RefCounted)
 
 	int n = 48;
+	int max_across = 0; // the most cells across this dish's grid (0: the default, G.field_max_across)
+	double own_diffusion = 0.0; // how fast the nutrient spreads in this dish's medium, µm^2/s (0: the default, G.diffusion)
 	double spacing = 12.5, origin = 300.0, radius = 300.0;
 	std::vector<float> conc;
 	std::vector<uint8_t> inside;
 	std::vector<float> eff; // a copy of the field with the rim cells' stand-in values filled in, for many readers at once (see snapshot)
 	std::vector<double> cp, dp;
 	int inside_count = 0;
+
+	// A fresh plankton's nutrient is a small cloud, much smaller than a cell of a big dish's grid, and a grid cell cannot
+	// hold what a cloud that small is (its gradient is what a swimmer follows). So until it has spread to about a cell it is
+	// kept as it really is, a Gaussian: this much nutrient (energy), centred here, with this variance on each axis (µm^2),
+	// spreading as 2 D t. Then it is given to the grid, which carries on. The grid and the clouds add up to the nutrient.
+	struct Puff {
+		double x, y, mass, var;
+		double cut = 1.0; // how far out it is looked for, as a multiple of cloud_cut (less for the clouds of a source: hundreds overlap, and their trimmed tails would add up to a missing far field)
+	};
+	std::vector<Puff> puffs;
+	// A source (a pipette) releases nutrient steadily at a point; on a grid too coarse for the plume near it, what it releases
+	// is kept up and let go as a small cloud every so often (at first often, then every EMIT_INTERVAL seconds), each given the
+	// spread that what it released over that time has had. Keyed by where the source is.
+	struct Emitter {
+		double x = 0, y = 0, mass = 0, age = 0, lived = 0;
+		uint64_t epoch = 0;
+	};
+	std::map<uint64_t, Emitter> emitters;
+	uint64_t emit_epoch = 0;
+	void release_emitter(Emitter &e);
+	void add_puff(double x, double y, double mass, double var, double cut = 1.0);
+	double hash_age = 0.0; // sim seconds the clouds have spread since the lists were last made (they are made afresh when it passes HASH_REFRESH)
+	// The puffs filed by place so that a read looks at one short list: the dish is cut into square 'bins' half a grid cell
+	// across, and each puff is listed in every bin its reach touches (see puff_reach). Rebuilt when the puffs change (and
+	// by `snapshot`, so that the many readers of a step find it done). Per puff, what a read needs besides where it is.
+	mutable bool hash_dirty = true;
+	mutable int bins_across = 1;
+	mutable double bin_size = 1.0;
+	mutable std::vector<int> bin_start, bin_entries;
+	mutable std::vector<double> ha, hb, hreach2, hsigma; // a = 1 / (2 pi var), b = 1 / (2 var), reach2: how far (squared) it can be told from the medium
+	double puff_reach(const Puff &p) const; // how far (µm) from its centre a cloud is above cloud_cut of the detection floor: past that it is not looked for
+	void rebuild_hash() const;
+	void puff_sum(double x, double y, double &c, double &gx, double &gy) const; // adds the puffs' concentration and gradient at the point
+	void puff_probe(double x, double y, double &c, double &gx, double &gy, double &sigma) const; // the same, and the smallest sigma among the clouds that reach it
+	void deposit_gaussian(double x, double y, double mass, double var);
+	double grid_total() const;
+	double grid_concentration_xy(double x, double y) const; // the grid's own concentration at a point (bilinear), without the clouds
+	double take_from_grid(double x, double y, double energy); // the cell the point is in gives up to this much
+	template <typename F>
+	void each_puff(double x, double y, F fn) const; // calls fn(puff index, dx, dy, r2) for each cloud that reaches the point
+	std::vector<float> view_values() const; // the grid's concentrations with the puffs' added at the cell centres, for pictures
+	double view_cell(const std::vector<float> &view, int ix, int iy) const;
 
 	double patch_amplitude = 0.0, patch_size = 10000.0;
 	uint64_t patch_seed = 0;
@@ -42,13 +87,35 @@ protected:
 public:
 	NutrientField() { build(300.0, 48); } // a usable (if small) field even before the first reset
 	static int size_for(double dish_radius);
+	int size_for_radius(double dish_radius) const; // as size_for, with this field's own most cells across
+	void set_max_across(int across) { max_across = across; }
+	int get_max_across() const { return max_across > 0 ? max_across : (int)G.field_max_across; }
+	void set_diffusion(double d) { own_diffusion = d; }
+	double get_diffusion() const { return own_diffusion > 0.0 ? own_diffusion : G.diffusion; }
 	void reset(double dish_radius);
 	void resize(double dish_radius); // a larger dish: keeps the nutrient (and the total) on a new grid
 	int get_size() const { return n; }
 	double get_spacing() const { return spacing; }
 	bool accepts(const Vector2 &local) const;
 	void deposit(const Vector2 &local, double energy);
+	void disc_block(double x, double y, double radius, int &x0, int &x1, int &y0, int &y1) const;
 	void deposit_disc(const Vector2 &local, double disc_radius, double energy);
+	// A plankton's burst: this much nutrient over a disc of this radius at first. Kept as a cloud (see Puff) where the grid is
+	// too coarse to hold it, and put straight on the grid where it is not.
+	void add_cloud(const Vector2 &local, double disc_radius, double energy);
+	void advance_puffs(double dt); // the clouds spread, and the ones that have reached a cell's size go onto the grid
+	// A step of the sources: begin_emissions, then emit_xy for each source that is there, then end_emissions (which lets go of
+	// what a source that is gone had kept). flush_emitters lets go of what every source has kept (before a save).
+	void begin_emissions() { emit_epoch++; }
+	void emit_xy(double x, double y, double energy, double dt);
+	void end_emissions();
+	void flush_emitters();
+	int puff_count() const { return (int)puffs.size(); }
+	Array puffs_export() const;
+	void puffs_import(const Array &saved);
+	// The smallest sigma, in µm, among the clouds that reach this point (a huge number if none does): how fine a structure
+	// the nutrient has here, for choosing how often a swimmer looks (see BupSim::moves_for_structure).
+	double min_cloud_sigma(double x, double y) const;
 	double erase_disc(const Vector2 &local, double disc_radius, double strength);
 	double sample(const Vector2 &local) const;
 	Vector3 read(const Vector2 &local) const;
@@ -87,8 +154,43 @@ public:
 		c = top + (bottom - top) * ty;
 		gx = ((c10 - c00) + ((c11 - c01) - (c10 - c00)) * ty) / spacing;
 		gy = (bottom - top) / spacing;
+		if (!puffs.empty()) {
+			puff_sum(x, y, c, gx, gy);
+		}
+	}
+	// What read_snapshot_xy gives, and the smallest sigma among the clouds that reach the point (a huge number if none).
+	inline void probe_snapshot_xy(double x, double y, double &c, double &gx, double &gy, double &sigma) const {
+		double fx = std::clamp((x + origin) / spacing - 0.5, 0.0, n - 1.001);
+		double fy = std::clamp((y + origin) / spacing - 0.5, 0.0, n - 1.001);
+		int x0 = (int)fx, y0 = (int)fy;
+		double tx = fx - x0, ty = fy - y0;
+		const float *row = eff.data() + (size_t)y0 * n + x0;
+		double c00 = row[0], c10 = row[1], c01 = row[n], c11 = row[n + 1];
+		double top = c00 + (c10 - c00) * tx;
+		double bottom = c01 + (c11 - c01) * tx;
+		c = top + (bottom - top) * ty;
+		gx = ((c10 - c00) + ((c11 - c01) - (c10 - c00)) * ty) / spacing;
+		gy = (bottom - top) / spacing;
+		sigma = 1.0e18;
+		if (!puffs.empty()) {
+			puff_probe(x, y, c, gx, gy, sigma);
+		}
 	}
 	double concentration_xy(double x, double y) const; // just the concentration of read_xy
+	// The concentration at a point as the grid's and the clouds' shares, and taking what a bup wants given those (as take_xy,
+	// which reads them itself): for the serial uptake pass, which reads each bup's place once.
+	struct CloudShare { // which clouds reach a point and how much of the concentration each makes (the first few; `more` if there were others)
+		int k[6];
+		double c[6];
+		double total = 0.0; // the clouds' concentration at the point
+		int count = 0;
+		bool more = false;
+	};
+	// The clouds' share of the concentration at a point, as the snapshot has them (safe from many threads at once).
+	void cloud_share_xy(double x, double y, CloudShare &share) const;
+	double grid_concentration(double x, double y) const { return grid_concentration_xy(x, y); } // the grid's concentration, as it is now
+	void concentration_parts_xy(double x, double y, double &from_grid, double &from_clouds, CloudShare &share) const;
+	double take_parts_xy(double x, double y, double energy, double from_grid, double from_clouds, const CloudShare &share);
 	double take_xy(double x, double y, double energy);
 	void deposit_xy(double x, double y, double energy);
 };

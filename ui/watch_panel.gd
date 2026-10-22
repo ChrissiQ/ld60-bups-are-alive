@@ -1,6 +1,6 @@
 class_name WatchPanel
 extends PanelContainer
-## The bups the player is watching (see Dish.watch_bup), newest first, in a scrolling list: each with its colour and its name
+## The bups the player is watching (see Dish.watch_bup), in a scrolling list, youngest bup first and oldest last: each with its colour and its name
 ## (grey once it has died). Clicking one asks for it to be opened in the inspect panel (`bup_chosen`); the cross at
 ## its end takes it off the list. Shown only while there is something on the list. The list is rebuilt when it changes, and
 ## otherwise only the names and who is alive are looked at again, twice a second.
@@ -42,7 +42,9 @@ func _rebuild() -> void:
 		child.queue_free()
 	_buttons.clear()
 	title.text = Strings.t("watch.title", [dish.watched.size()])
-	for id in dish.watched:
+	var youngest_first: Array[int] = dish.watched.duplicate()
+	youngest_first.sort_custom(func(a: int, b: int) -> bool: return a > b)  # (bups are numbered as they are born, so the biggest number is the youngest)
+	for id in youngest_first:
 		var row := HBoxContainer.new()
 		row.theme_type_variation = &"TightRow"
 		var swatch := ColorRect.new()  # the bup's colour, so a clade can be followed by eye

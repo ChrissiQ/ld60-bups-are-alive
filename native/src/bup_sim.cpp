@@ -72,7 +72,10 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("bup_ready", "id"), &BupSim::bup_ready);
 	ClassDB::bind_method(D_METHOD("bup_split", "id", "keep"), &BupSim::bup_split);
 	ClassDB::bind_method(D_METHOD("bup_tumble_rate", "id", "concentration", "delta", "noise"), &BupSim::bup_tumble_rate);
+	ClassDB::bind_method(D_METHOD("moves_for", "delta"), &BupSim::moves_for);
+	ClassDB::bind_method(D_METHOD("diffuse_pieces", "seconds"), &BupSim::diffuse_pieces);
 	ClassDB::bind_method(D_METHOD("bup_sense_range", "id"), &BupSim::bup_sense_range);
+	ClassDB::bind_method(D_METHOD("bup_estimate_error", "id", "concentration"), &BupSim::bup_estimate_error);
 	ClassDB::bind_method(D_METHOD("bup_steering", "id"), &BupSim::bup_steering);
 	ClassDB::bind_method(D_METHOD("bup_steer_bytes", "id", "max_alpha"), &BupSim::bup_steer_bytes);
 	ClassDB::bind_method(D_METHOD("bup_radius", "id", "pixel_um"), &BupSim::bup_radius);
@@ -274,7 +277,6 @@ void BupSim::derive(Bup &b) {
 	b.add_mass = (float)(G.add_mass_factor * size_gene * size_gene);
 	b.yield = (float)(std::exp(-(double)b.harm) / std::sqrt((double)b.genes[2]));
 	b.drag_upkeep = (float)(G.drag_upkeep * (double)b.genes[0] * b.genes[0]);
-	b.effective_diffusion = (float)((double)b.genes[0] * b.genes[0] * G.run_seconds / (2.0 * (1.0 - G.mean_cos_turn)));
 }
 
 int BupSim::find(int64_t id) const {
@@ -647,11 +649,6 @@ double BupSim::tumble_rate(Bup &b, double concentration, double delta, double no
 	return G.tumble_base * std::clamp(1.0 - G.chemotaxis_gain * ((double)b.fast - b.slow + estimate_error(b, concentration) * b.noise), G.tumble_up_factor, 1.0);
 }
 
-double BupSim::drift_fraction(const Bup &b, double log_gradient, double concentration, double noise) const {
-	double registered = b.genes[0] * log_gradient * drift_gain();
-	return G.max_drift_fraction * std::tanh((registered + estimate_error(b, concentration) * G.drift_noise * noise) / G.drift_half);
-}
-
 void BupSim::pay_upkeep_and_grow(Bup &b, double delta) {
 	b.energy -= (float)(upkeep(b) * delta);
 	if (b.energy <= G.maintenance_floor) {
@@ -737,15 +734,17 @@ double BupSim::bup_upkeep(int64_t id) const { WITH_BUP(id, 0.0) return upkeep(b)
 double BupSim::bup_max_energy(int64_t id) const { WITH_BUP(id, 0.0) return max_energy(b); }
 double BupSim::bup_uptake(int64_t id, double concentration, double delta) const { WITH_BUP(id, 0.0) return uptake_wanted(b, concentration, delta); }
 double BupSim::bup_sense_range(int64_t id) const { WITH_BUP(id, 0.0) return sense_range(b); }
+double BupSim::bup_estimate_error(int64_t id, double concentration) const { WITH_BUP(id, 0.0) return estimate_error(b, concentration); }
 
-// Which way this bup's drift tends (the unit vector up the gradient where it is) and the chance that a step of it
-// goes that way rather than down the slope: 0.5 when it cannot tell, up to 1.
+// Which way this bup's drift tends (the unit vector up the gradient where it is) and how surely it goes that way: the
+// chance that it ends up further up the slope after a minute of swimming (steering_chance), 0.5 when it cannot tell,
+// up to 1.
 Vector3 BupSim::bup_steering(int64_t id) const {
 	WITH_BUP(id, Vector3(0, 0, 0.5))
 	double c, gx, gy;
 	field->read_xy(b.x, b.y, c, gx, gy);
 	double glen = std::sqrt(gx * gx + gy * gy);
-	double chance = 0.5 * (1.0 + std::erf(steering_snr(b.genes[0], sense_range(b), c, glen) / std::sqrt(2.0)));
+	double chance = steering_chance(b.genes[0], sense_range(b), c, glen);
 	return glen > 1e-12 ? Vector3((float)(gx / glen), (float)(gy / glen), (float)chance) : Vector3(0, 0, 0.5);
 }
 
@@ -876,62 +875,91 @@ void BupSim::swim_chunk(const SwimJob &job, uint32_t chunk) {
 			swim_by_runs(b, job.sub, r);
 			keep_inside(b, r);
 			pay_upkeep_and_grow(b, job.delta);
+			if (clouds_now) {
+				field->cloud_share_xy(b.x, b.y, shares[i]);
+			}
 		}
 		return;
 	}
 	drift_chunk(job, first, last, r);
 	for (size_t i = first; i < last; i++) {
 		pay_upkeep_and_grow(bups[i], job.delta);
+		if (clouds_now) {
+			field->cloud_share_xy(bups[i].x, bups[i].y, shares[i]);
+		}
 	}
 }
 
-// The walk of a step that spans many runs, for the bups first..last: what a run-and-tumble swimmer averages to is a
-// random walk with the swimmer's effective diffusion, plus a drift up the gradient. Each sub-step a bup reads the nutrient
-// where it is, takes a Gaussian step of the diffusion's size, and adds the drift (the fraction of its speed it registers
-// from the log-gradient, with the noise of its senses), and is kept inside the wall. The sub-steps go across all the bups
-// in turn, rather than all of one bup's after another: each bup's step is a chain of dependent work (read the field,
-// divide, square root, tanh), and with several bups in turn the processor can overlap those chains. What stays the same
-// for a bup for the whole step is worked out once, the heading is only put in the bup when the wall needs it (and at the
-// end), and the wall is first tested without a square root.
+// The walk of a step that spans many runs, for the bups first..last: what a run-and-tumble swimmer averages to over many
+// runs is a drift up the gradient plus a random walk, both of which the real model measures (see MotionTable in
+// params.h; the table is made by tools/gen_motion_table.gd). Each sub-step a bup reads the nutrient where it is, works
+// out how steep a slope it faces and how well it can read it, looks up its drift and its diffusion along and across the
+// slope, takes that step, and is kept inside the wall (a step that crosses it is reflected, as in a reflecting boundary
+// where a crowd stays even; the exact wall of the fine model, with its sliding, is used only to turn the bup).
+// The sub-steps go across all the bups in turn, rather than all of one bup's after another: each bup's step is a chain
+// of dependent work (read the field, divide, square root, look up), and with several bups in turn the processor can
+// overlap those chains. What stays the same for a bup for the whole step is worked out once, the heading is only put in
+// the bup when the wall needs it (and at the end), and the wall is first tested without a square root.
 void BupSim::drift_chunk(const SwimJob &job, size_t first, size_t last, Rng &r) {
 	struct Lane {
 		float x, y;
-		double spread, sense_k, speed, near_wall2;
+		double sense_k, speed, near_wall2;
 		double hx, hy, hl; // the latest displacement long enough to set a heading, not yet put in the bup's dx, dy
+		double sub; // this bup's sub-step: finer where a young cloud is within reach of it (see moves_for_structure)
+		double c0, gx0, gy0; // what it reads at the start of the step, which its first sub-step uses (it reads again after each move)
+		int moves;
 		bool pending;
 	};
 	const size_t count = last - first;
 	std::vector<Lane> lanes(count);
-	const double floor_c = G.detection_floor, max_drift = G.max_drift_fraction, drift_noise = G.drift_noise, drift_half = G.drift_half;
-	const double noise_ref = G.noise_reference, gain = drift_gain(), sub = job.sub;
+	const double floor_c = G.detection_floor, noise_ref = G.noise_reference;
+	const MotionTable &motion = G.motion;
+	const double spacing = field->get_spacing();
+	int max_moves = 1;
 	for (size_t i = 0; i < count; i++) {
 		Bup &b = bups[first + i];
 		b.primed = false; // (the signal memory isn't kept up while drifting)
 		Lane &l = lanes[i];
 		l.x = b.x;
 		l.y = b.y;
-		l.spread = std::sqrt(2.0 * (double)b.effective_diffusion * sub);
 		l.sense_k = G.gradient_noise * (G.reference_sense / sense_range(b));
 		l.speed = b.genes[0];
 		double limit = radius - body_radius(b);
 		l.near_wall2 = limit > 0.0 ? limit * limit * (1.0 - 1e-9) : -1.0; // (any bup nearer the wall than this gets the exact test)
 		l.hx = l.hy = l.hl = 0.0;
 		l.pending = false;
+		double cloud_sigma;
+		field->probe_snapshot_xy(l.x, l.y, l.c0, l.gx0, l.gy0, cloud_sigma);
+		l.moves = moves_for_structure(job.delta, std::min(spacing, 2.0 * cloud_sigma));
+		l.sub = job.delta / l.moves;
+		max_moves = std::max(max_moves, l.moves);
 	}
-	for (int m = 0; m < job.moves; m++) {
+	for (int m = 0; m < max_moves; m++) {
 		for (size_t i = 0; i < count; i++) {
 			Lane &l = lanes[i];
+			if (m >= l.moves) {
+				continue;
+			}
 			double c, gx, gy;
-			field->read_snapshot_xy(l.x, l.y, c, gx, gy);
+			if (m == 0) {
+				c = l.c0;
+				gx = l.gx0;
+				gy = l.gy0;
+			} else {
+				field->read_snapshot_xy(l.x, l.y, c, gx, gy);
+			}
 			double lx = gx / (floor_c + c), ly = gy / (floor_c + c);
-			double sx = r.gaussian() * l.spread, sy = r.gaussian() * l.spread;
 			double glen = std::sqrt(lx * lx + ly * ly);
-			if (glen > 1e-9) {
-				double error = std::min(l.sense_k * std::sqrt(noise_ref / std::max(c, 1e-5)), 5.0);
-				double fraction = max_drift * std::tanh((l.speed * glen * gain + error * drift_noise * r.gaussian()) / drift_half);
-				double drift = l.speed * fraction * sub / glen;
-				sx += lx * drift;
-				sy += ly * drift;
+			double error = std::min(l.sense_k * std::sqrt(noise_ref / std::max(c, 1e-5)), 5.0);
+			double f, along, across;
+			motion.lookup(l.speed * glen, error, f, along, across);
+			double kick = 2.0 * l.speed * l.speed * l.sub, up = r.gaussian() * std::sqrt(along * kick), side = r.gaussian() * std::sqrt(across * kick);
+			double sx = up, sy = side;
+			if (glen > 1e-9) { // along the slope and across it; with none, in any direction
+				double ux = lx / glen, uy = ly / glen;
+				up += l.speed * f * l.sub;
+				sx = ux * up - uy * side;
+				sy = uy * up + ux * side;
 			}
 			l.x += (float)sx;
 			l.y += (float)sy;
@@ -944,6 +972,13 @@ void BupSim::drift_chunk(const SwimJob &job, size_t first, size_t last, Rng &r) 
 			}
 			if ((double)l.x * l.x + (double)l.y * l.y > l.near_wall2) { // at the wall: the exact test and the turn, on the bup itself
 				Bup &b = bups[first + i];
+				double limit = radius - body_radius(b), dist = std::sqrt((double)l.x * l.x + (double)l.y * l.y);
+				if (dist > limit && limit > 0.0) { // a step across the wall comes back by as much as it went over (or to the wall, if that is too far in)
+					double back = 2.0 * limit - dist;
+					back = back < 0.5 * limit ? limit : back;
+					l.x = (float)(l.x * back / dist);
+					l.y = (float)(l.y * back / dist);
+				}
 				b.x = l.x;
 				b.y = l.y;
 				if (l.pending) {
@@ -970,20 +1005,54 @@ void BupSim::drift_chunk(const SwimJob &job, size_t first, size_t last, Rng &r) 
 }
 
 
+// How many sub-steps a step of the coarse motion is cut into (each reads the nutrient where the bup is, and moves it). The
+// longest sub-step is MOTION_STEP on a fine grid. The nutrient has no structure finer than a grid cell, or than a plankton
+// cloud (motion_structure), so on a coarser grid a bup that moves a short way across a cell learns nothing from a
+// second look, and the sub-step may grow as the square of the cell (a bup's displacement goes as the square root of
+// time): the same distance moved, in the field's own units, as on the fine grid. Measured against the shorter sub-steps
+// in a field of plankton clouds, that leaves the nutrient the bups end up in within 0.4% (none lost at 90 mm; the same
+// sub-step length at 40 mm cost 1.1%, at 20 mm 5%, which is why it is not simply longer).
+// How many pieces a long stretch of diffusion is solved in. The solver is implicit and stable at any length, but a long
+// piece spreads a sharp patch a little less faithfully, by an amount that goes with D dt / cell^2 (how far the
+// nutrient spreads in the piece, in cells): measured against pieces of 5 s, that is 0.3-0.5% of a plankton cloud's peak
+// on grids of 200 µm and finer, 0.01-0.03% at 600 µm and nothing beyond. So a piece is cut when that number is above
+// diffuse_accuracy, and in no case below the interval.
+int BupSim::diffuse_pieces(double seconds) const {
+	double spacing = field->get_spacing();
+	int by_interval = std::max(1, (int)std::ceil(seconds / G.diffuse_interval - 1e-9));
+	int by_accuracy = std::max(1, (int)std::ceil(field->get_diffusion() * seconds / (spacing * spacing) / std::max(G.diffuse_accuracy, 1e-9) - 1e-9));
+	return std::min(by_interval, by_accuracy);
+}
+
+int BupSim::moves_for(double delta) const {
+	return moves_for_structure(delta, field->get_spacing());
+}
+
+// The same for a place where the nutrient has structure this fine (a cell of the grid, or a young cloud, if that is finer).
+int BupSim::moves_for_structure(double delta, double structure) const {
+	double scale = std::max(1.0, structure / std::max(G.motion_structure, 1.0));
+	return std::max(1, (int)std::ceil(delta / (G.motion_step * scale * scale)));
+}
+
 void BupSim::step(double delta, const PackedVector2Array &source_pos, const PackedFloat32Array &source_rates, double feed_per_second, double sim_time) {
 	if (sim_time >= 0.0) {
 		now_seconds = sim_time;
 	}
 	int sources = (int)std::min(source_pos.size(), source_rates.size());
+	field->begin_emissions();
 	for (int i = 0; i < sources; i++) {
-		field->deposit_xy(source_pos[i].x, source_pos[i].y, source_rates[i] / 60.0 * delta * G.nutrient_energy);
+		field->emit_xy(source_pos[i].x, source_pos[i].y, source_rates[i] / 60.0 * delta * G.nutrient_energy, delta);
 	}
+	field->end_emissions();
 	feed_concentration += feed_per_second * delta;
 	diffuse_accum += delta;
 	if (diffuse_accum >= G.diffuse_interval) {
 		field->fill(feed_concentration);
 		feed_concentration = 0.0;
-		field->diffuse(diffuse_accum);
+		int pieces = diffuse_pieces(diffuse_accum);
+		for (int piece = 0; piece < pieces; piece++) {
+			field->diffuse(diffuse_accum / pieces);
+		}
 		diffuse_accum = 0.0;
 	}
 
@@ -993,10 +1062,15 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 	job.sim = this;
 	job.delta = delta;
 	job.fine = delta <= G.fine_step;
-	job.moves = job.fine ? 1 : std::max(1, (int)std::ceil(delta / G.motion_step));
+	job.moves = job.fine ? 1 : moves_for(delta);
 	job.sub = delta / job.moves;
 	job.seed = rng.next_bits();
+	field->advance_puffs(delta);
 	field->snapshot();
+	clouds_now = field->puff_count() > 0;
+	if (clouds_now) {
+		shares.resize(bups.size());
+	}
 	int chunks = ((int)bups.size() + SWIM_CHUNK - 1) / SWIM_CHUNK;
 	WorkerThreadPool *pool = WorkerThreadPool::get_singleton();
 	if (threads == 1 || chunks <= 1 || pool == nullptr) {
@@ -1017,10 +1091,13 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 	int64_t until_death = death_gap(death_chance);
 	for (size_t i = 0; i < bups.size(); i++) {
 		Bup &b = bups[i];
-		{ // take up nutrient from the medium where the bup is
-			double wanted = uptake_wanted(b, field->concentration_xy(b.x, b.y), delta);
+		if (b.energy < (float)max_energy(b)) { // take up nutrient from the medium where the bup is (a full one wants none)
+			double from_grid = field->grid_concentration(b.x, b.y);
+			static const NutrientField::CloudShare no_clouds = NutrientField::CloudShare();
+			const NutrientField::CloudShare &share = clouds_now ? shares[i] : no_clouds; // (the clouds as they were when the bups moved: they hold thousands of times what a bup takes in a step)
+			double wanted = uptake_wanted(b, from_grid + share.total, delta);
 			if (wanted > 0.0) {
-				double got = field->take_xy(b.x, b.y, wanted);
+				double got = field->take_parts_xy(b.x, b.y, wanted, from_grid, share.total, share);
 				eat(b, got);
 			}
 		}

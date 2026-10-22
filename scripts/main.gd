@@ -44,6 +44,7 @@ const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) stil
 @onready var follow_button: Button = $HUD/InfoPanel/Box/Follow
 @onready var watch_button: Button = $HUD/InfoPanel/Box/TopRow/WatchButton
 @onready var watch_panel: WatchPanel = $HUD/WatchPanel
+@onready var layers_panel: LayersPanel = $HUD/LayersPanel  ## what the dish shows: each kind of thing can be hidden
 @onready var hud_layer: CanvasLayer = $HUD
 @onready var pause_menu: PauseMenu = $MenuLayer/PauseMenu
 @onready var pause_ring: Panel = $HUD/PauseRing
@@ -100,9 +101,9 @@ func _ready() -> void:
 	source_rate_row.value_changed.connect(_on_source_rate_changed)
 	feed_row.configure(0.0, StartConditions.MAX_FEED_DENSITY, 0.1, 0.0, Strings.t("hud.rate_unit_feed"))
 	feed_row.value_changed.connect(func(v: float) -> void: dish.feed_density = v)
-	bloom_row.configure(0.0, StartConditions.MAX_BLOOM_RATE, Dish.BLOOM_RATE_STEP, 0.0, Strings.t("hud.rate_unit_bloom"))
+	bloom_row.configure(0.0, StartConditions.MAX_BLOOM_DENSITY, Dish.BLOOM_DENSITY_STEP, 0.0, Strings.t("hud.rate_unit_bloom"))
 	bloom_row.disabled_reason = Strings.t("hud.rate_bloom_locked")
-	bloom_row.value_changed.connect(func(v: float) -> void: dish.bloom_rate = v)
+	bloom_row.value_changed.connect(func(v: float) -> void: dish.bloom_density = v)
 	delete_source_button.pressed.connect(_delete_selected_source)
 	delete_source_button.focus_mode = Control.FOCUS_NONE
 	follow_button.pressed.connect(_toggle_follow)
@@ -110,6 +111,7 @@ func _ready() -> void:
 	lineage_back_button.pressed.connect(_step_back)
 	watch_button.focus_mode = Control.FOCUS_NONE
 	watch_panel.dish = dish
+	layers_panel.layer_toggled.connect(dish.show_layer)
 	watch_panel.bup_chosen.connect(_open_watched)
 	lineage_button.pressed.connect(_open_lineage)
 	follow_button.focus_mode = Control.FOCUS_NONE
@@ -398,7 +400,7 @@ func _point_text(d: Dictionary) -> String:
 	])
 
 
-## How reliably a bup drifts up the slope where it is (the chance a step goes up rather than down), in a word.
+## How surely a bup goes up the slope where it is (the chance that it ends up further up after a minute of swimming), in a word.
 func _steering_word(chance: float) -> String:
 	if chance < 0.55:
 		return Strings.t("panel.steering_blind")
@@ -755,8 +757,8 @@ func _sync_bloom_panel() -> void:
 		bloom_row.set_enabled(plankton_unlocked)
 	if not is_equal_approx(feed_row.value, snappedf(dish.feed_density, 0.1)):
 		feed_row.set_value_silently(dish.feed_density)
-	if not is_equal_approx(bloom_row.value, dish.bloom_rate):
-		bloom_row.set_value_silently(dish.bloom_rate)
+	if not is_equal_approx(bloom_row.value, snappedf(dish.bloom_density, Dish.BLOOM_DENSITY_STEP)):
+		bloom_row.set_value_silently(dish.bloom_density)
 
 
 func _update_hud() -> void:

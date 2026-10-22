@@ -520,7 +520,7 @@ func _init() -> void:
 	m.toolbar.select_tool(Toolbar.Tool.SELECT)
 	m.dish.select_at(float_spot)
 	floater.burst_at = m.dish.time + 1.0
-	m.dish.step(2.0)
+	m.dish.advance(Dish.BURST_CHECK_SECONDS)  # (plankton are looked over for bursts once in this long)
 	check(m.dish.selected_plankton == null and m.dish.plankton.is_empty(), "a selected plankton that bursts is let go")
 	picks[Dish.PickMode.ALL].button_pressed = true
 	await process_frame
@@ -666,6 +666,16 @@ func _init() -> void:
 	m.watch_button.pressed.emit()
 	m._process(0.0)
 	check(not m.dish.is_watched(watched_one) and not m.watch_panel.visible, "pressing the button again takes it off the list, which goes away when empty")
+	var older: int = m.dish.add_bup(m.dish.global_position + Vector2(30, 20), Genome.founder(), 100.0)
+	var younger: int = m.dish.add_bup(m.dish.global_position + Vector2(40, 20), Genome.founder(), 100.0)
+	m.dish.watch_bup(younger)
+	m.dish.watch_bup(older)  # (watched last, so the newest on the list, but the older bup)
+	m._process(0.0)
+	var listed: Array = m.watch_panel.entries.get_children().map(func(row: Node) -> String: return row.get_child(1).text)
+	check(listed == [m.dish.bup_name(younger), m.dish.bup_name(older)], "the watch list runs from the youngest bup at the top to the oldest at the bottom, whatever order they were watched in (%s)" % [listed])
+	m.dish.unwatch_bup(older)
+	m.dish.unwatch_bup(younger)
+	m._process(0.0)
 	m.dish.selected_id = -1
 	await process_frame
 	m.dish.clear_bups()
@@ -893,7 +903,7 @@ func _init() -> void:
 	g.tracker.index = 0
 	# The rate box: the feed is always there; the bloom comes with plankton, at experiment 2, and starts at none.
 	await process_frame
-	check(g.rate_panel.visible and g.feed_row.visible and g.bloom_row.visible and not g.bloom_row.slider.editable and g.bloom_row.label.tooltip_text == "Unlocks with experiment 2" and g.dish.bloom_rate == 0.0, "goal 1 shows the feed control, and the bloom control faint with the reason")
+	check(g.rate_panel.visible and g.feed_row.visible and g.bloom_row.visible and not g.bloom_row.slider.editable and g.bloom_row.label.tooltip_text == "Unlocks with experiment 2" and g.dish.bloom_density == 0.0, "goal 1 shows the feed control, and the bloom control faint with the reason")
 	check(g.rate_panel.position.y >= g.hud.position.y + g.hud.get_content_height(), "the rate box sits under the readout, not over it")
 	check(not g.hud.get_parsed_text().contains("UP/DOWN") and not g.hud.get_parsed_text().contains("ESC"), "the readout has no shortcut reminders")
 	check(absf(g.feed_row.label.global_position.x - g.hud.global_position.x) < 1.5 and g.rate_panel.global_position.x < g.hud.global_position.x, "the box's text lines up with the readout's, and the box itself starts further left")
@@ -907,18 +917,18 @@ func _init() -> void:
 	check(g.paused and g.toolbar.pause_button.button_pressed, "reaching a goal pauses the game")
 	check(g.dish.upkeep_factor == Dish.GOAL_UPKEEP_FACTOR, "experiment 2 makes staying alive cost more")
 	g.dish.upkeep_factor = 1.0
-	check(g.bloom_row.slider.editable and g.dish.bloom_rate == 0.0, "experiment 2 unlocks the bloom control, at none until the player chooses")
+	check(g.bloom_row.slider.editable and g.dish.bloom_density == 0.0, "experiment 2 unlocks the bloom control, at none until the player chooses")
 	check(g.bloom_row.global_position.y < g.feed_row.global_position.y, "the bloom control is above the feed control")
-	check(g.bloom_row.label.tooltip_text == "Plankton bloom rate" and g.feed_row.label.tooltip_text == "Nutrient added to each mm² of the dish every hour" and g.feed_row.label.mouse_filter != Control.MOUSE_FILTER_IGNORE, "hovering a name says what the rate is")
-	g.bloom_row.slider.value = 12.0
-	check(is_equal_approx(g.dish.bloom_rate, 12.0), "the control sets the dish's bloom rate")
-	g.dish.bloom_rate = 36.0
+	check(g.bloom_row.label.tooltip_text == "Plankton appearing in each mm² of the dish every day" and g.feed_row.label.tooltip_text == "Nutrient added to each mm² of the dish every hour" and g.feed_row.label.mouse_filter != Control.MOUSE_FILTER_IGNORE, "hovering a name says what the rate is")
+	g.bloom_row.slider.value = 1.5
+	check(is_equal_approx(g.dish.bloom_density, 1.5), "the control sets the dish's bloom density")
+	g.dish.bloom_density = 3.5
 	g.dish.feed_density = 6.0
 	await process_frame
-	check(is_equal_approx(g.bloom_row.value, 36.0) and is_equal_approx(g.feed_row.value, 6.0), "the controls follow the dish when it changes some other way")
-	g.dish.bloom_rate = 0.0
+	check(is_equal_approx(g.bloom_row.value, 3.5) and is_equal_approx(g.feed_row.value, 6.0), "the controls follow the dish when it changes some other way")
+	g.dish.bloom_density = 0.0
 	g.dish.feed_density = 0.0
-	check(g.tracker.goals[1].text.contains("%.0f a day" % Dish.SUGGESTED_BLOOM_RATE), "the goal text suggests a bloom rate")
+	check(g.tracker.goals[1].text.contains("%.2f per mm² a day" % Dish.SUGGESTED_BLOOM_DENSITY), "the goal text suggests a bloom density")
 	g.toolbar.set_paused(true)
 	g.toolbar.select_tool(Toolbar.Tool.PLANKTON)
 	check(g.tool == Toolbar.Tool.PLANKTON and g.toolbar.plankton_button.tooltip_text.begins_with("Place plankton"), "the plankton tool is selected from the toolbar")
@@ -931,6 +941,25 @@ func _init() -> void:
 	g.tracker.index = 0
 	g._sync_tool_locks()
 	check(g.tool == Toolbar.Tool.SELECT, "locking the selected tool falls back to select")
+	# The layers panel: five toggles, all lit at first; hiding a layer stops it being drawn and pointed at.
+	var layers: LayersPanel = g.layers_panel
+	check(layers.row.get_child_count() == 5 and layers.medium_button.button_pressed and layers.steering_button.button_pressed, "the layers panel has five toggles, all lit at first")
+	check(layers.bups_button.tooltip_text == "Bups (V)" and layers.medium_button.tooltip_text == "Nutrient haze (Z)", "each layer's tip names it and its key")
+	g.dish.clear_selection()
+	g.dish.place_plankton(g.dish.global_position + Vector2(100, 100))
+	g.dish.plankton_draw_radius()
+	g.dish.select_at(g.dish.global_position + Vector2(100, 100))
+	check(g.dish.selected_plankton != null, "a plankton can be selected while its layer shows")
+	layers.plankton_button.button_pressed = false
+	check(not g.dish.layer_shown(Dish.Layer.PLANKTON) and g.dish.selected_plankton == null, "hiding the plankton layer lets go of a selected plankton")
+	g.dish.select_at(g.dish.global_position + Vector2(100, 100))
+	check(g.dish.selected_plankton == null, "and a hidden layer cannot be selected")
+	layers.bups_button.button_pressed = false
+	check(not g.dish._bups_mesh.visible and not g.dish.looks_at_bups(), "hiding the bups hides their picture and they can no longer be pointed at")
+	layers.bups_button.button_pressed = true
+	layers.plankton_button.button_pressed = true
+	check(g.dish._bups_mesh.visible and g.dish.looks_at_plankton(), "showing them again restores both")
+	g.dish.plankton.clear()
 	g.queue_free()
 	Session.mode = Session.Mode.GOALS
 

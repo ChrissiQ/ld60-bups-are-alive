@@ -22,6 +22,7 @@
 [ext_resource type="PackedScene" path="res://scenes/pause_menu.tscn" id="pause_menu"]
 [ext_resource type="PackedScene" path="res://ui/bup_name_row.tscn" id="bup_name_row"]
 [ext_resource type="PackedScene" path="res://ui/watch_panel.tscn" id="watch_panel"]
+[ext_resource type="PackedScene" path="res://ui/layers_panel.tscn" id="layers_panel"]
 [ext_resource type="Texture2D" path="res://icons/lineage.svg" id="lineage_icon"]
 [ext_resource type="Texture2D" path="res://icons/watch.svg" id="watch_icon"]
 [ext_resource type="Texture2D" path="res://icons/back.svg" id="back_icon"]
@@ -45,7 +46,7 @@ script = ExtResource("2")
 [node name="Readout" type="RichTextLabel" parent="HUD" unique_id=945527870]
 theme_type_variation = &"Readout"
 offset_left = 20.0
-offset_top = 16.0
+offset_top = 76.0
 offset_right = 420.0
 offset_bottom = 300.0
 mouse_filter = 2
@@ -94,6 +95,9 @@ grow_vertical = 0
 script = ExtResource("3")
 
 [node name="WatchPanel" parent="HUD" instance=ExtResource("watch_panel")]
+
+[node name="LayersPanel" parent="HUD" instance=ExtResource("layers_panel")]
+
 
 [node name="Toolbars" type="VBoxContainer" parent="HUD"]
 theme_type_variation = &"FlushStack"
@@ -265,7 +269,6 @@ min_value = 1.0
 max_value = 100.0
 value = 1.0
 rounded = true
-select_all_on_focus = true
 
 [node name="SourceOptions" type="Control" parent="HUD/Toolbars/ToolOptions"]
 visible = false
@@ -282,7 +285,6 @@ min_value = 0.5
 max_value = 60.0
 step = 0.5
 value = 10.0
-select_all_on_focus = true
 
 [node name="EraseOptions" type="Control" parent="HUD/Toolbars/ToolOptions"]
 visible = false
@@ -299,7 +301,6 @@ min_value = 5.0
 max_value = 100.0
 value = 30.0
 rounded = true
-select_all_on_focus = true
 
 [node name="InfoPanel" type="PanelContainer" parent="HUD"]
 visible = false

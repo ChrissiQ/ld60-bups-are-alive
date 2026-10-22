@@ -25,7 +25,7 @@ func _init() -> void:
 	))
 	goals.append(Goal.new(
 		Strings.t("goals.keen_title"),
-		Strings.t("goals.keen_text", [SENSE_FRACTION * 100, SENSE_TARGET, SimClock.format(SENSE_HOLD), Dish.SUGGESTED_BLOOM_RATE]),
+		Strings.t("goals.keen_text", [SENSE_FRACTION * 100, SENSE_TARGET, SimClock.format(SENSE_HOLD), Dish.SUGGESTED_BLOOM_DENSITY]),
 		SENSE_HOLD,
 		func(d: Dish) -> float:
 			if d.population() < SENSE_MIN_POP:

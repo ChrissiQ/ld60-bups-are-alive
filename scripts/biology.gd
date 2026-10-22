@@ -25,7 +25,6 @@ const TUMBLE_UP_FACTOR := 0.15  ## tumble rate falls to this fraction while clim
 # "internal delays", and Clark & Grant 2005 on this trade-off [memory, unverified]).
 const MEMORY_SHORT := 0.3  ## s
 const MEMORY_LONG := 2.0  ## s
-const MAX_DRIFT_FRACTION := 0.22  ## the ceiling of the coarse drift up a gradient, as a share of swim speed, fitted with Cell.DRIFT_HALF and DRIFT_NOISE so that it reproduces the run-and-tumble model (which reaches about 3 of 20 µm/s in steep gradients: noise keeps it under the ceiling). Real cells are reported to reach ~0.35 [search: ~7 of 20 µm/s, Berg & Turner 1990, secondary source], so this model's chemotaxis is still conservative; TUMBLE_UP_FACTOR is the knob.
 
 # --- The medium ------------------------------------------------------------------------------
 const MEDIUM_THICKNESS := 25.0  ## how many times thicker than water the medium is (viscosity): nutrient diffuses that many times slower (Stokes-Einstein). Swimming is left as it is [choice]

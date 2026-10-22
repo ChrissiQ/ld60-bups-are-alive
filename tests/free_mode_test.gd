@@ -9,6 +9,11 @@ func check(ok: bool, what: String) -> void:
 	TestUtil.check(ok, what)
 
 
+## Sets a dish's bloom to this many plankton a day (the game sets a density: this is for tests that count them).
+func _bloom_per_day(d: Dish, per_day: float) -> void:
+	d.bloom_density = per_day / (PI * pow(d.radius / StartConditions.UM_PER_MM, 2))
+
+
 func _make_dish() -> Dish:
 	var d := Dish.new()
 	root.add_child(d)
@@ -181,6 +186,41 @@ func _init() -> void:
 	large.advance(600.0)
 	var large_copy := _make_dish()
 	check(large_copy.from_dict(TestUtil.saved(large)) and large_copy.radius == 1200.0 and large_copy.field.size == 96, "a big dish survives save and load")
+	# The nutrient detail (cells across the grid) is a start condition: a finer grid on a big dish, kept through resize, save and load.
+	var fine_start := StartConditions.new()
+	fine_start.nutrient_resolution = 200
+	var fine_dish := _make_dish()
+	fine_dish.strike(fine_start)
+	check(StartConditions.new().nutrient_resolution == 100 and fine_dish.field.size == 200 and is_equal_approx(fine_dish.field.get_spacing(), 2.0 * fine_dish.radius / 200.0), "the nutrient detail sets the cells across a dish's grid (%d)" % fine_dish.field.size)
+	fine_dish.resize_to(fine_dish.radius * 1.5)
+	check(fine_dish.field.size == 200, "a resized dish keeps its nutrient detail")
+	var fine_copy := _make_dish()
+	check(fine_copy.from_dict(TestUtil.saved(fine_dish)) and fine_copy.field.size == 200 and fine_copy.field.get_max_across() == 200, "the nutrient detail survives save and load")
+	var old_save := TestUtil.saved(fine_dish)
+	old_save.erase("nutrient_resolution")
+	old_save["field"] = Array(_make_dish().field.values())  # (a save from before the setting: the default grid)
+	var plain := _make_dish()
+	plain.strike(StartConditions.new())
+	var plain_save := TestUtil.saved(plain)
+	plain_save.erase("nutrient_resolution")
+	var plain_copy := _make_dish()
+	check(plain_copy.from_dict(plain_save) and plain_copy.field.size == 100, "a save without the setting loads with the default grid")
+	# The medium thickness (an advanced option): how fast the nutrient spreads, kept through resize, save and load.
+	var thin_start := StartConditions.new()
+	thin_start.medium_thickness = 4.0
+	var thin_dish := _make_dish()
+	thin_dish.strike(thin_start)
+	var usual_dish := _make_dish()
+	usual_dish.strike(StartConditions.new())
+	check(is_equal_approx(thin_dish.field.get_diffusion(), Biology.WATER_DIFFUSION / 4.0) and is_equal_approx(usual_dish.field.get_diffusion(), Biology.NUTRIENT_DIFFUSION), "the medium thickness sets how fast the nutrient spreads (%.1f in 4x water, %.1f in the usual medium)" % [thin_dish.field.get_diffusion(), usual_dish.field.get_diffusion()])
+	var thin_copy := _make_dish()
+	check(thin_copy.from_dict(TestUtil.saved(thin_dish)) and is_equal_approx(thin_copy.medium_thickness, 4.0) and is_equal_approx(thin_copy.field.get_diffusion(), Biology.WATER_DIFFUSION / 4.0), "the medium thickness survives save and load")
+	var usual_copy := _make_dish()
+	var usual_save := TestUtil.saved(usual_dish)
+	usual_save.erase("medium_thickness")
+	check(usual_copy.from_dict(usual_save) and is_equal_approx(usual_copy.field.get_diffusion(), Biology.NUTRIENT_DIFFUSION), "a save without the setting loads with the usual medium")
+	check(StartConditions.from_dict({"medium_thickness": 0.0}).medium_thickness == StartConditions.MIN_MEDIUM_THICKNESS and StartConditions.from_dict({"medium_thickness": 1000.0}).medium_thickness == StartConditions.MAX_MEDIUM_THICKNESS, "the medium thickness is clamped when loaded")
+	check(StartConditions.from_dict({"nutrient_resolution": 9999}).nutrient_resolution == StartConditions.MAX_NUTRIENT_RESOLUTION and StartConditions.from_dict({"nutrient_resolution": 10}).nutrient_resolution == StartConditions.MIN_NUTRIENT_RESOLUTION, "the nutrient detail is clamped when loaded")
 	check(absf(TestUtil.units(large_copy) - TestUtil.units(large)) < 0.5, "...with its dissolved nutrient (%.1f vs %.1f)" % [TestUtil.units(large_copy), TestUtil.units(large)])
 	check(large_copy.bup_limit == 1200, "...and its bup limit")
 	large.free()
@@ -309,6 +349,7 @@ func _init() -> void:
 	var too_dark := 0
 	var sat_total := 0.0
 	var val_total := 0.0
+	seed(20261022)  # (the draws are random, and the brightness bar is within half a standard error of the true mean: a fixed seed keeps the test from flipping)
 	for i in 1000:
 		var random_pick := Genome.random_color()
 		greys += 1 if random_pick.s < 0.15 else 0
@@ -524,7 +565,7 @@ func _init() -> void:
 	shrinking.plankton.append(Plankton.new(Vector2(1000, 0), 0.0, 1e9, 300.0, 0.0))
 	shrinking.plankton.append(Plankton.new(Vector2(2500, 0), 0.0, 1e9, 300.0, 0.0))
 	shrinking.feed_density = 8.0
-	shrinking.bloom_rate = 40.0
+	shrinking.bloom_density = 0.25
 	var density_before := shrinking.field.sample(Vector2.ZERO)
 	shrinking.resize_to(1500.0)
 	check(shrinking.radius == 1500.0 and shrinking.field.size == NutrientField.size_for(1500.0), "a dish shrinks to the size asked")
@@ -540,12 +581,12 @@ func _init() -> void:
 		lost_gone = lost_gone and not shrinking.has_bup(id) and not shrinking.has_record(id)
 	check(kept_alive and lost_gone, "the bups inside live on, and the dead ones' records are freed (no descendants, not open anywhere)")
 	check(shrinking.sources.size() == 1 and shrinking.plankton.size() == 1, "sources and plankton past the edge go (%d sources, %d plankton left)" % [shrinking.sources.size(), shrinking.plankton.size()])
-	check(is_equal_approx(shrinking.feed_density, 8.0) and is_equal_approx(shrinking.bloom_rate, 10.0), "the feed is a density, so it stays as it was; the bloom, a count, follows the area (a quarter here: %.2f, %.2f)" % [shrinking.feed_density, shrinking.bloom_rate])
+	check(is_equal_approx(shrinking.feed_density, 8.0) and is_equal_approx(shrinking.bloom_density, 0.25) and is_equal_approx(shrinking.bloom_per_day(), 0.25 * PI * 1.5 * 1.5), "the feed and the bloom are densities, so they stay as they were, and the bloom's plankton a day follow the area (%.2f, %.3f, %.3f a day)" % [shrinking.feed_density, shrinking.bloom_density, shrinking.bloom_per_day()])
 	check(absf(shrinking.field.sample(Vector2.ZERO) - density_before) < 0.06 * density_before, "the nutrient left keeps its concentration (%.4f then, %.4f now)" % [density_before, shrinking.field.sample(Vector2.ZERO)])
 	shrinking.resize_to(10.0)
 	check(shrinking.radius == StartConditions.MIN_DISH_RADIUS, "and never below the smallest dish")
 	shrinking.resize_to(3000.0)
-	check(is_equal_approx(shrinking.feed_density, 8.0) and is_equal_approx(shrinking.bloom_rate, 10.0 * 4.0 * (StartConditions.MIN_DISH_RADIUS * StartConditions.MIN_DISH_RADIUS) / (1500.0 * 1500.0) * (3000.0 * 3000.0) / (StartConditions.MIN_DISH_RADIUS * StartConditions.MIN_DISH_RADIUS) / 4.0), "growing again scales the bloom back up with the area, and leaves the feed density alone")
+	check(is_equal_approx(shrinking.feed_density, 8.0) and is_equal_approx(shrinking.bloom_density, 0.25) and is_equal_approx(shrinking.bloom_per_day(), 0.25 * PI * 9.0), "growing again gives the bloom more plankton a day with the area, and leaves the feed and the bloom densities alone")
 	shrinking.advance(60.0)
 	check(shrinking.population() <= 2, "a shrunken dish keeps running")
 	shrinking.free()
@@ -623,27 +664,29 @@ func _init() -> void:
 	bloom.strike(_small())
 	bloom.field.reset(bloom.radius)
 	var bloom_spot := bloom.global_position + Vector2(40, 30)
-	check(bloom.plankton.is_empty() and bloom.bloom_rate == 0.0, "a new dish has no plankton in the water and no bloom")
+	check(bloom.plankton.is_empty() and bloom.bloom_density == 0.0, "a new dish has no plankton in the water and no bloom")
 	check(bloom.place_plankton(bloom_spot) and bloom.plankton.size() == 1, "a plankton can be placed")
 	check(not bloom.place_plankton(bloom.global_position + Vector2(bloom.radius + 10.0, 0)), "plankton can't be placed outside the dish")
 	var lifetime: float = bloom.plankton[0].burst_at - bloom.time
 	check(lifetime >= Dish.PLANKTON_MEAN_LIFE * (1.0 - Dish.PLANKTON_LIFE_SPREAD) and lifetime <= Dish.PLANKTON_MEAN_LIFE * (1.0 + Dish.PLANKTON_LIFE_SPREAD), "it bursts at a random time within a set span of the mean life (%.0f s)" % lifetime)
 	var before_burst := TestUtil.units(bloom)
 	bloom.plankton[0].burst_at = bloom.time + 1.0
-	bloom.step(2.0)
+	bloom.advance(Dish.BURST_CHECK_SECONDS)  # (they are looked over for bursts once in this long)
 	check(bloom.plankton.is_empty() and absf(TestUtil.units(bloom) - before_burst - Dish.PLANKTON_UNITS) < 1.0, "a plankton that bursts is gone and leaves its %.0f units of nutrient (%.1f)" % [Dish.PLANKTON_UNITS, TestUtil.units(bloom) - before_burst])
 	for i in 30:
 		bloom.place_plankton(bloom_spot)
 	check(bloom.plankton.size() == 30, "there is no limit on how many the player places but the dish's (%d)" % bloom.plankton.size())
 	bloom.plankton.clear()
-	bloom.bloom_rate = 240.0
+	bloom.resize_to(Dish.DEFAULT_RADIUS)  # (the 300 µm dish is too small for a bloom of any size: a day's worth is a fraction of a plankton)
+	_bloom_per_day(bloom, 240.0)
 	bloom.advance(3600.0)
 	check(bloom.plankton.size() >= 8 and bloom.plankton.size() <= 12, "a bloom of 240 a day (10 an hour) adds one every 6 minutes, so about ten are floating after an hour (%d)" % bloom.plankton.size())
 	# They arrive on a fixed schedule: exactly one every 6 minutes, whatever else is random.
 	var drip := _make_dish()
 	drip.strike(_small())
 	drip.clear_bups()
-	drip.bloom_rate = 240.0
+	drip.resize_to(Dish.DEFAULT_RADIUS)
+	_bloom_per_day(drip, 240.0)
 	var arrivals_seen: Array[float] = []
 	var seen_ids := {}
 	for i in int(3600.0 / 10.0):
@@ -656,13 +699,17 @@ func _init() -> void:
 	for i in range(1, arrivals_seen.size()):
 		even = even and absf((arrivals_seen[i] - arrivals_seen[i - 1]) - 360.0) < 10.5
 	check(even, "the bloom drips plankton in on a fixed schedule, one every 6 minutes (%s)" % [arrivals_seen]) 
-	bloom.bloom_rate = 1000.0
-	check(bloom.bloom_rate == StartConditions.MAX_BLOOM_RATE, "the bloom rate cannot be set above the most the game allows")
+	bloom.bloom_density = 1000.0
+	check(bloom.bloom_density == StartConditions.MAX_BLOOM_DENSITY, "the bloom density cannot be set above the most the game allows")
+	var biggest_per_step := StartConditions.MAX_BLOOM_DENSITY * PI * pow(StartConditions.MAX_DISH_RADIUS / StartConditions.UM_PER_MM, 2) / 86400.0 * Dish.MAX_STEP
+	var biggest_floating := StartConditions.MAX_BLOOM_DENSITY * PI * pow(StartConditions.MAX_DISH_RADIUS / StartConditions.UM_PER_MM, 2) * Dish.PLANKTON_MEAN_LIFE / 86400.0
+	check(biggest_per_step < Dish.MAX_BLOOM_ARRIVALS_PER_STEP and biggest_floating < Dish.MAX_PLANKTON, "the most bloom on the biggest dish fits what a step can add (%.0f of %d) and what the dish can hold (%.0f of %d)" % [biggest_per_step, Dish.MAX_BLOOM_ARRIVALS_PER_STEP, biggest_floating, Dish.MAX_PLANKTON])
 	# The bursts, which are what feed the colony, come at steady enough intervals: no long gaps with nothing.
 	var steady := _make_dish()
 	steady.strike(_small())
 	steady.clear_bups()
-	steady.bloom_rate = 24.0
+	steady.resize_to(Dish.DEFAULT_RADIUS)
+	_bloom_per_day(steady, 24.0)
 	var gaps := []
 	var last_burst := 0.0
 	var floating := steady.plankton.size()
@@ -684,7 +731,7 @@ func _init() -> void:
 	var stamp_then: Array = bloom._render_stamp
 	bloom._process(0.0)
 	check(not bloom._trails_may_show and bloom._render_stamp == stamp_then, "the next picture, with nothing moving, is made once more, and then no trails remain")
-	bloom.bloom_rate = 0.0
+	bloom.bloom_density = 0.0
 	bloom.plankton.clear()
 	bloom.advance(600.0)
 	check(bloom.plankton.is_empty(), "with no bloom nothing appears by itself")
@@ -693,10 +740,10 @@ func _init() -> void:
 	bloom.upkeep_factor = 10.0
 	var cost_after: float = bloom.bup_info(bloom.sim.bup_ids()[0])["upkeep"]
 	check(cost_after > 5.0 * cost_before and cost_after < 10.0 * cost_before, "a higher upkeep factor makes staying alive cost more (%.5f to %.5f a second)" % [cost_before, cost_after])
-	bloom.bloom_rate = 7.0  # (a day)
+	bloom.bloom_density = 0.07
 	var bloom_copy := _make_dish()
-	check(bloom_copy.from_dict(TestUtil.saved(bloom)) and bloom_copy.plankton.size() == 1 and is_equal_approx(bloom_copy.plankton[0].burst_at, bloom.plankton[0].burst_at) and bloom_copy.bloom_rate == 7.0, "plankton and the bloom rate survive save and load")
-	check(StartConditions.from_dict({"bloom_rate": 9999}).bloom_rate == StartConditions.MAX_BLOOM_RATE and StartConditions.new().bloom_rate == 0.0, "the bloom rate is a start condition: none by default, clamped when loaded")
+	check(bloom_copy.from_dict(TestUtil.saved(bloom)) and bloom_copy.plankton.size() == 1 and is_equal_approx(bloom_copy.plankton[0].burst_at, bloom.plankton[0].burst_at) and bloom_copy.bloom_density == 0.07, "plankton and the bloom density survive save and load")
+	check(StartConditions.from_dict({"bloom_density": 9999}).bloom_density == StartConditions.MAX_BLOOM_DENSITY and StartConditions.new().bloom_density == 0.0, "the bloom density is a start condition: none by default, clamped when loaded")
 
 # --- Selecting and inspecting: bups and sources are picked, the medium is read anywhere.
 	d.strike(_small())
@@ -758,25 +805,27 @@ func _init() -> void:
 	check(HistoryGraph.time_ticks(0.0, 900.0, 300.0) == [0.0, 300.0, 600.0, 900.0], "time ticks over the first window")
 	check(HistoryGraph.time_ticks(399.0, 1299.0, 300.0) == [600.0, 900.0, 1200.0], "time ticks over a scrolled window")
 	check(HistoryGraph.time_ticks(0.0, 100.0, 300.0) == [0.0], "a short window still has its origin tick")
-	check(HistoryGraph.window_seconds(100.0) == 24.0 * 3600.0 and HistoryGraph.window_seconds(86399.0) == 24.0 * 3600.0, "the graph spans 24 hours at first")
-	check(HistoryGraph.window_seconds(86400.0) == 72.0 * 3600.0 and HistoryGraph.window_seconds(200000.0) == 72.0 * 3600.0, "...and 72 hours once the run reaches 24")
-	check(HistoryGraph.window_start(100.0) == 0.0 and HistoryGraph.window_start(200000.0) == 0.0, "the window starts at zero until the run outgrows it")
-	check(HistoryGraph.window_start(300000.0) == 300000.0 - 72.0 * 3600.0, "then it follows the newest sample (%s)" % HistoryGraph.window_start(300000.0))
+	var A := HistoryGraph.Span
+	check(HistoryGraph.auto_span(100.0) == A.LAST_24 and HistoryGraph.auto_span(86399.0) == A.LAST_24, "until G is pressed the graph shows 24 hours at first")
+	check(HistoryGraph.auto_span(86400.0) == A.LAST_72 and HistoryGraph.auto_span(259199.0) == A.LAST_72, "...moves up to 72 hours once the run is 24 hours long")
+	check(HistoryGraph.auto_span(259200.0) == A.LAST_WEEK and HistoryGraph.auto_span(604799.0) == A.LAST_WEEK and HistoryGraph.auto_span(604800.0) == A.ALL and HistoryGraph.auto_span(9.0e7) == A.ALL, "...then to a week at 72 hours and to the whole run at a week")
+	check(HistoryGraph.window_start_for(A.LAST_24, 100.0) == 0.0 and HistoryGraph.window_start_for(A.LAST_72, 200000.0) == 0.0, "the window starts at zero until the run outgrows it")
+	check(HistoryGraph.window_start_for(A.LAST_72, 300000.0) == 300000.0 - 72.0 * 3600.0, "then it follows the newest sample (%s)" % HistoryGraph.window_start_for(A.LAST_72, 300000.0))
 	# The graph's spans, and the whole run in a bounded history.
 	var spans := HistoryGraph.new()
-	check(spans.span == HistoryGraph.Span.AUTO, "the graph grows its own window until told otherwise")
+	check(not spans.chosen and spans.shown_span() == A.LAST_24, "the graph starts on 24 hours and moves up by itself until G is pressed")
 	var order := []
 	for i in 5:
 		spans.cycle_span()
-		order.append(spans.span)
-	check(order == [HistoryGraph.Span.LAST_24, HistoryGraph.Span.LAST_72, HistoryGraph.Span.LAST_WEEK, HistoryGraph.Span.ALL, HistoryGraph.Span.AUTO], "G goes through 24h, 72h, week, the whole run, and back to its own")
+		order.append(spans.shown_span())
+	check(order == [A.LAST_72, A.LAST_WEEK, A.ALL, A.LAST_24, A.LAST_72] and spans.chosen, "G goes through the four modes, 24h, 72h, week and the whole run, round again, and from then on it is the player's choice")
 	spans.free()
 	check(HistoryGraph.span_seconds(HistoryGraph.Span.LAST_72, 100.0) == 72.0 * 3600.0 and HistoryGraph.span_seconds(HistoryGraph.Span.LAST_WEEK, 100.0) == 168.0 * 3600.0, "a fixed span is as long as it says")
 	check(HistoryGraph.span_seconds(HistoryGraph.Span.ALL, 600000.0) == 600000.0 and HistoryGraph.span_seconds(HistoryGraph.Span.ALL, 10.0) == HistoryGraph.MIN_ALL_WINDOW, "the whole-run span is the run so far (never under an hour)")
 	check(HistoryGraph.window_start_for(HistoryGraph.Span.LAST_24, 50.0 * 3600.0) == 26.0 * 3600.0 and HistoryGraph.window_start_for(HistoryGraph.Span.LAST_24, 10.0 * 3600.0) == 0.0 and HistoryGraph.window_start_for(HistoryGraph.Span.ALL, 900000.0) == 0.0, "a last-N window follows the newest sample once the run outgrows it; the whole run starts at zero")
 	check(HistoryGraph.tick_step(24.0 * 3600.0) == 4.0 * 3600.0 and HistoryGraph.tick_step(72.0 * 3600.0) == 12.0 * 3600.0 and HistoryGraph.tick_step(168.0 * 3600.0) == 48.0 * 3600.0, "time ticks are spaced for the window")
 	check(HistoryGraph.tick_step(2.0 * 86400.0, 24.0) == 86400.0, "ticks counted in days are whole days apart")
-	check(not HistoryGraph.ticks_in_days(HistoryGraph.Span.LAST_WEEK, 168.0 * 3600.0) and HistoryGraph.ticks_in_days(HistoryGraph.Span.ALL, 8.0 * 86400.0) and HistoryGraph.ticks_in_days(HistoryGraph.Span.AUTO, 8.0 * 86400.0) and not HistoryGraph.ticks_in_days(HistoryGraph.Span.ALL, 3600.0), "the axis counts days past a week, and for the whole run once it is a couple of days")
+	check(not HistoryGraph.ticks_in_days(HistoryGraph.Span.LAST_WEEK, 168.0 * 3600.0) and HistoryGraph.ticks_in_days(HistoryGraph.Span.ALL, 8.0 * 86400.0) and HistoryGraph.ticks_in_days(HistoryGraph.Span.LAST_72, 8.0 * 86400.0) and not HistoryGraph.ticks_in_days(HistoryGraph.Span.ALL, 3600.0), "the axis counts days past a week, and for the whole run once it is a couple of days")
 	check(HistoryGraph.format_time(86400.0 * 3.0, true) == "3d" and HistoryGraph.format_time(86400.0 * 1500.0, true) == "1,500d" and HistoryGraph.format_time(3600.0 * 5.0) == "5h", "days and hours on the ticks")
 	# The history goes on after the colony dies out, so its time stays true: the population drops to zero and the traits stay.
 	var gone := _make_dish()
@@ -1145,4 +1194,10 @@ func _init() -> void:
 	m3.queue_free()
 	Session.mode = Session.Mode.GOALS
 
+	# Spread colours: a random starting hue, then each next founder one step (1/n) further round the wheel, at full strength.
+	var spread := Genome.spread_colors(5)
+	var spread_in_order := spread.size() == 5
+	for k in range(1, spread.size()):
+		spread_in_order = spread_in_order and absf(fposmod(spread[k].h - spread[k - 1].h, 1.0) - 0.2) < 0.001 and is_equal_approx(spread[k].s, 1.0) and is_equal_approx(spread[k].v, 1.0)
+	check(spread_in_order, "spread colours go round the wheel in order, a fifth of it apart for five founders")
 	TestUtil.finish(self, "FREE MODE TESTS OK")

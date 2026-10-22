@@ -2,7 +2,8 @@ class_name HistoryGraph
 extends Control
 ## Oscilloscope-style plot of a dish's history: population (left axis, amber) and one trait
 ## (right axis, green) against time (bottom axis), over a scrolling window. The window is the last 24 hours, 72 hours or
-## week, or the whole run (the G key goes through them), or else it grows by itself: 24 hours, then 72.
+## week, or the whole run: four modes, which the G key goes through. Until G is pressed the graph moves up a mode by
+## itself, as the run reaches AUTO_BUMP times the window of the mode it is in (24 hours, then 72, then a week, then all).
 ## Colours and text sizes come from the theme type "HistoryGraph" (see scenes/menu_theme.tres),
 ## like any other widget; nothing about its look is decided here.
 
@@ -15,20 +16,20 @@ const MARGIN_LEFT := 40.0  ## room for the population tick labels
 const MARGIN_RIGHT := 40.0  ## room for the trait tick labels
 const MARGIN_TOP := 28.0  ## legend
 const MARGIN_BOTTOM := 20.0  ## time tick labels
-const SHORT_WINDOW := 24.0 * 3600.0  ## the span shown at first ...
-const LONG_WINDOW := 72.0 * 3600.0  ## ... and, once the run is past it, the span after (72 hours)
 const WEEK := 7.0 * 86400.0
 const MIN_ALL_WINDOW := 3600.0  ## the whole-run view is never narrower than this
-enum Span { AUTO, LAST_24, LAST_72, LAST_WEEK, ALL }  ## what the window shows (the G key goes through them in this order)
+enum Span { LAST_24, LAST_72, LAST_WEEK, ALL }  ## what the window shows (the G key goes through them in this order)
+const AUTO_BUMP := 1.0  ## until G is pressed, the graph moves to the next mode once the run is this many times as long as the mode's window (1: when the graph is full)
 const SPAN_SECONDS := {Span.LAST_24: 24.0 * 3600.0, Span.LAST_72: 72.0 * 3600.0, Span.LAST_WEEK: 168.0 * 3600.0}
-const SPAN_LEGENDS := {Span.AUTO: "graph.time", Span.LAST_24: "graph.time_24", Span.LAST_72: "graph.time_72", Span.LAST_WEEK: "graph.time_week", Span.ALL: "graph.time_all"}
+const SPAN_LEGENDS := {Span.LAST_24: "graph.time_24", Span.LAST_72: "graph.time_72", Span.LAST_WEEK: "graph.time_week", Span.ALL: "graph.time_all"}
 const TICK_HOURS := [1.0, 2.0, 4.0, 6.0, 12.0, 24.0, 48.0, 96.0, 168.0, 336.0, 720.0, 1440.0, 4320.0, 8760.0, 17520.0, 43800.0, 87600.0]  ## the gaps the time ticks can have, in hours
 const POP_STEPS := [10.0, 20.0, 25.0, 50.0, 100.0, 150.0, 200.0, 300.0, 500.0]
 const BIG_STEPS := [1.0, 1.2, 1.6, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0]  ## the leading digits of the axis maximums past POP_STEPS
 
 var dish: Dish
 var trait_index := 1
-var span := Span.AUTO
+var span := Span.LAST_24  ## the mode the player has chosen with G (it counts once `chosen`)
+var chosen := false  ## whether G has been pressed: until then the graph moves up a mode by itself (see `shown_span`)
 var _drawn_key := []  ## what the graph was last drawn from (see `refresh`)
 var _drawn_msec := 0  ## when it was
 
@@ -37,7 +38,7 @@ var _drawn_msec := 0  ## when it was
 ## simulation time, so at normal speed most frames have nothing new to draw. At top speed a sample arrives
 ## every frame, so a new sample alone waits for the next redraw tenth of a second.
 func refresh() -> void:
-	var key := [dish.history_version if dish != null else -1, trait_index, span, size]
+	var key := [dish.history_version if dish != null else -1, trait_index, shown_span(), size]
 	if key == _drawn_key:
 		return
 	var now := Time.get_ticks_msec()
@@ -52,8 +53,24 @@ func cycle_trait() -> void:
 	trait_index = (trait_index + 1) % TRAITS.size()
 
 
+## The mode being shown: the one chosen with G, or until it is pressed the one the run has grown into.
+func shown_span() -> Span:
+	return span if chosen else auto_span(dish.time if dish != null else 0.0)
+
+
+## The mode a run of this length is in when G has not been pressed: each moves to the next once the run is AUTO_BUMP times
+## as long as its window; the whole-run mode is last.
+static func auto_span(sim_time: float) -> Span:
+	for mode: Span in [Span.LAST_24, Span.LAST_72, Span.LAST_WEEK]:
+		if sim_time < SPAN_SECONDS[mode] * AUTO_BUMP:
+			return mode
+	return Span.ALL
+
+
+## G: the next mode after the one shown, and from now on the player's choice.
 func cycle_span() -> void:
-	span = ((span + 1) % Span.size()) as Span
+	span = ((shown_span() + 1) % Span.size()) as Span
+	chosen = true
 
 
 ## The top of the harm axis: the smallest of HARM_STEPS that holds every sample, so low harm is not squashed
@@ -103,18 +120,10 @@ static func time_ticks(x_min: float, x_max: float, step: float) -> Array:
 	return out
 
 
-## How many seconds the graph spans on its own: 24 hours until the run reaches 24 hours, then 72.
-static func window_seconds(sim_time: float) -> float:
-	return SHORT_WINDOW if sim_time < SHORT_WINDOW else LONG_WINDOW
-
-
 ## How many seconds the graph spans in a mode: the hours it names, or the whole run so far (and at least MIN_ALL_WINDOW).
 static func span_seconds(mode: Span, sim_time: float) -> float:
-	match mode:
-		Span.AUTO:
-			return window_seconds(sim_time)
-		Span.ALL:
-			return maxf(MIN_ALL_WINDOW, last_sample_time(sim_time))
+	if mode == Span.ALL:
+		return maxf(MIN_ALL_WINDOW, last_sample_time(sim_time))
 	return SPAN_SECONDS[mode]
 
 
@@ -133,11 +142,7 @@ static func last_sample_time(sim_time: float) -> float:
 
 
 ## Seconds shown at the left edge: the window starts at zero and follows the newest sample once
-## the run is longer than it.
-static func window_start(sim_time: float) -> float:
-	return window_start_for(Span.AUTO, sim_time)
-
-
+## the run is longer than it (the whole-run mode always starts at zero).
 static func window_start_for(mode: Span, sim_time: float) -> float:
 	return maxf(0.0, last_sample_time(sim_time) - span_seconds(mode, sim_time)) if mode != Span.ALL else 0.0
 
@@ -163,11 +168,12 @@ func _draw() -> void:
 	var trait_color := _color("trait")
 	var muted := _color("muted")
 	var trait_name: String = TRAITS[trait_index]
-	var window := span_seconds(span, dish.time)
-	var x_min := window_start_for(span, dish.time)
+	var mode := shown_span()
+	var window := span_seconds(mode, dish.time)
+	var x_min := window_start_for(mode, dish.time)
 	var x_max := x_min + window
-	var pops := _points("pop", x_min)
-	var vals := _points(trait_name, x_min)
+	var pops := _points("pop", x_min, mode)
+	var vals := _points(trait_name, x_min, mode)
 	var spec: Array = Genome.GENES.get(trait_name, [0.0, harm_axis_max(_values(vals))])
 	var lo: float = spec[0]
 	var hi: float = spec[1]
@@ -177,7 +183,7 @@ func _draw() -> void:
 	var pop_max := nice_ceil(peak)
 	var margin_left := maxf(MARGIN_LEFT, font.get_string_size(UiText.thousands(pop_max), HORIZONTAL_ALIGNMENT_LEFT, -1, tick_size).x + 10.0)  # (room for the widest population label)
 	var plot := Rect2(margin_left, MARGIN_TOP, size.x - margin_left - MARGIN_RIGHT, size.y - MARGIN_TOP - MARGIN_BOTTOM)
-	var in_days := ticks_in_days(span, window)
+	var in_days := ticks_in_days(mode, window)
 	var tick := tick_step(window, 24.0 if in_days else 1.0)  # (days are whole days apart)
 
 	# Gridlines first, so the data lines sit on top.
@@ -211,7 +217,7 @@ func _draw() -> void:
 
 	# Legend doubles as the axis titles, coloured to match the axis each belongs to.
 	draw_string(font, Vector2(6.0, 16.0), Strings.t("graph.bups"), HORIZONTAL_ALIGNMENT_LEFT, -1, legend_size, population_color)
-	draw_string(font, Vector2(plot.position.x, 16.0), Strings.t(SPAN_LEGENDS[span]), HORIZONTAL_ALIGNMENT_CENTER, plot.size.x, legend_size, muted)
+	draw_string(font, Vector2(plot.position.x, 16.0), Strings.t(SPAN_LEGENDS[mode]), HORIZONTAL_ALIGNMENT_CENTER, plot.size.x, legend_size, muted)
 	draw_string(font, Vector2(0.0, 16.0), Strings.t("graph.trait", [Strings.t("genes.graph_" + trait_name)]), HORIZONTAL_ALIGNMENT_RIGHT, size.x - 6.0, legend_size, trait_color)
 
 	_plot_line(pops, plot, 0.0, pop_max, x_min, window, population_color)
@@ -221,11 +227,11 @@ func _draw() -> void:
 ## The samples of a series as (time, value), the ones from `x_min` on. In the whole-run view they are the whole run's (thinned: see
 ## Dish.history_all), each at the end of the stretch it is the mean of, with the newest sample of the fine history after them.
 ## Otherwise sample i was recorded at (newest sample time) - (samples after it) * interval.
-func _points(name: String, x_min: float) -> PackedVector2Array:
+func _points(name: String, x_min: float, mode: Span) -> PackedVector2Array:
 	var out := PackedVector2Array()
 	var last_sample := last_sample_time(dish.time)
 	var fine: Array = dish.history[name]
-	if span == Span.ALL:
+	if mode == Span.ALL:
 		var whole: Array = dish.history_all[name]
 		var step := dish.history_all_factor * Dish.HISTORY_INTERVAL
 		for i in whole.size():

@@ -475,6 +475,22 @@ corner_radius_top_right = 4
 corner_radius_bottom_right = 4
 corner_radius_bottom_left = 4
 
+[sub_resource type="StyleBoxFlat" id="tool_hover_pressed"]
+content_margin_left = 6.0
+content_margin_top = 6.0
+content_margin_right = 6.0
+content_margin_bottom = 6.0
+bg_color = Color(0.14, 0.42, 0.24, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.75, 1, 0.85, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
 [sub_resource type="StyleBoxFlat" id="tool_disabled"]
 content_margin_left = 6.0
 content_margin_top = 6.0
@@ -844,7 +860,7 @@ ToolButton/constants/icon_max_width = 24
 ToolButton/colors/icon_disabled_color = Color(1, 1, 1, 0.25)
 ToolButton/styles/disabled = SubResource("tool_disabled")
 ToolButton/styles/hover = SubResource("tool_hover")
-ToolButton/styles/hover_pressed = SubResource("tool_pressed")
+ToolButton/styles/hover_pressed = SubResource("tool_hover_pressed")
 ToolButton/styles/normal = SubResource("tool_normal")
 ToolButton/styles/pressed = SubResource("tool_pressed")
 ToolbarPanel/base_type = &"PanelContainer"

@@ -73,6 +73,7 @@ func _compact(box: SpinBox, tooltip: String) -> void:
 	var field := box.get_line_edit()
 	field.theme_type_variation = &"CompactField"  # the SpinBox's own role is set in the scene
 	field.tooltip_text = tooltip
+	UiInput.select_all_unless_clicked(field)
 	field.max_length = str(int(box.max_value)).length() + (2 if box.step < 1.0 else 0)  # as many characters as the maximum has, and a decimal point and place if it takes them
 	# The box measured itself with the default field style first, and a Control's rect doesn't
 	# shrink back on its own once its minimum size drops, so settle it at its real size.

@@ -67,6 +67,7 @@ func _ready() -> void:
 	reset_button.pressed.connect(func() -> void: slider.value = default_value)
 	value_field.text_submitted.connect(func(_text: String) -> void: value_field.release_focus())  # which commits (below)
 	value_field.focus_entered.connect(_begin_typing)
+	UiInput.select_all_unless_clicked(value_field)
 	value_field.focus_exited.connect(_commit_typing)
 	value_field.gui_input.connect(_on_field_key)
 	_update_text()

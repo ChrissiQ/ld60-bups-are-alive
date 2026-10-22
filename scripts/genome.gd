@@ -106,17 +106,15 @@ static func random_color() -> Color:
 
 
 ## `count` colours as far apart as they can be: the same saturation and brightness (full), and hues spaced evenly
-## round the wheel (two founders get opposite colours, ten get every 36 degrees). Which colour starts where on
-## the wheel, and which founder gets which, is random.
+## round the wheel (two founders get opposite colours, ten get every 36 degrees). Where the first one starts on the
+## wheel is random; each next founder is the next step round it.
 static func spread_colors(count: int) -> Array[Color]:
 	var out: Array[Color] = []
 	if count <= 0:
 		return out
 	var start := randf()
-	var slots := range(count)
-	slots.shuffle()
 	for k in count:
-		out.append(Color.from_hsv(fposmod(start + float(slots[k]) / count, 1.0), 1.0, 1.0))
+		out.append(Color.from_hsv(fposmod(start + float(k) / count, 1.0), 1.0, 1.0))
 	return out
 
 

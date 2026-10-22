@@ -54,7 +54,7 @@ struct Rng {
 			v = 2.0 * uniform() - 1.0;
 			s = u * u + v * v;
 		} while (s >= 1.0 || s == 0.0);
-		double scale = std::sqrt(-2.0 * std::log(s) / s);
+		double scale = std::sqrt(-2.0 * fast_log(s) / s);
 		spare = v * scale;
 		has_spare = true;
 		return u * scale;
@@ -74,7 +74,7 @@ class BupSim : public RefCounted {
 		float hue = 0, sat = 0, val = 0, harm = 0; // colour is hue, saturation and value (0..1 each)
 		int mutations = 0;
 		// derived from the genome
-		float yield = 1, add_mass = 8, drag_upkeep = 0, effective_diffusion = 0;
+		float yield = 1, add_mass = 8, drag_upkeep = 0;
 		// chemotaxis state (slow playback)
 		float fast = 0, slow = 0, noise = 0, tumbling = 0;
 		bool primed = false;
@@ -141,7 +141,6 @@ class BupSim : public RefCounted {
 	double uptake_wanted(const Bup &b, double concentration, double delta) const;
 	double estimate_error(const Bup &b, double concentration) const;
 	double tumble_rate(Bup &b, double concentration, double delta, double noise);
-	double drift_fraction(const Bup &b, double log_gradient, double concentration, double noise) const;
 	void pay_upkeep_and_grow(Bup &b, double delta); // one bup's step of living: it pays its upkeep from its reserve and grows with what is left
 	void swim_by_runs(Bup &b, double delta, Rng &r);
 	void keep_inside(Bup &b, Rng &r);
@@ -161,6 +160,11 @@ class BupSim : public RefCounted {
 	static void run_swim_chunk(void *job, uint32_t chunk);
 	void swim_chunk(const SwimJob &job, uint32_t chunk);
 	void drift_chunk(const SwimJob &job, size_t first, size_t last, Rng &r);
+	int moves_for(double delta) const;
+	int moves_for_structure(double delta, double structure) const;
+	int diffuse_pieces(double seconds) const;
+	bool clouds_now = false; // whether any cloud is in the dish this step (if not, `shares` is not made)
+	std::vector<NutrientField::CloudShare> shares; // for each bup, which clouds reach it where its move ended and how much each gives (read on all cores, used by the serial uptake pass)
 	int threads = 0; // 0: as many as the machine has; 1: just this one (the results are the same)
 	int cap() const;
 	int limit = 0; // the most bups the dish holds; 0 means the default for its radius
@@ -221,6 +225,7 @@ public:
 	Vector2 bup_split(int64_t id, double keep);
 	double bup_tumble_rate(int64_t id, double concentration, double delta, double noise);
 	double bup_sense_range(int64_t id) const;
+	double bup_estimate_error(int64_t id, double concentration) const;
 	Vector3 bup_steering(int64_t id) const;
 	PackedByteArray bup_steer_bytes(int64_t id, double max_alpha) const;
 	double bup_radius(int64_t id, double pixel_um) const; // half the length it is drawn at: its own, or the least that shows

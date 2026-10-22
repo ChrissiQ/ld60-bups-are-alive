@@ -28,15 +28,13 @@ text = "@free_setup.title"
 
 [node name="Panel" type="PanelContainer" parent="."]
 layout_mode = 1
-anchors_preset = 4
-anchor_top = 0.5
-anchor_bottom = 0.5
+anchors_preset = 0
 offset_left = 48.0
-offset_top = 0.0
+offset_top = 130.0
 offset_right = 48.0
-offset_bottom = 0.0
+offset_bottom = 130.0
 grow_horizontal = 1
-grow_vertical = 2
+grow_vertical = 1
 
 [node name="Box" type="VBoxContainer" parent="Panel"]
 theme_type_variation = &"RoomyStack"
@@ -59,31 +57,79 @@ theme_type_variation = &"IconButton"
 icon = ExtResource("4")
 icon_alignment = 1
 
-[node name="BupsRow" parent="Panel/Box" instance=ExtResource("5")]
+[node name="Scroll" type="ScrollContainer" parent="Panel/Box"]
+layout_mode = 2
+horizontal_scroll_mode = 0
+vertical_scroll_mode = 2
+
+[node name="Rows" type="VBoxContainer" parent="Panel/Box/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"RoomyStack"
+
+[node name="BupsRow" parent="Panel/Box/Scroll/Rows" instance=ExtResource("5")]
 layout_mode = 2
 label_text = "@free_setup.bups"
 
-[node name="NutrientsRow" parent="Panel/Box" instance=ExtResource("5")]
+[node name="NutrientsRow" parent="Panel/Box/Scroll/Rows" instance=ExtResource("5")]
 layout_mode = 2
 label_text = "@free_setup.start_nutrient"
 label_tip = "@free_setup.start_density_tip"
 
-[node name="RateRow" parent="Panel/Box" instance=ExtResource("5")]
+[node name="RateRow" parent="Panel/Box/Scroll/Rows" instance=ExtResource("5")]
 layout_mode = 2
 label_text = "@free_setup.nutrient_feed"
 label_tip = "@free_setup.feed_tip"
 
-[node name="BloomRow" parent="Panel/Box" instance=ExtResource("5")]
+[node name="BloomRow" parent="Panel/Box/Scroll/Rows" instance=ExtResource("5")]
 layout_mode = 2
 label_text = "@free_setup.plankton_bloom"
 
-[node name="DishRow" parent="Panel/Box" instance=ExtResource("5")]
+[node name="DishRow" parent="Panel/Box/Scroll/Rows" instance=ExtResource("5")]
 layout_mode = 2
 label_text = "@free_setup.dish_radius"
 
-[node name="LimitRow" parent="Panel/Box" instance=ExtResource("5")]
+[node name="LimitRow" parent="Panel/Box/Scroll/Rows" instance=ExtResource("5")]
 layout_mode = 2
 label_text = "@free_setup.bup_limit"
+
+[node name="AdvancedToggle" type="Button" parent="Panel/Box/Scroll/Rows"]
+layout_mode = 2
+theme_type_variation = &"ListButton"
+alignment = 0
+text = "@free_setup.advanced_closed"
+
+[node name="Advanced" type="VBoxContainer" parent="Panel/Box/Scroll/Rows"]
+visible = false
+layout_mode = 2
+theme_type_variation = &"RoomyStack"
+
+[node name="NoteRow" type="HBoxContainer" parent="Panel/Box/Scroll/Rows/Advanced"]
+layout_mode = 2
+
+[node name="Note" type="Label" parent="Panel/Box/Scroll/Rows/Advanced/NoteRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"Hint"
+text = "@free_setup.advanced_note"
+autowrap_mode = 3
+
+[node name="AdvancedReset" type="Button" parent="Panel/Box/Scroll/Rows/Advanced/NoteRow"]
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"IconButton"
+icon = ExtResource("4")
+icon_alignment = 1
+
+[node name="DetailRow" parent="Panel/Box/Scroll/Rows/Advanced" instance=ExtResource("5")]
+layout_mode = 2
+label_text = "@free_setup.nutrient_detail"
+label_tip = "@free_setup.detail_tip"
+
+[node name="ThicknessRow" parent="Panel/Box/Scroll/Rows/Advanced" instance=ExtResource("5")]
+layout_mode = 2
+label_text = "@free_setup.medium_thickness"
+label_tip = "@free_setup.thickness_tip"
 
 [node name="Actions" type="HBoxContainer" parent="Panel/Box"]
 layout_mode = 2

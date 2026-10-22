@@ -240,14 +240,15 @@ func _init() -> void:
 	check(wall_dir.dot(Vector2.RIGHT) < 0.2 and absf(wall_dir.y) > 0.8, "a swimmer that hits the wall slides along it")
 
 	# --- Chemotaxis, in a shallow gradient (0.5% per µm) where sense matters. Measured once for the real
-	# run-and-tumble model (see Cell.DRIFT_HALF): a keen bup drifts up at about 1.9 µm/s and a dull one
-	# far less, and the coarse model used at fast playback is fitted to reproduce both.
+	# run-and-tumble model: a keen bup drifts up at about 3 µm/s (E. coli's gentle-gradient response: see Cell.CHEMOTAXIS_GAIN) and a dull one far less, and the coarse
+	# model used at fast playback (the measured motion table; tests/motion_table_test.gd checks it much
+	# more closely) reproduces both.
 	var fine_keen := _drift_speed(false, true, 50.0)
 	var coarse_keen := _drift_speed(true, true, 50.0)
 	var coarse_long := _drift_speed(true, true, 50.0, 15.0)  # ultra playback: long steps, split into motion sub-steps
 	var fine_dull := _drift_speed(false, true, 10.0)
 	var fine_flat := _drift_speed(false, false, 50.0)
-	check(fine_keen.x > 6.0 * fine_keen.y and fine_keen.x > 1.0 and fine_keen.x < 2.4, "a keen bup drifts up a gradient (%.2f µm/s, s.e. %.2f; measured about 1.9)" % [fine_keen.x, fine_keen.y])
+	check(fine_keen.x > 6.0 * fine_keen.y and fine_keen.x > 2.4 and fine_keen.x < 3.6, "a keen bup drifts up a gradient (%.2f µm/s, s.e. %.2f; measured about 3.0)" % [fine_keen.x, fine_keen.y])
 	check(absf(coarse_keen.x - fine_keen.x) < 0.6, "the coarse model drifts like the real run-and-tumble one (%.2f vs %.2f µm/s)" % [coarse_keen.x, fine_keen.x])
 	check(absf(coarse_long.x - fine_keen.x) < 0.55, "...and so do the long steps of ultra playback (%.2f vs %.2f µm/s)" % [coarse_long.x, fine_keen.x])
 	check(fine_dull.x < 0.7 * fine_keen.x, "a dull bup follows the gradient far less (%.2f vs %.2f µm/s)" % [fine_dull.x, fine_keen.x])
@@ -258,7 +259,7 @@ func _init() -> void:
 	var dull_gap := _mean_tumble_rate(10.0, 0.0) - _mean_tumble_rate(10.0, 0.05)
 	check(keen_gap > 0.15 and keen_gap > 2.0 * dull_gap, "keen bups tell a shallow gradient from none far better than dull ones (gap %.2f vs %.2f tumbles per second)" % [keen_gap, dull_gap])
 
-	# --- Steering: the chance a bup's drift goes up the slope where it is, and the map of where it could.
+	# --- Steering: how surely a bup's drift goes up the slope where it is (halfway from a coin toss to certain), and the map of where it could.
 	var steer_dish := Dish.new()
 	root.add_child(steer_dish)
 	steer_dish.strike(_small())
