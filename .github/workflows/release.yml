@@ -67,8 +67,17 @@ jobs:
           {
             echo "## Changes${prev:+ since $prev}"
             echo
-            git log ${prev:+$prev..}"$tag" --no-merges --pretty='- %s'
+            # (an @ in a commit subject would become a mention of that GitHub user, and list them as a contributor: a zero-width space after it stops that)
+            git log ${prev:+$prev..}"$tag" --no-merges --pretty='- %s' | sed 's/@/@\&#8203;/g'
             echo
+            # The contributors are the commits' authors, by their GitHub names (the noreply address they commit with has it).
+            authors=$(git log ${prev:+$prev..}"$tag" --no-merges --pretty='%ae' | sed -n 's/^[0-9]*+\(.*\)@users\.noreply\.github\.com$/@\1/p' | sort -u | paste -sd' ' -)
+            if [ -n "$authors" ]; then
+              echo "## Contributors"
+              echo
+              echo "$authors"
+              echo
+            fi
             echo "## Downloads"
             echo
             echo "- **Windows, Linux, macOS**: unzip and run. (macOS is not signed: right-click the app, then Open.)"
