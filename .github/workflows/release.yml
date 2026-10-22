@@ -1,0 +1,80 @@
+# Makes a public GitHub release when a version tag is pushed:
+#
+#   git tag v0.2.0
+#   git push origin v0.2.0
+#
+# The release has notes (the commit subjects since the previous tag), a ready-to-run build for each of
+# Windows, Linux and macOS, and the Godot project (source plus the prebuilt native libraries for all
+# three, so it plays from inside Godot with nothing to compile).
+#
+# NOT YET RUN: expect to fix small things on its first run. The export presets are in export_presets.cfg.
+name: release
+on:
+  push:
+    tags: ["v*"]
+env:
+  GODOT_VERSION: "4.7.2"
+jobs:
+  native:
+    uses: ./.github/workflows/build-native.yml
+  release:
+    needs: native
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 } # (all of the history and tags, for the notes)
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bups-*
+          path: native/bin
+          merge-multiple: true
+      - name: Get Godot and its export templates
+        run: |
+          base="https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-stable"
+          curl -fsSL -o godot.zip "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          curl -fsSL -o templates.tpz "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -q godot.zip
+          sudo mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot
+          dir="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "$dir"
+          unzip -q -j templates.tpz 'templates/*' -d "$dir"
+      - name: Export the three builds
+        run: |
+          godot --headless --path . --import || true # (the first import may exit badly yet leave a good result)
+          mkdir -p build/windows build/linux build/macos
+          godot --headless --path . --export-release "Windows Desktop"
+          godot --headless --path . --export-release "Linux"
+          godot --headless --path . --export-release "macOS"
+      - name: Package
+        run: |
+          tag="$GITHUB_REF_NAME"
+          mkdir dist
+          (cd build/windows && zip -qr "../../dist/BupsAreAlive-$tag-windows.zip" .)
+          (cd build/linux && chmod +x BupsAreAlive.x86_64 && zip -qr "../../dist/BupsAreAlive-$tag-linux.zip" .)
+          cp build/macos/BupsAreAlive.zip "dist/BupsAreAlive-$tag-macos.zip"
+          # The project: the source as tagged, with the native libraries built for this release added.
+          mkdir -p stage/bups-are-alive
+          git archive "$tag" | tar -x -C stage/bups-are-alive
+          cp native/bin/* stage/bups-are-alive/native/bin/
+          rm -rf stage/bups-are-alive/.claude
+          (cd stage && zip -qr "../dist/BupsAreAlive-$tag-godot-project.zip" bups-are-alive)
+      - name: Write the release notes
+        run: |
+          tag="$GITHUB_REF_NAME"
+          prev=$(git describe --tags --abbrev=0 "$tag^" 2>/dev/null || true)
+          {
+            echo "## Changes${prev:+ since $prev}"
+            echo
+            git log ${prev:+$prev..}"$tag" --no-merges --pretty='- %s'
+            echo
+            echo "## Downloads"
+            echo
+            echo "- **Windows, Linux, macOS**: unzip and run. (macOS is not signed: right-click the app, then Open.)"
+            echo "- **godot-project**: the source with the native code already built for Windows, Linux and macOS. Unzip it and open the folder in Godot ${GODOT_VERSION%.*} or later, then press play. Nothing to compile."
+          } > notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: notes.md
+          files: dist/*

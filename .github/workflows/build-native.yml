@@ -1,6 +1,6 @@
 # Builds the native simulation (native/) for every platform the game ships on, so a player needs
-# nothing installed. NOT YET RUN: written alongside the first multi-platform setup, so expect to fix
-# small things on its first run.
+# nothing installed. It runs when native/ changes, by hand, and as the first step of release.yml
+# (which collects these libraries into the release).
 #
 # It builds against godot-cpp's own bundled Godot 4.5 API (api_version=4.5, matching
 # compatibility_minimum in native/bups.gdextension), so no API dump is needed, and the result runs
@@ -10,6 +10,7 @@ on:
   push:
     paths: ["native/**", ".github/workflows/build-native.yml"]
   workflow_dispatch:
+  workflow_call:
 env:
   GODOT_CPP_COMMIT: 2bb1acf6f8ae1ce96ac7b9ba3a10b499c59c49ec
 jobs:
