@@ -8,7 +8,7 @@ func _init() -> void:
 	root.add_child(a)
 	a.set_seed(7)
 	a.strike()
-	a.food_rate = 9.0
+	a.feed_density = 9.0
 	a.place_source(a.global_position + Vector2(50, 30), 4.0)
 	var tracker := GoalTracker.new()
 	for i in 240:  # two hours of simulation time
@@ -28,7 +28,7 @@ func _init() -> void:
 	if not ok: failures.append("from_dict returned false")
 	if a.population() != b.population(): failures.append("cell count %d vs %d" % [a.population(), b.population()])
 	if absf(a.time - b.time) > 0.001: failures.append("time")
-	if a.food_rate != b.food_rate: failures.append("food_rate")
+	if a.feed_density != b.feed_density: failures.append("feed_density")
 	var stats_a := a.population_stats()
 	var stats_b := b.population_stats()
 	for key: String in Genome.LABELED + ["mutations", "harm"]:

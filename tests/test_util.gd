@@ -44,6 +44,11 @@ static func units(dish: Dish) -> float:
 	return dish.field.total() / Dish.NUTRIENT_ENERGY
 
 
+## The nutrient in a dish as a density, in units per mm² (what the player chooses), from the total in the field.
+static func density(dish: Dish) -> float:
+	return units(dish) / (PI * pow(dish.radius / StartConditions.UM_PER_MM, 2))
+
+
 ## A dish's save, as it comes back from a file.
 static func saved(dish: Dish) -> Dictionary:
 	return JSON.parse_string(JSON.stringify(dish.to_dict()))

@@ -11,7 +11,7 @@ func check(ok: bool, what: String) -> void:
 
 
 func _same(a: StartConditions, b: StartConditions) -> bool:
-	return a.bups == b.bups and a.nutrients == b.nutrients and is_equal_approx(a.nutrient_rate, b.nutrient_rate) and is_equal_approx(a.dish_radius, b.dish_radius)
+	return a.bups == b.bups and a.nutrient_density == b.nutrient_density and is_equal_approx(a.feed_density, b.feed_density) and is_equal_approx(a.dish_radius, b.dish_radius)
 
 
 func _write_raw(text: String) -> void:
@@ -32,8 +32,8 @@ func _init() -> void:
 	# Round trip.
 	var c := StartConditions.new()
 	c.bups = 77
-	c.nutrients = 33
-	c.nutrient_rate = 14.0
+	c.nutrient_density = 33
+	c.feed_density = 14.0
 	c.dish_radius = 4200.0
 	check(c.save(), "save succeeds")
 	check(_same(StartConditions.load_saved(), c), "saved settings load back unchanged")
@@ -43,11 +43,11 @@ func _init() -> void:
 	check(_same(StartConditions.load_saved(), StartConditions.new()), "garbage file: defaults")
 	_write_raw("[1, 2, 3]")
 	check(_same(StartConditions.load_saved(), StartConditions.new()), "wrong JSON shape: defaults")
-	_write_raw('{"bups": "lots", "nutrients": [1], "nutrient_rate": null, "dish_radius": {"x": 1}}')
+	_write_raw('{"bups": "lots", "nutrient_density": [1], "feed_density": null, "dish_radius": {"x": 1}}')
 	check(_same(StartConditions.load_saved(), StartConditions.new()), "wrong value types: defaults")
-	_write_raw('{"bups": 99999, "nutrients": -5, "nutrient_rate": 500, "dish_radius": 1}')
+	_write_raw('{"bups": 99999, "nutrient_density": -5, "feed_density": 500, "dish_radius": 1}')
 	var clamped := StartConditions.load_saved()
-	check(clamped.bups == StartConditions.MAX_BUPS and clamped.nutrients == 0 and clamped.nutrient_rate == StartConditions.MAX_NUTRIENT_RATE and clamped.dish_radius == StartConditions.MIN_DISH_RADIUS, "out-of-range values clamp")
+	check(clamped.bups == StartConditions.MAX_BUPS and clamped.nutrient_density == 0 and clamped.feed_density == StartConditions.MAX_FEED_DENSITY and clamped.dish_radius == StartConditions.MIN_DISH_RADIUS, "out-of-range values clamp")
 	# The founders the player named and coloured are kept with the starting conditions, and cleaned up when read back.
 	var named := StartConditions.new()
 	named.bups = 3
@@ -80,7 +80,7 @@ func _init() -> void:
 	check(StartConditions.from_dict({"founders": crowd}).founders.size() == StartConditions.MAX_BUPS and StartConditions.MAX_BUPS == 250, "at most 250 founders")
 	_write_raw('{"bups": 12}')
 	var partial := StartConditions.load_saved()
-	check(partial.bups == 12 and partial.nutrients == StartConditions.new().nutrients, "missing keys fall back individually")
+	check(partial.bups == 12 and partial.nutrient_density == StartConditions.new().nutrient_density, "missing keys fall back individually")
 
 	# End to end through the real setup screen: choose, GO, "relaunch", reopen.
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(TEMP))
@@ -88,7 +88,7 @@ func _init() -> void:
 	var setup: Control = load("res://scenes/free_setup.tscn").instantiate()
 	root.add_child(setup)
 	await process_frame
-	check(setup.bups_row.slider.value == 4 and setup.nutrients_row.slider.value == 10000, "first ever visit shows the defaults")
+	check(setup.bups_row.slider.value == 4 and setup.nutrients_row.slider.value == 32, "first ever visit shows the defaults")
 	setup.bups_row.slider.value = 55
 	setup.nutrients_row.slider.value = 90
 	setup.rate_row.slider.value = 3
@@ -110,8 +110,8 @@ func _init() -> void:
 	# Reset to default: loads defaults into the sliders only; nothing is saved or forgotten.
 	var prev := StartConditions.new()
 	prev.bups = 31
-	prev.nutrients = 77
-	prev.nutrient_rate = 12.0
+	prev.nutrient_density = 77
+	prev.feed_density = 12.0
 	prev.dish_radius = 3800.0
 	prev.save()
 	Session.free_start = StartConditions.load_saved()
@@ -123,7 +123,7 @@ func _init() -> void:
 	check(reset_screen.bups_row.slider.value == 31 and is_equal_approx(reset_screen.dish_row.slider.value, 3.8), "setup opens on the saved preference")
 	reset_screen.reset_button.pressed.emit()
 	var d := StartConditions.new()
-	check(reset_screen.bups_row.slider.value == d.bups and reset_screen.nutrients_row.slider.value == d.nutrients and reset_screen.rate_row.slider.value == d.nutrient_rate and is_equal_approx(reset_screen.dish_row.slider.value, d.dish_radius / 1000.0), "Reset to default puts the defaults in the sliders")
+	check(reset_screen.bups_row.slider.value == d.bups and reset_screen.nutrients_row.slider.value == d.nutrient_density and reset_screen.rate_row.slider.value == d.feed_density and is_equal_approx(reset_screen.dish_row.slider.value, d.dish_radius / 1000.0), "Reset to default puts the defaults in the sliders")
 	check(FileAccess.get_file_as_string(TEMP) == file_before, "Reset doesn't touch the saved file")
 	check(_same(Session.free_start, prev), "Reset doesn't change the remembered preference")
 	reset_screen._back()  # backing out after a reset
@@ -143,12 +143,12 @@ func _init() -> void:
 	reopened.rate_row.slider.value = 20
 	reopened.dish_row.slider.value = 5.0
 	reopened.nutrients_row.reset_button.pressed.emit()
-	check(reopened.nutrients_row.slider.value == d.nutrients, "row reset puts that slider at its default")
+	check(reopened.nutrients_row.slider.value == d.nutrient_density, "row reset puts that slider at its default")
 	check(reopened.bups_row.slider.value == 90 and reopened.rate_row.slider.value == 20 and is_equal_approx(reopened.dish_row.slider.value, 5.0), "...and leaves the other sliders alone")
 	reopened.rate_row.reset_button.pressed.emit()
 	reopened.dish_row.reset_button.pressed.emit()
 	reopened.bups_row.reset_button.pressed.emit()
-	check(reopened.bups_row.slider.value == d.bups and reopened.rate_row.slider.value == d.nutrient_rate and is_equal_approx(reopened.dish_row.slider.value, d.dish_radius / 1000.0), "every row has a working reset")
+	check(reopened.bups_row.slider.value == d.bups and reopened.rate_row.slider.value == d.feed_density and is_equal_approx(reopened.dish_row.slider.value, d.dish_radius / 1000.0), "every row has a working reset")
 	check(FileAccess.get_file_as_string(TEMP) == file_now, "row resets save nothing")
 	check(reopened.reset_button.text == "" and reopened.reset_button.icon != null and reopened.reset_button.tooltip_text == "Use defaults", "top-right reset is icon-only with a 'Use defaults' tooltip")
 	check(reopened.bups_row.reset_button.tooltip_text == "Use default (4)", "row tooltip names the default: '%s'" % reopened.bups_row.reset_button.tooltip_text)
@@ -173,14 +173,14 @@ func _init() -> void:
 	for v in [reopened.bups_row.value_field, reopened.dish_row.value_field]:
 		check(v.global_position.x + v.size.x <= global_right + 1.0, "%s keeps to the right edge the global reset aligns to" % v.name)
 	# A saved value off the slider's step grid: what is shown, previewed and played must agree.
-	_write_raw('{"bups": 7, "nutrients": 33, "nutrient_rate": 6.5, "dish_radius": 3050}')
+	_write_raw('{"bups": 7, "nutrient_density": 33, "feed_density": 6.5, "dish_radius": 3050}')
 	Session.free_start = StartConditions.load_saved()
 	var off_grid: Control = load("res://scenes/free_setup.tscn").instantiate()
 	root.add_child(off_grid)
 	await process_frame
-	check(off_grid._start.nutrient_rate == off_grid.rate_row.value, "working copy takes the slider's rate (%s vs shown %s)" % [off_grid._start.nutrient_rate, off_grid.rate_row.value])
+	check(off_grid._start.feed_density == off_grid.rate_row.value, "working copy takes the slider's rate (%s vs shown %s)" % [off_grid._start.feed_density, off_grid.rate_row.value])
 	check(is_equal_approx(off_grid._start.dish_radius, off_grid.dish_row.value * 1000.0), "working copy takes the slider's radius (%s vs shown %s)" % [off_grid._start.dish_radius, off_grid.dish_row.value])
-	check(off_grid._start.bups == int(off_grid.bups_row.value) and off_grid._start.nutrients == int(off_grid.nutrients_row.value), "bups and nutrients agree too")
+	check(off_grid._start.bups == int(off_grid.bups_row.value) and off_grid._start.nutrient_density == int(off_grid.nutrients_row.value), "bups and nutrients agree too")
 	off_grid.queue_free()
 	Session.free_start = StartConditions.load_saved()
 

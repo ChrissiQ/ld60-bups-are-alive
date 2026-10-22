@@ -39,63 +39,103 @@ func _init() -> void:
 	var d := _make_dish()
 	d.strike()
 	check(d.population() == 4, "default bups = 4, got %d" % d.population())
-	check(absf(TestUtil.units(d) - 10000.0) < 0.5, "default starting nutrient = 10,000 units, got %.1f" % TestUtil.units(d))
+	check(absf(TestUtil.density(d) - 32.0) < 0.5, "default starting nutrient = 32 units/mm² (about 10,000 units in the 10 mm dish), got %.2f" % TestUtil.density(d))
 	check(d.radius == 10000.0 and d.bup_limit == 20000, "the default dish is 10 mm in radius with room for 20,000 bups, got %.0f and %d" % [d.radius, d.bup_limit])
 
 	# --- Counts and clamping.
 	var s := _small()
 	s.bups = 120
-	s.nutrients = 150
+	s.nutrient_density = 150
 	d.strike(s)
 	check(d.population() == 120, "120 bups, got %d" % d.population())
-	check(absf(TestUtil.units(d) - 150.0) < 0.5, "150 units of starting nutrient, got %.1f" % TestUtil.units(d))
+	check(absf(TestUtil.density(d) - 150.0) < 3.0, "150 units/mm² of starting nutrient, got %.1f" % TestUtil.density(d))
 	s.bups = 9999
-	s.nutrients = 9999999  # (more than the most the game allows)
+	s.nutrient_density = 9999999  # (more than the most the game allows)
 	d.strike(s)
 	check(d.population() == Dish.MAX_CELLS, "bups clamped to MAX_CELLS")
-	check(absf(TestUtil.units(d) - StartConditions.MAX_NUTRIENTS) < 0.5, "starting nutrient clamped to its maximum")
-	s.nutrients = 0
+	check(absf(TestUtil.density(d) - StartConditions.MAX_NUTRIENT_DENSITY) < StartConditions.MAX_NUTRIENT_DENSITY * 0.02, "starting nutrient clamped to its maximum")
+	s.nutrient_density = 0
 	d.strike(s)
 	check(d.field.is_empty(), "0 starting nutrient means a bare dish")
 
-	# --- The starting nutrient is spread evenly, wherever you look.
+	# --- With no patchiness the starting nutrient is spread evenly, wherever you look (see below for the patchy kind).
 	d.strike(_small())
+	d.field.reset(d.radius)
+	d.field.set_patchiness(0.0, 1.0, 0)
+	d.field.fill(0.001)
 	var centre_c := d.field.sample(Vector2.ZERO)
 	var edge_c := d.field.sample(Vector2(d.radius * 0.8, 0.0))
-	check(centre_c > 0.0 and absf(centre_c - edge_c) < centre_c * 0.02, "the starting medium is uniform (%.5f vs %.5f)" % [centre_c, edge_c])
+	check(centre_c > 0.0 and absf(centre_c - edge_c) < centre_c * 0.02, "without patchiness the medium is uniform (%.5f vs %.5f)" % [centre_c, edge_c])
 
 	# --- Nutrient rate is part of the start conditions.
 	var r := StartConditions.new()
-	r.nutrient_rate = 17.0
+	r.feed_density = 17.0
 	d.strike(r)
-	check(d.food_rate == 17.0, "start rate applied, got %.1f" % d.food_rate)
-	r.nutrient_rate = 999.0
+	check(d.feed_density == 17.0, "start rate applied, got %.1f" % d.feed_density)
+	r.feed_density = 999.0
 	d.strike(r)
-	check(d.food_rate == StartConditions.MAX_NUTRIENT_RATE, "rate clamped to max")
+	check(d.feed_density == StartConditions.MAX_FEED_DENSITY, "rate clamped to max")
 	d.strike(_small())
-	check(d.food_rate == 0.0, "no feed by default, got %.1f" % d.food_rate)
+	check(d.feed_density == 0.0, "no feed by default, got %.1f" % d.feed_density)
 
 	# --- The feed adds nutrient evenly at the chosen rate.
 	d.strike(_small())
 	d.clear_bups()
 	d.field.reset(d.radius)
-	d.food_rate = 12.0
-	d.advance(120.0)
-	check(absf(TestUtil.units(d) - 12.0 * 2.0) < 2.0, "the feed adds rate x time (%.1f units in 2 min at 12/min)" % TestUtil.units(d))
-	check(absf(d.field.sample(Vector2.ZERO) - d.field.sample(Vector2(d.radius * 0.7, 0.0))) < d.field.sample(Vector2.ZERO) * 0.03, "...evenly over the dish")
+	d.feed_density = 12.0
+	d.advance(3600.0)
+	check(absf(TestUtil.density(d) - 12.0) < 0.3, "the feed adds rate x time to every mm² (%.2f units/mm² in an hour at 12/mm²/h)" % TestUtil.density(d))
+	# The nutrient put in is patchy, richer and poorer places that stay put, though the total is what was asked for.
+	var patchy := _make_dish()
+	patchy.set_seed(8)
+	var patch_start := StartConditions.new()
+	patch_start.dish_radius = 4000.0
+	patch_start.nutrient_density = 100.0
+	patchy.strike(patch_start)
+	var cell_values: PackedFloat32Array = patchy.field.values()
+	var seen := []
+	for i in patchy.field.size * patchy.field.size:
+		if patchy.field.accepts(patchy.field.cell_centre(i)):
+			seen.append(cell_values[i])
+	var seen_mean := 0.0
+	for v in seen:
+		seen_mean += v
+	seen_mean /= seen.size()
+	var seen_spread := 0.0
+	for v in seen:
+		seen_spread += (v - seen_mean) * (v - seen_mean)
+	seen_spread = sqrt(seen_spread / seen.size()) / seen_mean
+	check(absf(TestUtil.density(patchy) - 100.0) < 2.0 and absf(seen_spread - Dish.NUTRIENT_PATCHINESS) < 0.1, "the starting nutrient is uneven (spread %.2f of the mean) with the density asked for (%.1f)" % [seen_spread, TestUtil.density(patchy)])
+	patchy.feed_density = 20.0
+	patchy.advance(3600.0)
+	check(absf(TestUtil.density(patchy) - 120.0) < 3.0, "the feed adds its density on average (%.1f)" % TestUtil.density(patchy))
+	var same_seed := _make_dish()
+	same_seed.set_seed(8)
+	same_seed.strike(patch_start)
+	var other_seed := _make_dish()
+	other_seed.set_seed(9)
+	other_seed.strike(patch_start)
+	var probe := Vector2(1000, 500)
+	check(same_seed.patch_seed != other_seed.patch_seed and not is_equal_approx(other_seed.field.sample(probe), same_seed.field.sample(probe)), "a landscape depends on the seed: another seed, other patches")
+	var landscape_copy := _make_dish()
+	check(landscape_copy.from_dict(TestUtil.saved(patchy)) and landscape_copy.patch_seed == patchy.patch_seed, "the landscape's seed survives save and load")
+	patchy.free()
+	same_seed.free()
+	other_seed.free()
+	landscape_copy.free()
 
 	# --- Dish size.
 	var small := StartConditions.new()
 	small.dish_radius = 150.0
 	small.bups = 100
-	small.nutrients = 100
+	small.nutrient_density = 100
 	d.strike(small)
 	check(d.radius == 150.0, "dish radius 150, got %.0f" % d.radius)
 	var inside_small := true
 	for id in d.bup_ids():
 		inside_small = inside_small and (d.bup_info(id)["pos"] as Vector2).length() <= d.radius
 	check(inside_small, "everything starts inside a small dish")
-	check(absf(TestUtil.units(d) - 100.0) < 0.5, "...with its starting nutrient (%.1f)" % TestUtil.units(d))
+	check(absf(TestUtil.density(d) - 100.0) < 3.0, "...with its starting nutrient density (%.1f)" % TestUtil.density(d))
 	small.dish_radius = 5.0
 	d.strike(small)
 	check(d.radius == StartConditions.MIN_SIM_RADIUS, "radius clamped to the smallest the simulation runs")
@@ -134,9 +174,9 @@ func _init() -> void:
 	large_start.dish_radius = 1200.0
 	large_start.bup_limit = Dish.cap_for(1200.0)
 	large_start.bups = 200
-	large_start.nutrients = 500
+	large_start.nutrient_density = 500
 	large.strike(large_start)
-	check(large.bup_limit == 1200 and large.field.size == 96 and large.population() == 200 and absf(TestUtil.units(large) - 500.0) < 1.0, "a big dish starts with its own grid, limit and nutrient")
+	check(large.bup_limit == 1200 and large.field.size == 96 and large.population() == 200 and absf(TestUtil.density(large) - 500.0) < 10.0, "a big dish starts with its own grid, limit and nutrient")
 	large.place_source(large.global_position + Vector2(400, 0), 10.0)
 	large.advance(600.0)
 	var large_copy := _make_dish()
@@ -330,10 +370,23 @@ func _init() -> void:
 		list_ok = list_ok and n == n.to_lower() and n.length() >= 2 and n.length() <= 8 and not n.contains(" ") and not seen_names.has(n)
 		seen_names[n] = true
 	check(list_ok, "the list of random names holds at least one for every possible founder (%d), each lowercase, one word, short, none twice" % name_list.size())
+	screen._reset_all()
+	var reset_ok := true
+	for i in 5:
+		reset_ok = reset_ok and screen._names[i].text == "" and screen._colors[i].color.is_equal_approx(Genome.color_of(Genome.founder()))
+	check(reset_ok and screen.reset_button.tooltip_text == "Reset all", "the reset icon (hover: Reset all) clears every name and puts every colour back to the default")
 	screen._names[2].text = "  Maeve "
 	screen._colors[2].color = Color.html("#3366cc")
 	var collected: Array = screen._collect()
-	check(collected.size() == 5 and collected[2] == {"name": "Maeve", "color": "#3366cc"}, "what is typed and picked is collected, tidied (%s)" % [collected[2]])
+	check(collected.size() == 3 and collected[0] == {} and collected[2] == {"name": "Maeve", "color": "#3366cc"}, "what is typed and picked is collected, tidied, and trailing founders left at the default are not kept (%s)" % [collected])
+	# Going back keeps nothing: the settings stay as they were, even after a reset or edits.
+	var founders_before: Array = Session.free_start.founders.duplicate(true)
+	var file_before: String = FileAccess.get_file_as_string(StartConditions.settings_path)
+	screen._names[0].text = "Edited"
+	screen._reset_all()
+	screen._back()
+	await process_frame
+	check(Session.free_start.founders == founders_before and FileAccess.get_file_as_string(StartConditions.settings_path) == file_before, "going back from the founders screen, after edits and a reset, leaves the settings as they were (nothing kept, nothing saved)")
 	screen.queue_free()
 	Session.free_start = kept_start
 	await process_frame
@@ -457,7 +510,7 @@ func _init() -> void:
 	var shrinking := _make_dish()
 	var shrink_start := StartConditions.new()
 	shrink_start.dish_radius = 3000.0
-	shrink_start.nutrients = 30000
+	shrink_start.nutrient_density = 30000
 	shrinking.strike(shrink_start)
 	shrinking.clear_bups()
 	var kept_ids: Array[int] = []
@@ -470,7 +523,7 @@ func _init() -> void:
 	shrinking.place_source(shrinking.global_position + Vector2(2200, 0), 5.0)
 	shrinking.plankton.append(Plankton.new(Vector2(1000, 0), 0.0, 1e9, 300.0, 0.0))
 	shrinking.plankton.append(Plankton.new(Vector2(2500, 0), 0.0, 1e9, 300.0, 0.0))
-	shrinking.food_rate = 8.0
+	shrinking.feed_density = 8.0
 	shrinking.bloom_rate = 40.0
 	var density_before := shrinking.field.sample(Vector2.ZERO)
 	shrinking.resize_to(1500.0)
@@ -487,12 +540,12 @@ func _init() -> void:
 		lost_gone = lost_gone and not shrinking.has_bup(id) and not shrinking.has_record(id)
 	check(kept_alive and lost_gone, "the bups inside live on, and the dead ones' records are freed (no descendants, not open anywhere)")
 	check(shrinking.sources.size() == 1 and shrinking.plankton.size() == 1, "sources and plankton past the edge go (%d sources, %d plankton left)" % [shrinking.sources.size(), shrinking.plankton.size()])
-	check(is_equal_approx(shrinking.food_rate, 2.0) and is_equal_approx(shrinking.bloom_rate, 10.0), "the feed and the bloom follow the area, a quarter here (%.2f, %.2f)" % [shrinking.food_rate, shrinking.bloom_rate])
+	check(is_equal_approx(shrinking.feed_density, 8.0) and is_equal_approx(shrinking.bloom_rate, 10.0), "the feed is a density, so it stays as it was; the bloom, a count, follows the area (a quarter here: %.2f, %.2f)" % [shrinking.feed_density, shrinking.bloom_rate])
 	check(absf(shrinking.field.sample(Vector2.ZERO) - density_before) < 0.06 * density_before, "the nutrient left keeps its concentration (%.4f then, %.4f now)" % [density_before, shrinking.field.sample(Vector2.ZERO)])
 	shrinking.resize_to(10.0)
 	check(shrinking.radius == StartConditions.MIN_DISH_RADIUS, "and never below the smallest dish")
 	shrinking.resize_to(3000.0)
-	check(is_equal_approx(shrinking.food_rate, 2.0 * 4.0 * (StartConditions.MIN_DISH_RADIUS * StartConditions.MIN_DISH_RADIUS) / (1500.0 * 1500.0) * (3000.0 * 3000.0) / (StartConditions.MIN_DISH_RADIUS * StartConditions.MIN_DISH_RADIUS) / 4.0), "growing again scales the feed back up with the area")
+	check(is_equal_approx(shrinking.feed_density, 8.0) and is_equal_approx(shrinking.bloom_rate, 10.0 * 4.0 * (StartConditions.MIN_DISH_RADIUS * StartConditions.MIN_DISH_RADIUS) / (1500.0 * 1500.0) * (3000.0 * 3000.0) / (StartConditions.MIN_DISH_RADIUS * StartConditions.MIN_DISH_RADIUS) / 4.0), "growing again scales the bloom back up with the area, and leaves the feed density alone")
 	shrinking.advance(60.0)
 	check(shrinking.population() <= 2, "a shrunken dish keeps running")
 	shrinking.free()
@@ -553,7 +606,9 @@ func _init() -> void:
 	d.strike(_small())
 	d.clear_bups()
 	d.field.reset(d.radius)
-	d.field.fill(500.0)
+	d.field.set_patchiness(0.0, 1.0, 0)  # (an even medium, so the brush's effect is plain to see)
+	d.field.fill(1.0)
+	var total_filled: float = d.field.total()
 	var patch := d.global_position + Vector2(-80, 40)
 	var middle_before := d.field.sample(patch - d.global_position)
 	var removed := d.erase_nutrient(patch, 40.0)
@@ -561,7 +616,7 @@ func _init() -> void:
 	var rim := patch + Vector2(36, 0)
 	check(d.field.sample(rim - d.global_position) > d.field.sample(patch - d.global_position), "...and less towards its edge")
 	check(absf(d.field.sample(d.global_position + Vector2(150, 150) - d.global_position) - middle_before) < middle_before * 0.01, "...and not at all outside it")
-	check(absf((500.0 - d.field.total()) / Dish.NUTRIENT_ENERGY - removed) < 0.01, "erasing reports the units it removed")
+	check(absf((total_filled - d.field.total()) / Dish.NUTRIENT_ENERGY - removed) < 0.01, "erasing reports the units it removed")
 
 	# --- Plankton: placed by hand, as many as the dish holds, they float until they burst into nutrient; a bloom adds more at random.
 	var bloom := _make_dish()
@@ -851,8 +906,8 @@ func _init() -> void:
 	check(StartConditions.new().dish_radius == Dish.DEFAULT_RADIUS, "default radius is the dish's default")
 	var original := StartConditions.new()
 	original.bups = 33
-	original.nutrients = 44
-	original.nutrient_rate = 7.0
+	original.nutrient_density = 44
+	original.feed_density = 7.0
 	original.dish_radius = 4100.0
 	var duplicate := original.copy()
 	check(duplicate != original and duplicate.to_dict() == original.to_dict(), "copy() has the same values")
@@ -1010,7 +1065,7 @@ func _init() -> void:
 
 	# --- Bups all start inside the dish at any count.
 	s.bups = 200
-	s.nutrients = 60
+	s.nutrient_density = 60
 	d.strike(s)
 	check(_radii(Array(d.bup_ids()).map(func(id: int) -> Vector2: return d.bup_world_pos(id))).max() <= d.radius, "200 bups inside dish")
 
@@ -1020,8 +1075,8 @@ func _init() -> void:
 	var mtime_before := FileAccess.get_modified_time(SaveGame.PATH) if had_save else 0
 	var chosen := _small()
 	chosen.bups = 150
-	chosen.nutrients = 40
-	chosen.nutrient_rate = 11.0
+	chosen.nutrient_density = 40
+	chosen.feed_density = 11.0
 	Session.free_start = chosen
 	Session.mode = Session.Mode.FREE
 	Session.load_requested = true  # must be ignored in free mode
@@ -1029,7 +1084,7 @@ func _init() -> void:
 	root.add_child(m)
 	await process_frame
 	check(m.free_mode, "main.free_mode")
-	check(m.dish.population() == 150 and absf(TestUtil.units(m.dish) - 40.0) < 2.0 and m.dish.food_rate == 11.0, "free scene started with chosen conditions (%d bups, %.0f nutrient, rate %.0f)" % [m.dish.population(), TestUtil.units(m.dish), m.dish.food_rate])
+	check(m.dish.population() == 150 and absf(TestUtil.density(m.dish) - 40.0) < 1.0 and m.dish.feed_density == 11.0, "free scene started with chosen conditions (%d bups, %.0f units/mm², feed %.0f)" % [m.dish.population(), TestUtil.density(m.dish), m.dish.feed_density])
 	for i in 60:
 		await process_frame
 	check(m.tracker.index == 0, "no goal progress in free mode (pop %d >= 1,000 would complete goal 1)" % m.dish.population())
@@ -1043,7 +1098,7 @@ func _init() -> void:
 	hud_text = m.hud.get_parsed_text()
 	check(hud_text.contains("/ 2,000") and hud_text.contains("dish  1.5 mm"), "...and follows a change of limit or size ('%s')" % hud_text.get_slice("\n", 1))
 	m._open_menu()
-	check(m.pause_menu.initial_panel.visible and m.pause_menu.initial_bups.value_label.text == "150" and m.pause_menu.initial_nutrients.value_label.text == "40" and m.pause_menu.initial_rate.value_label.text == "11/min" and m.pause_menu.initial_dish.value_label.text == "0.3 mm" and m.pause_menu.initial_limit.value_label.text == UiText.thousands(chosen.bup_limit), "the Escape menu records how the dish started, unchanged by later changes (dish %s)" % m.pause_menu.initial_dish.value_label.text)
+	check(m.pause_menu.initial_panel.visible and m.pause_menu.initial_bups.value_label.text == "150" and m.pause_menu.initial_nutrients.value_label.text == "40/mm²" and m.pause_menu.initial_rate.value_label.text == "11.0 /mm²/h" and m.pause_menu.initial_dish.value_label.text == "0.3 mm" and m.pause_menu.initial_limit.value_label.text == UiText.thousands(chosen.bup_limit), "the Escape menu records how the dish started, unchanged by later changes (dish %s)" % m.pause_menu.initial_dish.value_label.text)
 	check(m.pause_menu.initial_bups.name_label.text == "Bups" and m.pause_menu.initial_rate.name_label.text == "Nutrient feed", "its rows carry their labels")
 	m._close_menu()
 	# The dish-size slider covers every size, so a dish at its largest can still shrink.
@@ -1070,9 +1125,9 @@ func _init() -> void:
 	root.add_child(m2)
 	await process_frame
 	m2.dish.clear_bups()
-	m2.dish.food_rate = 2.0
+	m2.dish.feed_density = 2.0
 	m2._restart()
-	check(m2.dish.population() == 150 and absf(TestUtil.units(m2.dish) - 40.0) < 2.0 and m2.dish.food_rate == 11.0, "restart reuses free start conditions")
+	check(m2.dish.population() == 150 and absf(TestUtil.density(m2.dish) - 40.0) < 1.0 and m2.dish.feed_density == 11.0, "restart reuses free start conditions")
 	m2.queue_free()
 	await process_frame
 
@@ -1083,7 +1138,7 @@ func _init() -> void:
 	root.add_child(m3)
 	# Checked straight after _ready, before the first frame: once frames run, the sim feeds
 	# and eats nutrient, so the amounts would depend on how long the first frame took.
-	check(not m3.free_mode and m3.dish.population() == 4 and absf(TestUtil.units(m3.dish) - 10000.0) < 0.5 and m3.dish.food_rate == 0.0, "goal mode default start: seeded with nutrient, no feed")
+	check(not m3.free_mode and m3.dish.population() == 4 and absf(TestUtil.density(m3.dish) - 32.0) < 0.5 and m3.dish.feed_density == 0.0, "goal mode default start: seeded with nutrient, no feed")
 	await process_frame
 	check(m3.goal_panel.visible and m3.goal_panel.get_parsed_text().begins_with("EXPERIMENT 1 / "), "goal mode shows the goal panel")
 	check(not m3.hud.get_parsed_text().contains("DISH"), "goal mode's readout has no dish line")

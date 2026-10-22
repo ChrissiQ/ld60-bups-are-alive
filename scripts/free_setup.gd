@@ -23,28 +23,28 @@ func _ready() -> void:
 	var defaults := StartConditions.new()
 
 	bups_row.configure(StartConditions.MIN_BUPS, StartConditions.MAX_BUPS, 1, defaults.bups)
-	nutrients_row.configure(0, StartConditions.MAX_NUTRIENTS, 1, defaults.nutrients, Strings.t("free_setup.unit_nutrient"))
-	rate_row.configure(0, StartConditions.MAX_NUTRIENT_RATE, 1, defaults.nutrient_rate, Strings.t("free_setup.unit_feed"))
+	nutrients_row.configure(0, StartConditions.MAX_NUTRIENT_DENSITY, 1, defaults.nutrient_density, Strings.t("free_setup.unit_nutrient"))
+	rate_row.configure(0, StartConditions.MAX_FEED_DENSITY, 0.1, defaults.feed_density, Strings.t("free_setup.unit_feed"))
 	bloom_row.configure(0, StartConditions.MAX_BLOOM_RATE, Dish.BLOOM_RATE_STEP, defaults.bloom_rate, Strings.t("free_setup.unit_bloom"))
 	dish_row.configure(StartConditions.MIN_DISH_RADIUS / StartConditions.UM_PER_MM, StartConditions.MAX_DISH_RADIUS / StartConditions.UM_PER_MM, 0.1, defaults.dish_radius / StartConditions.UM_PER_MM, Strings.t("ui.mm_unit"))  # the dish is chosen in mm; the simulation works in µm
 	limit_row.configure(StartConditions.MIN_BUP_LIMIT, StartConditions.MAX_BUP_LIMIT, 1, defaults.bup_limit)
 	bups_row.value = _start.bups
-	nutrients_row.value = _start.nutrients
-	rate_row.value = _start.nutrient_rate
+	nutrients_row.value = _start.nutrient_density
+	rate_row.value = _start.feed_density
 	bloom_row.value = _start.bloom_rate
 	dish_row.value = _start.dish_radius / StartConditions.UM_PER_MM
 	limit_row.value = _start.bup_limit
 	# A saved value off the slider's step grid shows rounded, so take what the sliders hold,
 	# so that what's shown, previewed and played are always the same number.
 	_start.bups = int(bups_row.value)
-	_start.nutrients = int(nutrients_row.value)
-	_start.nutrient_rate = rate_row.value
+	_start.nutrient_density = nutrients_row.value
+	_start.feed_density = rate_row.value
 	_start.bloom_rate = bloom_row.value
 	_start.dish_radius = snappedf(dish_row.value * StartConditions.UM_PER_MM, 1.0)
 	_start.bup_limit = int(limit_row.value)
 	bups_row.value_changed.connect(func(v: float) -> void: _start.bups = int(v); _sync_limit_floor(); _refresh())
-	nutrients_row.value_changed.connect(func(v: float) -> void: _start.nutrients = int(v); _refresh())
-	rate_row.value_changed.connect(func(v: float) -> void: _start.nutrient_rate = v; _refresh())
+	nutrients_row.value_changed.connect(func(v: float) -> void: _start.nutrient_density = v; _refresh())
+	rate_row.value_changed.connect(func(v: float) -> void: _start.feed_density = v; _refresh())
 	bloom_row.value_changed.connect(func(v: float) -> void: _start.bloom_rate = v; _refresh())
 	dish_row.value_changed.connect(func(v: float) -> void: _start.dish_radius = snappedf(v * StartConditions.UM_PER_MM, 1.0); _refresh())
 	limit_row.value_changed.connect(func(v: float) -> void: _start.bup_limit = int(v); _refresh())

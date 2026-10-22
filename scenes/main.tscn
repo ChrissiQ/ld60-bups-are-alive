@@ -24,6 +24,7 @@
 [ext_resource type="PackedScene" path="res://ui/watch_panel.tscn" id="watch_panel"]
 [ext_resource type="Texture2D" path="res://icons/lineage.svg" id="lineage_icon"]
 [ext_resource type="Texture2D" path="res://icons/watch.svg" id="watch_icon"]
+[ext_resource type="Texture2D" path="res://icons/back.svg" id="back_icon"]
 [ext_resource type="Texture2D" path="res://icons/pick_all.svg" id="pick_all_icon"]
 [ext_resource type="Texture2D" path="res://icons/tool_plankton.svg" id="plankton_icon"]
 [ext_resource type="Texture2D" path="res://icons/pick_background.svg" id="pick_background_icon"]
@@ -331,7 +332,6 @@ size_flags_horizontal = 3
 layout_mode = 2
 size_flags_vertical = 4
 theme_type_variation = &"IconButton"
-toggle_mode = true
 tooltip_text = "@hud.watch"
 icon = ExtResource("watch_icon")
 icon_alignment = 1
@@ -394,9 +394,22 @@ grow_vertical = 0
 layout_mode = 2
 theme_type_variation = &"TightStack"
 
-[node name="Title" type="Label" parent="HUD/LineagePanel/Box"]
+[node name="TitleRow" type="HBoxContainer" parent="HUD/LineagePanel/Box"]
+layout_mode = 2
+theme_type_variation = &"TightRow"
+
+[node name="BackButton" type="Button" parent="HUD/LineagePanel/Box/TitleRow"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"IconButton"
+tooltip_text = "@hud.lineage_back_tip"
+icon = ExtResource("back_icon")
+icon_alignment = 1
+
+[node name="Title" type="Label" parent="HUD/LineagePanel/Box/TitleRow"]
 theme_type_variation = &"BupName"
 layout_mode = 2
+size_flags_horizontal = 3
 text_overrun_behavior = 3
 
 [node name="Scroll" type="ScrollContainer" parent="HUD/LineagePanel/Box"]
@@ -429,7 +442,7 @@ label_min_width = 50.0
 slider_min_width = 64.0
 slider_min_height = 18.0
 value_min_width = 44.0
-unit_min_width = 34.0
+unit_min_width = 58.0
 
 [node name="FeedRow" parent="HUD/RatePanel/Rows" instance=ExtResource("setting_row")]
 layout_mode = 2
@@ -440,7 +453,7 @@ label_min_width = 50.0
 slider_min_width = 64.0
 slider_min_height = 18.0
 value_min_width = 44.0
-unit_min_width = 34.0
+unit_min_width = 58.0
 
 [node name="PauseRing" type="Panel" parent="HUD"]
 theme_type_variation = &"RingPanel"

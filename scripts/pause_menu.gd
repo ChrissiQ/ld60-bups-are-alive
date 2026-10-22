@@ -62,8 +62,8 @@ func open(dish: Dish, free_mode: bool, started_as: StartConditions = null) -> vo
 	initial_panel.visible = _record_shown
 	if _record_shown:
 		initial_bups.value_text = UiText.thousands(started_as.bups)
-		initial_nutrients.value_text = UiText.thousands(started_as.nutrients)
-		initial_rate.value_text = UiText.thousands(started_as.nutrient_rate) + Strings.t("pause.per_minute")
+		initial_nutrients.value_text = UiText.thousands(started_as.nutrient_density) + Strings.t("pause.per_mm2")
+		initial_rate.value_text = UiText.thousands(started_as.feed_density, 1) + Strings.t("pause.per_mm2_hour")
 		initial_bloom.value_text = UiText.thousands(started_as.bloom_rate) + Strings.t("pause.per_day")
 		initial_dish.value_text = UiText.mm(started_as.dish_radius)
 		initial_limit.value_text = UiText.thousands(started_as.bup_limit)

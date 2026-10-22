@@ -197,7 +197,7 @@ func _init() -> void:
 	for wall_radius: float in [300.0, 1200.0, 6000.0, 12000.0]:
 		var rim := NutrientField.new()
 		rim.reset(wall_radius)
-		rim.fill(0.01 * PI * wall_radius * wall_radius)
+		rim.fill(0.01)
 		var cannot_eat := 0
 		var reads_low := 0
 		for k in 360:
@@ -309,7 +309,7 @@ func _init() -> void:
 	for i in 100:
 		sim.bup_tumble_rate(stale, 0.0005, DT, 0.0)  # settled on a faint signal
 	sim.get_field().reset(Dish.DEFAULT_RADIUS)
-	sim.get_field().fill(0.1 * PI * Dish.DEFAULT_RADIUS * Dish.DEFAULT_RADIUS)
+	sim.get_field().fill(0.1)
 	sim.step(15.0, PackedVector2Array(), PackedFloat32Array(), 0.0)  # a long step: drift, not runs
 	var first_after := sim.bup_tumble_rate(stale, 0.1, DT, 0.0)
 	check(absf(first_after - Cell.TUMBLE_BASE) < 0.05, "back to runs after drifting, the first tumble rate is the baseline, not a leftover (%.2f)" % first_after)
@@ -436,7 +436,7 @@ func _init() -> void:
 		run_dish.sim.set_threads(threads)
 		var run_start := StartConditions.new()
 		run_start.dish_radius = 3000.0
-		run_start.nutrients = 200000
+		run_start.nutrient_density = 200000
 		run_start.bups = 5
 		run_start.bup_limit = 5000
 		run_dish.strike(run_start)
@@ -500,10 +500,10 @@ func _drift_speed(coarse: bool, gradient: bool, sense: float, long_step := 1.5) 
 		var start := StartConditions.new()
 		start.dish_radius = 1500.0  # wide: a wall in reach cuts the drift short, and it does so more the longer the steps
 		start.bup_limit = Dish.cap_for(1500.0)
-		start.nutrients = 0  # (the field is loaded below; nothing else should be in it)
+		start.nutrient_density = 0  # (the field is loaded below; nothing else should be in it)
 		d.strike(start)
 		d.clear_bups()
-		d.food_rate = 0.0
+		d.feed_density = 0.0
 		var values := []
 		for i in d.field.size * d.field.size:
 			values.append(0.01 * exp(clampf(d.field.cell_centre(i).x, -250.0, 250.0) / 200.0) if gradient else 0.03)

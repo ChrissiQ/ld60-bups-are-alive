@@ -66,10 +66,12 @@ label_text = "@free_setup.bups"
 [node name="NutrientsRow" parent="Panel/Box" instance=ExtResource("5")]
 layout_mode = 2
 label_text = "@free_setup.start_nutrient"
+label_tip = "@free_setup.start_density_tip"
 
 [node name="RateRow" parent="Panel/Box" instance=ExtResource("5")]
 layout_mode = 2
 label_text = "@free_setup.nutrient_feed"
+label_tip = "@free_setup.feed_tip"
 
 [node name="BloomRow" parent="Panel/Box" instance=ExtResource("5")]
 layout_mode = 2

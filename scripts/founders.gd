@@ -1,12 +1,14 @@
 extends Control
 ## Free mode's last step before the dish starts: every founder, in order (#1, #2 ...), to name and colour.
 ## Only founders can be given a colour here; their descendants drift from it as they mutate (see Genome).
-## What is chosen is kept with the starting conditions, so the next launch (and a restart) starts the same way.
+## What is chosen is kept with the starting conditions when the dish is started (START), so the next launch (and a restart)
+## starts the same way. Nothing is kept by going back: that returns to the settings as they were, whatever was changed here.
 
 @onready var list: VBoxContainer = $Panel/Box/Scroll/List
 @onready var random_button: Button = $Panel/Box/Tools/RandomButton
 @onready var spread_button: Button = $Panel/Box/Tools/SpreadButton
 @onready var names_button: Button = $Panel/Box/Tools/NamesButton
+@onready var reset_button: Button = $Panel/Box/Header/ResetButton
 @onready var back_button: Button = $Panel/Box/Actions/BackButton
 @onready var start_button: Button = $Panel/Box/Actions/StartButton
 
@@ -22,6 +24,7 @@ func _ready() -> void:
 	random_button.pressed.connect(_randomise_colors)
 	spread_button.pressed.connect(_spread_colors)
 	names_button.pressed.connect(_randomise_names)
+	reset_button.pressed.connect(_reset_all)
 	back_button.pressed.connect(_back)
 	start_button.pressed.connect(_start_game)
 	if not _names.is_empty():
@@ -56,6 +59,14 @@ func _add_row(index: int) -> void:
 func _randomise_colors() -> void:
 	for picker in _colors:
 		picker.color = Genome.random_color()
+
+
+## Every founder back to the default: no name chosen, and the default colour.
+func _reset_all() -> void:
+	var default_colour := Genome.color_of(Genome.founder())
+	for i in _names.size():
+		_names[i].text = ""
+		_colors[i].color = default_colour
 
 
 ## Every founder a name from the list of silly ones (each used once, as there are more names than founders can be).
@@ -100,7 +111,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		_back()
 
 
-## Keeps what the rows hold with the starting conditions (so it is there when the player comes back, and at the next launch).
+## Keeps what the rows hold with the starting conditions (so it is there at the next launch and for a restart).
 func _commit() -> void:
 	_start.founders = _collect()
 	Session.free_start = _start
@@ -108,8 +119,7 @@ func _commit() -> void:
 
 
 func _back() -> void:
-	_commit()
-	get_tree().change_scene_to_file(Scenes.FREE_SETUP)
+	get_tree().change_scene_to_file(Scenes.FREE_SETUP)  # (the changes made here are let go: only START keeps them)
 
 
 func _start_game() -> void:

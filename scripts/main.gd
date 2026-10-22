@@ -11,6 +11,8 @@ const ZOOM_BUTTON_STEP := 1.25
 const ZOOM_WHEEL_STEP := 1.1
 const ZOOM_PINCH_GAIN := 1.0  ## a trackpad pinch zooms by its own factor, to this power
 const ZOOM_TRACKPAD_SCROLL := 0.05  ## a two-finger scroll zooms by ZOOM_WHEEL_STEP to the power of this for each unit it moves
+const WATCH_ICON := preload("res://icons/watch.svg")
+const UNWATCH_ICON := preload("res://icons/unwatch.svg")
 const PAN_KEY_PIXELS := 600.0  ## screen pixels a second the view moves while a pan key (W, A, S or D) is held
 const RATE_PANEL_GAP := 16.0  ## screen pixels between the readout and the feed and bloom box under it
 const FIT_MARGIN := 40.0  ## screen pixels kept clear at the sides when framing the dish
@@ -34,7 +36,8 @@ const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) stil
 @onready var name_row: BupNameRow = $HUD/InfoPanel/Box/TopRow/NameRow
 @onready var lineage_button: Button = $HUD/InfoPanel/Box/TopRow/LineageButton
 @onready var lineage_panel: PanelContainer = $HUD/LineagePanel
-@onready var lineage_title: Label = $HUD/LineagePanel/Box/Title
+@onready var lineage_title: Label = $HUD/LineagePanel/Box/TitleRow/Title
+@onready var lineage_back_button: Button = $HUD/LineagePanel/Box/TitleRow/BackButton
 @onready var lineage_entries: VBoxContainer = $HUD/LineagePanel/Box/Scroll/Entries
 @onready var source_rate_row: SettingRow = $HUD/InfoPanel/Box/SourceRate
 @onready var delete_source_button: Button = $HUD/InfoPanel/Box/DeleteSource
@@ -95,8 +98,8 @@ func _ready() -> void:
 	banner.text = ""
 	source_rate_row.configure(Dish.MIN_SOURCE_RATE, Dish.MAX_SOURCE_RATE, 0.1, 10.0, Strings.t("hud.source_rate_unit"))
 	source_rate_row.value_changed.connect(_on_source_rate_changed)
-	feed_row.configure(0.0, StartConditions.MAX_NUTRIENT_RATE, 1.0, 0.0, Strings.t("hud.rate_unit_feed"))
-	feed_row.value_changed.connect(func(v: float) -> void: dish.food_rate = v)
+	feed_row.configure(0.0, StartConditions.MAX_FEED_DENSITY, 0.1, 0.0, Strings.t("hud.rate_unit_feed"))
+	feed_row.value_changed.connect(func(v: float) -> void: dish.feed_density = v)
 	bloom_row.configure(0.0, StartConditions.MAX_BLOOM_RATE, Dish.BLOOM_RATE_STEP, 0.0, Strings.t("hud.rate_unit_bloom"))
 	bloom_row.disabled_reason = Strings.t("hud.rate_bloom_locked")
 	bloom_row.value_changed.connect(func(v: float) -> void: dish.bloom_rate = v)
@@ -104,6 +107,7 @@ func _ready() -> void:
 	delete_source_button.focus_mode = Control.FOCUS_NONE
 	follow_button.pressed.connect(_toggle_follow)
 	watch_button.pressed.connect(_toggle_watch)
+	lineage_back_button.pressed.connect(_step_back)
 	watch_button.focus_mode = Control.FOCUS_NONE
 	watch_panel.dish = dish
 	watch_panel.bup_chosen.connect(_open_watched)
@@ -270,7 +274,7 @@ func _update_info_panel() -> void:
 	delete_source_button.visible = editing
 	follow_button.visible = dish.selected_id >= 0 and not dead  # a bup can be followed once it is selected, not just hovered
 	var watched_now := dish.is_watched(dish.selected_id)
-	watch_button.set_pressed_no_signal(watched_now)  # (lit while the bup is on the list)
+	watch_button.icon = UNWATCH_ICON if watched_now else WATCH_ICON  # (an eye; crossed out while the bup is on the list, as that is what pressing it does)
 	watch_button.tooltip_text = Strings.t("hud.unwatch") if watched_now else Strings.t("hud.watch")
 	follow_button.text = Strings.t("hud.stop_following") if following_id >= 0 else Strings.t("hud.follow")
 	top_row.visible = bup_id >= 0
@@ -458,9 +462,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion:
 		_on_mouse_motion(event)
 	elif event is InputEventMagnifyGesture:  # a trackpad pinch: apart zooms in
-		_zoom_by(pow(event.factor, ZOOM_PINCH_GAIN))
+		if not _over_hud():
+			_zoom_by(pow(event.factor, ZOOM_PINCH_GAIN))
 	elif event is InputEventPanGesture:  # a trackpad's two-finger scroll, which stands in for the mouse wheel (up zooms in)
-		_zoom_by(pow(ZOOM_WHEEL_STEP, -event.delta.y * ZOOM_TRACKPAD_SCROLL))
+		if not _over_hud():
+			_zoom_by(pow(ZOOM_WHEEL_STEP, -event.delta.y * ZOOM_TRACKPAD_SCROLL))
 	elif event is InputEventKey and event.pressed and not event.echo:
 		_on_key(event)
 
@@ -484,12 +490,19 @@ func _on_key(event: InputEventKey) -> void:
 ## Escape lets go of a selection first, and only with nothing selected opens the menu.
 func _escape() -> void:
 	if _stack.size() > 1:  # a lineage (or a bup reached through one) is open: back one step
-		_set_stack(_stack.slice(0, _stack.size() - 1))
-		dish.selected_id = _stack.back()["id"]
+		_step_back()
 	elif dish.has_selection():
 		_clear_selection()
 	else:
 		_open_menu()
+
+
+## One step back through the views opened on a bup (a lineage, or a bup reached through one): what Escape does, and the
+## back icon of the lineage panel.
+func _step_back() -> void:
+	if _stack.size() > 1:
+		_set_stack(_stack.slice(0, _stack.size() - 1))
+		dish.selected_id = _stack.back()["id"]
 
 
 ## Lets go of everything selected: the bup (with whatever views were opened on it) and any source.
@@ -605,10 +618,10 @@ func _quit_to_menu() -> void:
 func _on_mouse_button(event: InputEventMouseButton) -> void:
 	match event.button_index:
 		MOUSE_BUTTON_WHEEL_UP:
-			if event.pressed:
+			if event.pressed and not _over_hud():
 				_zoom_by(ZOOM_WHEEL_STEP)
 		MOUSE_BUTTON_WHEEL_DOWN:
-			if event.pressed:
+			if event.pressed and not _over_hud():
 				_zoom_by(1.0 / ZOOM_WHEEL_STEP)
 		MOUSE_BUTTON_LEFT, MOUSE_BUTTON_MIDDLE:
 			if event.pressed:
@@ -621,6 +634,12 @@ func _on_mouse_button(event: InputEventMouseButton) -> void:
 					_click(make_input_local(event).position)
 				_press_button = MOUSE_BUTTON_NONE
 				_dragging = false
+
+
+## Whether the pointer is over one of the HUD's panels or lists: a wheel or a trackpad scroll there is the list's, and
+## never the zoom's, even when the list has nowhere left to scroll.
+func _over_hud() -> bool:
+	return get_viewport().gui_get_hovered_control() != null
 
 
 func _on_mouse_motion(event: InputEventMouseMotion) -> void:
@@ -734,8 +753,8 @@ func _sync_bloom_panel() -> void:
 	var plankton_unlocked := _tools_unlocked()
 	if plankton_unlocked != bloom_row.slider.editable:  # (the bloom stays in the box, faint, until plankton unlock)
 		bloom_row.set_enabled(plankton_unlocked)
-	if not is_equal_approx(feed_row.value, dish.food_rate):
-		feed_row.set_value_silently(dish.food_rate)
+	if not is_equal_approx(feed_row.value, snappedf(dish.feed_density, 0.1)):
+		feed_row.set_value_silently(dish.feed_density)
 	if not is_equal_approx(bloom_row.value, dish.bloom_rate):
 		bloom_row.set_value_silently(dish.bloom_rate)
 

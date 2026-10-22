@@ -11,14 +11,14 @@ func _init() -> void:
 	root.add_child(dish)
 	dish.set_seed(1)
 	dish.strike()
-	dish.food_rate = 10.0
+	dish.feed_density = 10.0
 	var tracker := GoalTracker.new()
 	tracker.goal_completed.connect(func(g: Goal) -> void:
 		print("COMPLETE '%s' at %s pop=%d sense=%.0f" % [g.title, SimClock.format(dish.time), dish.population(), dish.population_stats()["sense"]]))
 	while dish.time < DAY:
 		if tracker.index == 1 and dish.sources.is_empty():
 			# Goal 2's intended play: cut the random feed to a trickle and put a source at the far edge.
-			dish.food_rate = 1.0
+			dish.feed_density = 1.0
 			dish.place_source(dish.global_position + Vector2(240, 0), 10.0)
 		dish.advance(CHUNK)
 		tracker.update(dish, CHUNK)

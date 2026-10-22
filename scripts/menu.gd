@@ -44,7 +44,7 @@ func _ready() -> void:
 ## The dish behind the title: a fed colony of founders in evenly spaced colours.
 func _ambient_start() -> StartConditions:
 	var start := StartConditions.new()
-	start.nutrient_rate = 10.0
+	start.feed_density = 2.0
 	start.spread_founders()
 	return start
 

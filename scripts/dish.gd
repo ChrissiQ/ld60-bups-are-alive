@@ -50,6 +50,8 @@ const ARC_SHOWN_ABOVE := 0.54  ## chance of drifting up the slope above which th
 const MOTION_STEP := 3.0  ## the longest motion sub-step, in seconds: a swimmer must not jump farther than a gradient is wide (~50-100 µm; a bup diffuses ~40 µm in 3 s)
 const FINE_STEP := 0.25  ## steps this short or shorter follow individual runs and tumbles
 const NUTRIENT_ENERGY := 16.0  ## the energy in one unit of nutrient: the unit of every feed, dose and source
+const NUTRIENT_PATCHINESS := 0.2  ## how uneven the nutrient put into the dish is: the spread of its density as a share of the mean, richer and poorer patches within patches at every scale [choice: no measured scale; gentle: patches you can see without starving a founder's neighbourhood]
+const CONCENTRATION_PER_DENSITY := NUTRIENT_ENERGY / 1.0e6  ## the concentration (energy per µm²) that one unit of nutrient per mm² makes: the field holds concentrations, so a density chosen in units/mm² goes in as it is
 const FOUNDER_ENERGY := 100.0  ## enough reserve to find a first meal in a sparse dish
 const DIVISION_SPREAD := 0.03  ## how unevenly a division splits the mother: the daughters' sizes vary a few percent
 const FIELD_TARGET_SPACING := 25.0  ## µm: plumes at the real diffusion are 50-100 µm wide, so a 25 µm grid resolves them
@@ -95,9 +97,9 @@ var bup_limit := StartConditions.DEFAULT_BUP_LIMIT:  ## the most bups the dish h
 		_sync_render_capacity()
 var nutrients_placed := 0  ## how many units of nutrient the player has dropped in by hand
 var sources: Array[NutrientSource] = []
-var food_rate := 3.0:  ## units of nutrient fed in per minute, spread evenly over the dish
+var feed_density := 3.0:  ## units of nutrient fed in to each mm² of the dish every hour, spread evenly (a density, so the dish's size does not change it)
 	set(value):
-		food_rate = clampf(value, 0.0, StartConditions.MAX_NUTRIENT_RATE)
+		feed_density = clampf(value, 0.0, StartConditions.MAX_FEED_DENSITY)
 var bloom_rate := 0.0:  ## plankton appearing a sim-day (24 hours), at steady intervals, at random places
 	set(value):
 		if value > 0.0 and bloom_rate <= 0.0:
@@ -301,7 +303,7 @@ func strike(start: StartConditions = null) -> void:
 	radius = clampf(start.dish_radius, StartConditions.MIN_SIM_RADIUS, StartConditions.MAX_DISH_RADIUS)
 	sim.reset(radius, -1)  # a new dish: no bups, no nutrient, the random stream carries on
 	bup_limit = start.bup_limit
-	food_rate = start.nutrient_rate
+	feed_density = start.feed_density
 	var bups := clampi(start.bups, 1, bup_limit)
 	var spread := minf(radius * 0.8, 40.0 + 40.0 * sqrt(maxf(bups - 4.0, 0.0)))  # (the founders start in a disc that grows with their number, 4 in a spot 40 µm across, 100 across about 430 µm)
 	for i in bups:
@@ -314,14 +316,16 @@ func strike(start: StartConditions = null) -> void:
 		var id := sim.add_bup(sim.random_point(spread), founder, FOUNDER_ENERGY, sqrt(grown), born_with, 0, Vector2.RIGHT)
 		if chosen.get("name", "") != "":
 			rename_bup(id, chosen["name"])
-	field.fill(clampi(start.nutrients, 0, StartConditions.MAX_NUTRIENTS) * NUTRIENT_ENERGY)  # the medium the colony starts in
+	patch_seed = int(sim.random_float() * 2147483647.0)
+	field.set_patchiness(NUTRIENT_PATCHINESS, radius, patch_seed)  # (the largest patches about the size of the dish; the feed follows the same landscape)
+	field.fill(clampf(start.nutrient_density, 0.0, StartConditions.MAX_NUTRIENT_DENSITY) * CONCENTRATION_PER_DENSITY)  # the medium the colony starts in
 
 
 ## Changes the dish's size about its centre, with everything in it.
 ## Larger: the bups, the nutrient (spread over the new grid, none of it lost) and the sources stay where they are.
 ## Smaller: everything past the new edge goes. Bups there die like any other death (a family record with no living
 ## descendants, and not open in a panel, is freed with them), and so do the sources and plankton and the nutrient there.
-## Either way the feed and the bloom change in step with the area, so they stay as dense as they were.
+## Either way the bloom changes in step with the area, so plankton stay as dense as they were (the feed is a density already).
 func resize_to(new_radius: float) -> void:
 	new_radius = clampf(new_radius, StartConditions.MIN_DISH_RADIUS, StartConditions.MAX_DISH_RADIUS)
 	if is_equal_approx(new_radius, radius):
@@ -342,7 +346,6 @@ func resize_to(new_radius: float) -> void:
 					hovered_plankton = null
 				plankton.remove_at(i)
 	radius = new_radius
-	food_rate *= area_ratio
 	bloom_rate *= area_ratio
 	edit_count += 1
 	_render_stale = true
@@ -395,7 +398,7 @@ func step(delta: float) -> void:
 		positions.append(source.pos - global_position)
 		rates.append(source.rate)
 		source.emitted += source.rate / 60.0 * delta
-	sim.step(delta, positions, rates, food_rate, time)  # (time, so births and deaths are stamped with it)
+	sim.step(delta, positions, rates, feed_density * CONCENTRATION_PER_DENSITY / 3600.0, time)  # (time, so births and deaths are stamped with it)
 	_history_accum += delta
 	if _history_accum >= HISTORY_INTERVAL:
 		_history_accum -= HISTORY_INTERVAL
@@ -542,6 +545,7 @@ func pin_bup(id: int) -> void:
 
 
 ## The bups the player is watching, newest first (see watch_bup). Their records, and their ancestors', are kept.
+var patch_seed := 0  ## which landscape of richer and poorer patches the nutrient follows (see NUTRIENT_PATCHINESS)
 var watched: Array[int] = []
 var watch_version := 0  ## bumped whenever the list changes, so its panel can rebuild only then
 
@@ -862,7 +866,8 @@ func to_dict() -> Dictionary:
 		"bup_limit": bup_limit,
 		"nutrients_placed": nutrients_placed,
 		"time": time,
-		"food_rate": food_rate,
+		"feed_density": feed_density,
+		"patch_seed": patch_seed,
 		"cells": saved_cells,
 		"field": Array(field.values()),
 		"sources": saved_sources,
@@ -882,7 +887,7 @@ func to_dict() -> Dictionary:
 func from_dict(d: Dictionary) -> bool:
 	if not (d.get("cells") is Array):
 		return false
-	for key in ["radius", "bup_limit", "nutrients_placed", "time", "food_rate", "bloom_rate"]:
+	for key in ["radius", "bup_limit", "nutrients_placed", "time", "feed_density", "bloom_rate"]:
 		if d.has(key) and not Validate.is_number(d[key]):
 			return false
 	var loaded_cells := []
@@ -984,7 +989,9 @@ func from_dict(d: Dictionary) -> bool:
 	nutrients_placed = int(d.get("nutrients_placed", 0))
 	time = float(d.get("time", 0.0))
 	_bloom_due = float(d["bloom_due"]) if Validate.is_number(d.get("bloom_due")) else time
-	food_rate = float(d["food_rate"]) if Validate.is_number(d.get("food_rate")) else food_rate
+	feed_density = float(d["feed_density"]) if Validate.is_number(d.get("feed_density")) else feed_density
+	patch_seed = int(d["patch_seed"]) if Validate.is_number(d.get("patch_seed")) else 0
+	field.set_patchiness(NUTRIENT_PATCHINESS, radius, patch_seed)  # (so the feed goes on following the same landscape)
 	_reset_runtime_state()
 	for key in loaded_history:
 		history[key] = loaded_history[key]

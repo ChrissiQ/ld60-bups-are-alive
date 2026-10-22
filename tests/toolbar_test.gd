@@ -66,8 +66,8 @@ func _key(code: Key, shift: bool = false) -> void:
 func _init() -> void:
 	var start := StartConditions.new()
 	start.dish_radius = 300.0  # the tests place things by hand and count on a small dish
-	start.nutrients = 0
-	start.nutrient_rate = 0.0
+	start.nutrient_density = 0
+	start.feed_density = 0.0
 	Session.free_start = start
 	Session.mode = Session.Mode.FREE
 	var m: Node = load("res://scenes/main.tscn").instantiate()
@@ -568,9 +568,17 @@ func _init() -> void:
 	await process_frame
 	await process_frame
 	check(m.lineage_entries.get_child(0).get_child(1).text.contains("\nborn"), "each lineage entry has its name on one row and its times below, so nothing is cut off")
-	check(m._concentration_text(0.002) == "125 units/mm²" and m._concentration_text(0.0000001) == "0.0 units/mm²" and m._concentration_text(0.00005) == "3.1 units/mm²", "concentration is shown in units per mm² (%s, %s)" % [m._concentration_text(0.002), m._concentration_text(0.00005)])
+	check(m._concentration_text(0.002) == "125/mm²" and m._concentration_text(0.0000001) == "0.0/mm²" and m._concentration_text(0.00005) == "3.1/mm²", "concentration is shown in units per mm² (%s, %s)" % [m._concentration_text(0.002), m._concentration_text(0.00005)])
 	check(m.lineage_panel.visible and not m.info_panel.visible and m.lineage_entries.get_child_count() == 2, "the lineage covers the info and lists the family line (%d entries)" % m.lineage_entries.get_child_count())
 	check(m.lineage_entries.get_child(1).get_child(1).disabled and not m.lineage_entries.get_child(0).get_child(1).disabled, "the bup itself is marked, its ancestors can be clicked")
+	check(m.lineage_back_button.visible and m.lineage_back_button.tooltip_text == "Back", "the lineage panel has a back icon")
+	var stack_before: int = m._stack.size()
+	m.lineage_back_button.pressed.emit()
+	await process_frame
+	check(m._stack.size() == stack_before - 1 and not m.lineage_panel.visible and m.info_panel.visible, "the back icon closes the lineage, like Escape, back to the bup's info")
+	m.lineage_button.pressed.emit()
+	await process_frame
+	await process_frame
 	var swatch_mother: ColorRect = m.lineage_entries.get_child(1).get_child(0)
 	var swatch_grandmother: ColorRect = m.lineage_entries.get_child(0).get_child(0)
 	check(swatch_mother.color.is_equal_approx(Genome.color_of(m.dish.lineage_info(mother))) and swatch_grandmother.color.is_equal_approx(Genome.color_of(m.dish.lineage_info(grandmother))), "each line of the lineage has a small square in that bup's colour")
@@ -640,17 +648,17 @@ func _init() -> void:
 	m.dish.selected_id = watched_one
 	await process_frame
 	await process_frame
-	check(m.watch_button.visible and m.watch_button.tooltip_text == "Watch" and not m.watch_button.button_pressed, "a selected bup has a Watch icon, not lit")
+	check(m.watch_button.visible and m.watch_button.tooltip_text == "Watch" and m.watch_button.icon == m.WATCH_ICON, "a selected bup has a Watch icon, an eye")
 	m.watch_button.pressed.emit()
 	m._process(0.0)
-	check(m.dish.is_watched(watched_one) and m.watch_panel.visible and m.watch_button.tooltip_text == "Stop watching" and m.watch_panel.title.text == "WATCHING  1" and m.watch_button.button_pressed, "pressing it puts the bup on the list, which appears, and the icon lights and offers to take it off again")
+	check(m.dish.is_watched(watched_one) and m.watch_panel.visible and m.watch_button.tooltip_text == "Stop watching" and m.watch_panel.title.text == "WATCHING  1" and m.watch_button.icon == m.UNWATCH_ICON, "pressing it puts the bup on the list, which appears, and the eye is crossed out to offer taking it off again")
 	m.dish.selected_id = -1
 	m.dish.remove_bup(watched_one)
 	await process_frame
 	m._process(0.0)
 	await create_timer(0.6).timeout
 	m._process(0.0)
-	check(m.dish.has_record(watched_one) and m.watch_panel._buttons[watched_one].text.contains("(deceased)"), "a watched bup that dies stays on the list, marked as deceased ('%s')" % m.watch_panel._buttons[watched_one].text)
+	check(m.dish.has_record(watched_one) and m.watch_panel._buttons[watched_one].theme_type_variation == &"DeceasedListButton" and m.watch_panel._buttons[watched_one].text == m.dish.bup_name(watched_one), "a watched bup that dies stays on the list, its name in grey with no extra text ('%s')" % m.watch_panel._buttons[watched_one].text)
 	m.watch_panel._buttons[watched_one].pressed.emit()
 	await process_frame
 	await process_frame
@@ -829,7 +837,8 @@ func _init() -> void:
 	# The eraser takes nutrient out of the medium under its brush.
 	m.toolbar.set_paused(true)
 	m.dish.field.reset(m.dish.radius)
-	m.dish.field.fill(800.0)
+	m.dish.field.set_patchiness(0.0, 1.0, 0)  # (an even medium, so the brush's effect is plain to see)
+	m.dish.field.fill(1.0)
 	m.toolbar.select_tool(Toolbar.Tool.ERASE)
 	check(m.tool_options.visible and m.tool_options.brush_size_box.is_visible_in_tree(), "the eraser shows its brush size")
 	check(m.tool_options.brush_size_box.get_line_edit().get_tooltip(Vector2.ZERO) == "Brush radius", "hovering the brush size says what it is")
@@ -889,8 +898,8 @@ func _init() -> void:
 	check(not g.hud.get_parsed_text().contains("UP/DOWN") and not g.hud.get_parsed_text().contains("ESC"), "the readout has no shortcut reminders")
 	check(absf(g.feed_row.label.global_position.x - g.hud.global_position.x) < 1.5 and g.rate_panel.global_position.x < g.hud.global_position.x, "the box's text lines up with the readout's, and the box itself starts further left")
 	g.feed_row.slider.value = 4.0
-	check(is_equal_approx(g.dish.food_rate, 4.0), "the feed control sets the dish's feed")
-	g.dish.food_rate = 0.0
+	check(is_equal_approx(g.dish.feed_density, 4.0), "the feed control sets the dish's feed")
+	g.dish.feed_density = 0.0
 	g.tracker.index = 1
 	g.toolbar.set_paused(false)
 	g._on_goal_completed(g.tracker.goals[0])
@@ -900,15 +909,15 @@ func _init() -> void:
 	g.dish.upkeep_factor = 1.0
 	check(g.bloom_row.slider.editable and g.dish.bloom_rate == 0.0, "experiment 2 unlocks the bloom control, at none until the player chooses")
 	check(g.bloom_row.global_position.y < g.feed_row.global_position.y, "the bloom control is above the feed control")
-	check(g.bloom_row.label.tooltip_text == "Plankton bloom rate" and g.feed_row.label.tooltip_text == "Constant feed nutrients" and g.feed_row.label.mouse_filter != Control.MOUSE_FILTER_IGNORE, "hovering a name says what the rate is")
+	check(g.bloom_row.label.tooltip_text == "Plankton bloom rate" and g.feed_row.label.tooltip_text == "Nutrient added to each mm² of the dish every hour" and g.feed_row.label.mouse_filter != Control.MOUSE_FILTER_IGNORE, "hovering a name says what the rate is")
 	g.bloom_row.slider.value = 12.0
 	check(is_equal_approx(g.dish.bloom_rate, 12.0), "the control sets the dish's bloom rate")
 	g.dish.bloom_rate = 36.0
-	g.dish.food_rate = 6.0
+	g.dish.feed_density = 6.0
 	await process_frame
 	check(is_equal_approx(g.bloom_row.value, 36.0) and is_equal_approx(g.feed_row.value, 6.0), "the controls follow the dish when it changes some other way")
 	g.dish.bloom_rate = 0.0
-	g.dish.food_rate = 0.0
+	g.dish.feed_density = 0.0
 	check(g.tracker.goals[1].text.contains("%.0f a day" % Dish.SUGGESTED_BLOOM_RATE), "the goal text suggests a bloom rate")
 	g.toolbar.set_paused(true)
 	g.toolbar.select_tool(Toolbar.Tool.PLANKTON)

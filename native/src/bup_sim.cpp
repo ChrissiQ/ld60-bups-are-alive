@@ -85,7 +85,7 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("fraction_with_gene_at_least", "name", "threshold"), &BupSim::fraction_with_gene_at_least);
 	ClassDB::bind_method(D_METHOD("pick_bup", "local", "slack", "pixel_um"), &BupSim::pick_bup);
 	ClassDB::bind_method(D_METHOD("nearest_and_count", "local", "radius"), &BupSim::nearest_and_count);
-	ClassDB::bind_method(D_METHOD("step", "delta", "source_pos", "source_rates", "feed_per_minute", "sim_time"), &BupSim::step, DEFVAL(-1.0));
+	ClassDB::bind_method(D_METHOD("step", "delta", "source_pos", "source_rates", "feed_per_second", "sim_time"), &BupSim::step, DEFVAL(-1.0));
 	ClassDB::bind_method(D_METHOD("render_buffer", "pixel_um", "capacity"), &BupSim::render_buffer);
 }
 
@@ -147,7 +147,7 @@ void BupSim::reset(double dish_radius, int64_t seed) {
 	bups.reserve(cap() + 16);
 	next_id = 1;
 	diffuse_accum = 0.0;
-	feed_energy = 0.0;
+	feed_concentration = 0.0;
 	if (seed >= 0) { // a negative seed keeps the random stream going, so a restart is a new game
 		set_seed(seed);
 	}
@@ -970,7 +970,7 @@ void BupSim::drift_chunk(const SwimJob &job, size_t first, size_t last, Rng &r) 
 }
 
 
-void BupSim::step(double delta, const PackedVector2Array &source_pos, const PackedFloat32Array &source_rates, double feed_per_minute, double sim_time) {
+void BupSim::step(double delta, const PackedVector2Array &source_pos, const PackedFloat32Array &source_rates, double feed_per_second, double sim_time) {
 	if (sim_time >= 0.0) {
 		now_seconds = sim_time;
 	}
@@ -978,11 +978,11 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 	for (int i = 0; i < sources; i++) {
 		field->deposit_xy(source_pos[i].x, source_pos[i].y, source_rates[i] / 60.0 * delta * G.nutrient_energy);
 	}
-	feed_energy += feed_per_minute / 60.0 * G.nutrient_energy * delta;
+	feed_concentration += feed_per_second * delta;
 	diffuse_accum += delta;
 	if (diffuse_accum >= G.diffuse_interval) {
-		field->fill(feed_energy);
-		feed_energy = 0.0;
+		field->fill(feed_concentration);
+		feed_concentration = 0.0;
 		field->diffuse(diffuse_accum);
 		diffuse_accum = 0.0;
 	}

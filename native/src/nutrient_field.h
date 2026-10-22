@@ -26,6 +26,9 @@ class NutrientField : public RefCounted {
 	std::vector<double> cp, dp;
 	int inside_count = 0;
 
+	double patch_amplitude = 0.0, patch_size = 10000.0;
+	uint64_t patch_seed = 0;
+	double patch_noise(double x, double y) const; // fractal noise at a place in the dish (zero on average; see set_patchiness)
 	int index_at(double x, double y) const;
 	void build(double dish_radius, int cells_across);
 	int nearest_inside(int ix, int iy) const;
@@ -51,7 +54,12 @@ public:
 	Vector3 read(const Vector2 &local) const;
 	Vector2 gradient(const Vector2 &local) const;
 	double take(const Vector2 &local, double energy);
-	void fill(double energy);
+	void fill(double concentration); // adds this concentration (energy per µm²) to the dish, on average: patchy if set_patchiness asked for it, though the total is the same
+	// A fixed landscape of richer and poorer patches that `fill` follows: fractal noise (patches within patches, each size
+	// half the one above and 80% as strong, from `largest_patch_um` down to the grid's own scale) of this relative strength
+	// (the standard deviation as a share of the mean), from this seed. It is a function of position, so it is the same after
+	// the dish is resized, and it averages to 1, so the total nutrient is what was asked for.
+	void set_patchiness(double amplitude, double largest_patch_um, int64_t seed);
 	void diffuse(double dt);
 	double total() const;
 	bool is_empty() const { return total() <= 0.0; }

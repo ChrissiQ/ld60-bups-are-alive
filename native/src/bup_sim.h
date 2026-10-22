@@ -113,7 +113,7 @@ class BupSim : public RefCounted {
 	Ref<NutrientField> field;
 	int64_t next_id = 1;
 	Rng rng; // the simulation's own random stream
-	double diffuse_accum = 0.0, feed_energy = 0.0;
+	double diffuse_accum = 0.0, feed_concentration = 0.0; // (the feed since the last solve, as a concentration)
 
 	int64_t death_gap(double p);
 	double uniform() { return rng.uniform(); }
@@ -232,7 +232,7 @@ public:
 	int64_t pick_bup(const Vector2 &local, double slack, double pixel_um) const;
 	Vector2 nearest_and_count(const Vector2 &local, double near) const;
 
-	void step(double delta, const PackedVector2Array &source_pos, const PackedFloat32Array &source_rates, double feed_per_minute, double sim_time = -1.0);
+	void step(double delta, const PackedVector2Array &source_pos, const PackedFloat32Array &source_rates, double feed_per_second, double sim_time = -1.0); // `feed_per_second`: concentration (energy per µm²) added to the whole dish each second
 	PackedFloat32Array render_buffer(double pixel_um, int capacity); // (it also notes where each bup was drawn, so the next picture can draw its trail)
 	Vector2 bup_pos(int64_t id) const;
 	void set_custom_name(int64_t id, const String &name);

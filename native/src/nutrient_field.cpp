@@ -21,7 +21,8 @@ void NutrientField::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("read", "local"), &NutrientField::read);
 	ClassDB::bind_method(D_METHOD("gradient", "local"), &NutrientField::gradient);
 	ClassDB::bind_method(D_METHOD("take", "local", "energy"), &NutrientField::take);
-	ClassDB::bind_method(D_METHOD("fill", "energy"), &NutrientField::fill);
+	ClassDB::bind_method(D_METHOD("fill", "concentration"), &NutrientField::fill);
+	ClassDB::bind_method(D_METHOD("set_patchiness", "amplitude", "largest_patch_um", "seed"), &NutrientField::set_patchiness);
 	ClassDB::bind_method(D_METHOD("diffuse", "dt"), &NutrientField::diffuse);
 	ClassDB::bind_method(D_METHOD("total"), &NutrientField::total);
 	ClassDB::bind_method(D_METHOD("is_empty"), &NutrientField::is_empty);
@@ -295,14 +296,85 @@ double NutrientField::take(const Vector2 &local, double energy) {
 	return take_xy(local.x, local.y, energy);
 }
 
-void NutrientField::fill(double energy) {
-	if (inside_count == 0 || energy <= 0.0) {
+void NutrientField::set_patchiness(double amplitude, double largest_patch_um, int64_t seed) {
+	patch_amplitude = std::max(amplitude, 0.0);
+	patch_size = std::max(largest_patch_um, 1.0);
+	patch_seed = (uint64_t)seed;
+}
+
+// Value noise: a hashed value at each corner of a lattice of this spacing, smoothly blended between them (about -1 to 1).
+static double lattice_noise(double x, double y, double lattice, uint64_t seed) {
+	double gx = x / lattice, gy = y / lattice;
+	double fx = std::floor(gx), fy = std::floor(gy);
+	double tx = gx - fx, ty = gy - fy;
+	tx = tx * tx * (3.0 - 2.0 * tx);
+	ty = ty * ty * (3.0 - 2.0 * ty);
+	auto corner = [&](int64_t ix, int64_t iy) {
+		uint64_t h = seed + (uint64_t)ix * 0x9E3779B97F4A7C15ULL + (uint64_t)iy * 0xC2B2AE3D27D4EB4FULL;
+		h = (h ^ (h >> 30)) * 0xBF58476D1CE4E5B9ULL;
+		h = (h ^ (h >> 27)) * 0x94D049BB133111EBULL;
+		h ^= h >> 31;
+		return (double)(h >> 11) * (2.0 / 9007199254740992.0) - 1.0;
+	};
+	int64_t ix = (int64_t)fx, iy = (int64_t)fy;
+	double top = corner(ix, iy) + (corner(ix + 1, iy) - corner(ix, iy)) * tx;
+	double bottom = corner(ix, iy + 1) + (corner(ix + 1, iy + 1) - corner(ix, iy + 1)) * tx;
+	return top + (bottom - top) * ty;
+}
+
+// Fractal noise: the sum of octaves of value noise, each with half the spacing and 0.8 of the strength of the one before,
+// from the largest patch down to the size of a grid cell, so the landscape is patchy at every scale.
+double NutrientField::patch_noise(double x, double y) const {
+	double total = 0.0, strength = 1.0;
+	double lattice = patch_size;
+	for (int octave = 0; octave < 10 && (octave == 0 || lattice >= spacing); octave++) {
+		total += strength * lattice_noise(x, y, lattice, patch_seed + (uint64_t)octave * 0xD1B54A32D192ED03ULL);
+		strength *= 0.8;
+		lattice *= 0.5;
+	}
+	return total;
+}
+
+void NutrientField::fill(double concentration) {
+	if (concentration <= 0.0 || inside_count == 0) {
 		return;
 	}
-	float per_cell = (float)(energy / (inside_count * spacing * spacing));
+	if (patch_amplitude <= 0.0) {
+		for (size_t i = 0; i < conc.size(); i++) {
+			if (inside[i]) {
+				conc[i] += (float)concentration;
+			}
+		}
+		return;
+	}
+	// The noise, scaled to zero mean and unit spread over the dish, then each cell gets (1 + amplitude * noise) of the
+	// concentration, kept above a floor and rescaled so that the dish still gets exactly `concentration` on average.
+	std::vector<double> noise(conc.size(), 0.0);
+	double sum = 0.0, sum_sq = 0.0;
+	for (int y = 0; y < n; y++) {
+		for (int x = 0; x < n; x++) {
+			size_t i = (size_t)y * n + x;
+			if (inside[i]) {
+				double v = patch_noise((x + 0.5) * spacing - origin, (y + 0.5) * spacing - origin);
+				noise[i] = v;
+				sum += v;
+				sum_sq += v * v;
+			}
+		}
+	}
+	double mean = sum / inside_count;
+	double spread = std::sqrt(std::max(sum_sq / inside_count - mean * mean, 1e-12));
+	double weight_total = 0.0;
 	for (size_t i = 0; i < conc.size(); i++) {
 		if (inside[i]) {
-			conc[i] += per_cell;
+			noise[i] = std::max(1.0 + patch_amplitude * (noise[i] - mean) / spread, 0.05);
+			weight_total += noise[i];
+		}
+	}
+	double scale = concentration * inside_count / weight_total;
+	for (size_t i = 0; i < conc.size(); i++) {
+		if (inside[i]) {
+			conc[i] += (float)(scale * noise[i]);
 		}
 	}
 }
