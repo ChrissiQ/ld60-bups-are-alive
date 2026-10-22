@@ -38,6 +38,6 @@ theme/custom_font="res://fonts/CommitMono-500.otf"
 
 [rendering]
 
-textures/vram_compression/import_etc2_astc=true
 rendering_device/driver.windows="d3d12"
+textures/vram_compression/import_etc2_astc=true
 environment/defaults/default_clear_color=Color(0.02, 0.03, 0.025, 1)

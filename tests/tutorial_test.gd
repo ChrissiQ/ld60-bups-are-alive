@@ -3,8 +3,6 @@ extends SceneTree
 ## The guided tour: it starts when asked, holds the game, lights something real at each step, waits for what it asks,
 ## can be skipped at any time, and leaves the screen as it found it.
 
-const SEEN_TEMP := "user://tutorial_test.json"
-
 
 func check(ok: bool, what: String) -> void:
 	TestUtil.check(ok, what)
@@ -23,10 +21,6 @@ func _screen(mode: Session.Mode, wanted: bool) -> Node:
 
 
 func _init() -> void:
-	var real_seen := Tutorial.seen_path
-	Tutorial.seen_path = SEEN_TEMP
-	DirAccess.remove_absolute(SEEN_TEMP)
-	check(not Tutorial.seen(), "the tour has not been shown at first")
 
 	# Not asked for: nothing happens.
 	var quiet: Node = await _screen(Session.Mode.FREE, false)
@@ -59,10 +53,13 @@ func _init() -> void:
 			check(not card_rect.intersects(hole.grow(Tutorial.SPOT_PAD - 1.0)), "step %d: the card does not cover what it lights" % (tour.index + 1))
 		var wait: Callable = step["wait"]
 		if wait.is_valid():
-			check(not tour.blocking and not tour.next_button.visible and tour.waiting_label.visible and tour.waiting_label.text == "Try it", "step %d asks for something: no Next, and it says Try it" % (tour.index + 1))
+			check(not tour.blocking and tour.next_button.visible and tour.next_button.disabled and tour.waiting_label.visible and tour.waiting_label.text == "Try it", "step %d asks for something: Next is there but shut, and it says Try it" % (tour.index + 1))
+			check(tour.waiting_label.get_index() < tour.card.get_node("Box/Actions").get_index(), "step %d: Try it is on its own line above the buttons" % (tour.index + 1))
 			check(tour.mouse_filter == Control.MOUSE_FILTER_IGNORE and tour.scrims[0].mouse_filter == Control.MOUSE_FILTER_STOP and tour.scrims[3].mouse_filter == Control.MOUSE_FILTER_STOP, "step %d: the dimming takes every click but those on what is lit" % (tour.index + 1))
 			check(m.paused, "the game stays held on a step that asks for something")
 			var before: int = tour.index
+			tour.next()
+			check(tour.index == before, "Next does nothing while step %d is not done" % (before + 1))
 			if tour.index > 0 and "bup" in key and "Click" in key:
 				check(m.camera.zoom.x > was_zoom.x, "the step that asks for a click on a bup has the camera close to it")
 				var spot: Vector2 = m.dish.bup_world_pos(m._tutorial_bup)
@@ -73,10 +70,11 @@ func _init() -> void:
 				m._open_lineage()
 			elif "back arrow" in key:
 				check(step.get("escape_passes", false), "the lineage step lets Escape through to close it")
+				check(m._lineage_is_open(), "the lineage step has the lineage open")
 				m._step_back()
 			await process_frame
 			await process_frame
-			check(tour.index == before + 1 or not tour.active, "doing what step %d asks goes on to the next" % (before + 1))
+			check(tour.index == before + 1, "doing what step %d asks goes straight on to the next" % (before + 1))
 		else:
 			check(tour.blocking and tour.mouse_filter == Control.MOUSE_FILTER_STOP and tour.next_button.visible, "step %d is read: it holds the clicks and has Next" % (tour.index + 1))
 			if tour.index == tour._steps.size() - 1:
@@ -85,7 +83,6 @@ func _init() -> void:
 		seen_steps += 1
 	check(not tour.active and not tour.visible, "the tour ends after the last step")
 	check(seen_steps == 16, "a free-mode tour has 16 steps (%d)" % seen_steps)
-	check(Tutorial.seen(), "finishing is remembered")
 	check(m.paused and m.dish.selected_id < 0 and not m.dish.is_watched(m._tutorial_bup) and m.camera.zoom.is_equal_approx(was_zoom) and m.camera.position.is_equal_approx(m.dish.global_position), "afterwards it is paused as before, with nothing selected or watched and the camera where it was")
 	await process_frame
 	await process_frame
@@ -93,7 +90,6 @@ func _init() -> void:
 	m.queue_free()
 
 	# Space, Enter and Back; and what a step asks for cannot be spoiled by clicks or keys elsewhere.
-	DirAccess.remove_absolute(SEEN_TEMP)
 	var n: Node = await _screen(Session.Mode.FREE, true)
 	var nt: Tutorial = n.tutorial
 	check(not nt.back_button.visible, "there is no Back on the first step")
@@ -120,16 +116,33 @@ func _init() -> void:
 	tool_key.pressed = true
 	nt._input(tool_key)
 	check(n.tool == Toolbar.Tool.SELECT, "a tool key does nothing while the tour waits for a click (the tool stays Inspect)")
+	check(nt.index == 9 and nt.next_button.disabled, "Next is shut until the click is made")
 	n.dish.select_at(n.dish.bup_world_pos(n._tutorial_bup), 2.0)
 	await process_frame
 	await process_frame
-	check(nt.index == 10, "the click goes on")
+	check(nt.index == 10, "making the click goes straight on")
+	nt.next()
+	check(nt.index == 11 and nt.next_button.disabled, "the watch step is shut until the eye is pressed")
+	n._toggle_watch()
+	await process_frame
+	await process_frame
+	check(nt.index == 12, "pressing the eye goes straight on to the watch list")
 	nt.back_button.pressed.emit()
-	check(nt.index == 8, "Back from the step after one that asked for something goes before it (%d)" % nt.index)
+	await process_frame
+	check(nt.index == 11 and not nt.next_button.disabled and nt.text_label.text.contains("eye"), "Back shows the watch step again, with Next open because the bup is still watched")
+	nt.back_button.pressed.emit()
+	nt.back_button.pressed.emit()
+	await process_frame
+	check(nt.index == 9 and not nt.next_button.disabled, "and the click step too, with Next open because the bup is still selected (it does not go on again by itself)")
+	n.dish.clear_selection()
+	await process_frame
+	check(nt.index == 9 and nt.next_button.disabled, "if the bup is let go, Next is shut again")
+	nt.skip()
+	await process_frame
+	check(n.dish.watched.is_empty(), "skipping takes the bup the tour had watched off the list again")
 	n.queue_free()
 
 	# Skipped part-way.
-	DirAccess.remove_absolute(SEEN_TEMP)
 	var s: Node = await _screen(Session.Mode.FREE, true)
 	s.tutorial.next()
 	s.tutorial.next()
@@ -137,7 +150,6 @@ func _init() -> void:
 	s.tutorial.skip_button.pressed.emit()
 	await process_frame
 	check(not s.tutorial.active and not s.tutorial.visible and s.paused, "Skip ends the tour at once")
-	check(Tutorial.seen(), "skipping is remembered too")
 	s.queue_free()
 
 	# Skipped on a step that asked for something, after the view was changed for it.
@@ -156,7 +168,6 @@ func _init() -> void:
 	t.queue_free()
 
 	# Goal mode: the goal's own step is there, and a game that was playing plays again afterwards.
-	DirAccess.remove_absolute(SEEN_TEMP)
 	var g: Node = await _screen(Session.Mode.GOALS, true)
 	check(g.tutorial.active and g.tutorial._steps.size() == 17, "goal mode's tour has the goal step as well (%d steps)" % g.tutorial._steps.size())
 	check(g.tutorial._steps[3]["text"].begins_with("Your experiment") and g.tutorial._steps[6]["text"].contains("experiment 2"), "it explains the goal and that the nutrient tools unlock later")
@@ -181,7 +192,5 @@ func _init() -> void:
 	check(not setup._start.tutorial, "and reset turns it off")
 	setup.queue_free()
 
-	DirAccess.remove_absolute(SEEN_TEMP)
-	Tutorial.seen_path = real_seen
 	Session.mode = Session.Mode.GOALS
 	TestUtil.finish(self, "TUTORIAL TESTS OK")

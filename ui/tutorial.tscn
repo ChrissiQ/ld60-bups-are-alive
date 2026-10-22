@@ -63,6 +63,10 @@ layout_mode = 2
 theme_type_variation = &"SmallBright"
 autowrap_mode = 3
 
+[node name="Waiting" type="Label" parent="Card/Box"]
+layout_mode = 2
+theme_type_variation = &"Accent"
+
 [node name="Actions" type="HBoxContainer" parent="Card/Box"]
 layout_mode = 2
 
@@ -70,18 +74,18 @@ layout_mode = 2
 layout_mode = 2
 theme_type_variation = &"ListButton"
 
-[node name="BackButton" type="Button" parent="Card/Box/Actions"]
-layout_mode = 2
-theme_type_variation = &"ListButton"
-
 [node name="Spacer" type="Control" parent="Card/Box/Actions"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="Waiting" type="Label" parent="Card/Box/Actions"]
+[node name="Pair" type="HBoxContainer" parent="Card/Box/Actions"]
 layout_mode = 2
-theme_type_variation = &"Accent"
+theme_type_variation = &"TightRow"
 
-[node name="NextButton" type="Button" parent="Card/Box/Actions"]
+[node name="BackButton" type="Button" parent="Card/Box/Actions/Pair"]
+layout_mode = 2
+theme_type_variation = &"ListButton"
+
+[node name="NextButton" type="Button" parent="Card/Box/Actions/Pair"]
 layout_mode = 2
 theme_type_variation = &"SmallPrimaryButton"

@@ -72,7 +72,7 @@ var _pointer_stamp := []  ## what the hover and placement preview were last work
 var _point_stamp := []  ## the same for the nutrient readout under the pointer
 var _tutorial_was_paused := false  ## whether the game was held before the tour began, which it goes back to
 var _tutorial_bup := -1  ## the bup the tour asked the player to pick, once it has set the view up for that (-1: it has not)
-var _tutorial_bup_was_watched := false
+var _tutorial_watched_before: Array[int] = []  ## who was on the watch list when the tour began, so it takes off only whom it put there
 var following_id := -1  ## the bup the camera is keeping in the middle of the view, or -1
 var _banner_left := 0.0
 var _hover_point := Vector2.ZERO  ## the spot in the dish the pointer is over, for the select tool's readout
@@ -797,6 +797,7 @@ func _update_hud() -> void:
 ## that what only shows while it is in use (the info panel, the watch list, the lineage) is there to be explained.
 func _start_tutorial() -> void:
 	_tutorial_was_paused = paused
+	_tutorial_watched_before = dish.watched.duplicate()
 	toolbar.set_paused(true)
 	var steps: Array[Dictionary] = []
 	steps.append(_tour("welcome"))
@@ -814,8 +815,8 @@ func _start_tutorial() -> void:
 	steps.append(_tour("info", func() -> Rect2: return info_panel.get_global_rect()))
 	steps.append(_tour("watch", func() -> Rect2: return watch_button.get_global_rect(), func() -> bool: return dish.is_watched(dish.selected_id)))
 	steps.append(_tour("watched", func() -> Rect2: return watch_panel.get_global_rect()))
-	steps.append(_tour("lineage_open", func() -> Rect2: return lineage_button.get_global_rect(), func() -> bool: return lineage_panel.visible))
-	steps.append(_tour("lineage", func() -> Rect2: return lineage_panel.get_global_rect(), func() -> bool: return not lineage_panel.visible))
+	steps.append(_tour("lineage_open", func() -> Rect2: return lineage_button.get_global_rect(), _lineage_is_open, _tutorial_close_lineage))
+	steps.append(_tour("lineage", func() -> Rect2: return lineage_panel.get_global_rect(), func() -> bool: return not _lineage_is_open(), _tutorial_open_lineage))
 	steps.back()["escape_passes"] = true  # (Escape closes a lineage, which is what that step asks for)
 	steps.append(_tour("finish"))
 	tutorial.start(steps)
@@ -833,10 +834,24 @@ func _tutorial_show_bup() -> void:
 	var ids := dish.bup_ids()
 	if ids.is_empty():
 		return
-	_tutorial_bup = ids[0]
-	_tutorial_bup_was_watched = dish.is_watched(_tutorial_bup)
+	_tutorial_bup = dish.selected_id if dish.has_bup(dish.selected_id) else ids[0]  # (coming back to the step keeps the bup already chosen)
 	camera.zoom = Vector2.ONE * TUTORIAL_ZOOM
 	camera.position = dish.global_position + (dish.bup_world_pos(_tutorial_bup) - dish.global_position).limit_length(dish.radius)
+
+
+## The lineage step comes with the lineage open, and the step that asks for it with it shut, whichever way they are reached.
+func _tutorial_open_lineage() -> void:
+	if not _lineage_is_open():
+		_open_lineage()
+
+
+func _tutorial_close_lineage() -> void:
+	if _lineage_is_open():
+		_step_back()
+
+
+func _lineage_is_open() -> bool:
+	return not _stack.is_empty() and _stack.back()["view"] == "lineage"
 
 
 func _tutorial_bup_rect() -> Rect2:
@@ -849,8 +864,9 @@ func _tutorial_bup_rect() -> Rect2:
 ## The tour ended, finished or skipped: whatever it set up goes back, so the screen looks as it did before it.
 func _on_tutorial_closed(_completed: bool) -> void:
 	if _tutorial_bup >= 0:
-		if not _tutorial_bup_was_watched:
-			dish.unwatch_bup(_tutorial_bup)
+		for id in dish.watched.duplicate():
+			if not id in _tutorial_watched_before:
+				dish.unwatch_bup(id)
 		_tutorial_bup = -1
 		_clear_selection()
 		_fit_camera()

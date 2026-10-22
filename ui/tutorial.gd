@@ -2,8 +2,9 @@ class_name Tutorial
 extends Control
 ## A guided tour of the screen: one part at a time is lit and explained on a card, and the rest is dimmed. A step is either
 ## read (the game is held, nothing behind the card can be clicked, and Next goes on) or acted on (the player is asked to
-## do something, such as select a bup, and the tour goes on by itself when it is done). Skip is always there, and so is
-## Escape. The screen that shows the tour gives it its steps (see `start`) and undoes whatever the tour set up when it
+## do something, such as select a bup: Next stays shut until it is done, and the tour goes on the moment it is. Coming back
+## to such a step does not go on again: it is shown, with Next open while what it asked for still holds). Skip is always there,
+## and so is Escape. The screen that shows the tour gives it its steps (see `start`) and undoes whatever the tour set up when it
 ## closes: this only draws the steps and moves through them.
 ##
 ## A step is a Dictionary: "text" (what the card says), "target" (a Callable giving the lit part of the screen as a Rect2,
@@ -19,35 +20,23 @@ const CARD_GAP := 18.0  ## between the lit part and its card
 const SCREEN_MARGIN := 16.0  ## the card keeps this far from the edges
 const PULSE_SECONDS := 0.8  ## the outline fades in and out so the eye finds it
 
-## Where the tour remembers it has been shown (so goal mode does not repeat it on every new game).
-static var seen_path := "user://tutorial.json"
-
 @onready var scrims: Array[Panel] = [$ScrimTop, $ScrimBottom, $ScrimLeft, $ScrimRight]
 @onready var spot: Panel = $Spot
 @onready var card: PanelContainer = $Card
 @onready var title_label: Label = $Card/Box/TitleRow/Title
 @onready var step_label: Label = $Card/Box/TitleRow/Step
 @onready var text_label: Label = $Card/Box/Text
-@onready var waiting_label: Label = $Card/Box/Actions/Waiting
+@onready var waiting_label: Label = $Card/Box/Waiting
 @onready var skip_button: Button = $Card/Box/Actions/SkipButton
-@onready var back_button: Button = $Card/Box/Actions/BackButton
-@onready var next_button: Button = $Card/Box/Actions/NextButton
+@onready var back_button: Button = $Card/Box/Actions/Pair/BackButton
+@onready var next_button: Button = $Card/Box/Actions/Pair/NextButton
 
 var active := false
 var blocking := false  ## the step is being read: the game is held and nothing behind the card can be clicked
 var index := -1
 var _steps: Array[Dictionary] = []
 var _pulse: Tween = null
-
-
-static func seen() -> bool:
-	return FileAccess.file_exists(seen_path)
-
-
-static func mark_seen() -> void:
-	var file := FileAccess.open(seen_path, FileAccess.WRITE)
-	if file != null:
-		file.store_string("seen")
+var _was_satisfied := false  ## whether the step's condition held a moment ago: the tour goes on when it starts to, not when it already does
 
 
 func _ready() -> void:
@@ -75,8 +64,14 @@ func start(steps: Array[Dictionary]) -> void:
 	_show_step(0)
 
 
+## Whether the step's own condition is met (a step that asks for nothing is always met): Next is only open when it is.
+func satisfied() -> bool:
+	var wait: Callable = _steps[index].get("wait", Callable())
+	return not wait.is_valid() or wait.call()
+
+
 func next() -> void:
-	if not active:
+	if not active or not satisfied():
 		return
 	if index + 1 >= _steps.size():
 		_close(true)
@@ -84,14 +79,10 @@ func next() -> void:
 		_show_step(index + 1)
 
 
-## One step back, past the steps that asked for something (what they asked for is done, so they would only go straight on).
 func back() -> void:
 	if not active or index == 0:
 		return
-	var j := index - 1
-	while j > 0 and _steps[j].get("wait", Callable()).is_valid():
-		j -= 1
-	_show_step(j)
+	_show_step(index - 1)
 
 
 func skip() -> void:
@@ -105,7 +96,6 @@ func _close(completed: bool) -> void:
 	visible = false
 	if _pulse != null:
 		_pulse.kill()
-	Tutorial.mark_seen()
 	closed.emit(completed)
 
 
@@ -127,7 +117,8 @@ func _show_step(i: int) -> void:
 	text_label.text = step["text"]
 	waiting_label.visible = not blocking
 	back_button.visible = i > 0
-	next_button.visible = blocking
+	_was_satisfied = satisfied()
+	next_button.disabled = not _was_satisfied
 	next_button.text = Strings.t("tutorial.done" if i == _steps.size() - 1 else "tutorial.next")
 	_layout()
 
@@ -135,10 +126,12 @@ func _show_step(i: int) -> void:
 func _process(_delta: float) -> void:
 	if not active:
 		return
-	var wait: Callable = _steps[index].get("wait", Callable())
-	if wait.is_valid() and wait.call():
-		next()
+	var now := satisfied()
+	next_button.disabled = not now
+	if now and not _was_satisfied:
+		next()  # (what the step asked for has just been done)
 		return
+	_was_satisfied = now
 	_layout()  # (what is lit can move: the window changes shape, a panel appears)
 
 
@@ -149,9 +142,9 @@ func _input(event: InputEvent) -> void:
 		return  # (the step asks for something Escape does in the game)
 	if event.keycode == KEY_ESCAPE:
 		skip()
-	elif blocking and event.keycode in [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE, KEY_RIGHT]:
-		next()
-	elif blocking and event.keycode == KEY_LEFT:
+	elif event.keycode in [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE, KEY_RIGHT]:
+		next()  # (which does nothing while the step still asks for something)
+	elif event.keycode == KEY_LEFT:
 		back()
 	get_viewport().set_input_as_handled()  # (none of the game's shortcuts act behind the tour: a tool key would spoil the step)
 
