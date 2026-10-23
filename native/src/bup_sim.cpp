@@ -869,6 +869,9 @@ void BupSim::swim_chunk(const SwimJob &job, uint32_t chunk) {
 	Rng r;
 	r.seed(job.seed + (uint64_t)(chunk + 1) * 0xD1B54A32D192ED03ULL);
 	r.next_bits(); // (so that streams from nearby seeds are well apart)
+	for (int block = 0; block < uptake_blocks; block++) {
+		uptake_lists[(size_t)chunk * uptake_blocks + block].clear();
+	}
 	if (job.fine) {
 		for (size_t i = first; i < last; i++) {
 			Bup &b = bups[i];
@@ -878,6 +881,7 @@ void BupSim::swim_chunk(const SwimJob &job, uint32_t chunk) {
 			if (clouds_now) {
 				field->cloud_share_xy(b.x, b.y, shares[i]);
 			}
+			note_uptake(chunk, i);
 		}
 		return;
 	}
@@ -886,6 +890,80 @@ void BupSim::swim_chunk(const SwimJob &job, uint32_t chunk) {
 		pay_upkeep_and_grow(bups[i], job.delta);
 		if (clouds_now) {
 			field->cloud_share_xy(bups[i].x, bups[i].y, shares[i]);
+		}
+		note_uptake(chunk, i);
+	}
+}
+
+// Files a bup under the cell it takes nutrient from, if it has room for any.
+void BupSim::note_uptake(uint32_t chunk, size_t i) {
+	Bup &b = bups[i];
+	grid_got[i] = -1.0;
+	cloud_want[i] = 0.0;
+	double full = max_energy(b);
+	if (b.energy < (float)full) {
+		int cell = field->uptake_cell_xy(b.x, b.y);
+		if (cell >= 0) {
+			Eater e;
+			e.bup = (int)i;
+			e.cell = cell;
+			e.x = b.x;
+			e.y = b.y;
+			e.rate = G.uptake_per_size * size_of(b) * b.genes[2];
+			e.room = std::max(full - b.energy, 0.0) / b.yield;
+			e.clouds = clouds_now ? shares[i].total : 0.0;
+			uptake_lists[(size_t)chunk * uptake_blocks + (cell / field->get_size()) / uptake_rows].push_back(e);
+		}
+	}
+}
+
+void BupSim::run_uptake_block(void *job, uint32_t block) {
+	const UptakeJob *j = (const UptakeJob *)job;
+	j->sim->uptake_block(j->delta, block);
+}
+
+// The bups filed under the cells of one block of rows take from them: cell by cell, each cell's bups in the order they are in.
+void BupSim::uptake_block(double delta, uint32_t block) {
+	const int n = field->get_size();
+	const int chunks = ((int)bups.size() + SWIM_CHUNK - 1) / SWIM_CHUNK;
+	size_t total = 0;
+	for (int chunk = 0; chunk < chunks; chunk++) {
+		total += uptake_lists[(size_t)chunk * uptake_blocks + block].size();
+	}
+	if (total == 0) {
+		return;
+	}
+	const int first_cell = (int)block * uptake_rows * n;
+	const int cells = std::min(uptake_rows, n - (int)block * uptake_rows) * n;
+	thread_local std::vector<int> start;
+	thread_local std::vector<Eater> sorted;
+	start.assign((size_t)cells + 1, 0);
+	sorted.resize(total);
+	for (int chunk = 0; chunk < chunks; chunk++) {
+		for (const Eater &e : uptake_lists[(size_t)chunk * uptake_blocks + block]) {
+			start[(size_t)(e.cell - first_cell) + 1]++;
+		}
+	}
+	for (int c = 0; c < cells; c++) {
+		start[(size_t)c + 1] += start[(size_t)c];
+	}
+	for (int chunk = 0; chunk < chunks; chunk++) { // (chunks in order, bups in order in them: so each cell's are in the order they are in)
+		for (const Eater &e : uptake_lists[(size_t)chunk * uptake_blocks + block]) {
+			sorted[(size_t)start[(size_t)(e.cell - first_cell)]++] = e;
+		}
+	}
+	for (const Eater &e : sorted) {
+		double from_grid = field->uptake_concentration_xy(e.x, e.y, e.cell);
+		double concentration = from_grid + e.clouds;
+		double wanted = std::min(e.rate * concentration / (G.half_saturation + concentration) * delta, e.room); // (as uptake_wanted)
+		if (wanted <= 0.0) {
+			continue;
+		}
+		if (e.clouds <= 0.0) {
+			grid_got[e.bup] = field->take_cell(e.cell, wanted);
+		} else {
+			grid_got[e.bup] = field->take_cell(e.cell, wanted * from_grid / concentration);
+			cloud_want[e.bup] = wanted * e.clouds / concentration;
 		}
 	}
 }
@@ -1072,6 +1150,12 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 		shares.resize(bups.size());
 	}
 	int chunks = ((int)bups.size() + SWIM_CHUNK - 1) / SWIM_CHUNK;
+	int across = field->get_size();
+	uptake_rows = std::max(1, (across + 47) / 48);
+	uptake_blocks = (across + uptake_rows - 1) / uptake_rows;
+	uptake_lists.resize((size_t)chunks * uptake_blocks);
+	grid_got.resize(bups.size());
+	cloud_want.resize(bups.size());
 	WorkerThreadPool *pool = WorkerThreadPool::get_singleton();
 	if (threads == 1 || chunks <= 1 || pool == nullptr) {
 		for (int chunk = 0; chunk < chunks; chunk++) {
@@ -1079,6 +1163,15 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 		}
 	} else {
 		WorkerThreadPool::GroupID group = pool->add_native_group_task(&BupSim::run_swim_chunk, &job, chunks, threads > 1 ? threads : -1, true, "bups swim");
+		pool->wait_for_group_task_completion(group);
+	}
+	UptakeJob uptake_job = { this, delta };
+	if (threads == 1 || uptake_blocks <= 1 || pool == nullptr || bups.size() < 4000) {
+		for (int block = 0; block < uptake_blocks; block++) {
+			uptake_block(delta, (uint32_t)block);
+		}
+	} else {
+		WorkerThreadPool::GroupID group = pool->add_native_group_task(&BupSim::run_uptake_block, &uptake_job, uptake_blocks, threads > 1 ? threads : -1, true, "bups eat");
 		pool->wait_for_group_task_completion(group);
 	}
 
@@ -1091,15 +1184,12 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 	int64_t until_death = death_gap(death_chance);
 	for (size_t i = 0; i < bups.size(); i++) {
 		Bup &b = bups[i];
-		if (b.energy < (float)max_energy(b)) { // take up nutrient from the medium where the bup is (a full one wants none)
-			double from_grid = field->grid_concentration(b.x, b.y);
-			static const NutrientField::CloudShare no_clouds = NutrientField::CloudShare();
-			const NutrientField::CloudShare &share = clouds_now ? shares[i] : no_clouds; // (the clouds as they were when the bups moved: they hold thousands of times what a bup takes in a step)
-			double wanted = uptake_wanted(b, from_grid + share.total, delta);
-			if (wanted > 0.0) {
-				double got = field->take_parts_xy(b.x, b.y, wanted, from_grid, share.total, share);
-				eat(b, got);
+		if (grid_got[i] >= 0.0) { // (the cell's part of the uptake is done; the clouds' is taken here, one bup after another, as they hold thousands of times what a bup takes in a step)
+			double got = grid_got[i];
+			if (cloud_want[i] > 0.0) {
+				got += field->take_from_clouds(b.x, b.y, cloud_want[i], shares[i].total, shares[i]);
 			}
+			eat(b, got);
 		}
 		bool dies = b.energy <= 0.0f;
 		if (!dies && until_death-- == 0) {

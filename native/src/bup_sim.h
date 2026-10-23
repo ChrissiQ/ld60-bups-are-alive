@@ -165,6 +165,31 @@ class BupSim : public RefCounted {
 	int diffuse_pieces(double seconds) const;
 	bool clouds_now = false; // whether any cloud is in the dish this step (if not, `shares` is not made)
 	std::vector<NutrientField::CloudShare> shares; // for each bup, which clouds reach it where its move ended and how much each gives (read on all cores, used by the serial uptake pass)
+	// Taking up nutrient is done by cell, the cells at the same time: each bup is filed under the cell it takes from, as it was when the
+	// bups finished moving, and each cell's bups, in the order they are in, take from it one after another (so the more of them,
+	// the more it is run down by the time the last takes, as when they all went one after another). Cells never share a bup, and a
+	// cell is worked on by one thread, so the result does not depend on how many threads there are. A bup reads the cells
+	// around its own as they were when the step began. What a bup's uptake needs of it is copied into its entry when it is filed,
+	// so that working through a cell's bups does not go looking for them all over the array of bups.
+	struct Eater {
+		int bup; // its index
+		int cell; // the cell it takes from
+		float x, y;
+		double rate; // what it takes in a step in a medium that is all nutrient, but for the saturation (see uptake_wanted)
+		double room; // the most it can take, for the room it has left
+		double clouds; // the concentration the clouds make where it is (0 if none reach it)
+	};
+	std::vector<std::vector<Eater>> uptake_lists; // [chunk * uptake_blocks + block]: the bups of that chunk taking from a cell in that block of rows, in order
+	std::vector<double> grid_got; // what each bup got from its cell this step (-1: it took none)
+	std::vector<double> cloud_want; // and how much it still wants from the clouds that reach it
+	int uptake_blocks = 1, uptake_rows = 1;
+	void note_uptake(uint32_t chunk, size_t i);
+	void uptake_block(double delta, uint32_t block);
+	struct UptakeJob {
+		BupSim *sim;
+		double delta;
+	};
+	static void run_uptake_block(void *job, uint32_t block);
 	int threads = 0; // 0: as many as the machine has; 1: just this one (the results are the same)
 	int cap() const;
 	int limit = 0; // the most bups the dish holds; 0 means the default for its radius
@@ -180,7 +205,10 @@ public:
 	void set_seed(int64_t seed);
 	void set_limit(int bup_limit) { limit = bup_limit; }
 	void set_upkeep_scale(double scale) { upkeep_scale = scale; }
-	void set_threads(int count) { threads = count; }
+	void set_threads(int count) {
+		threads = count;
+		field->set_threads(count);
+	}
 	void grow(double new_radius); // a larger dish; the bups and the nutrient stay
 	int shrink(double new_radius); // a smaller dish about the same centre: bups past the new edge die (the number is returned), the nutrient there goes
 	Ref<NutrientField> get_field() const { return field; }

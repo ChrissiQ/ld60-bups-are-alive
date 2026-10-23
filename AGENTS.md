@@ -32,11 +32,15 @@ There are exactly **two clocks**: real time, and the simulation clock (playback 
 - **Saves are not stable.** The game is unreleased, so do not write code that reads old save formats, and do not edit a real `save.json` or `free_settings.json` in the user data folder; tests use scratch paths.
 - **Releases** are made by pushing a `v*` tag (see the README); changing a workflow in `.github/workflows/` changes what builds.
 
+## Debug log
+
+F12, on any screen (undocumented in the game: not on the HUD or in the controls; only its notice is in `strings.cfg`), writes `bups-<date>_<time>-<ms>.log` and a `.png` of the screen to `user://logs/` (on macOS `~/Library/Application Support/Godot/app_userdata/<project>/logs/`), then shows "Debug info logged" for a few seconds. The log is JSON: the run's settings and state, the mean nutrient by distance from the dish centre (a rim ring or step shows there), the selected bup, and every simulation constant. It works in menus and in the tutorial: the `DebugHotkey` autoload (`ui/debug_hotkey.tscn`) takes the key, logs the current screen and the session, and the screen's `dish` and `debug_state()` when it has them. Each write prunes the folder to the newest 20 logs and nothing older than 14 days. When diagnosing a report, read the newest log (`ls -t`) and its screenshot. `scripts/debug_log.gd` builds it; add to `report` what a diagnosis keeps needing, and keep personal data out.
+
 ## Running things
 
 Tests are headless scripts: `godot --headless --path . -s tests/<name>.gd` (`dialog_test` is a scene: `godot --headless --path . res://tests/dialog_test.tscn`); each prints an OK line or the failures. Run `godot --headless --path . --import` after adding a `class_name` script or a new asset.
 
-- After any interface change run `ui_lint_test`, `strings_test`, `fonts_test`, `screens_test`, `settings_test`, `toolbar_test`, `free_mode_test` and `tutorial_test`.
+- After any interface change run `ui_lint_test`, `strings_test`, `fonts_test`, `screens_test`, `settings_test`, `toolbar_test`, `free_mode_test`, `tutorial_test` and `debug_log_test`.
 - The simulation tests are slow (`model_test`, `substep_test`, `cloud_test`, `motion_table_test`, `smoke`). **Work out what the answer should be first, from sources or derivation, and use a test to confirm it once.** Do not run tests in a loop to discover what is correct: write down the expected number and why, and size the sample so it can tell the effect from noise.
 - Outcomes are deterministic for a seed (identical on any thread count); only timing varies. Timings are noisy on a busy machine, so compare variants in the same sitting.
 - Windowed runs (for screenshots) should be short, self-quitting and off-screen (`--position 6000,6000`). Never kill processes broadly. Delete temporary test files afterwards.
@@ -45,7 +49,7 @@ Tests are headless scripts: `godot --headless --path . -s tests/<name>.gd` (`dia
 
 ## Gotchas
 
-- GDScript: `%g` is not a supported format; comparing a `String` to a `bool` with `==` is an error (check `is bool` first); `-s` test scripts do not load autoloads.
+- GDScript: `%g` is not a supported format; comparing a `String` to a `bool` with `==` is an error (check `is bool` first).
 - The editor re-saves scenes and the theme in its own format (`&"Label"`); keep lint patterns tolerant of both. Typed node exports in a `.tscn` need `node_paths=PackedStringArray("prop")`. `.uid` files are tracked.
 - Raw files (`.cfg`, `.txt`) are only exported when a preset's `include_filter` names them. The macOS export needs ETC2/ASTC import on (`project.godot`) and is ad-hoc signed, not notarized. A release is made by pushing a `v*` tag (see the README).
 - The tutorial runs on every goal-mode start and only when switched on in free mode; nothing about it is saved in goal mode.

@@ -811,6 +811,11 @@ func place_plankton(world_pos: Vector2) -> bool:
 	return true
 
 
+## Anywhere in the dish a plankton's body fits (so the bloom feeds the rim as well as the middle).
+func _random_plankton_spot() -> Vector2:
+	return sim.random_point(radius - PLANKTON_DRAW_RADIUS)
+
+
 func _add_plankton(local: Vector2) -> void:
 	var life := PLANKTON_MEAN_LIFE * (1.0 + PLANKTON_LIFE_SPREAD * (2.0 * sim.random_float() - 1.0))
 	plankton.append(Plankton.new(local, time, time + life, PLANKTON_UNITS, sim.random_float() * TAU))
@@ -822,7 +827,7 @@ func _add_plankton(local: Vector2) -> void:
 func add_steady_state_plankton() -> void:
 	var wanted := mini(int(round(bloom_per_day() * PLANKTON_MEAN_LIFE / 86400.0)), MAX_PLANKTON - plankton.size())
 	for i in wanted:
-		_add_plankton(sim.random_point(radius * 0.95))
+		_add_plankton(_random_plankton_spot())
 
 
 ## How many plankton the bloom adds in a sim-day: its density over the dish's area.
@@ -839,7 +844,7 @@ func _step_plankton(delta: float) -> void:
 		var arrivals := 0
 		while time >= _bloom_due and arrivals < MAX_BLOOM_ARRIVALS_PER_STEP:
 			if plankton.size() < MAX_PLANKTON:
-				_add_plankton(sim.random_point(radius * 0.95))
+				_add_plankton(_random_plankton_spot())
 			_bloom_due += interval  # (exactly on schedule: only where it lands, and how long it floats, are random)
 			arrivals += 1
 		if time >= _bloom_due:  # (far behind, say the rate was just raised a great deal: start over from now)

@@ -138,6 +138,8 @@ func _process(_delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if not active or not (event is InputEventKey) or not event.pressed or event.echo:
 		return
+	if event.keycode == KEY_F12:
+		return  # (the debug log is taken from the tour too)
 	if event.keycode == KEY_ESCAPE and _steps[index].get("escape_passes", false):
 		return  # (the step asks for something Escape does in the game)
 	if event.keycode == KEY_ESCAPE:

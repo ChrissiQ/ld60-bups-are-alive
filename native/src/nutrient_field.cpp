@@ -1,5 +1,6 @@
 #include "nutrient_field.h"
 
+#include <godot_cpp/classes/worker_thread_pool.hpp>
 #include <godot_cpp/core/class_db.hpp>
 
 #include <algorithm>
@@ -71,8 +72,7 @@ void NutrientField::build(double dish_radius, int cells_across) {
 	spacing = 2.0 * dish_radius / n;
 	conc.assign((size_t)n * n, 0.0f);
 	inside.assign((size_t)n * n, 0);
-	cp.assign(n, 0.0);
-	dp.assign(n, 0.0);
+	fill_weights_valid = false;
 	inside_count = 0;
 	for (int y = 0; y < n; y++) {
 		for (int x = 0; x < n; x++) {
@@ -81,6 +81,13 @@ void NutrientField::build(double dish_radius, int cells_across) {
 				inside[(size_t)y * n + x] = 1;
 				inside_count++;
 			}
+		}
+	}
+	owner.assign((size_t)n * n, -1);
+	for (int y = 0; y < n; y++) {
+		for (int x = 0; x < n; x++) {
+			size_t i = (size_t)y * n + x;
+			owner[i] = inside[i] ? (int)i : nearest_inside(x, y);
 		}
 	}
 }
@@ -155,13 +162,40 @@ int NutrientField::nearest_inside(int ix, int iy) const {
 	return best;
 }
 
-void NutrientField::snapshot() {
-	eff.resize((size_t)n * n);
-	for (int iy = 0; iy < n; iy++) {
+// Lines of the grid are handled in blocks of this many, and a grid with fewer cells than PARALLEL_CELLS is done on this thread
+// (handing the work to the pool costs about as much as a small grid takes).
+static const int LINE_BLOCK = 16;
+static const int PARALLEL_CELLS = 30000;
+
+void NutrientField::run_blocks(void (*fn)(void *, uint32_t), void *job, int blocks) {
+	WorkerThreadPool *pool = WorkerThreadPool::get_singleton();
+	if (threads == 1 || blocks <= 1 || pool == nullptr || n * n < PARALLEL_CELLS) {
+		for (int block = 0; block < blocks; block++) {
+			fn(job, (uint32_t)block);
+		}
+		return;
+	}
+	WorkerThreadPool::GroupID group = pool->add_native_group_task(fn, job, blocks, threads > 1 ? threads : -1, true, "nutrient grid");
+	pool->wait_for_group_task_completion(group);
+}
+
+void NutrientField::snapshot_rows(int first_row, int last_row) {
+	for (int iy = first_row; iy < last_row; iy++) {
 		for (int ix = 0; ix < n; ix++) {
 			eff[(size_t)iy * n + ix] = (float)cell_value(ix, iy);
 		}
 	}
+}
+
+void NutrientField::run_snapshot_block(void *job, uint32_t block) {
+	NutrientField *field = (NutrientField *)job;
+	int first = (int)block * LINE_BLOCK;
+	field->snapshot_rows(first, std::min(first + LINE_BLOCK, field->n));
+}
+
+void NutrientField::snapshot() {
+	eff.resize((size_t)n * n);
+	run_blocks(&NutrientField::run_snapshot_block, this, (n + LINE_BLOCK - 1) / LINE_BLOCK);
 	rebuild_hash();
 }
 
@@ -688,7 +722,11 @@ double NutrientField::take_parts_xy(double x, double y, double energy, double fr
 	}
 	double all = from_grid + from_clouds;
 	double taken = take_from_grid(x, y, energy * from_grid / all);
-	double wanted = energy * from_clouds / all;
+	return taken + take_from_clouds(x, y, energy * from_clouds / all, from_clouds, share);
+}
+
+double NutrientField::take_from_clouds(double x, double y, double wanted, double from_clouds, const CloudShare &share) {
+	double taken = 0.0;
 	if (!share.more) {
 		for (int s = 0; s < share.count; s++) {
 			double part = std::min(puffs[share.k[s]].mass, wanted * share.c[s] / from_clouds);
@@ -702,6 +740,28 @@ double NutrientField::take_parts_xy(double x, double y, double energy, double fr
 		puffs[k].mass -= part;
 		taken += part;
 	});
+	return taken;
+}
+
+double NutrientField::uptake_concentration_xy(double x, double y, int own) const {
+	double fx = std::clamp((x + origin) / spacing - 0.5, 0.0, n - 1.001);
+	double fy = std::clamp((y + origin) / spacing - 0.5, 0.0, n - 1.001);
+	int x0 = (int)fx, y0 = (int)fy;
+	double tx = fx - x0, ty = fy - y0;
+	auto cell = [&](int ix, int iy) {
+		size_t i = (size_t)iy * n + ix;
+		return owner[i] == own ? (double)conc[own] : (double)eff[i];
+	};
+	double c00 = cell(x0, y0), c10 = cell(x0 + 1, y0), c01 = cell(x0, y0 + 1), c11 = cell(x0 + 1, y0 + 1);
+	double top = c00 + (c10 - c00) * tx;
+	double bottom = c01 + (c11 - c01) * tx;
+	return top + (bottom - top) * ty;
+}
+
+double NutrientField::take_cell(int cell, double energy) {
+	double area = spacing * spacing;
+	double taken = std::min(energy, (double)conc[cell] * area);
+	conc[cell] -= (float)(taken / area);
 	return taken;
 }
 
@@ -727,6 +787,7 @@ void NutrientField::set_patchiness(double amplitude, double largest_patch_um, in
 	patch_amplitude = std::max(amplitude, 0.0);
 	patch_size = std::max(largest_patch_um, 1.0);
 	patch_seed = (uint64_t)seed;
+	fill_weights_valid = false;
 }
 
 // Value noise: a hashed value at each corner of a lattice of this spacing, smoothly blended between them (about -1 to 1).
@@ -775,38 +836,43 @@ void NutrientField::fill(double concentration) {
 		return;
 	}
 	// The noise, scaled to zero mean and unit spread over the dish, then each cell gets (1 + amplitude * noise) of the
-	// concentration, kept above a floor and rescaled so that the dish still gets exactly `concentration` on average.
-	std::vector<double> noise(conc.size(), 0.0);
-	double sum = 0.0, sum_sq = 0.0;
-	for (int y = 0; y < n; y++) {
-		for (int x = 0; x < n; x++) {
-			size_t i = (size_t)y * n + x;
-			if (inside[i]) {
-				double v = patch_noise((x + 0.5) * spacing - origin, (y + 0.5) * spacing - origin);
-				noise[i] = v;
-				sum += v;
-				sum_sq += v * v;
+	// concentration, kept above a floor and rescaled so that the dish still gets exactly `concentration` on average. The
+	// weights depend only on the grid and the landscape, so they are made once and kept until either changes.
+	if (!fill_weights_valid) {
+		std::vector<double> &noise = fill_weights;
+		noise.assign(conc.size(), 0.0);
+		double sum = 0.0, sum_sq = 0.0;
+		for (int y = 0; y < n; y++) {
+			for (int x = 0; x < n; x++) {
+				size_t i = (size_t)y * n + x;
+				if (inside[i]) {
+					double v = patch_noise((x + 0.5) * spacing - origin, (y + 0.5) * spacing - origin);
+					noise[i] = v;
+					sum += v;
+					sum_sq += v * v;
+				}
 			}
 		}
-	}
-	double mean = sum / inside_count;
-	double spread = std::sqrt(std::max(sum_sq / inside_count - mean * mean, 1e-12));
-	double weight_total = 0.0;
-	for (size_t i = 0; i < conc.size(); i++) {
-		if (inside[i]) {
-			noise[i] = std::max(1.0 + patch_amplitude * (noise[i] - mean) / spread, 0.05);
-			weight_total += noise[i];
+		double mean = sum / inside_count;
+		double spread = std::sqrt(std::max(sum_sq / inside_count - mean * mean, 1e-12));
+		fill_weight_total = 0.0;
+		for (size_t i = 0; i < conc.size(); i++) {
+			if (inside[i]) {
+				noise[i] = std::max(1.0 + patch_amplitude * (noise[i] - mean) / spread, 0.05);
+				fill_weight_total += noise[i];
+			}
 		}
+		fill_weights_valid = true;
 	}
-	double scale = concentration * inside_count / weight_total;
+	double scale = concentration * inside_count / fill_weight_total;
 	for (size_t i = 0; i < conc.size(); i++) {
 		if (inside[i]) {
-			conc[i] += (float)(scale * noise[i]);
+			conc[i] += (float)(scale * fill_weights[i]);
 		}
 	}
 }
 
-void NutrientField::solve_run(int first, int step, int count, double k) {
+void NutrientField::solve_run(int first, int step, int count, double k, double *cp, double *dp) {
 	double b = 1.0 + k;
 	cp[0] = -k / b;
 	dp[0] = conc[first] / b;
@@ -824,10 +890,12 @@ void NutrientField::solve_run(int first, int step, int count, double k) {
 	}
 }
 
-void NutrientField::sweep(bool along_rows, double k) {
+// Solves the lines first_line..last_line of one sweep. Each line is its own tridiagonal system, so lines are independent.
+void NutrientField::sweep_lines(bool along_rows, double k, int first_line, int last_line) {
 	int step = along_rows ? 1 : n;
 	int line_step = along_rows ? n : 1;
-	for (int line = 0; line < n; line++) {
+	std::vector<double> cp(n), dp(n);
+	for (int line = first_line; line < last_line; line++) {
 		int base = line * line_step;
 		int i = 0;
 		while (i < n) {
@@ -840,10 +908,21 @@ void NutrientField::sweep(bool along_rows, double k) {
 				i++;
 			}
 			if (i - start > 1) {
-				solve_run(base + start * step, step, i - start, k);
+				solve_run(base + start * step, step, i - start, k, cp.data(), dp.data());
 			}
 		}
 	}
+}
+
+void NutrientField::run_sweep_block(void *job, uint32_t block) {
+	const SweepJob *j = (const SweepJob *)job;
+	int first = (int)block * LINE_BLOCK;
+	j->field->sweep_lines(j->along_rows, j->k, first, std::min(first + LINE_BLOCK, j->field->n));
+}
+
+void NutrientField::sweep(bool along_rows, double k) {
+	SweepJob job = { this, along_rows, k };
+	run_blocks(&NutrientField::run_sweep_block, &job, (n + LINE_BLOCK - 1) / LINE_BLOCK);
 }
 
 void NutrientField::diffuse(double dt) {

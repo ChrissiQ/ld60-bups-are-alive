@@ -465,6 +465,23 @@ func _on_tool_selected(new_tool: Toolbar.Tool) -> void:
 			Input.set_default_cursor_shape(Input.CURSOR_ARROW)
 
 
+## What only this screen knows, for the log.
+func debug_state() -> Dictionary:
+	return {
+		"mode": "free" if free_mode else "goals",
+		"goal_index": tracker.index,
+		"sim_speed": sim_speed,
+		"achieved_speed": achieved_speed,
+		"paused": paused,
+		"menu_open": menu_open,
+		"tutorial_step": tutorial.index if tutorial.active else -1,
+		"tool": Toolbar.Tool.keys()[tool],
+		"zoom": camera.zoom.x,
+		"following": following_id,
+		"views_open": _stack.size(),
+	}
+
+
 ## Only input the GUI didn't consume arrives here, so clicks on the toolbar never reach the dish.
 func _unhandled_input(event: InputEvent) -> void:
 	if menu_open:  # only Escape reaches the game while the menu is up, and it closes the menu

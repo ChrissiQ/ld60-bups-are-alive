@@ -25,8 +25,8 @@ class NutrientField : public RefCounted {
 	double spacing = 12.5, origin = 300.0, radius = 300.0;
 	std::vector<float> conc;
 	std::vector<uint8_t> inside;
+	std::vector<int> owner; // for each cell, the cell whose nutrient it has: itself if it is inside the dish, else its nearest inside neighbour (-1: none)
 	std::vector<float> eff; // a copy of the field with the rim cells' stand-in values filled in, for many readers at once (see snapshot)
-	std::vector<double> cp, dp;
 	int inside_count = 0;
 
 	// A fresh plankton's nutrient is a small cloud, much smaller than a cell of a big dish's grid, and a grid cell cannot
@@ -79,7 +79,23 @@ class NutrientField : public RefCounted {
 	int nearest_inside(int ix, int iy) const;
 	double cell_value(int ix, int iy) const;
 	void sweep(bool along_rows, double k);
-	void solve_run(int first, int step, int count, double k);
+	void solve_run(int first, int step, int count, double k, double *cp, double *dp);
+	void sweep_lines(bool along_rows, double k, int first_line, int last_line);
+	void snapshot_rows(int first_row, int last_row);
+	// Each cell's share of a feed, patches included. It depends only on the grid and the patch landscape, so it is made once (see `fill`).
+	std::vector<double> fill_weights;
+	double fill_weight_total = 0.0;
+	bool fill_weights_valid = false;
+	int threads = 0; // 0: as many as the machine has; 1: just this one (the results are the same)
+	// Runs fn(job, block) for each of `blocks` blocks of lines or rows, on the worker threads when the grid is big enough to pay for it.
+	void run_blocks(void (*fn)(void *, uint32_t), void *job, int blocks);
+	static void run_sweep_block(void *job, uint32_t block);
+	static void run_snapshot_block(void *job, uint32_t block);
+	struct SweepJob {
+		NutrientField *field;
+		bool along_rows;
+		double k;
+	};
 
 protected:
 	static void _bind_methods();
@@ -91,6 +107,7 @@ public:
 	void set_max_across(int across) { max_across = across; }
 	int get_max_across() const { return max_across > 0 ? max_across : (int)G.field_max_across; }
 	void set_diffusion(double d) { own_diffusion = d; }
+	void set_threads(int count) { threads = count; }
 	double get_diffusion() const { return own_diffusion > 0.0 ? own_diffusion : G.diffusion; }
 	void reset(double dish_radius);
 	void resize(double dish_radius); // a larger dish: keeps the nutrient (and the total) on a new grid
@@ -191,6 +208,13 @@ public:
 	double grid_concentration(double x, double y) const { return grid_concentration_xy(x, y); } // the grid's concentration, as it is now
 	void concentration_parts_xy(double x, double y, double &from_grid, double &from_clouds, CloudShare &share) const;
 	double take_parts_xy(double x, double y, double energy, double from_grid, double from_clouds, const CloudShare &share);
+	double take_from_clouds(double x, double y, double energy, double from_clouds, const CloudShare &share); // the clouds' part of a take: this much, out of the clouds that reach the point
+	// Uptake by cell, so that the cells can be worked on at the same time. `uptake_cell_xy` is the cell a bup at the point takes from;
+	// `uptake_concentration_xy` is what `grid_concentration` gives there, but with every cell other than `own` as it was when the step
+	// began (`snapshot`) and `own` as it is now; `take_cell` takes up to this much energy out of a cell.
+	int uptake_cell_xy(double x, double y) const { return owner[index_at(x, y)]; }
+	double uptake_concentration_xy(double x, double y, int own) const;
+	double take_cell(int cell, double energy);
 	double take_xy(double x, double y, double energy);
 	void deposit_xy(double x, double y, double energy);
 };
