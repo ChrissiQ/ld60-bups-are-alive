@@ -153,6 +153,8 @@ func _run() -> void:
 	dish.process_mode = Node.PROCESS_MODE_DISABLED  # (the game's _process draws: not what is measured here)
 	dish.set_seed(seed_value)
 	start = _start(scenario)
+	if OS.get_environment("DETAIL") != "":  # (DETAIL=200: the nutrient grid's cells across)
+		start.nutrient_resolution = int(OS.get_environment("DETAIL"))
 	start.death_husks = OS.get_environment("DEATH_HUSKS") == "1"  # (DEATH_HUSKS=1: the dead leave husks, whose leak the CPU runs for both backends)
 	dish.strike(start)
 	_place_sources(dish, scenario)

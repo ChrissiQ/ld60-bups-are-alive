@@ -205,6 +205,8 @@ func filled_dish(n: int, radius: float, setting: String, limit := 0, feed := 3.0
 	sc.nutrient_density = nutrient
 	sc.feed_density = feed
 	sc.sim_backend = setting
+	if OS.get_environment("GAME_CHECK_DETAIL") != "":  # (GAME_CHECK_DETAIL=400: the nutrient grid's cells across)
+		sc.nutrient_resolution = int(OS.get_environment("GAME_CHECK_DETAIL"))
 	sc.spread_founders()
 	make_dish(sc, seed_value)
 	var born_with := Cell.mass_to_add(Genome.founder())
