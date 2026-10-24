@@ -41,6 +41,7 @@ const DOUBLING_SECONDS := 2400.0  ## 40 min, glucose minimal medium at 37 C [sea
 const MAINTENANCE_SHARE := 0.05  ## maintenance as a share of the fast-growth energy budget; small in E. coli [search: Pirt-style maintenance is a small component], 5% is a choice
 const MOTILITY_SHARE := 0.03  ## cost of swimming at the founders' speed, share of the same budget [search: flagella+chemotaxis ~2-10%]
 const SENSING_SHARE := 0.005  ## cost of the founders' chemoreceptors, same basis [choice: chemotaxis signalling is "a lesser extent" than flagella, per the same source]
+const DEATH_RELEASE := 0.25  ## share of a dead bup's body (its mass at COST_PER_MASS) that returns to the medium as nutrient the others can eat; a bup rebuilds that share, since eating has no loss of its own, so this is the net new biomass per dead one [search: new cells per dead cell, E. coli 0.12-0.23 (Biselli 2020), 0.28 (Middelboe 2003, lysate of a marine bacterium), 0.2-0.33 (Mason & Hamer 1987, per carbon released); 20-65% of lysate carbon is used within hours and 2-5% stays refractory for months (Kitayama 2007)]. The reserve is not returned. A bup displaced at the limit and one the player erases return nothing
 const DEATH_PER_SECOND := 1.0e-6  ## death from causes other than starvation while growing: negligible [search: Biselli 2020 ties death to starvation, not growth]
 
 # --- Mutation (see Genome for the argument) -------------------------------------------------

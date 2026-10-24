@@ -1541,6 +1541,10 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 
 	size_t keep = 0;
 	std::vector<Bup> newborn;
+	struct DeathCloud {
+		float x, y, energy;
+	};
+	std::vector<DeathCloud> death_clouds;
 	// Each bup that has energy left has the same small chance of dying of something else this step. Rather than a random
 	// number for each, the number of such bups until the next death is drawn (the gaps between independent chances of p are
 	// geometric): the same odds for every bup, and one draw for each death instead of one for each bup.
@@ -1562,6 +1566,9 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 		}
 		if (dies) {
 			record_death(b);
+			if (G.death_release > 0.0) { // (what its body was made of goes back to the medium, as a cloud once the step is done)
+				death_clouds.push_back({ b.x, b.y, (float)(G.death_release * G.cost_per_mass * b.mass) });
+			}
 			continue; // died
 		}
 		if (ready_to_divide(b)) {
@@ -1602,6 +1609,9 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 		keep++;
 	}
 	bups.resize(keep);
+	for (const DeathCloud &c : death_clouds) { // (after the loop: a cloud made in it would be found by the bups after it, and the clouds' lookup rebuilt for each)
+		field->add_cloud(Vector2(c.x, c.y), 0.0, c.energy);
+	}
 	// At the carrying limit a birth takes the place of a random bup, so reproduction (not a blocked
 	// birth) is still what wins: numbers hold steady and the fitter lineage spreads (a Moran process).
 	int limit = cap();

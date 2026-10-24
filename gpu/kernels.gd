@@ -34,7 +34,7 @@ const TYPES := {
 # 32 trait_mutations, 33 harmful_mutations, 34 compensatory_mutations, 35 lethal_fraction, 36 harm_shape, 37 mean_harm, 38 mean_repair, 39 max_harm,
 # 40 hue_step, 41 sat_step, 42 val_step, 43 val_min, 44-47 gene_min, 48-51 gene_max, 52-55 gene_step, 56 add_mass_factor, 57 drag_upkeep,
 # 58 division_spread, 59 death chance per step, 60 limit (the most bups: a random share dies each step, as many as the colony is expected to exceed it by), 61 feed per step (concentration),
-# 62 capacity (slots), 63 unused, 64 handover distance (cloud_handover * spacing), 65 cloud_cut, 66 bin size, 67 bins across, 68 motion_step,
+# 62 capacity (slots), 63 what a death gives back per unit of the body's mass (death_release x cost_per_mass; 0: nothing), 64 handover distance (cloud_handover * spacing), 65 cloud_cut, 66 bin size, 67 bins across, 68 motion_step,
 # 69 motion_structure, 70 cloud spread per step (2 D dt), 71 puff capacity, 72 entry capacity, 73 bins,
 # 74 min_length_px, 75 width (µm), 76 min_width_px, 77 max_trail_px (the drawing's constants), 78 event capacity (births, and deaths, per batch),
 # 79 upkeep_scale (the dish's upkeep factor: multiplies base_upkeep + maintenance_per_mass * mass).
@@ -46,6 +46,7 @@ const TYPES := {
 # PUFF: 8 floats each: x, y, mass, variance, cut, alive, reach^2, sigma;
 # PCNT (uint, 8): 0 slots in use, 1 slots after compaction, 2 clouds that found no slot and went onto the grid (since the load),
 #       3 list entries cut because the lists were full (since the load), 4-7 spare
+# (a bup that died of starvation or chance has -2 in its word 23 until `copy`, for `death_clouds`: a trimmed one does not give its body back)
 # CNT (uint, 16): 0 bups now, 1 survivors, 2 newborn, 3 bups next, 4 next id lo, 5 step number, 6 next id hi, 7 dish seed,
 #       8 births this batch, 9 deaths this batch, 10 births lost (no event slot, since the load), 11 deaths lost (since the load),
 #       12 what the trim at the limit expects the next step to add: the last step's growth (newborn minus the deaths that were not a trim,
@@ -446,6 +447,7 @@ void main() {
 	bool natural = energy <= 0.0 || u01(s) < P[59];
 	bool trimmed = !natural && u01(s) < trim;  // (the same draws as one chain of `||`)
 	if (trimmed) atomicAdd(CNT[13], 1u);  // (counted, so that the growth the next trim expects leaves out the trim's own deaths)
+	if (natural) BUPS[b + 23] = -2.0;  // (a death by starvation or chance, not a trim: `death_clouds` gives its body back; the record is gone after `copy`)
 	if (natural || trimmed) return;
 	SURV[i] = 1u;
 	if (mass >= birth + add_mass) {
@@ -654,9 +656,9 @@ void main() {
 }
 """
 
-## The clouds spread (as the CPU's advance_puffs): a cloud that has spread to about a cell is given to the grid, its nutrient over the cells
-## it covers, and an eaten one is dropped. What goes to the grid is summed in fixed point (an exact sum whatever the order), then added.
-const K_PUFF_ADVANCE := """
+## What puts nutrient on the grid from many threads at once (the clouds that have spread to a cell, and the deaths' that find no slot): in fixed point,
+## an exact sum whatever the order; `dep_apply` adds it to the field. Used by `puff_advance` and `death_clouds`.
+const DEP_FUNCS := """
 void add_dep(uint cell, float amount) { // 2^20 to the unit, in 64 bits
 	while (amount > 0.0) {
 		float part = min(amount, 4000.0);
@@ -681,6 +683,11 @@ void deposit_xy(float x, float y, float mass) {
 	if (kept <= 1e-9) { add_dep(uint(cells[0]), mass); return; }
 	for (int k = 0; k < count; k++) add_dep(uint(cells[k]), mass * weights[k] / kept);
 }
+"""
+
+## The clouds spread (as the CPU's advance_puffs): a cloud that has spread to about a cell is given to the grid, its nutrient over the cells
+## it covers, and an eaten one is dropped. What goes to the grid is summed in fixed point (an exact sum whatever the order), then added.
+const K_PUFF_ADVANCE := """
 void main() {
 	uint k = gl_GlobalInvocationID.x;
 	if (k >= PCNT[0]) return;
@@ -887,6 +894,39 @@ void main() { if (gl_GlobalInvocationID.x == 0u) { CNT[8] = 0u; CNT[9] = 0u; } }
 ## The family events of a step (after `finalize`, before `compact`, which places the newborns: the same rule), one thread per bup, into
 ## event set `pcs.pb`, the step's place in the batch `pcs.pa`: each kept newborn is a birth at CNT[8] + its place among the newborns,
 ## each bup not kept a death at CNT[9] + its place among those; so the order is the bups' order, whatever order the threads run in.
+## What a bup that died of starvation or chance gives back (not one the trim displaced at the limit, as the CPU's step does not for its Moran
+## displacement): a cloud of P[63] (death_release x cost_per_mass) per unit of its mass at its place, as the CPU's add_cloud of radius 0 does:
+## a cloud of variance 100 µm² in the next free slots (slot = the number of slots in use + the number of bups that died before it, trimmed or not,
+## so a trimmed one's slot is left empty, `alive` 0, until a compaction), a deposit on the grid if the grid is too fine for a cloud or the slots are
+## taken. After `finalize`, before `copy`: the dead bups' records are still where they were. `death_count` then takes the slots.
+const K_DEATH_CLOUDS := """
+void main() {
+	uint i = gl_GlobalInvocationID.x;
+	if (i >= CNT[0] || P[63] <= 0.0 || SURV[i] != 0u) return;
+	uint b = i * 24u;
+	uint slot = PCNT[0] + (i - EXCS[i]);
+	if (slot < uint(P[71])) { uint o = slot * 8u; PUFF[o + 5] = 0.0; }  // (empty unless this one is a cloud below)
+	if (BUPS[b + 23] != -2.0) return;
+	float mass = P[63] * BUPS[b + 6], x = BUPS[b + 1], y = BUPS[b + 2];
+	if (slot < uint(P[71]) && 10.0 < P[64]) {
+		uint o = slot * 8u;
+		PUFF[o] = x; PUFF[o + 1] = y; PUFF[o + 2] = mass; PUFF[o + 3] = 100.0; PUFF[o + 4] = 1.0;
+		PUFF[o + 6] = 0.0; PUFF[o + 7] = 0.0; PUFF[o + 5] = 1.0;
+	} else {
+		deposit_xy(x, y, mass);
+		if (slot >= uint(P[71])) atomicAdd(PCNT[2], 1u);
+	}
+}
+"""
+
+const K_DEATH_COUNT := """
+void main() {
+	if (gl_GlobalInvocationID.x != 0u) return;  // (one thread: a dispatch of 1 runs a whole group of 64)
+	if (P[63] <= 0.0) return;
+	PCNT[0] = min(PCNT[0] + (CNT[0] - CNT[1]), uint(P[71]));
+}
+"""
+
 const K_EVENTS := """
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
@@ -1168,7 +1208,7 @@ static func core() -> Dictionary:
 	_add(out, "setcount", K_SETCOUNT, ["CNT"])
 	_add(out, "ev_puffs", K_EV_PUFFS, ["P", "PCNT", "PUFF", "EVR", "EVP", "CONC", "INSIDE"])
 	_add(out, "ev_deposits", K_EV_DEPOSITS, ["P", "CONC", "EVR", "EVCC", "EVCA"])
-	_add(out, "puff_advance", K_PUFF_ADVANCE, ["P", "PCNT", "PUFF", "INSIDE", "DPLO", "DPHI"])
+	_add(out, "puff_advance", K_PUFF_ADVANCE, ["P", "PCNT", "PUFF", "INSIDE", "DPLO", "DPHI"], DEP_FUNCS)
 	_add(out, "dep_apply", K_DEP_APPLY, ["P", "CONC", "DPLO", "DPHI"])
 	_add(out, "puff_clear", K_PUFF_CLEAR, ["P", "PDLO", "PDHI", "PSCALE"])
 	_add(out, "puff_scale", K_PUFF_SCALE, ["PCNT", "PUFF", "PDLO", "PDHI", "PSCALE"])
@@ -1188,6 +1228,8 @@ static func core() -> Dictionary:
 	_add(out, "probe", K_PROBE, ["P", "ENTD", "BINS", "BINC", "PQ", "PR"], CLOUD_FUNCS)
 	# the game's side
 	_add(out, "ev_begin", K_EV_BEGIN, ["CNT"])
+	_add(out, "death_clouds", K_DEATH_CLOUDS, ["P", "CNT", "PCNT", "BUPS", "SURV", "EXCS", "PUFF", "INSIDE", "DPLO", "DPHI"], DEP_FUNCS)
+	_add(out, "death_count", K_DEATH_COUNT, ["P", "CNT", "PCNT"])
 	_add(out, "events", K_EVENTS, ["P", "CNT", "BUPS_U", "CHILD_U", "SURV", "KID", "EXCS", "EXCK", "EVB", "EVD"])
 	_add(out, "ev_count", K_EV_COUNT, ["CNT", "EVN"])
 	_add(out, "stats1", K_STATS1, ["CNT", "BUPS", "SPART"], "", 256)

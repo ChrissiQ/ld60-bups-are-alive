@@ -48,6 +48,7 @@ void main() {
 	bool natural = energy <= 0.0 || u01(s) < P[59];
 	bool trimmed = !natural && u01(s) < trim;  // (the same draws as one chain of `||`)
 	if (trimmed) atomicAdd(CNT[13], 1u);  // (counted, so that the growth the next trim expects leaves out the trim's own deaths)
+	if (natural) BUPS[b + 23] = -2.0;  // (a death by starvation or chance, not a trim: `death_clouds` gives its body back; the record is gone after `copy`)
 	if (natural || trimmed) return;
 	SURV[i] = 1u;
 	if (mass >= birth + add_mass) {

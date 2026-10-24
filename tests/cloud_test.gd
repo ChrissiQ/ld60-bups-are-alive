@@ -34,6 +34,7 @@ func _init() -> void:
 	_check_uptake()
 	_check_save()
 	_check_sources()
+	_check_death_release()
 	_check_plume()
 	_check_threads()
 	TestUtil.finish(self, "CLOUD TESTS OK")
@@ -81,6 +82,18 @@ func _check_conservation() -> void:
 		d.step(20.0)
 	check(clouds_before == 41 and d.field.puff_count() == 0, "clouds spread and, by about five hours, have all been given to the grid (%d of %d left)" % [d.field.puff_count(), clouds_before])
 	check(absf(d.field.total() / before - 1.0) < 1e-4, "the nutrient is conserved through the spreading and the handover (%.1f before, %.1f after)" % [before, d.field.total()])
+	d.free()
+
+
+func _check_death_release() -> void:
+	var d := _dish(90.0)
+	var mass := 12.0
+	var where := Vector2(-3000, 2000)
+	d.sim.add_bup(where, Genome.founder(), 0.0, sqrt(mass), mass, 0, Vector2.RIGHT)  # (no energy: it starves in the first step)
+	d.sim.step(20.0, PackedVector2Array(), PackedFloat32Array(), 0.0, 0.0)
+	var expected := Biology.DEATH_RELEASE * Cell.COST_PER_MASS * mass
+	check(d.population() == 0, "a bup with no energy dies in its first step")
+	check(d.field.puff_count() == 1 and absf(d.field.total() - expected) < 1e-4 * expected, "a bup that starves gives back a share of its body as a cloud where it died (%.3f of %.3f)" % [d.field.total(), expected])
 	d.free()
 
 

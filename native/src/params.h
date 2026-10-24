@@ -15,7 +15,7 @@
 #define BUP_PARAMS(X) \
 	X(diffusion) X(field_target_spacing) X(field_min_across) X(field_max_across) \
 	X(nutrient_energy) X(max_cells) X(motion_step) X(motion_structure) X(cloud_handover) X(cloud_cut) X(steering_window) X(fine_step) X(diffuse_interval) X(diffuse_accuracy) \
-	X(division_spread) X(death_rate) \
+	X(division_spread) X(death_rate) X(death_release) \
 	X(growth_rate) X(cost_per_mass) X(reserve_per_mass) X(maintenance_floor) X(base_upkeep) \
 	X(maintenance_per_mass) X(drag_upkeep) X(sense_upkeep) X(uptake_per_size) X(half_saturation) \
 	X(detection_floor) X(noise_reference) X(gradient_noise) X(reference_sense) X(reference_size) \

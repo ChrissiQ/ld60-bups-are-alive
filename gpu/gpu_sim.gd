@@ -48,7 +48,7 @@ var diffusion := 0.0  ## the medium's diffusion coefficient (µm²/s)
 var feed_per_second := 0.0  ## the feed (concentration per second)
 var upkeep_scale := 1.0  ## the dish's upkeep factor (P[79])
 var limit := 0  ## the most bups (P[60]): past it a random share dies each step
-var has_clouds := false  ## whether any cloud has been loaded or sent: until then the cloud kernels are not run
+var has_clouds := false  ## whether any cloud has been loaded or sent, or deaths make them: until then the cloud kernels are not run
 var has_events := false
 var _k_total := 0.0  ## the diffusion of one step, D dt / cell²
 var _scan_sizes := [0, 0, 0]
@@ -224,7 +224,7 @@ func load_state(cells_across: int, cell_spacing: float, dish_radius: float, conc
 			for j in 5:
 				pf[k * 8 + j] = float(one[j])
 			pf[k * 8 + 5] = 1.0
-	has_clouds = clouds > 0
+	has_clouds = clouds > 0 or float(consts["death_release"]) > 0.0  # (the deaths' clouds)
 	_buf("PUFF", pf.to_byte_array())
 	_buf("PUFF2", _zeros(puff_capacity * 8 * 4))
 	bufs["PUFF_V"] = bufs["PUFF"]
@@ -336,6 +336,7 @@ func _fill_params() -> void:
 		"min_length_px": 74, "width": 75, "min_width_px": 76, "max_trail_px": 77}
 	for key in names_to_index:
 		p[names_to_index[key]] = float(consts[key])
+	p[63] = float(consts["death_release"]) * float(consts["cost_per_mass"])  # (what a death gives back per unit of the body's mass)
 	var s_axis: Array = consts["motion_s"]
 	var e_axis: Array = consts["motion_e"]
 	p[25] = s_axis.size()
@@ -482,6 +483,9 @@ func _record_life(cl: int, step := 0, event_set := 0) -> void:
 		dispatch(cl, "add2", n1, float(n1))
 		dispatch(cl, "add1_" + which, c, float(c))
 	dispatch(cl, "finalize", 1)
+	if has_clouds:
+		dispatch(cl, "death_clouds", capacity)
+		dispatch(cl, "death_count", 1)
 	dispatch(cl, "events", capacity, float(step), float(event_set))
 	dispatch(cl, "compact", capacity * 6)
 	dispatch(cl, "copy", capacity * 6)

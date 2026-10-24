@@ -20,7 +20,7 @@ const MOTION_INPUTS := [
 const OTHER_CONSTANTS := [
 	"detection_floor", "noise_reference", "gradient_noise", "reference_sense", "reference_size", "motion_step", "motion_structure", "cloud_handover", "cloud_cut", "steering_window", "fine_step",
 	"diffusion", "field_target_spacing", "field_min_across", "field_max_across", "nutrient_energy", "max_cells",
-	"diffuse_interval", "diffuse_accuracy", "division_spread", "death_rate", "growth_rate", "cost_per_mass", "reserve_per_mass",
+	"diffuse_interval", "diffuse_accuracy", "division_spread", "death_rate", "death_release", "growth_rate", "cost_per_mass", "reserve_per_mass",
 	"maintenance_floor", "base_upkeep", "maintenance_per_mass", "drag_upkeep", "sense_upkeep", "uptake_per_size",
 	"half_saturation", "mass_um", "width", "trait_mutations", "harmful_mutations", "compensatory_mutations",
 	"lethal_fraction", "harm_shape", "mean_harm", "mean_repair", "max_harm", "hue_step", "sat_step", "val_step", "val_min",
@@ -71,6 +71,7 @@ static func build() -> Dictionary:
 		"diffuse_accuracy": Dish.DIFFUSE_ACCURACY,
 		"division_spread": Dish.DIVISION_SPREAD,
 		"death_rate": Biology.DEATH_PER_SECOND,
+		"death_release": Biology.DEATH_RELEASE,
 		"growth_rate": Cell.GROWTH_RATE,
 		"cost_per_mass": Cell.COST_PER_MASS,
 		"reserve_per_mass": Cell.RESERVE_PER_MASS,

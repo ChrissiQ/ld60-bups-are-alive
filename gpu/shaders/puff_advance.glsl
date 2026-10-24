@@ -38,6 +38,7 @@ void deposit_xy(float x, float y, float mass) {
 	if (kept <= 1e-9) { add_dep(uint(cells[0]), mass); return; }
 	for (int k = 0; k < count; k++) add_dep(uint(cells[k]), mass * weights[k] / kept);
 }
+
 void main() {
 	uint k = gl_GlobalInvocationID.x;
 	if (k >= PCNT[0]) return;

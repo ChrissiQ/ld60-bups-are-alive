@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://bn7ake5hrmg1x"
+path="res://.godot/imported/death_count.glsl-0a4e573cc82aee9affcf27702d7e1fd2.res"
+
+[deps]
+
+source_file="res://gpu/shaders/death_count.glsl"
+dest_files=["res://.godot/imported/death_count.glsl-0a4e573cc82aee9affcf27702d7e1fd2.res"]
+
+[params]
+

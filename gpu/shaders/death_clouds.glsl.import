@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://br1gheigoq0x4"
+path="res://.godot/imported/death_clouds.glsl-167f053dc985b1435f9f870796118c20.res"
+
+[deps]
+
+source_file="res://gpu/shaders/death_clouds.glsl"
+dest_files=["res://.godot/imported/death_clouds.glsl-167f053dc985b1435f9f870796118c20.res"]
+
+[params]
+
