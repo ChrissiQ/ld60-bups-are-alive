@@ -1227,6 +1227,14 @@ func _backend_rule_tests() -> void:
 	# Fine steps never run on the GPU, whatever the setting says (it has no fine path).
 	for setting: String in [auto, on, off]:
 		check(not Dish.backend_wants_gpu(setting, Dish.FINE_STEP, 1, 400, 1000000, false, true) and not Dish.backend_wants_gpu(setting, 0.1, 1, 400, 1000000, true, true), "'%s': a fine step (x1) is never the GPU's, even with a million bups" % setting)
+	# Fine or coarse is judged on the speed and the usual frame, not one frame's length: a stray short frame at x100 stays coarse, a real x1 is fine at once.
+	var usual := Dish.typical_frame(PackedFloat32Array([0.0167, 0.0166, 0.0168, 0.0167, 0.0165]))
+	check(is_equal_approx(usual, 0.0167), "the usual frame is the median of the recent ones: %f" % usual)
+	check(Dish.rule_step(0.18, 1, 0.0018, usual) > Dish.FINE_STEP, "x100 with one stray 1.8 ms frame (a 0.18 s step) is still a coarse step")
+	check(Dish.rule_step(0.0167, 1, 0.0167, usual) <= Dish.FINE_STEP, "x1 is a fine step on the first frame")
+	check(Dish.rule_step(1.67, 1, 0.0167, usual) > Dish.FINE_STEP and Dish.rule_step(10.0, 1, 0.1, usual) > Dish.FINE_STEP, "x100 is coarse, in a normal frame and in a hitch (0.1 s)")
+	check(Dish.rule_step(0.1, 1, 0.1, usual) <= Dish.FINE_STEP and Dish.rule_step(0.5, 1, 0.1, usual) <= Dish.FINE_STEP, "x1 and x5 stay fine in a hitch frame (0.1 s): the speed decides, not the frame")
+	check(Dish.rule_step(0.18, 0, 0.0018, usual) == 0.18 and Dish.rule_step(0.18, 3, 0.0018, usual) == 0.18 and Dish.rule_step(0.18, 1, 0.0, usual) == 0.18, "without the frame's steps or length, the step is taken as given")
 	check(not Dish.backend_wants_gpu(off, 18.5, 7, 400, 1000000, true, true), "Off: never")
 	check(Dish.backend_wants_gpu(on, 1.67, 1, 100, 4, false, true) and Dish.backend_wants_gpu(on, 16.7, 1, 100, 4, false, true), "On: at x100 and up, whatever the crowd")
 	check(not Dish.backend_wants_gpu(on, 1.67, 1, 100, 4, false, false), "On, but no usable GPU: the processor")

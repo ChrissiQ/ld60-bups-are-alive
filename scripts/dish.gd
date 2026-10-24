@@ -1593,6 +1593,9 @@ const GPU_STEP_MODEL := [146.0, 0.00049, 0.0044, 0.0005, 0.04]
 const GPU_FRAME_USEC := 250.0  ## what a frame on the GPU costs besides its steps, beyond the engine's own frame: the fixed part ...
 const GPU_FRAME_USEC_PER_BUP := 0.005  ## ... and the part for each bup (every one is drawn, and the frame's questions look at every slot). Measured on the M1 Pro (tools/gpu/game_check.gd frame: vsync off, the frame with the GPU's bups paused against the engine's frame with none, same sitting, a busy machine): about 0 ms at 20,000 bups, 0.3-0.65 ms at 100,000, 5.8 ms at 1,000,000 (the old assumption, 1,000 µs at any size, was 2-3x too high at 100,000 and 6x too low at a million). It moves none of the rule's switches to the GPU (game_check thresholds: at each the GPU's frame is far below the processor's), and one hand-back (90 mm, x10,000, 2,000 clouds: below 2,250 bups instead of 4,000)
 
+const TYPICAL_FRAMES := 5  ## the recent frames whose median length is the usual frame (rule_step)
+
+var _recent_frames := PackedFloat32Array()  ## the lengths of the last TYPICAL_FRAMES frames `advance` was asked for (real seconds, capped)
 var _coarse_frames := 0  ## frames in a row whose steps were coarse
 var _cpu_votes := 0  ## frames in a row that Auto's rule wanted the processor while the GPU ran
 var _gpu_on_cpu := false  ## gpu_active, but the CPU's bups are the true ones just now (an edit or a save brought them over): the GPU reloads them before its next batch
@@ -1608,6 +1611,26 @@ static func backend_frame_costs(step_delta: float, cells_across: int, moves: int
 	var cpu: float = CPU_STEP_MODEL[0] + CPU_STEP_MODEL[1] * cells_squared + CPU_STEP_MODEL[2] * moves + population * (CPU_STEP_MODEL[3] + CPU_STEP_MODEL[4] * moves) + CPU_STEP_MODEL[5] * clouds
 	var gpu: float = GPU_STEP_MODEL[0] + GPU_STEP_MODEL[1] * cells_squared + population * (GPU_STEP_MODEL[2] + GPU_STEP_MODEL[3] * moves) + GPU_STEP_MODEL[4] * clouds
 	return Vector2(steps * cpu, GPU_FRAME_USEC + GPU_FRAME_USEC_PER_BUP * population + steps * gpu)
+
+
+## The median of the recent frames' lengths (0 for none).
+static func typical_frame(frames: PackedFloat32Array) -> float:
+	if frames.is_empty():
+		return 0.0
+	var sorted := frames.duplicate()
+	sorted.sort()
+	return sorted[sorted.size() / 2]
+
+
+## The step that fine-or-coarse is judged on. A step is the playback speed times the frame's length, and only the speed is the player's:
+## one short frame (a stray 1.8 ms one at x100 makes a 0.18 s step, under FINE_STEP) must not send the dish to the processor and
+## restart the takeover count. So a one-step frame is judged as the same speed over the usual frame (`typical`, from `typical_frame`);
+## pressing x1 is still fine at once, and a hitch (a long frame) does not make x1 coarse. Frames of several steps are coarse anyway, and
+## without the frame's length or its steps the step is taken as given.
+static func rule_step(step_delta: float, steps: int, real: float, typical: float) -> float:
+	if steps != 1 or real <= 0.0 or typical <= 0.0:
+		return step_delta
+	return step_delta * typical / real
 
 
 ## The backend rule, as a function of what it depends on alone (so that it can be tested and re-asked after anything changes): whether the
@@ -1648,7 +1671,8 @@ func set_backend_setting(value: String) -> void:
 
 
 ## (3C) Chooses where the bups run for this frame (the switch rule), from the setting (on, off, automatic),
-## `step_delta` (steps of FINE_STEP or shorter run on the CPU, so it switches back at once), `steps` (how many of them the frame holds, if
+## `step_delta` (steps of FINE_STEP or shorter run on the CPU, so it switches back at once; judged by rule_step, so one stray short frame
+## does not count as a fine step, though a whole frame's steps run as asked), `steps` (how many of them the frame holds, if
 ## the caller knows: `advance` does; 0 guesses from the length; Auto's costs take them scaled to a frame of RULE_FRAME_SECONDS by the length
 ## of the frame just past), the population, the dish and the limit:
 ## makes `gpu_world` when first needed (if GpuWorld.available()), moves the state (gpu_world.load_from_cpu / export_to_cpu) and sets
@@ -1658,17 +1682,24 @@ func set_backend_setting(value: String) -> void:
 ## coarse steps in a row. Asked again on every frame, so a resize, a new limit, a new speed or a new setting (all of which `advance`
 ## meets here) is re-evaluated at once.
 func _choose_backend(step_delta: float, steps := 0) -> void:
-	_coarse_frames = _coarse_frames + 1 if step_delta > FINE_STEP else 0
+	var real := minf(get_process_delta_time(), 0.1)  # (the frame the caller advances for: main.gd's, capped as it caps it, MAX_FRAME_SECONDS)
+	var typical := 0.0
+	if steps > 0 and real > 0.0:
+		_recent_frames.append(real)
+		if _recent_frames.size() > TYPICAL_FRAMES:
+			_recent_frames = _recent_frames.slice(_recent_frames.size() - TYPICAL_FRAMES)
+		typical = typical_frame(_recent_frames)
+	var rule_delta := rule_step(step_delta, steps, real, typical)  # (fine or coarse is judged on this; the steps that run keep step_delta)
+	_coarse_frames = _coarse_frames + 1 if rule_delta > FINE_STEP else 0
 	var allowed := backend_setting != StartConditions.BACKEND_CPU
 	var available := backend_usable(GpuWorld.available(), bup_limit, GpuWorld.most_bups())
-	var real := minf(get_process_delta_time(), 0.1)  # (the frame the caller advances for: main.gd's, capped as it caps it, MAX_FRAME_SECONDS)
 	var rule_steps := steps
 	if steps > 0 and real > 0.0:
 		rule_steps = maxi(1, roundi(steps * RULE_FRAME_SECONDS / real))  # (the same work per real second, whichever backend ran the last frame and however long it took)
-	var wants := backend_wants_gpu(backend_setting, step_delta, sim.moves_for(step_delta), field.get_size(), population(), gpu_world != null and gpu_active, available, rule_steps, field.puff_count())
+	var wants := backend_wants_gpu(backend_setting, rule_delta, sim.moves_for(step_delta), field.get_size(), population(), gpu_world != null and gpu_active, available, rule_steps, field.puff_count())
 	if gpu_world != null and gpu_active:
 		_cpu_votes = 0 if wants else _cpu_votes + 1
-		var rule_only := allowed and available and step_delta > FINE_STEP  # (what is left to say 'no' is Auto's rule: it must say so for a while)
+		var rule_only := allowed and available and rule_delta > FINE_STEP  # (what is left to say 'no' is Auto's rule: it must say so for a while)
 		if not wants and (not rule_only or _cpu_votes >= AUTO_DOWN_FRAMES):
 			_to_cpu_for_edit()  # (its state, brought over unless an edit has just done so)
 			gpu_active = false
