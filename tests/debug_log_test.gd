@@ -57,7 +57,7 @@ func _init() -> void:
 	check(m.tutorial.active, "the tour does not take F12 as a key of its own")
 	hotkey._input(_key(KEY_F12))
 	check(not hotkey.notice.visible, "nothing is said before the log is written")
-	for i in 4:
+	for i in hotkey.FREEZE_FRAMES + 3:
 		await process_frame
 	check(_logs().size() == 1, "F12 writes one log (%d)" % _logs().size())
 	check(hotkey.notice.visible and hotkey.notice.text == "Debug info logged", "and then says so")
@@ -75,7 +75,7 @@ func _init() -> void:
 	current_scene = menu
 	await process_frame
 	hotkey.write()
-	for i in 3:
+	for i in hotkey.FREEZE_FRAMES + 2:
 		await process_frame
 	var newest := _logs()
 	newest.sort()
@@ -88,7 +88,7 @@ func _init() -> void:
 	var ask := ConfirmationDialog.new()
 	root.add_child(ask)
 	ask.window_input.emit(_key(KEY_F12))
-	for i in 3:
+	for i in hotkey.FREEZE_FRAMES + 2:
 		await process_frame
 	check(_logs().size() == before + 1, "F12 writes a log while a dialog is up")
 	ask.queue_free()
@@ -99,7 +99,7 @@ func _init() -> void:
 	current_scene = setup
 	await process_frame
 	hotkey.write()
-	for i in 3:
+	for i in hotkey.FREEZE_FRAMES + 2:
 		await process_frame
 	newest = _logs()
 	newest.sort()

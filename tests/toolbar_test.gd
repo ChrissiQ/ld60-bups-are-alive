@@ -114,7 +114,7 @@ func _init() -> void:
 	check(m.paused and m.pause_ring.visible, "restarting in free mode pauses again")
 	m.toolbar.set_paused(false)
 
-	# --- Nutrient tool: click drops a dose, drag pans.
+	# --- Nutrient tool: click drops a dose, drag drops one at intervals along the path (and does not pan).
 	m.toolbar.set_paused(true)  # the medium then changes only by what the clicks do
 	m.toolbar.select_tool(Toolbar.Tool.NUTRIENT)
 	check(m.tool == Toolbar.Tool.NUTRIENT, "toolbar selects nutrient tool")
@@ -126,7 +126,7 @@ func _init() -> void:
 	var box_centre: float = m.tool_options.nutrient_count_box.global_position.x + m.tool_options.nutrient_count_box.size.x * 0.5
 	var button_centre: float = m.toolbar.nutrient_button.global_position.x + m.toolbar.nutrient_button.size.x * 0.5
 	check(absf(box_centre - button_centre) <= 1.0, "number box sits directly under the nutrient button (%.1f vs %.1f)" % [box_centre, button_centre])
-	check(m.tool_options.nutrient_count_box.value == 1.0, "count defaults to 1")
+	check(m.tool_options.nutrient_count_box.value == 300.0, "count defaults to 300, about what a plankton releases")
 	var count_field: LineEdit = m.tool_options.nutrient_count_box.get_line_edit()
 	check(count_field.get_tooltip(Vector2.ZERO) == "Nutrients per click", "hovering the number says 'Nutrients per click' (got '%s')" % count_field.get_tooltip(Vector2.ZERO))
 	check(m.tool_options.nutrient_count_box.get_tooltip(Vector2.ZERO) == "Nutrients per click", "...and so does the box's arrow area")
@@ -136,14 +136,14 @@ func _init() -> void:
 	var options_bottom: float = m.tool_options.global_position.y + m.tool_options.size.y
 	var dish_top_now: float = centre.y - m.dish.radius * m.camera.zoom.x
 	check(dish_top_now >= options_bottom, "the dish clears the options bar (dish top %.0f, bar bottom %.0f)" % [dish_top_now, options_bottom])
-	m.tool_options.nutrient_count_box.value = 9999
-	check(m.tool_options.nutrient_count() == 100, "nutrient count caps at 100, got %d" % m.tool_options.nutrient_count())
+	m.tool_options.nutrient_count_box.value = 99999
+	check(m.tool_options.nutrient_count() == 9999, "nutrient count caps at 9999, got %d" % m.tool_options.nutrient_count())
 	var box: SpinBox = m.tool_options.nutrient_count_box
 	var field := box.get_line_edit()
 	await process_frame
-	var digits_w := field.get_theme_font("font").get_string_size("100", HORIZONTAL_ALIGNMENT_LEFT, -1, field.get_theme_font_size("font_size")).x
-	check(box.size.x <= 56.0, "nutrient box is compact (%.0fpx)" % box.size.x)
-	check(digits_w + 8.0 <= field.size.x, "three digits still fit the field (%.0f + padding in %.0fpx)" % [digits_w, field.size.x])
+	var digits_w := field.get_theme_font("font").get_string_size("9999", HORIZONTAL_ALIGNMENT_LEFT, -1, field.get_theme_font_size("font_size")).x
+	check(box.size.x <= 64.0, "nutrient box is compact (%.0fpx)" % box.size.x)
+	check(digits_w + 8.0 <= field.size.x, "four digits still fit the field (%.0f + padding in %.0fpx)" % [digits_w, field.size.x])
 	m.tool_options.nutrient_count_box.value = 1
 	var p := centre + Vector2(50, 30)
 	_click(m, p)
@@ -166,8 +166,15 @@ func _init() -> void:
 	var before: float = TestUtil.units(m.dish)
 	var cam_before: Vector2 = m.camera.position
 	_drag(m, centre, Vector2(60, 0))
-	check(is_equal_approx(TestUtil.units(m.dish), before), "a drag must not drop nutrient")
-	check(is_equal_approx(m.camera.position.x, cam_before.x - 60.0 / m.camera.zoom.x), "drag pans the camera by the pointer distance (%.1f)" % (m.camera.position.x - cam_before.x))
+	var spacing: float = m._paint_spacing()
+	var places := 1 + int(floor(60.0 / m.camera.zoom.x / spacing))  # (where the button went down, and every spacing along the way)
+	var dropped_doses := roundi((TestUtil.units(m.dish) - before) / 30.0)
+	check(absi(dropped_doses - places) <= 1 and dropped_doses >= 2, "a drag drops a dose every %.0f µm along its path: %d doses (about %d expected)" % [spacing, dropped_doses, places])
+	check(m.camera.position.is_equal_approx(cam_before), "a drag with the nutrient tool does not pan the camera")
+	before = TestUtil.units(m.dish)
+	_drag(m, centre, Vector2(60, 0), MOUSE_BUTTON_MIDDLE)
+	check(is_equal_approx(TestUtil.units(m.dish), before) and not m.camera.position.is_equal_approx(cam_before), "the middle button still pans, and drops nothing")
+	cam_before = m.camera.position
 	cam_before = m.camera.position
 	_button(m, MOUSE_BUTTON_LEFT, true, centre)
 	_motion(m, centre + Vector2(3, 0), Vector2(3, 0))  # under the drag threshold
@@ -443,6 +450,30 @@ func _init() -> void:
 	m.name_row.edit.text = "   "
 	m.name_row.edit.text_submitted.emit("   ")
 	check(m.dish.bup_name(named_id) == default_label, "an empty name goes back to the number")
+	# The name is a field made to look like a label: a click puts a caret in it, the keys that move it work, none changes the text, and
+	# leaving it puts the name back at its start.
+	var name_field: LineEdit = m.name_row.name_label
+	check(name_field.theme_type_variation == &"BupNameField" and name_field.focus_mode == Control.FOCUS_ALL, "the name is a field that can take focus, drawn like a label")
+	var letter := InputEventKey.new()
+	letter.keycode = KEY_X
+	letter.unicode = 120
+	var arrow := InputEventKey.new()
+	arrow.keycode = KEY_LEFT
+	var select_all := InputEventKey.new()
+	select_all.keycode = KEY_A
+	select_all.ctrl_pressed = true
+	var backspace := InputEventKey.new()
+	backspace.keycode = KEY_BACKSPACE
+	check(BupNameRow.lets_through(arrow) and BupNameRow.lets_through(select_all) and not BupNameRow.lets_through(letter) and not BupNameRow.lets_through(backspace), "the name takes the arrow keys and select all, and no key that would change it")
+	name_field.grab_focus()
+	name_field.caret_column = name_field.text.length()
+	name_field.release_focus()
+	check(name_field.caret_column == 0, "leaving the name puts it back at its start")
+	name_field.grab_focus()
+	name_field.caret_column = 3
+	m.name_row.show_bup(m.dish, named_id, true)  # (the panel does this every frame)
+	check(name_field.caret_column == 3, "the name keeps its caret while the panel refreshes it every frame")
+	name_field.release_focus()
 	m.dish.remove_bup(named_id)
 	m.dish.selected_id = -1
 	await process_frame
@@ -851,9 +882,9 @@ func _init() -> void:
 	m.dish.field.fill(1.0)
 	m.toolbar.select_tool(Toolbar.Tool.ERASE)
 	check(m.tool_options.visible and m.tool_options.brush_size_box.is_visible_in_tree(), "the eraser shows its brush size")
-	check(m.tool_options.brush_size_box.get_line_edit().get_tooltip(Vector2.ZERO) == "Brush radius", "hovering the brush size says what it is")
-	m.tool_options.brush_size_box.value = 40
-	check(m.tool_options.brush_radius() == 40.0, "the brush radius is the box's value")
+	check(m.tool_options.brush_size_box.get_line_edit().get_tooltip(Vector2.ZERO) == "Brush radius (µm)", "hovering the brush size says what it is")
+	m.tool_options.brush_size_box.value = 100
+	check(m.tool_options.brush_radius() == 100.0, "the brush radius is the box's value")
 	var wiped: Vector2 = spot - m.dish.global_position
 	var before_erase: float = m.dish.field.sample(wiped)
 	_click(m, _screen(m, spot))
@@ -862,6 +893,12 @@ func _init() -> void:
 	check(absf(m.dish.field.sample(wiped + Vector2(120, 0)) - before_erase) < before_erase * 0.02, "...and none outside it")
 	_click(m, centre + Vector2(900, 0))
 	check(absf(m.dish.field.sample(wiped + Vector2(120, 0)) - before_erase) < before_erase * 0.02, "erasing outside the dish does nothing")
+	m.dish.field.fill(1.0)
+	m.tool_options.brush_size_box.value = 50
+	var cam_erase: Vector2 = m.camera.position
+	_drag(m, _screen(m, spot), Vector2(-150.0 * m.camera.zoom.x, 0))  # (150 µm to the left, over three brush radii)
+	check(m.dish.field.sample(wiped + Vector2(-100, 0)) < before_erase * 0.5, "dragging the eraser wipes along its path, not only where it went down")
+	check(m.camera.position.is_equal_approx(cam_erase), "...and a drag with the eraser does not pan")
 	m.toolbar.set_paused(false)
 	for i in Dish.MAX_SOURCES + 3:
 		m.dish.place_source(m.dish.global_position + Vector2(i % 50 * 2 - 50, i / 50 * 2 - 20), 5.0)  # (all within the small dish)

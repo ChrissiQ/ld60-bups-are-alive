@@ -44,9 +44,11 @@ void main() {
 	uint b = i * 24u;
 	uint s = hash(hash(CNT[7] ^ (CNT[5] * 0x85EBCA6BU) ^ 777U) + i * 0x9E3779B9U);  // (this dish's stream, this step, this bup)
 	float energy = BUPS[b + 5], mass = BUPS[b + 6], birth = BUPS[b + 7], add_mass = BUPS[b + 13];
-	float trim = max(0.0, float(n_now) - P[60]) / float(n_now);
-	bool dies = energy <= 0.0 || u01(s) < P[59] || u01(s) < trim;
-	if (dies) return;
+	float trim = max(0.0, float(n_now) + float(CNT[12]) - P[60]) / float(n_now);
+	bool natural = energy <= 0.0 || u01(s) < P[59];
+	bool trimmed = !natural && u01(s) < trim;  // (the same draws as one chain of `||`)
+	if (trimmed) atomicAdd(CNT[13], 1u);  // (counted, so that the growth the next trim expects leaves out the trim's own deaths)
+	if (natural || trimmed) return;
 	SURV[i] = 1u;
 	if (mass >= birth + add_mass) {
 		float keep = clamp(0.5 + P[58] * gauss(s), 0.35, 0.65);

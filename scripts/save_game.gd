@@ -3,7 +3,7 @@ extends RefCounted
 ## One save slot, stored as JSON in user://.
 
 const PATH := "user://save.json"
-const VERSION := 1
+const VERSION := 2  ## a save of another version is taken for no save at all (it is never read, and the next one overwrites it)
 
 
 static func has_save() -> bool:

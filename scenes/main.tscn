@@ -262,13 +262,13 @@ layout_mode = 2
 
 [node name="NutrientCount" type="SpinBox" parent="HUD/Toolbars/ToolOptions/NutrientOptions"]
 theme_type_variation = &"CompactSpinBox"
-custom_minimum_size = Vector2(52, 30)
+custom_minimum_size = Vector2(60, 30)
 layout_mode = 0
-offset_right = 52.0
+offset_right = 60.0
 offset_bottom = 30.0
 min_value = 1.0
-max_value = 100.0
-value = 1.0
+max_value = 9999.0
+value = 300.0
 rounded = true
 
 [node name="SourceOptions" type="Control" parent="HUD/Toolbars/ToolOptions"]
@@ -294,13 +294,14 @@ layout_mode = 2
 
 [node name="BrushSize" type="SpinBox" parent="HUD/Toolbars/ToolOptions/EraseOptions"]
 theme_type_variation = &"CompactSpinBox"
-custom_minimum_size = Vector2(52, 30)
+custom_minimum_size = Vector2(60, 30)
 layout_mode = 0
-offset_right = 52.0
+offset_right = 60.0
 offset_bottom = 30.0
-min_value = 5.0
-max_value = 100.0
-value = 30.0
+min_value = 50.0
+max_value = 9999.0
+step = 50.0
+value = 2000.0
 rounded = true
 
 [node name="InfoPanel" type="PanelContainer" parent="HUD"]

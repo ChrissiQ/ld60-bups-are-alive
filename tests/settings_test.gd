@@ -89,6 +89,9 @@ func _init() -> void:
 	root.add_child(setup)
 	await process_frame
 	check(setup.bups_row.slider.value == 4 and setup.nutrients_row.slider.value == 32, "first ever visit shows the defaults")
+	var wheel_sliders := setup.find_children("*", "HSlider", true, false)
+	var wheel_scrolls := wheel_sliders.filter(func(n: Node) -> bool: return n.scrollable)
+	check(wheel_sliders.size() >= 8 and wheel_scrolls.is_empty(), "no slider answers the scroll wheel, so scrolling the list over them leaves them alone (%d of %d do)" % [wheel_scrolls.size(), wheel_sliders.size()])
 	setup.bups_row.slider.value = 55
 	setup.nutrients_row.slider.value = 90
 	setup.rate_row.slider.value = 3

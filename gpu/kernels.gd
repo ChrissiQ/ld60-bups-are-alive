@@ -33,7 +33,7 @@ const TYPES := {
 # 23 uptake_per_size, 24 half_saturation, 25 ns, 26 ne, 27 ls0, 28 dls, 29 le0, 30 dle, 31 s_axis[0]
 # 32 trait_mutations, 33 harmful_mutations, 34 compensatory_mutations, 35 lethal_fraction, 36 harm_shape, 37 mean_harm, 38 mean_repair, 39 max_harm,
 # 40 hue_step, 41 sat_step, 42 val_step, 43 val_min, 44-47 gene_min, 48-51 gene_max, 52-55 gene_step, 56 add_mass_factor, 57 drag_upkeep,
-# 58 division_spread, 59 death chance per step, 60 limit (the most bups: past it a random share dies each step), 61 feed per step (concentration),
+# 58 division_spread, 59 death chance per step, 60 limit (the most bups: a random share dies each step, as many as the colony is expected to exceed it by), 61 feed per step (concentration),
 # 62 capacity (slots), 63 unused, 64 handover distance (cloud_handover * spacing), 65 cloud_cut, 66 bin size, 67 bins across, 68 motion_step,
 # 69 motion_structure, 70 cloud spread per step (2 D dt), 71 puff capacity, 72 entry capacity, 73 bins,
 # 74 min_length_px, 75 width (µm), 76 min_width_px, 77 max_trail_px (the drawing's constants), 78 event capacity (births, and deaths, per batch),
@@ -47,7 +47,10 @@ const TYPES := {
 # PCNT (uint, 8): 0 slots in use, 1 slots after compaction, 2 clouds that found no slot and went onto the grid (since the load),
 #       3 list entries cut because the lists were full (since the load), 4-7 spare
 # CNT (uint, 16): 0 bups now, 1 survivors, 2 newborn, 3 bups next, 4 next id lo, 5 step number, 6 next id hi, 7 dish seed,
-#       8 births this batch, 9 deaths this batch, 10 births lost (no event slot, since the load), 11 deaths lost (since the load), 12-15 spare
+#       8 births this batch, 9 deaths this batch, 10 births lost (no event slot, since the load), 11 deaths lost (since the load),
+#       12 what the trim at the limit expects the next step to add: the last step's growth (newborn minus the deaths that were not a trim,
+#       0 if negative) and a margin of CAP_SIGMAS standard deviations of the births and deaths, so the count stops just short of the limit,
+#       13 bups trimmed so far this step (`life` adds, `finalize` reads and clears), 14-15 spare
 # EVB / EVD (uint): EVENT_SETS sets of P[78] events each (a batch writes set `pcs.pb` of `events`): a birth is 16 words (id lo, id hi,
 #       parent lo, parent hi, step, generation, mutations; speed, sense, metabolism, size_gene, hue, sat, val, harm as float bits; 0),
 #       a death 8 (id lo, id hi, step, generation; mass as float bits; 0, 0, 0): BupSim.apply_events' layout. EVN (uint): per set, the
@@ -405,8 +408,9 @@ void main() {
 
 ## Division, death and mutation (the CPU's `step` after uptake and `mutate`), per bup. A bup dies of an empty reserve or by chance; one
 ## that has grown enough divides: the daughter, if not lethally mutated, is written into CHILD at the parent's index; SURV and KID mark
-## who is kept and who has a child. A population past the limit loses a random share each step (the CPU replaces a random bup at each
-## birth: the same, a step late).
+## who is kept and who has a child. A population that would pass the limit loses a random share each step (the CPU replaces a random bup at
+## each birth: the same). The share is what the step's growth is expected to carry over the limit: the last step's growth (CNT[12])
+## added to the count now. Trimming only what is already over leaves the count a step's births above the limit.
 const K_LIFE := """
 float gamma_big(float shape, inout uint s) {
 	float d = shape - 0.3333333, c = 1.0 / sqrt(9.0 * d);
@@ -438,9 +442,11 @@ void main() {
 	uint b = i * 24u;
 	uint s = hash(hash(CNT[7] ^ (CNT[5] * 0x85EBCA6BU) ^ 777U) + i * 0x9E3779B9U);  // (this dish's stream, this step, this bup)
 	float energy = BUPS[b + 5], mass = BUPS[b + 6], birth = BUPS[b + 7], add_mass = BUPS[b + 13];
-	float trim = max(0.0, float(n_now) - P[60]) / float(n_now);
-	bool dies = energy <= 0.0 || u01(s) < P[59] || u01(s) < trim;
-	if (dies) return;
+	float trim = max(0.0, float(n_now) + float(CNT[12]) - P[60]) / float(n_now);
+	bool natural = energy <= 0.0 || u01(s) < P[59];
+	bool trimmed = !natural && u01(s) < trim;  // (the same draws as one chain of `||`)
+	if (trimmed) atomicAdd(CNT[13], 1u);  // (counted, so that the growth the next trim expects leaves out the trim's own deaths)
+	if (natural || trimmed) return;
 	SURV[i] = 1u;
 	if (mass >= birth + add_mass) {
 		float keep = clamp(0.5 + P[58] * gauss(s), 0.35, 0.65);
@@ -527,6 +533,7 @@ void main() {
 """
 
 const K_FINALIZE := """
+const float CAP_SIGMAS = 4.0;  // (how far short of the limit the trim aims, in standard deviations: 4 is over it about once in 30,000 steps)
 void main() {
 	if (gl_GlobalInvocationID.x != 0u) return;  // (one thread: a dispatch of 1 runs a whole group of 64)
 	uint n = CNT[0];
@@ -534,6 +541,13 @@ void main() {
 	uint surv = n > 0u ? EXCS[n - 1u] + SURV[n - 1u] : 0u;
 	uint kids = n > 0u ? EXCK[n - 1u] + KID[n - 1u] : 0u;
 	CNT[1] = surv; CNT[2] = kids; CNT[3] = min(surv + kids, c);
+	int natural = int(n - surv) - int(CNT[13]);  // (the deaths that were not a trim)
+	int growth = int(kids) - natural;
+	// The count after a step is the limit plus (births - deaths) less what was expected of them: two independent counts of about
+	// kids and natural, each Poisson, so the margin is CAP_SIGMAS of sqrt(2 (kids + natural)) and the count is not expected to reach the limit.
+	float margin = CAP_SIGMAS * sqrt(2.0 * float(kids + uint(max(natural, 0))));
+	CNT[12] = uint(max(float(growth), 0.0) + ceil(margin));
+	CNT[13] = 0u;
 }
 """
 

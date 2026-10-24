@@ -173,6 +173,8 @@ corner_radius_top_right = 4
 corner_radius_bottom_right = 4
 corner_radius_bottom_left = 4
 
+[sub_resource type="StyleBoxEmpty" id="bup_name_field"]
+
 [sub_resource type="StyleBoxEmpty" id="scroll_track"]
 content_margin_left = 3.0
 content_margin_right = 3.0
@@ -728,6 +730,13 @@ BupName/base_type = &"Label"
 BupName/colors/font_color = Color(1, 0.75, 0.3, 1)
 BupName/font_sizes/font_size = 18
 BupName/fonts/font = ExtResource("f700")
+BupNameField/base_type = &"LineEdit"
+BupNameField/colors/caret_color = Color(1, 0.75, 0.3, 1)
+BupNameField/colors/font_color = Color(1, 0.75, 0.3, 1)
+BupNameField/font_sizes/font_size = 18
+BupNameField/fonts/font = ExtResource("f700")
+BupNameField/styles/focus = SubResource("bup_name_field")
+BupNameField/styles/normal = SubResource("bup_name_field")
 ColorPicker/constants/h_width = 22
 ColorPicker/constants/sv_height = 170
 ColorPicker/constants/sv_width = 215

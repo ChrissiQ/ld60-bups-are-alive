@@ -48,6 +48,30 @@ func _init() -> void:
 	var c := Dish.new()
 	root.add_child(c)
 	if c.from_dict({"nope": 1}): failures.append("accepted garbage")
+	# A save that cannot be read is refused without an error, and leaves the dish as it was: the bups in the old format (a list of
+	# dictionaries), a block that does not decompress to its size, a block of the wrong size for a bup's record, and one cut short.
+	var good: Dictionary = parsed["dish"]
+	var before := b.population()
+	var bad_old := good.duplicate()
+	bad_old["cells"] = [{"pos": [0, 0]}]
+	var bad_zstd := good.duplicate(true)
+	bad_zstd["cells"]["raw"] = int(bad_zstd["cells"]["raw"]) + 96
+	var bad_size := good.duplicate(true)
+	bad_size["cells"] = Dish._pack_bytes(PackedByteArray([1, 2, 3]))
+	var cut_short := good.duplicate(true)
+	cut_short["lineage"]["z"] = str(cut_short["lineage"]["z"]).substr(0, 20)
+	for bad: Dictionary in [bad_old, bad_zstd, bad_size, cut_short]:
+		if b.from_dict(bad): failures.append("accepted a save it cannot read")
+	if b.population() != before: failures.append("a refused save changed the dish")
+	# The packed family records keep every record, with the names the player gave.
+	var named_id := b.bup_ids()[0]
+	b.rename_bup(named_id, "Zoë")
+	var d2 := Dish.new()
+	root.add_child(d2)
+	if not d2.from_dict(JSON.parse_string(JSON.stringify(b.to_dict()))) or d2.bup_name(named_id) != "Zoë" or d2.sim.record_count() != b.sim.record_count():
+		failures.append("family records through a save (%d vs %d)" % [d2.sim.record_count(), b.sim.record_count()])
+	# A save of another version is no save at all.
+	if SaveGame.VERSION < 2: failures.append("the save version was not raised with the format")
 
 	print("cells=%d nutrient=%.0f history=%d goal_index=%d" % [a.population(), a.field.total() / Dish.NUTRIENT_ENERGY, a.history["pop"].size(), tracker.index])
 	if failures.is_empty():

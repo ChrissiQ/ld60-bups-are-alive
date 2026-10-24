@@ -4,6 +4,7 @@ extends Node
 ## the one in the log: a `dish` property.
 
 const NOTICE_SECONDS := 3.0  ## how long the notice stays up
+const FREEZE_FRAMES := 3  ## frames the game stands still before the screenshot is taken, so the picture has caught up with the state the log reads
 
 @onready var notice: Label = $Layer/Notice
 
@@ -38,17 +39,20 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 
-## Writes the log and a screenshot (taken once the frame has been drawn, without the notice in it), then says so.
+## Writes the log and a screenshot (taken once the frame has been drawn, without the notice in it), then says so. The game is held
+## for those frames (and put back as it was after), so the screenshot and the log show the same instant.
 func write() -> void:
 	if _logging:
 		return
 	_logging = true
 	notice.visible = false
 	_notice_left = 0.0
-	if DisplayServer.get_name() == "headless":
-		await get_tree().process_frame  # (nothing is drawn, so no frame ever finishes drawing)
-	else:
-		await RenderingServer.frame_post_draw
+	var was_paused := get_tree().paused
+	get_tree().paused = true
+	for i in FREEZE_FRAMES:
+		await get_tree().process_frame  # (in a window these are drawn, and the picture catches up with the frozen state)
+	if DisplayServer.get_name() != "headless":
+		await RenderingServer.frame_post_draw  # (nothing is drawn headless, so no frame ever finishes drawing)
 	var screenshot: Image = null
 	if DisplayServer.get_name() != "headless":
 		screenshot = get_viewport().get_texture().get_image()
@@ -56,6 +60,7 @@ func write() -> void:
 	var dish: Dish = scene.get("dish") if scene != null else null
 	var state: Dictionary = scene.debug_state() if scene != null and scene.has_method("debug_state") else {}
 	var path := DebugLog.write(DebugLog.report(dish, scene, state), screenshot)
+	get_tree().paused = was_paused
 	notice.text = Strings.t("debug.logged" if path != "" else "debug.failed")
 	_notice_left = NOTICE_SECONDS
 	notice.visible = true

@@ -14,6 +14,7 @@ uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
+const float CAP_SIGMAS = 4.0;  // (how far short of the limit the trim aims, in standard deviations: 4 is over it about once in 30,000 steps)
 void main() {
 	if (gl_GlobalInvocationID.x != 0u) return;  // (one thread: a dispatch of 1 runs a whole group of 64)
 	uint n = CNT[0];
@@ -21,4 +22,11 @@ void main() {
 	uint surv = n > 0u ? EXCS[n - 1u] + SURV[n - 1u] : 0u;
 	uint kids = n > 0u ? EXCK[n - 1u] + KID[n - 1u] : 0u;
 	CNT[1] = surv; CNT[2] = kids; CNT[3] = min(surv + kids, c);
+	int natural = int(n - surv) - int(CNT[13]);  // (the deaths that were not a trim)
+	int growth = int(kids) - natural;
+	// The count after a step is the limit plus (births - deaths) less what was expected of them: two independent counts of about
+	// kids and natural, each Poisson, so the margin is CAP_SIGMAS of sqrt(2 (kids + natural)) and the count is not expected to reach the limit.
+	float margin = CAP_SIGMAS * sqrt(2.0 * float(kids + uint(max(natural, 0))));
+	CNT[12] = uint(max(float(growth), 0.0) + ceil(margin));
+	CNT[13] = 0u;
 }

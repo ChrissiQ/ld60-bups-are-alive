@@ -12,11 +12,13 @@ custom_minimum_size = Vector2(16, 16)
 layout_mode = 2
 size_flags_vertical = 4
 
-[node name="Name" type="Label" parent="."]
-theme_type_variation = &"BupName"
+[node name="Name" type="LineEdit" parent="."]
 layout_mode = 2
 size_flags_horizontal = 3
-text_overrun_behavior = 3
+theme_type_variation = &"BupNameField"
+context_menu_enabled = false
+virtual_keyboard_enabled = false
+caret_blink = true
 
 [node name="Edit" type="LineEdit" parent="."]
 visible = false

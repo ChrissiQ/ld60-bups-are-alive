@@ -106,6 +106,8 @@ class BupSim : public RefCounted {
 	double upkeep_scale = 1.0; // multiplies the base and per-mass maintenance costs (a harsher dish)
 	int now_minutes() const { return (int)(now_seconds / 60.0); }
 	void make_record(const Bup &b, int64_t parent);
+	void finish_lineage_import(const PackedInt64Array &pinned); // after the records of a save are in: counts, pins and pruning
+	static constexpr int LINEAGE_BYTES = 68;
 	void record_death(const Bup &b);
 	void free_if_unused(int64_t id);
 	Dictionary record_info(int64_t id, const Record &r) const;
@@ -260,6 +262,11 @@ public:
 	void unpin(int64_t id);
 	Array lineage_export() const;
 	void lineage_import(const Array &saved, const PackedInt64Array &pinned = PackedInt64Array()); // `pinned`: ids to keep a hold on, whatever else is pruned
+	// The same records as one block of bytes (a save of a big dish: a dictionary for each of a hundred thousand records is slow to make and to
+	// write). Little-endian, and not a stable format: 32-bit count, the records (LINEAGE_BYTES each: id, parent, born, died, generation,
+	// mutations, four genes, hue, sat, val, harm, max_energy), 32-bit count of names, and each name as id, byte length and UTF-8.
+	PackedByteArray lineage_export_bytes() const;
+	void lineage_import_bytes(const PackedByteArray &data, const PackedInt64Array &pinned = PackedInt64Array());
 	void set_bup_energy(int64_t id, double energy);
 	void set_bup_pos(int64_t id, const Vector2 &pos);
 

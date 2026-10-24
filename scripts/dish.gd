@@ -17,10 +17,11 @@ signal layers_changed  ## a layer was shown or hidden
 ## A hidden layer cannot be hovered or picked, but what is already selected stays selected (hiding the bups to see the steering map of the selected one, say).
 enum Layer { MEDIUM, SOURCES, PLANKTON, BUPS, STEERING }  ## the nutrient haze, the feeders, the plankton, the bups, and the steering map and arc of the selected bup
 
-const DEFAULT_RADIUS := 10000.0  ## µm: 10 mm, the dish goal mode uses and free mode starts with
+const DEFAULT_RADIUS := 10000.0  ## µm: 10 mm, the dish before any start (the tests' dish too); goal mode and free mode start from StartConditions.DEFAULT_RADIUS
 const NUTRIENT_SCATTER := 5.0  ## radius a dose spreads over, per sqrt(nutrient) in it
 const MAX_CELLS := 300  ## the smallest carrying limit; see `cap_for`. Past the limit each birth displaces a random bup (a Moran process)
 const MAX_SOURCES := 1000
+const MAX_SAVED_BYTES := 600000000  ## the most a save's block of bups or of family records may be once decompressed (2,000,000 bups are 192 MB)
 const PLANKTON_UNITS := 300.0  ## nutrient a plankton releases when it bursts [choice: a patch a few minutes of chemotaxis can use; see SUGGESTED_BLOOM_DENSITY]
 const PLANKTON_PATCH_RADIUS := 250.0  ## µm the released nutrient starts out spread over (a lysed cell's cloud: Stocker et al. 2008 used ~300 µm)
 const PLANKTON_MEAN_LIFE := 3600.0  ## s a plankton floats on average before bursting [choice: lysis timing is random; no measured scale]
@@ -33,7 +34,7 @@ const PLANKTON_PICTURE_REACH := 1.3  ## how far from its centre, in plankton rad
 const PLANKTON_PICTURE_REFRESH_MSEC := 100  ## the placing of the pictures is rebuilt at most this often (plankton appear and burst all the time, and are not missed for a moment)
 const MAX_PLANKTON := 20000  ## floating at once: the most the biggest dish at the most bloom holds (a plankton floats about an hour, so 10 per mm² a day on 25,000 mm² is about 10,600)
 const MAX_WATCHED := 1000  ## the most bups on the watch list
-const SUGGESTED_BLOOM_DENSITY := 0.08  ## plankton in each mm² every sim-day that the goal text suggests: about one an hour on the 10 mm dish, 300 units an hour, about what the old feed gave
+const SUGGESTED_BLOOM_DENSITY := 0.08  ## plankton in each mm² every sim-day that the goal text suggests: about one an hour on a 10 mm dish, 300 units an hour, about what the old feed gave
 const GOAL_UPKEEP_FACTOR := 3.0  ## how much costlier staying alive is once goal mode reaches experiment 2 (set by the screen; 1 elsewhere) [x10 killed every colony tested at once; x3 did not]
 const MAX_BLOOM_ARRIVALS_PER_STEP := 200  ## the most plankton one step lets the bloom add (the most there is, at the most bloom on the biggest dish, is about 60 in a 20 s step; a rate raised a great deal starts over)
 const BURST_CHECK_SECONDS := 60.0  ## how often the plankton are looked over for ones that have burst (sim seconds): with thousands floating that is most of what they cost, and a minute is nothing against the hour they float
@@ -1034,21 +1035,6 @@ func to_dict() -> Dictionary:
 	if gpu_world != null and gpu_active:
 		_to_cpu_for_edit()  # (the save is made from the CPU's state)
 	field.flush_emitters()  # (what the sources have kept to release as a cloud is let go, so that the save has it)
-	var saved_cells := []
-	var records := sim.export_state_bytes()  # (every bup in one call, as the GPU's records: looking each one up would be too slow for a big dish)
-	var words := records.to_float32_array()
-	for i in words.size() / GpuSim.STRIDE:
-		var o := i * GpuSim.STRIDE
-		saved_cells.append({
-			"id": GpuSim.id_of(records, i),
-			"pos": [words[o + 1], words[o + 2]],
-			"dir": [words[o + 3], words[o + 4]],
-			"energy": words[o + 5],
-			"size": sqrt(words[o + 6]),
-			"birth_mass": words[o + 7],
-			"generation": int(words[o + 20]),
-			"genome": Genome.to_saved({"speed": words[o + 8], "sense": words[o + 9], "metabolism": words[o + 10], "size": words[o + 11], "hue": words[o + 16], "sat": words[o + 17], "val": words[o + 18], "harm": words[o + 15], "mutations": int(words[o + 19])}),
-		})
 	var saved_sources := []
 	for source in sources:
 		saved_sources.append({"pos": _vec_to_array(source.pos - global_position), "rate": source.rate, "emitted": source.emitted})
@@ -1057,7 +1043,7 @@ func to_dict() -> Dictionary:
 		saved_plankton.append({"pos": _vec_to_array(cell.pos), "born_at": cell.born_at, "burst_at": cell.burst_at, "units": cell.units, "shape": cell.shape})
 	return {
 		"next_id": sim.get_next_id(),
-		"lineage": sim.lineage_export(),
+		"lineage": _pack_bytes(sim.lineage_export_bytes()),
 		"radius": radius,
 		"nutrient_resolution": field.get_max_across(),
 		"medium_thickness": medium_thickness,
@@ -1066,7 +1052,7 @@ func to_dict() -> Dictionary:
 		"time": time,
 		"feed_density": feed_density,
 		"patch_seed": patch_seed,
-		"cells": saved_cells,
+		"cells": _pack_bytes(sim.export_state_bytes()),  # (every bup as the GPU's record: a dictionary for each of a hundred thousand would take seconds to make and to write)
 		"field": Array(field.values()),
 		"clouds": field.puffs_export(),
 		"sources": saved_sources,
@@ -1084,19 +1070,17 @@ func to_dict() -> Dictionary:
 ## Returns false, leaving the dish exactly as it was, if the data is unusable. Everything is
 ## validated and built on the side first, so a bad save can never leave a half-loaded dish.
 func from_dict(d: Dictionary) -> bool:
-	if not (d.get("cells") is Array):
+	var saved_bups: Variant = _unpack_bytes(d.get("cells"))
+	var saved_family: Variant = _unpack_bytes(d.get("lineage"))
+	if saved_bups == null or saved_family == null or saved_bups.size() % GpuSim.RECORD_BYTES != 0:
 		return false
+	var loaded_bups: PackedByteArray = saved_bups
+	var loaded_family: PackedByteArray = saved_family
 	if gpu_world != null and gpu_active:
 		_to_cpu_for_edit()  # (a load that is refused leaves the dish as it was: so the bups must be the CPU's, and the GPU reloads them at its next batch)
 	for key in ["radius", "bup_limit", "nutrients_placed", "time", "feed_density", "bloom_density", "nutrient_resolution", "medium_thickness"]:
 		if d.has(key) and not Validate.is_number(d[key]):
 			return false
-	var loaded_cells := []
-	for saved in d["cells"]:
-		var spec := _cell_from_saved(saved)
-		if spec.is_empty():
-			return false
-		loaded_cells.append(spec)
 	var loaded_sources: Array[NutrientSource] = []
 	var saved_sources = d.get("sources", [])
 	if not (saved_sources is Array):
@@ -1191,17 +1175,14 @@ func from_dict(d: Dictionary) -> bool:
 	_set_medium_thickness(loaded_thickness)
 	sim.reset(radius, -1)
 	bup_limit = loaded_limit
-	loaded_cells.resize(mini(loaded_cells.size(), StartConditions.MAX_BUP_LIMIT))  # (not the dish's limit: a save made on the GPU at the limit can hold a step's births more, which the next step takes back, as in play)
+	loaded_bups = loaded_bups.slice(0, mini(loaded_bups.size(), StartConditions.MAX_BUP_LIMIT * GpuSim.RECORD_BYTES))  # (not the dish's limit: a save made on the GPU at the limit can hold a step's births more, which the next step takes back, as in play)
 	_render_stale = true
 	edit_count += 1
-	for spec in loaded_cells:
-		sim.add_bup(spec["pos"], spec["genome"], spec["energy"], spec["size"], spec["birth_mass"], spec["generation"], spec["dir"], spec["id"])
+	sim.import_state_bytes(loaded_bups)
 	var saved_next = d.get("next_id")
 	if Validate.is_number(saved_next):
 		sim.set_next_id(int(saved_next))  # so the next bup born doesn't take a number already used
-	var saved_lineage = d.get("lineage")
-	if saved_lineage is Array:
-		sim.lineage_import(saved_lineage.filter(_is_saved_record), loaded_watched)
+	sim.lineage_import_bytes(loaded_family, loaded_watched)
 	field.load_values(saved_field)
 	field.puffs_import(saved_clouds)
 	sources = loaded_sources
@@ -1236,38 +1217,21 @@ func from_dict(d: Dictionary) -> bool:
 	return true
 
 
-## One saved bup as the arguments for BupSim.add_bup, or an empty dictionary if it is unusable.
-func _cell_from_saved(saved: Variant) -> Dictionary:
-	if not (saved is Dictionary) or not Validate.is_vec2(saved.get("pos")) or not Validate.is_vec2(saved.get("dir")):
-		return {}
-	if not Validate.is_number(saved.get("energy")) or not Validate.is_number(saved.get("generation")) or not (saved.get("genome") is Dictionary):
-		return {}
-	if not Validate.is_number(saved.get("size")) or not Validate.is_number(saved.get("birth_mass")) or not Validate.is_number(saved.get("id")):
-		return {}
-	var body := clampf(float(saved["size"]), 0.5, 12.0)
-	var born_with := clampf(float(saved["birth_mass"]), 0.25, body * body)
-	return {
-		"pos": _array_to_vec(saved["pos"]),
-		"dir": _array_to_vec(saved["dir"]),
-		"energy": float(saved["energy"]),
-		"size": body,
-		"birth_mass": born_with,
-		"generation": int(saved["generation"]),
-		"genome": Genome.from_saved(saved["genome"]),
-		"id": int(saved["id"]),
-	}
+## A block of bytes as a save holds it: its size, and the bytes compressed (zstd) and as text. A bup's record is 96 bytes and a family
+## record 68, so a hundred thousand of each is about 14 MB raw and a few MB compressed.
+static func _pack_bytes(bytes: PackedByteArray) -> Dictionary:
+	return {"raw": bytes.size(), "z": Marshalls.raw_to_base64(bytes.compress(FileAccess.COMPRESSION_ZSTD))}
 
 
-## A saved family record with every figure in it a number (anything else is dropped rather than trusted).
-static func _is_saved_record(r: Variant) -> bool:
-	if not (r is Dictionary) or not Validate.is_number(r.get("id")):
-		return false
-	for key in ["parent", "born", "died", "generation", "mutations", "speed", "sense", "metabolism", "size_gene", "hue", "sat", "val", "harm", "max_energy"]:
-		if r.has(key) and not Validate.is_number(r[key]):
-			return false
-	if r.has("name") and not (r["name"] is String):
-		return false
-	return true
+## What `_pack_bytes` made of these, read back from a save; null if it is not one (or does not decompress to the size it says).
+static func _unpack_bytes(saved: Variant) -> Variant:
+	if not (saved is Dictionary) or not Validate.is_number(saved.get("raw")) or not (saved.get("z") is String):
+		return null
+	var size := int(saved["raw"])
+	if size < 0 or size > MAX_SAVED_BYTES:
+		return null
+	var bytes := Marshalls.base64_to_raw(saved["z"]).decompress(size, FileAccess.COMPRESSION_ZSTD) if size > 0 else PackedByteArray()
+	return bytes if bytes.size() == size else null
 
 
 static func _vec_to_array(v: Vector2) -> Array:

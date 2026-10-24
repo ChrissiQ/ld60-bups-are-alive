@@ -83,6 +83,8 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("unpin", "id"), &BupSim::unpin);
 	ClassDB::bind_method(D_METHOD("lineage_export"), &BupSim::lineage_export);
 	ClassDB::bind_method(D_METHOD("lineage_import", "saved", "pinned"), &BupSim::lineage_import, DEFVAL(PackedInt64Array()));
+	ClassDB::bind_method(D_METHOD("lineage_export_bytes"), &BupSim::lineage_export_bytes);
+	ClassDB::bind_method(D_METHOD("lineage_import_bytes", "data", "pinned"), &BupSim::lineage_import_bytes, DEFVAL(PackedInt64Array()));
 	ClassDB::bind_method(D_METHOD("get_next_id"), &BupSim::get_next_id);
 	ClassDB::bind_method(D_METHOD("set_next_id", "value"), &BupSim::set_next_id);
 	ClassDB::bind_method(D_METHOD("bup_count"), &BupSim::bup_count);
@@ -523,6 +525,12 @@ void BupSim::lineage_import(const Array &saved, const PackedInt64Array &pinned) 
 		}
 		records[id] = r;
 	}
+	finish_lineage_import(pinned);
+}
+
+// After a save's records are in: the counts that keep a dead record are worked out again from the parents, the watched ones are
+// pinned, and the dead records nothing holds are let go.
+void BupSim::finish_lineage_import(const PackedInt64Array &pinned) {
 	for (auto &entry : records) {
 		entry.second.holds = 0;
 	}
@@ -546,6 +554,116 @@ void BupSim::lineage_import(const Array &saved, const PackedInt64Array &pinned) 
 	for (int64_t id : loose) {
 		free_if_unused(id);
 	}
+}
+
+namespace {
+template <typename T>
+void put(uint8_t *&at, T value) {
+	memcpy(at, &value, sizeof(T));
+	at += sizeof(T);
+}
+template <typename T>
+T take(const uint8_t *&at) {
+	T value;
+	memcpy(&value, at, sizeof(T));
+	at += sizeof(T);
+	return value;
+}
+} // namespace
+
+PackedByteArray BupSim::lineage_export_bytes() const {
+	int64_t names = 0, name_bytes = 0;
+	for (const auto &entry : records) {
+		if (!entry.second.name.is_empty()) {
+			names++;
+			name_bytes += entry.second.name.utf8().length();
+		}
+	}
+	PackedByteArray out;
+	out.resize(4 + (int64_t)records.size() * LINEAGE_BYTES + 4 + names * 12 + name_bytes);
+	uint8_t *at = out.ptrw();
+	put<uint32_t>(at, (uint32_t)records.size());
+	for (const auto &entry : records) {
+		const Record &r = entry.second;
+		put<int64_t>(at, entry.first);
+		put<int64_t>(at, r.parent);
+		put<int32_t>(at, r.born);
+		put<int32_t>(at, r.died);
+		put<int32_t>(at, r.generation);
+		put<int32_t>(at, r.mutations);
+		for (int g = 0; g < 4; g++) {
+			put<float>(at, r.genes[g]);
+		}
+		put<float>(at, r.hue);
+		put<float>(at, r.sat);
+		put<float>(at, r.val);
+		put<float>(at, r.harm);
+		put<float>(at, r.max_energy);
+	}
+	put<uint32_t>(at, (uint32_t)names);
+	for (const auto &entry : records) {
+		if (entry.second.name.is_empty()) {
+			continue;
+		}
+		CharString utf8 = entry.second.name.utf8();
+		put<int64_t>(at, entry.first);
+		put<uint32_t>(at, (uint32_t)utf8.length());
+		memcpy(at, utf8.get_data(), utf8.length());
+		at += utf8.length();
+	}
+	return out;
+}
+
+void BupSim::lineage_import_bytes(const PackedByteArray &data, const PackedInt64Array &pinned) {
+	ERR_FAIL_COND_MSG(data.size() < 8, "BupSim.lineage_import_bytes: too short");
+	const uint8_t *begin = data.ptr();
+	const uint8_t *end = begin + data.size();
+	const uint8_t *at = begin;
+	uint32_t count = take<uint32_t>(at);
+	ERR_FAIL_COND_MSG((int64_t)count * LINEAGE_BYTES + 8 > data.size(), "BupSim.lineage_import_bytes: fewer records than it says");
+	std::unordered_set<int64_t> living; // (looked up, not searched for: a big dish has as many records as bups)
+	living.reserve(bups.size());
+	for (const Bup &b : bups) {
+		living.insert(b.id);
+	}
+	records.reserve(records.size() + count);
+	for (uint32_t i = 0; i < count; i++) {
+		int64_t id = take<int64_t>(at);
+		Record r;
+		r.parent = take<int64_t>(at);
+		r.born = take<int32_t>(at);
+		r.died = take<int32_t>(at);
+		r.generation = take<int32_t>(at);
+		r.mutations = take<int32_t>(at);
+		for (int g = 0; g < 4; g++) {
+			r.genes[g] = take<float>(at);
+		}
+		r.hue = take<float>(at);
+		r.sat = take<float>(at);
+		r.val = take<float>(at);
+		r.harm = take<float>(at);
+		r.max_energy = take<float>(at);
+		r.alive = living.count(id) > 0;
+		if (r.alive) {
+			r.died = -1;
+		}
+		if (id > 0) {
+			records[id] = r;
+		}
+	}
+	uint32_t names = take<uint32_t>(at);
+	for (uint32_t i = 0; i < names; i++) {
+		ERR_FAIL_COND_MSG(end - at < 12, "BupSim.lineage_import_bytes: names cut short");
+		int64_t id = take<int64_t>(at);
+		uint32_t length = take<uint32_t>(at);
+		ERR_FAIL_COND_MSG((int64_t)(end - at) < (int64_t)length, "BupSim.lineage_import_bytes: a name is cut short");
+		auto found = records.find(id);
+		if (found != records.end()) {
+			found->second.name = String::utf8((const char *)at, (int)length);
+		}
+		at += length;
+	}
+	finish_lineage_import(pinned);
 }
 
 PackedInt64Array BupSim::bup_ids() const {

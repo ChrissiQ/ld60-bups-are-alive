@@ -13,6 +13,8 @@ const ZOOM_PINCH_GAIN := 1.0  ## a trackpad pinch zooms by its own factor, to th
 const ZOOM_TRACKPAD_SCROLL := 0.05  ## a two-finger scroll zooms by ZOOM_WHEEL_STEP to the power of this for each unit it moves
 const WATCH_ICON := preload("res://icons/watch.svg")
 const UNWATCH_ICON := preload("res://icons/unwatch.svg")
+const PAINT_MIN_PIXELS := 24.0  ## the least screen distance between two places of a drag with a brush tool (so that a small brush does not stamp every pixel)
+const PAINT_MAX_STEPS := 60  ## the most places one pointer movement makes (a fast sweep across the dish is not worth more than this)
 const PAN_KEY_PIXELS := 600.0  ## screen pixels a second the view moves while a pan key (W, A, S or D) is held
 const RATE_PANEL_GAP := 16.0  ## screen pixels between the readout and the feed and bloom box under it
 const FIT_MARGIN := 40.0  ## screen pixels kept clear at the sides when framing the dish
@@ -82,6 +84,8 @@ var _hovering_point := false
 var _press_button := MOUSE_BUTTON_NONE
 var _press_position := Vector2.ZERO
 var _dragging := false
+var _painting := false  ## the left button is down with a brush tool: the pointer's path is painted, and does not pan
+var _paint_last := Vector2.ZERO  ## where the brush last placed something (world position)
 var _drag_threshold: float = ProjectSettings.get_setting("gui/common/drag_threshold", 10)
 
 
@@ -128,6 +132,8 @@ func _ready() -> void:
 	var data := SaveGame.read() if Session.load_requested and not free_mode else {}
 	Session.load_requested = false
 	if data.is_empty() or not dish.from_dict(data["dish"]):
+		if not data.is_empty():
+			SaveGame.delete()  # (a save that will not load is no save: the title screen stops offering it)
 		_restart()
 	else:
 		tracker.from_dict(data["goals"])
@@ -660,11 +666,16 @@ func _on_mouse_button(event: InputEventMouseButton) -> void:
 				_press_button = event.button_index
 				_press_position = event.position
 				_dragging = event.button_index == MOUSE_BUTTON_MIDDLE or tool == Toolbar.Tool.PAN
+				_painting = event.button_index == MOUSE_BUTTON_LEFT and _is_brush(tool)
+				if _painting:  # (a brush tool acts where the button goes down, and goes on along the drag: it never pans)
+					_paint_last = make_input_local(event).position
+					_click(_paint_last)
 			elif event.button_index == _press_button:
-				if not _dragging:
+				if not _dragging and not _painting:
 					_click(make_input_local(event).position)
 				_press_button = MOUSE_BUTTON_NONE
 				_dragging = false
+				_painting = false
 
 
 ## Whether the pointer is over one of the HUD's panels or lists: a wheel or a trackpad scroll there is the list's, and
@@ -682,11 +693,45 @@ func _on_mouse_motion(event: InputEventMouseMotion) -> void:
 	if event.button_mask & held_mask == 0:
 		_press_button = MOUSE_BUTTON_NONE
 		_dragging = false
+		_painting = false
+		return
+	if _painting:
+		_paint_to(make_input_local(event).position)
 		return
 	if not _dragging and event.position.distance_to(_press_position) > _drag_threshold:
 		_dragging = true
 	if _dragging:
 		_pan_camera(-event.relative / camera.zoom.x)
+
+
+## The tools that place something along a drag (the nutrient dose, the plankton and the eraser), and so do not pan with the left button.
+func _is_brush(which: Toolbar.Tool) -> bool:
+	return which == Toolbar.Tool.NUTRIENT or which == Toolbar.Tool.PLANKTON or which == Toolbar.Tool.ERASE
+
+
+## The world distance between two places of a drag: the brush's own width, and never less than PAINT_MIN_PIXELS on the screen.
+func _paint_spacing() -> float:
+	var width := 0.0
+	match tool:
+		Toolbar.Tool.ERASE:
+			width = tool_options.brush_radius()
+		Toolbar.Tool.NUTRIENT:
+			width = Dish.scatter_radius(tool_options.nutrient_count())
+		Toolbar.Tool.PLANKTON:
+			width = Dish.PLANKTON_PATCH_RADIUS
+	return maxf(width, PAINT_MIN_PIXELS / camera.zoom.x)
+
+
+## Carries the brush from where it last placed something to `world`, placing at every spacing along the way.
+func _paint_to(world: Vector2) -> void:
+	var spacing := _paint_spacing()
+	var steps := 0
+	while _paint_last.distance_to(world) >= spacing and steps < PAINT_MAX_STEPS:
+		_paint_last = _paint_last.move_toward(world, spacing)
+		_click(_paint_last)
+		steps += 1
+	if steps == PAINT_MAX_STEPS:
+		_paint_last = world  # (a sweep past the cap carries on from here, not from where it fell short)
 
 
 ## Moves the view by `world_delta`, but never off the dish. Panning by hand takes over from following.

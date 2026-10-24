@@ -45,7 +45,7 @@ func _init() -> void:
 	d.strike()
 	check(d.population() == 4, "default bups = 4, got %d" % d.population())
 	check(absf(TestUtil.density(d) - 32.0) < 0.5, "default starting nutrient = 32 units/mm² (about 10,000 units in the 10 mm dish), got %.2f" % TestUtil.density(d))
-	check(d.radius == 10000.0 and d.bup_limit == 20000, "the default dish is 10 mm in radius with room for 20,000 bups, got %.0f and %d" % [d.radius, d.bup_limit])
+	check(d.radius == 45000.0 and d.bup_limit == 100000, "the default dish is 45 mm in radius with room for 100,000 bups, got %.0f and %d" % [d.radius, d.bup_limit])
 
 	# --- Counts and clamping.
 	var s := _small()
@@ -603,7 +603,7 @@ func _init() -> void:
 	var limit_copy := _make_dish()
 	check(limit_copy.from_dict(TestUtil.saved(limited)) and limit_copy.bup_limit == 50, "the limit survives save and load")
 	check(StartConditions.from_dict({"bup_limit": 99999999}).bup_limit == StartConditions.MAX_BUP_LIMIT and StartConditions.from_dict({"bup_limit": 1}).bup_limit == StartConditions.MIN_BUP_LIMIT, "a saved limit is clamped to the slider's range")
-	check(StartConditions.MAX_DISH_RADIUS == 90000.0 and StartConditions.MAX_BUP_LIMIT == 1000000, "free mode offers dishes up to 90000 µm and limits up to 1,000,000")
+	check(StartConditions.MAX_DISH_RADIUS == 90000.0 and StartConditions.MAX_BUP_LIMIT == 2000000, "free mode offers dishes up to 90000 µm and limits up to 2,000,000")
 	limited.free()
 	limit_copy.free()
 
@@ -916,16 +916,16 @@ func _init() -> void:
 	var radius_before := victim.radius
 	var time_before := victim.time
 	var broken := {
-		"cell missing pos": func(x: Dictionary) -> void: x["cells"][0].erase("pos"),
-		"cell pos too short": func(x: Dictionary) -> void: x["cells"][0]["pos"] = [1.0],
-		"cell pos holds text": func(x: Dictionary) -> void: x["cells"][0]["pos"] = ["a", "b"],
-		"cell genome not a dictionary": func(x: Dictionary) -> void: x["cells"][0]["genome"] = [1, 2],
-		"cell energy is text": func(x: Dictionary) -> void: x["cells"][0]["energy"] = "lots",
-		"cell is not a dictionary": func(x: Dictionary) -> void: x["cells"][0] = 7,
+		"no bups block": func(x: Dictionary) -> void: x.erase("cells"),
+		"bups in the old format, a list": func(x: Dictionary) -> void: x["cells"] = [{"pos": [1.0, 1.0]}],
+		"bups block of the wrong size for a record": func(x: Dictionary) -> void: x["cells"] = Dish._pack_bytes(PackedByteArray([1, 2, 3])),
+		"bups block that does not decompress to its size": func(x: Dictionary) -> void: x["cells"]["raw"] = int(x["cells"]["raw"]) + 96,
+		"no family records": func(x: Dictionary) -> void: x.erase("lineage"),
+		"family records cut short": func(x: Dictionary) -> void: x["lineage"]["z"] = str(x["lineage"]["z"]).substr(0, 20),
 		"source position too short": func(x: Dictionary) -> void: x["sources"][0]["pos"] = [3.0],
 		"source rate is text": func(x: Dictionary) -> void: x["sources"][0]["rate"] = "fast",
 		"nutrient field is the wrong size": func(x: Dictionary) -> void: x["field"] = [0.1, 0.2],
-		"cells not an array": func(x: Dictionary) -> void: x["cells"] = {},
+		"bups block empty": func(x: Dictionary) -> void: x["cells"] = {},
 		"history not a dictionary": func(x: Dictionary) -> void: x["history"] = [1],
 		"history holds text": func(x: Dictionary) -> void: x["history"]["pop"][0] = "no",
 		"radius is text": func(x: Dictionary) -> void: x["radius"] = "big",
@@ -940,20 +940,13 @@ func _init() -> void:
 	# Odd but harmless values are made safe instead of rejected.
 	var odd: Dictionary = good.duplicate(true)
 	odd["radius"] = 99999
-	odd["cells"][0]["genome"]["values"] = {"speed": 99999, "sense": -5}
-	odd["cells"][0]["genome"]["hue"] = 7.25
 	check(victim.from_dict(odd), "a save with out-of-range values still loads")
 	check(victim.radius == StartConditions.MAX_DISH_RADIUS, "...with the radius clamped (%.0f)" % victim.radius)
-	check(_first(victim)["speed"] == Genome.GENES["speed"][1] and _first(victim)["sense"] == Genome.GENES["sense"][0], "...and genes clamped to their range")
-	check(_first(victim)["hue"] >= 0.0 and _first(victim)["hue"] < 1.0, "...and the hue wrapped into range")
 	check(victim.selected_source == null and victim.selected_id == -1, "a successful load clears the selection")
-	var weird: Dictionary = good.duplicate(true)
-	weird["cells"][0]["genome"]["values"] = [1, 2, 3]
-	check(victim.from_dict(weird) and _first(victim)["speed"] == Genome.founder()["speed"], "a genome with garbage values falls back to defaults instead of crashing")
 
 	# --- StartConditions: one source for limits, and an honest copy().
 	check(StartConditions.MAX_BUPS <= StartConditions.MAX_BUP_LIMIT, "the bups slider cap never exceeds the limit slider's")
-	check(StartConditions.new().dish_radius == Dish.DEFAULT_RADIUS, "default radius is the dish's default")
+	check(StartConditions.new().dish_radius == StartConditions.DEFAULT_RADIUS, "default radius is the start's default")
 	var original := StartConditions.new()
 	original.bups = 33
 	original.nutrient_density = 44
