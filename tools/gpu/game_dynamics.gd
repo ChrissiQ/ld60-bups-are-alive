@@ -25,6 +25,7 @@ var dish: Dish
 var start: StartConditions
 var hours := 0
 var chk_pending := []  ## [hour, readback values] waiting for the hour's history sample
+var mutator_mean := 1.0  ## the mean mutator at the last reading (printed as a MUTATOR line after each SAMPLE)
 var wall_run := 0.0  ## µs spent advancing (not sampling)
 
 
@@ -70,6 +71,7 @@ func _hours_default(sc_name: String) -> int:
 
 func _line(hour: int, pop: int, means: Array, energy: float, nutrient: float) -> void:
 	print("SAMPLE %s %s %d %.2f %d %.4f %.4f %.5f %.5f %.5f %.4f %.2f" % [mode, scenario, seed_value, float(hour), pop, means[0], means[1], means[2], means[3], means[4], energy, nutrient])
+	print("MUTATOR %s %s %d %.2f %.4f" % [mode, scenario, seed_value, float(hour), mutator_mean])
 	if start.death_husks:
 		print("HUSKS %s %s %d %.2f husks %d clouds %d" % [mode, scenario, seed_value, float(hour), dish.sim.husk_count(), dish.field.puff_count()])
 
@@ -92,8 +94,10 @@ func _read_gpu() -> Array:
 	var np := bytes.size() / GpuSim.RECORD_BYTES
 	var sums := [0.0, 0.0, 0.0, 0.0, 0.0]
 	var energy := 0.0
+	mutator_mean = 0.0
 	for i in np:
 		var o := i * GpuSim.STRIDE
+		mutator_mean += bups[o + 13]
 		sums[0] += bups[o + 8]; sums[1] += bups[o + 9]; sums[2] += bups[o + 10]; sums[3] += bups[o + 11]; sums[4] += 1.0 - exp(-bups[o + 15])
 		energy += bups[o + 5]
 	var area := dish.field.get_spacing() * dish.field.get_spacing()
@@ -105,11 +109,13 @@ func _read_gpu() -> Array:
 		total += pf[2]
 	for k in 5:
 		sums[k] /= maxf(np, 1)
+	mutator_mean /= maxf(np, 1)
 	return [np, sums, energy / maxf(np, 1), total]
 
 
 func _read_cpu() -> Array:
 	var st: Dictionary = dish.population_stats()
+	mutator_mean = st["mutator"]
 	var energy := 0.0
 	var ex: PackedFloat32Array = dish.sim.export_state()
 	var np: int = ex.size() / GpuSim.STRIDE

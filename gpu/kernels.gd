@@ -37,10 +37,11 @@ const TYPES := {
 # 62 capacity (slots), 63 what a death gives back at once, as a cloud, per unit of the body's mass (P[8], or 0 when husks are on: the CPU makes them from the events), 64 handover distance (cloud_handover * spacing), 65 cloud_cut, 66 bin size, 67 bins across, 68 motion_step,
 # 69 motion_structure, 70 cloud spread per step (2 D dt), 71 puff capacity, 72 entry capacity, 73 bins,
 # 74 min_length_px, 75 width (µm), 76 min_width_px, 77 max_trail_px (the drawing's constants), 78 event capacity (births, and deaths, per batch),
+# 80 mutator_rate (a new mutator allele per division), 81 mutator_down_share, 82-84 the three mutator folds (weak, strong, top),
 # 79 upkeep_scale (the dish's upkeep factor: multiplies base_upkeep + maintenance_per_mass * mass).
 # The entries that depend on the step's length (5, 6, 7, 59, 61, 70, and the diffusion's k in the push constant) are set for every batch.
 # BUPS (the bup records): 24 words each: 0 id_lo (uint bits), 1 x, 2 y, 3 dx, 4 dy, 5 energy, 6 mass, 7 birth_mass, 8 speed, 9 sense,
-#       10 metabolism, 11 size, 12 yield, 13 add_mass, 14 drag_upkeep, 15 harm, 16 hue, 17 sat, 18 val, 19 mutations, 20 generation
+#       10 metabolism, 11 size, 12 yield, 13 mutator (the mutation rate, a multiple of the usual; the building size is P[56] x size²), 14 drag_upkeep, 15 harm, 16 hue, 17 sat, 18 val, 19 mutations, 20 generation
 #       (both whole numbers as floats), 21 id_hi (uint bits), 22 px, 23 py (where it was in the last picture; >= 1e30: none, newborns 3e38).
 #       The same as BupSim.export_state_bytes().
 # PUFF: 8 floats each: x, y, mass, variance, cut, alive, reach^2, sigma;
@@ -53,7 +54,7 @@ const TYPES := {
 #       0 if negative) and a margin of CAP_SIGMAS standard deviations of the births and deaths, so the count stops just short of the limit,
 #       13 bups trimmed so far this step (`life` adds, `finalize` reads and clears), 14-15 spare
 # EVB / EVD (uint): EVENT_SETS sets of P[78] events each (a batch writes set `pcs.pb` of `events`): a birth is 16 words (id lo, id hi,
-#       parent lo, parent hi, step, generation, mutations; speed, sense, metabolism, size_gene, hue, sat, val, harm as float bits; 0),
+#       parent lo, parent hi, step, generation, mutations; speed, sense, metabolism, size_gene, hue, sat, val, harm, mutator as float bits),
 #       a death 8 (id lo, id hi, step, generation; mass, x, y, the energy it gives back as float bits: 0 for a trimmed one): BupSim.apply_events' layout. EVN (uint): per set, the
 #       births and deaths of its batch (CNT[8], CNT[9] at its end; past P[78] they were lost). OUTK (uint): per event set, a copy of
 #       OUT as it was at the end of that set's batch (so a stalling read can still find a batch's samples after later frames).
@@ -431,7 +432,7 @@ float gamma_(float shape, inout uint s) {
 }
 int poisson(float mean, inout uint s) {
 	float lim = exp(-mean); int count = 0; float p = u01(s);
-	while (p > lim && count < 30) { count++; p *= u01(s); }
+	while (p > lim && count < 400) { count++; p *= u01(s); }
 	return count;
 }
 void main() {
@@ -442,7 +443,7 @@ void main() {
 	if (i >= n_now) return;
 	uint b = i * 24u;
 	uint s = hash(hash(CNT[7] ^ (CNT[5] * 0x85EBCA6BU) ^ 777U) + i * 0x9E3779B9U);  // (this dish's stream, this step, this bup)
-	float energy = BUPS[b + 5], mass = BUPS[b + 6], birth = BUPS[b + 7], add_mass = BUPS[b + 13];
+	float energy = BUPS[b + 5], mass = BUPS[b + 6], birth = BUPS[b + 7], add_mass = P[56] * BUPS[b + 11] * BUPS[b + 11], rate = BUPS[b + 13];  // (the building size from the size gene; the mutation rate of this bup, which its daughter is made at)
 	float trim = max(0.0, float(n_now) + float(CNT[12]) - P[60]) / float(n_now);
 	bool natural = energy <= 0.0 || u01(s) < P[59];
 	bool trimmed = !natural && u01(s) < trim;  // (the same draws as one chain of `||`)
@@ -461,7 +462,7 @@ void main() {
 		float g[4] = float[4](BUPS[b + 8], BUPS[b + 9], BUPS[b + 10], BUPS[b + 11]);
 		float hue = BUPS[b + 16], sat = BUPS[b + 17], val = BUPS[b + 18], harm = BUPS[b + 15], muts = BUPS[b + 19];
 		bool lethal = false;
-		int traits = poisson(P[32], s);
+		int traits = poisson(P[32] * rate, s);
 		for (int t = 0; t < traits; t++) {
 			int gene = int(u01(s) * 4.0) % 4;
 			float changed = clamp(g[gene] + gauss(s) * P[52 + gene], P[44 + gene], P[48 + gene]);
@@ -470,7 +471,7 @@ void main() {
 				hue = fract(hue + gauss(s) * P[40]); sat = clamp(sat + gauss(s) * P[41], 0.0, 1.0); val = clamp(val + gauss(s) * P[42], P[43], 1.0);
 			}
 		}
-		int harmful = poisson(P[33], s);
+		int harmful = poisson(P[33] * rate, s);
 		for (int t = 0; t < harmful; t++) {
 			if (u01(s) < P[35]) lethal = true;
 			else harm = min(harm + gamma_(P[36], s) * P[37] / P[36], P[39]);
@@ -478,12 +479,22 @@ void main() {
 			hue = fract(hue + gauss(s) * P[40]); sat = clamp(sat + gauss(s) * P[41], 0.0, 1.0); val = clamp(val + gauss(s) * P[42], P[43], 1.0);
 		}
 		if (harm > 0.0) {
-			int repairs = poisson(P[34], s);
+			int repairs = poisson(P[34] * rate, s);
 			for (int t = 0; t < repairs; t++) {
 				harm = max(harm + log(max(u01(s), 1e-12)) * P[38], 0.0);
 				muts += 1.0;
 				hue = fract(hue + gauss(s) * P[40]); sat = clamp(sat + gauss(s) * P[41], 0.0, 1.0); val = clamp(val + gauss(s) * P[42], P[43], 1.0);
 			}
+		}
+		// The mutation rate itself changes in jumps (see the CPU's mutate): a new mutator allele sets it to one of three folds, an antimutator halves it.
+		float mutator = rate, allele = u01(s);
+		if (allele < P[80]) {
+			float pick = u01(s);
+			mutator = max(mutator, pick < 0.2 ? P[82] : (pick < 0.8 ? P[83] : P[84]));
+			muts += 1.0;
+		} else if (mutator > 1.0 && allele < P[80] * (1.0 + P[81])) {
+			mutator = max(1.0, mutator * 0.5);
+			muts += 1.0;
 		}
 		if (!lethal) {
 			KID[i] = 1u;
@@ -495,7 +506,7 @@ void main() {
 			CHILD[c + 5] = min(de, P[22] * dm); CHILD[c + 6] = dm; CHILD[c + 7] = dm;
 			CHILD[c + 8] = g[0]; CHILD[c + 9] = g[1]; CHILD[c + 10] = g[2]; CHILD[c + 11] = g[3];
 			CHILD[c + 12] = exp(-harm) / sqrt(g[2]);
-			CHILD[c + 13] = P[56] * g[3] * g[3];
+			CHILD[c + 13] = mutator;
 			CHILD[c + 14] = P[57] * g[0] * g[0];
 			CHILD[c + 15] = harm;
 			CHILD[c + 16] = hue; CHILD[c + 17] = sat; CHILD[c + 18] = val; CHILD[c + 19] = muts; CHILD[c + 20] = gen + 1.0;
@@ -942,7 +953,7 @@ void main() {
 			EVB[o + 5u] = uint(uintBitsToFloat(CHILD_U[c + 20u])); EVB[o + 6u] = uint(uintBitsToFloat(CHILD_U[c + 19u]));
 			EVB[o + 7u] = CHILD_U[c + 8u]; EVB[o + 8u] = CHILD_U[c + 9u]; EVB[o + 9u] = CHILD_U[c + 10u]; EVB[o + 10u] = CHILD_U[c + 11u];
 			EVB[o + 11u] = CHILD_U[c + 16u]; EVB[o + 12u] = CHILD_U[c + 17u]; EVB[o + 13u] = CHILD_U[c + 18u]; EVB[o + 14u] = CHILD_U[c + 15u];
-			EVB[o + 15u] = 0u;
+			EVB[o + 15u] = CHILD_U[c + 13u];
 		} else atomicAdd(CNT[10], 1u);
 	}
 	if (SURV[i] == 0u) {
@@ -971,37 +982,37 @@ void main() {
 ## Stats of the bups now, in two passes of fixed order (so a sample is the same every run): sums over groups of 256 bups into SPART,
 ## then one group sums those (`pcs.pa` of them) into OUT at word `pcs.pb`, with the step `pcs.pc`.
 const K_STATS1 := """
-shared float sm[7 * 256];
+shared float sm[8 * 256];
 void main() {
 	uint i = gl_GlobalInvocationID.x, l = gl_LocalInvocationID.x;
-	float v[7] = float[7](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+	float v[8] = float[8](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
 	if (i < CNT[0]) {
 		uint b = i * 24u;
 		float h = BUPS[b + 15u];
 		v[0] = 1.0; v[1] = BUPS[b + 8u]; v[2] = BUPS[b + 9u]; v[3] = BUPS[b + 10u]; v[4] = BUPS[b + 11u];
 		v[5] = h < 0.1 ? h * (1.0 - h * (0.5 - h * (0.16666667 - h * 0.041666668))) : 1.0 - exp(-h);  // (1 - exp(-h) without the loss of a small h's digits)
-		v[6] = BUPS[b + 19u];
+		v[6] = BUPS[b + 19u]; v[7] = BUPS[b + 13u];
 	}
-	for (int k = 0; k < 7; k++) sm[k * 256 + int(l)] = v[k];
+	for (int k = 0; k < 8; k++) sm[k * 256 + int(l)] = v[k];
 	barrier();
 	for (uint half_ = 128u; half_ > 0u; half_ >>= 1u) {
-		if (l < half_) for (int k = 0; k < 7; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
+		if (l < half_) for (int k = 0; k < 8; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
 		barrier();
 	}
-	if (l == 0u) for (int k = 0; k < 7; k++) SPART[gl_WorkGroupID.x * 8u + uint(k)] = sm[k * 256];
+	if (l == 0u) for (int k = 0; k < 8; k++) SPART[gl_WorkGroupID.x * 8u + uint(k)] = sm[k * 256];
 }
 """
 
 const K_STATS2 := """
-shared float sm[7 * 256];
+shared float sm[8 * 256];
 void main() {
 	uint l = gl_LocalInvocationID.x, groups = uint(pcs.pa);
-	float v[7] = float[7](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-	for (uint g = l; g < groups; g += 256u) for (int k = 0; k < 7; k++) v[k] += SPART[g * 8u + uint(k)];
-	for (int k = 0; k < 7; k++) sm[k * 256 + int(l)] = v[k];
+	float v[8] = float[8](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+	for (uint g = l; g < groups; g += 256u) for (int k = 0; k < 8; k++) v[k] += SPART[g * 8u + uint(k)];
+	for (int k = 0; k < 8; k++) sm[k * 256 + int(l)] = v[k];
 	barrier();
 	for (uint half_ = 128u; half_ > 0u; half_ >>= 1u) {
-		if (l < half_) for (int k = 0; k < 7; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
+		if (l < half_) for (int k = 0; k < 8; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
 		barrier();
 	}
 	if (l == 0u) {
@@ -1009,7 +1020,8 @@ void main() {
 		OUT[o] = floatBitsToUint(float(CNT[0]));  // (the count exactly, not summed)
 		for (int k = 1; k < 7; k++) OUT[o + uint(k)] = floatBitsToUint(sm[k * 256]);
 		OUT[o + 7u] = floatBitsToUint(pcs.pc);
-		for (uint k = 8u; k < 16u; k++) OUT[o + k] = 0u;
+		OUT[o + 8u] = floatBitsToUint(sm[7 * 256]);  // (the mutator's sum)
+		for (uint k = 9u; k < 16u; k++) OUT[o + k] = 0u;
 	}
 }
 """

@@ -930,6 +930,7 @@ func _stats_at(data: PackedByteArray, sample: int) -> Dictionary:
 		out[GENE_NAMES[g]] = data.decode_float(o + (1 + g) * 4) * per
 	out["harm"] = data.decode_float(o + 5 * 4) * per
 	out["mutations"] = data.decode_float(o + 6 * 4) * per
+	out["mutator"] = data.decode_float(o + 8 * 4) * per
 	return out
 
 

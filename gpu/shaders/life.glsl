@@ -32,7 +32,7 @@ float gamma_(float shape, inout uint s) {
 }
 int poisson(float mean, inout uint s) {
 	float lim = exp(-mean); int count = 0; float p = u01(s);
-	while (p > lim && count < 30) { count++; p *= u01(s); }
+	while (p > lim && count < 400) { count++; p *= u01(s); }
 	return count;
 }
 void main() {
@@ -43,7 +43,7 @@ void main() {
 	if (i >= n_now) return;
 	uint b = i * 24u;
 	uint s = hash(hash(CNT[7] ^ (CNT[5] * 0x85EBCA6BU) ^ 777U) + i * 0x9E3779B9U);  // (this dish's stream, this step, this bup)
-	float energy = BUPS[b + 5], mass = BUPS[b + 6], birth = BUPS[b + 7], add_mass = BUPS[b + 13];
+	float energy = BUPS[b + 5], mass = BUPS[b + 6], birth = BUPS[b + 7], add_mass = P[56] * BUPS[b + 11] * BUPS[b + 11], rate = BUPS[b + 13];  // (the building size from the size gene; the mutation rate of this bup, which its daughter is made at)
 	float trim = max(0.0, float(n_now) + float(CNT[12]) - P[60]) / float(n_now);
 	bool natural = energy <= 0.0 || u01(s) < P[59];
 	bool trimmed = !natural && u01(s) < trim;  // (the same draws as one chain of `||`)
@@ -62,7 +62,7 @@ void main() {
 		float g[4] = float[4](BUPS[b + 8], BUPS[b + 9], BUPS[b + 10], BUPS[b + 11]);
 		float hue = BUPS[b + 16], sat = BUPS[b + 17], val = BUPS[b + 18], harm = BUPS[b + 15], muts = BUPS[b + 19];
 		bool lethal = false;
-		int traits = poisson(P[32], s);
+		int traits = poisson(P[32] * rate, s);
 		for (int t = 0; t < traits; t++) {
 			int gene = int(u01(s) * 4.0) % 4;
 			float changed = clamp(g[gene] + gauss(s) * P[52 + gene], P[44 + gene], P[48 + gene]);
@@ -71,7 +71,7 @@ void main() {
 				hue = fract(hue + gauss(s) * P[40]); sat = clamp(sat + gauss(s) * P[41], 0.0, 1.0); val = clamp(val + gauss(s) * P[42], P[43], 1.0);
 			}
 		}
-		int harmful = poisson(P[33], s);
+		int harmful = poisson(P[33] * rate, s);
 		for (int t = 0; t < harmful; t++) {
 			if (u01(s) < P[35]) lethal = true;
 			else harm = min(harm + gamma_(P[36], s) * P[37] / P[36], P[39]);
@@ -79,12 +79,22 @@ void main() {
 			hue = fract(hue + gauss(s) * P[40]); sat = clamp(sat + gauss(s) * P[41], 0.0, 1.0); val = clamp(val + gauss(s) * P[42], P[43], 1.0);
 		}
 		if (harm > 0.0) {
-			int repairs = poisson(P[34], s);
+			int repairs = poisson(P[34] * rate, s);
 			for (int t = 0; t < repairs; t++) {
 				harm = max(harm + log(max(u01(s), 1e-12)) * P[38], 0.0);
 				muts += 1.0;
 				hue = fract(hue + gauss(s) * P[40]); sat = clamp(sat + gauss(s) * P[41], 0.0, 1.0); val = clamp(val + gauss(s) * P[42], P[43], 1.0);
 			}
+		}
+		// The mutation rate itself changes in jumps (see the CPU's mutate): a new mutator allele sets it to one of three folds, an antimutator halves it.
+		float mutator = rate, allele = u01(s);
+		if (allele < P[80]) {
+			float pick = u01(s);
+			mutator = max(mutator, pick < 0.2 ? P[82] : (pick < 0.8 ? P[83] : P[84]));
+			muts += 1.0;
+		} else if (mutator > 1.0 && allele < P[80] * (1.0 + P[81])) {
+			mutator = max(1.0, mutator * 0.5);
+			muts += 1.0;
 		}
 		if (!lethal) {
 			KID[i] = 1u;
@@ -96,7 +106,7 @@ void main() {
 			CHILD[c + 5] = min(de, P[22] * dm); CHILD[c + 6] = dm; CHILD[c + 7] = dm;
 			CHILD[c + 8] = g[0]; CHILD[c + 9] = g[1]; CHILD[c + 10] = g[2]; CHILD[c + 11] = g[3];
 			CHILD[c + 12] = exp(-harm) / sqrt(g[2]);
-			CHILD[c + 13] = P[56] * g[3] * g[3];
+			CHILD[c + 13] = mutator;
 			CHILD[c + 14] = P[57] * g[0] * g[0];
 			CHILD[c + 15] = harm;
 			CHILD[c + 16] = hue; CHILD[c + 17] = sat; CHILD[c + 18] = val; CHILD[c + 19] = muts; CHILD[c + 20] = gen + 1.0;

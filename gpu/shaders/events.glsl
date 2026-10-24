@@ -32,7 +32,7 @@ void main() {
 			EVB[o + 5u] = uint(uintBitsToFloat(CHILD_U[c + 20u])); EVB[o + 6u] = uint(uintBitsToFloat(CHILD_U[c + 19u]));
 			EVB[o + 7u] = CHILD_U[c + 8u]; EVB[o + 8u] = CHILD_U[c + 9u]; EVB[o + 9u] = CHILD_U[c + 10u]; EVB[o + 10u] = CHILD_U[c + 11u];
 			EVB[o + 11u] = CHILD_U[c + 16u]; EVB[o + 12u] = CHILD_U[c + 17u]; EVB[o + 13u] = CHILD_U[c + 18u]; EVB[o + 14u] = CHILD_U[c + 15u];
-			EVB[o + 15u] = 0u;
+			EVB[o + 15u] = CHILD_U[c + 13u];
 		} else atomicAdd(CNT[10], 1u);
 	}
 	if (SURV[i] == 0u) {

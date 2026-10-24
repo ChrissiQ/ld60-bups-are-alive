@@ -79,6 +79,31 @@ func _init() -> void:
 				counted_on_bounds += 1
 	check(counted_on_bounds == 0, "traits never leave their bounds")
 
+	# Mutators: a daughter is made at the parent's mutator times the usual rate; a new allele sets the rate to a real fold, never past the top.
+	var usual_rate: float = Genome.TRAIT_MUTATIONS + Genome.HARMFUL_MUTATIONS
+	var mid_genome := Genome.founder()
+	var count_at := func(mutator: float, draws: int) -> float:
+		var mutator_parent := mid_genome.duplicate()
+		mutator_parent["mutator"] = mutator
+		var total := 0.0
+		for i in draws:
+			total += float(sim.mutate_genome(mutator_parent)["mutations"])
+		return total / draws
+	var usual_mean: float = count_at.call(1.0, 20000)
+	var strong_mean: float = count_at.call(100.0, 3000)
+	check(absf(usual_mean - usual_rate) < usual_rate * 0.05, "a usual bup's daughter has about %.3f mutations: %.3f" % [usual_rate, usual_mean])
+	check(absf(strong_mean / usual_mean - 100.0) < 5.0, "a 100-fold mutator's daughter has about 100 times as many mutations (%.1f against %.3f)" % [strong_mean, usual_mean])
+	var alleles := 0
+	var top_genome := Genome.founder()
+	top_genome["mutator"] = Genome.MUTATOR_FOLD_TOP
+	var beyond := 0
+	for i in 100000:
+		var c := sim.mutate_genome(mid_genome)
+		alleles += 1 if c["mutator"] > 1.0 else 0
+		beyond += 1 if sim.mutate_genome(top_genome)["mutator"] > Genome.MUTATOR_FOLD_TOP else 0
+	var expected_alleles := 100000.0 * Genome.MUTATOR_RATE
+	check(alleles > expected_alleles * 0.5 and alleles < expected_alleles * 1.6 and beyond == 0, "a new mutator allele appears about once in %d divisions (%d in 100,000, expected %.0f) and none passes the top fold" % [roundi(1.0 / Genome.MUTATOR_RATE), alleles, expected_alleles])
+
 	# --- Rate-yield trade-off: fast metabolisms grow quicker but waste fuel.
 	var fast := _cell(1.8)
 	var slow := _cell(0.5)

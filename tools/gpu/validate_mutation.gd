@@ -1,9 +1,10 @@
 extends SceneTree
-## godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/validate_mutation.gd -- M
+## godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/validate_mutation.gd -- M [parent mutator, default 1]
 ## The GPU's division and mutation against the CPU's `mutate_genome`: M bups, all ready to divide, with one parent genome; what the
 ## daughters' genomes look like (mutations, per-gene change, harm, lethal share, colour) from each.
 func _init() -> void:
 	var m := int(OS.get_cmdline_user_args()[0])
+	var parent_mutator := float(OS.get_cmdline_user_args()[1]) if OS.get_cmdline_user_args().size() > 1 else 1.0
 	SimConstants.apply()
 	var consts := SimConstants.build()
 	var dish := Dish.new()
@@ -16,7 +17,7 @@ func _init() -> void:
 	var field = dish.field
 	var template: PackedFloat32Array = dish.sim.export_state().slice(0, GpuSim.STRIDE)
 	# a parent in the middle of every range, with a little harm already (so repairs can happen), the same for every bup
-	var genome := {"speed": 20.0, "sense": 50.0, "metabolism": 1.0, "size": 4.0, "hue": 0.33, "sat": 0.7, "val": 1.0, "harm": 0.2, "mutations": 0}
+	var genome := {"speed": 20.0, "sense": 50.0, "metabolism": 1.0, "size": 4.0, "hue": 0.33, "sat": 0.7, "val": 1.0, "harm": 0.2, "mutations": 0, "mutator": parent_mutator}
 	var bups := PackedFloat32Array()
 	bups.resize(m * GpuSim.STRIDE)
 	for i in m:
@@ -25,7 +26,7 @@ func _init() -> void:
 		var o := i * GpuSim.STRIDE
 		bups[o] = 0.0; bups[o + 21] = 0.0; bups[o + 22] = GpuSim.NO_PICTURE; bups[o + 23] = GpuSim.NO_PICTURE  # (the id is set below, as integers)
 		bups[o + 1] = randf_range(-5000.0, 5000.0) * 0.5; bups[o + 2] = randf_range(-5000.0, 5000.0) * 0.5
-		bups[o + 5] = 50.0; bups[o + 6] = 20.0; bups[o + 7] = 1.0; bups[o + 13] = 4.0  # (mass 20 >= birth 1 + add 4: divides)
+		bups[o + 5] = 50.0; bups[o + 6] = 20.0; bups[o + 7] = 1.0; bups[o + 13] = parent_mutator  # (mass 20 >= birth 1 + add 4: divides)
 		bups[o + 8] = 20.0; bups[o + 9] = 50.0; bups[o + 10] = 1.0; bups[o + 11] = 4.0; bups[o + 15] = 0.2
 		bups[o + 16] = 0.33; bups[o + 17] = 0.7; bups[o + 18] = 1.0; bups[o + 19] = 0.0; bups[o + 20] = 0.0
 	var gpu := GpuSim.new()
@@ -41,20 +42,26 @@ func _init() -> void:
 	var out := raw.to_float32_array()
 	var np := out.size() / GpuSim.STRIDE
 	var gcount := {"n": 0, "lethal_free": 0}
+	var gmut := 0.0
+	var gmut_n := 0
 	var gd := _acc()
 	for i in np:
 		var o := i * GpuSim.STRIDE
 		if GpuSim.id_of(raw, i) <= m:
 			continue  # a parent
+		gmut += out[o + 13]; gmut_n += 1
 		_add(gd, out[o + 8] - 20.0, out[o + 9] - 50.0, out[o + 10] - 1.0, out[o + 11] - 4.0, out[o + 15] - 0.2, out[o + 19], out[o + 16] - 0.33, out[o + 17] - 0.7, out[o + 18] - 1.0)
 	var children: int = gd["n"]
 	var cd := _acc()
 	var lethal := 0
+	var cmut := 0.0
+	var cmut_n := 0
 	for i in m:
 		var r: Dictionary = dish.sim.mutate_genome(genome)
 		if r["lethal"]:
 			lethal += 1
 			continue
+		cmut += r["mutator"]; cmut_n += 1
 		_add(cd, r["speed"] - 20.0, r["sense"] - 50.0, r["metabolism"] - 1.0, r["size"] - 4.0, r["harm"] - 0.2, r["mutations"], fposmod(r["hue"] - 0.33 + 0.5, 1.0) - 0.5, r["sat"] - 0.7, r["val"] - 1.0)
 	print("lethal share: GPU %.5f  CPU %.5f" % [1.0 - float(children) / m, float(lethal) / m])
 	for k in ["speed", "sense", "metab", "size", "harm", "mutations", "hue", "sat", "val"]:
@@ -67,6 +74,7 @@ func _init() -> void:
 	print("Z trait-change share: GPU %.5f CPU %.5f  %+.2f s.e." % [tg, tc, (tg - tc) / sqrt(tg * (1.0 - tg) / maxf(gd["n"], 1) + tc * (1.0 - tc) / maxf(cd["n"], 1))])
 	var mg := _mean(gd, "mutations"); var mc := _mean(cd, "mutations")
 	print("Z mutation count mean: GPU %.5f CPU %.5f  %+.2f s.e." % [mg, mc, (mg - mc) / sqrt(pow(_sd(gd, "mutations"), 2) / maxf(gd["n"], 1) + pow(_sd(cd, "mutations"), 2) / maxf(cd["n"], 1))])
+	print("daughter mutator mean: GPU %.4f  CPU %.4f (parent %.1f)" % [gmut / maxf(gmut_n, 1), cmut / maxf(cmut_n, 1), parent_mutator])
 	quit(0)
 
 func _acc() -> Dictionary:

@@ -7,7 +7,8 @@ extends Control
 ## Colours and text sizes come from the theme type "HistoryGraph" (see scenes/menu_theme.tres),
 ## like any other widget; nothing about its look is decided here.
 
-const TRAITS := ["speed", "sense", "metabolism", "size", "harm"]  ## harm is the average % of food yield lost to mutation
+const TRAITS := ["speed", "sense", "metabolism", "size", "harm", "mutator"]  ## harm is the average % of food yield lost to mutation; mutator the average mutation rate as a multiple of the usual
+const MUTATOR_STEPS := [2.0, 5.0, 20.0, 150.0]  ## the mutator axis (from 1, the usual rate) tops out at the first of these that holds the data
 const HARM_STEPS := [10.0, 20.0, 50.0, 100.0]  ## the harm axis tops out at the first of these that holds the data (mean harm can reach about 99%)
 const THEME_TYPE := "HistoryGraph"
 const AXIS_ALPHA := 0.7  ## axis lines and ticks are the series colour, a little softer
@@ -75,6 +76,16 @@ func cycle_span() -> void:
 
 ## The top of the harm axis: the smallest of HARM_STEPS that holds every sample, so low harm is not squashed
 ## flat and high harm is not cut off.
+static func mutator_axis_max(samples: Array) -> float:
+	var peak := 0.0
+	for v in samples:
+		peak = maxf(peak, v)
+	for step in MUTATOR_STEPS:
+		if peak <= step:
+			return step
+	return MUTATOR_STEPS[-1]
+
+
 static func harm_axis_max(samples: Array) -> float:
 	var peak := 0.0
 	for v in samples:
@@ -181,7 +192,7 @@ func _draw() -> void:
 	var x_max := x_min + window
 	var pops := _points("pop", x_min, mode)
 	var vals := _points(trait_name, x_min, mode)
-	var spec: Array = Genome.GENES.get(trait_name, [0.0, harm_axis_max(_values(vals))])
+	var spec: Array = Genome.GENES.get(trait_name, [1.0, mutator_axis_max(_values(vals))] if trait_name == "mutator" else [0.0, harm_axis_max(_values(vals))])
 	var lo: float = spec[0]
 	var hi: float = spec[1]
 	var peak := 10.0

@@ -76,6 +76,7 @@ class BupSim : public RefCounted {
 		int mutations = 0;
 		// derived from the genome
 		float yield = 1, add_mass = 8, drag_upkeep = 0;
+		float mutator = 1; // how many times the usual mutation rate it makes daughters at (the GPU's record keeps it in word 13)
 		// chemotaxis state (slow playback)
 		float fast = 0, slow = 0, noise = 0, tumbling = 0;
 		bool primed = false;
@@ -85,6 +86,7 @@ class BupSim : public RefCounted {
 		float hue, sat, val, harm;
 		int mutations;
 		bool lethal;
+		float mutator = 1;
 	};
 
 	// The family record of every bup that is alive, and of every dead one that still has a living
@@ -97,6 +99,7 @@ class BupSim : public RefCounted {
 		int generation = 0, mutations = 0;
 		float genes[4] = { 0, 0, 0, 0 };
 		float hue = 0, sat = 0, val = 0, harm = 0;
+		float mutator = 1;
 		float max_energy = 0; // the reserve it could hold, as it was when it died
 		String name; // what the player called it, if anything: it lives and goes with the record
 		bool alive = true;
@@ -119,7 +122,7 @@ class BupSim : public RefCounted {
 	int now_minutes() const { return (int)(now_seconds / 60.0); }
 	void make_record(const Bup &b, int64_t parent);
 	void finish_lineage_import(const PackedInt64Array &pinned); // after the records of a save are in: counts, pins and pruning
-	static constexpr int LINEAGE_BYTES = 68;
+	static constexpr int LINEAGE_BYTES = 72;
 	void record_death(const Bup &b);
 	void free_if_unused(int64_t id);
 	Dictionary record_info(int64_t id, const Record &r) const;

@@ -39,7 +39,7 @@ class CheckWorld extends GpuWorld:
 			e.resize(64)
 			e.encode_u32(0, id & 0xFFFFFFFF); e.encode_u32(4, (id >> 32) & 0xFFFFFFFF)
 			e.encode_u32(16, 0); e.encode_u32(20, int(words[o + 20])); e.encode_u32(24, int(words[o + 19]))
-			for k in [[8, 28], [9, 32], [10, 36], [11, 40], [16, 44], [17, 48], [18, 52], [15, 56]]:
+			for k in [[8, 28], [9, 32], [10, 36], [11, 40], [16, 44], [17, 48], [18, 52], [15, 56], [13, 60]]:
 				e.encode_float(k[1], words[o + k[0]])
 			births.append_array(e)
 		for id: int in known:

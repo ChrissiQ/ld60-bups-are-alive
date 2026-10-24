@@ -12,8 +12,8 @@ extends RefCounted
 ## small populations once that class is lost by chance (Muller's ratchet).
 ##
 ## RATES ARE RAISED. A real E. coli makes about 1-3 x 10^-3 mutations per genome per division
-## (Drake 1991; Lee et al. 2012; from memory, unchecked here), so the rates below are several
-## hundred times higher. The reason: a real culture has ~10^8 cells and a dish here has at most
+## (Drake 1991; Lee et al. 2012; from memory, unchecked here), so the rates below are about a
+## hundred and thirty times higher (they were four hundred times higher before MUTATION_SUPPLY, below, cut them to a third). The reason: a real culture has ~10^8 cells and a dish here has at most
 ## 300, so the supply of new mutations per generation (population x rate) would be nearly nil.
 ## Raising the rate keeps that supply near what a real culture sees, and selection and clonal
 ## interference work in a comparable regime; drift is much stronger than in life (a mutation's
@@ -45,17 +45,32 @@ const RANDOM_VAL_MIN := 0.3  ## nor is a random colour picked darker than this
 const RANDOM_SAT_POWER := 0.7  ## 1 is an even spread; lower leans towards vivid (about 59% saturated on average, and greys at a third of an even spread's rate)
 const RANDOM_VAL_POWER := 0.85  ## the same for brightness, less strongly
 
-# Expected mutations per division (Poisson), each of its own kind.
-const TRAIT_MUTATIONS := 1.0  ## change one trait by a random amount; helpful or harmful depending on the dish
-const HARMFUL_MUTATIONS := 0.2  ## damage elsewhere in the genome, adding to `harm`
-const COMPENSATORY_MUTATIONS := 0.004  ## the rare helpful ones: they repair some harm
+# Expected mutations per division (Poisson), each of its own kind, for a bup with the usual mutation rate (a mutator makes daughters with
+# its rate times these, see below).
+const MUTATION_SUPPLY := 1.0 / 3.0  ## the share of the earlier base rates that is kept (1, 0.2 and 0.004), so that the strong mutator alleles below stay survivable at the real folds: a 150-fold mutator makes about 10 harmful mutations a division at this supply, and 30 at the old one, where most daughters die (the user chose to lower the base rate rather than scale the mutators; ordinary evolution is slower by the same factor)
+const TRAIT_MUTATIONS := 1.0 * MUTATION_SUPPLY  ## change one trait by a random amount; helpful or harmful depending on the dish
+const HARMFUL_MUTATIONS := 0.2 * MUTATION_SUPPLY  ## damage elsewhere in the genome, adding to `harm`
+const COMPENSATORY_MUTATIONS := 0.004 * MUTATION_SUPPLY  ## the rare helpful ones: they repair some harm
 const LETHAL_FRACTION := 0.05  ## share of harmful mutations that kill the daughter outright
 const HARM_SHAPE := 0.3  ## gamma shape below 1: mostly tiny effects, a long tail of big ones
 const MEAN_HARM := 0.03  ## average cost of a harmful mutation, as a fraction of food yield
 const MEAN_REPAIR := 0.02
 
+# Mutators. A bup carries `mutator`: how many times the usual rate it makes its daughters at (1 for the usual). It changes in jumps, as the
+# loss of a repair gene does in life (the folds are measured: mutY about 11x, mutS and mutL about 100-290x, mutT about 156x; Foster et al.
+# 2015, Lee et al. 2012, Wielgoss et al. 2013), and an antimutator mutation halves it again (Wielgoss et al. 2013: mutY antimutators cut a
+# mutT mutator's rate by 40-60%). The cost comes with the rate: more harmful mutations, more load, no extra penalty; and no direct benefit,
+# the mutator spreads only by hitchhiking on the helpful mutations it makes in the same asexual genome (Sniegowski et al. 1997).
+const MUTATOR_FOLD_WEAK := 10.0  ## a mutY-like allele (a fifth of the new alleles)
+const MUTATOR_FOLD_STRONG := 100.0  ## a mutS- or mutL-like allele, the commonest (three fifths)
+const MUTATOR_FOLD_TOP := 150.0  ## a mutT-like allele (a fifth)
+## A new mutator allele per division: in life 5e-6 per cell per generation (Boe et al. 2000), when a genome mutates 0.003 times a
+## generation (Drake 1991; Lee et al. 2012): the same ratio to this dish's rate.
+const MUTATOR_RATE := 5.0e-6 * (TRAIT_MUTATIONS + HARMFUL_MUTATIONS) / 0.003
+const MUTATOR_DOWN_SHARE := 0.3  ## antimutator mutations in a mutator, as a share of the mutator rate [choice: no measured ratio; Wielgoss et al. saw two in the time one mutator arose]
+
 ## How each gene is shown: its short label and decimals, so every readout agrees.
-const LABELED := ["speed", "sense", "metabolism", "size"]  ## the traits the readouts list, in order
+const LABELED := ["speed", "sense", "metabolism", "size", "mutator"]  ## the traits the readouts list, in order
 
 
 ## A trait's name as the readouts show it (see text/strings.cfg).
@@ -63,9 +78,9 @@ static func label(gene: String) -> String:
 	return Strings.t("genes." + gene)
 
 
-const DECIMALS := {"speed": 0, "sense": 0, "metabolism": 2, "size": 1}
+const DECIMALS := {"speed": 0, "sense": 0, "metabolism": 2, "size": 1, "mutator": 1}
 ## Where each gene is in a bup's info (BupSim.bup_info): its body size is `size`, so the size gene is not.
-const INFO_KEYS := {"speed": "speed", "sense": "sense", "metabolism": "metabolism", "size": "size_gene"}
+const INFO_KEYS := {"speed": "speed", "sense": "sense", "metabolism": "metabolism", "size": "size_gene", "mutator": "mutator"}
 
 
 static func format(gene: String, value: float) -> String:
@@ -79,7 +94,7 @@ static func harm_share(harm: float) -> float:
 
 ## The genome of the first bups: green, no harm, no mutations yet.
 static func founder() -> Dictionary:
-	return {"speed": 20.0, "sense": 50.0, "metabolism": 1.0, "size": 4.0, "hue": 0.33, "sat": 0.7, "val": 1.0, "harm": 0.0, "mutations": 0}
+	return {"speed": 20.0, "sense": 50.0, "metabolism": 1.0, "size": 4.0, "hue": 0.33, "sat": 0.7, "val": 1.0, "harm": 0.0, "mutations": 0, "mutator": 1.0}
 
 
 ## The colour a genome shows (a colour is kept as hue, saturation and brightness).
@@ -137,7 +152,7 @@ static func to_saved(genome: Dictionary) -> Dictionary:
 	var values := {}
 	for gene in GENES:
 		values[gene] = genome[gene]
-	return {"values": values, "hue": genome["hue"], "sat": genome["sat"], "val": genome["val"], "mutations": genome["mutations"], "harm": genome["harm"]}
+	return {"values": values, "hue": genome["hue"], "sat": genome["sat"], "val": genome["val"], "mutations": genome["mutations"], "harm": genome["harm"], "mutator": genome.get("mutator", 1.0)}
 
 
 ## A genome from a save file. Odd values are made safe instead of rejected: anything missing or
@@ -166,4 +181,7 @@ static func from_saved(d: Dictionary) -> Dictionary:
 	var mutations_saved: Variant = d.get("mutations")
 	if Validate.is_number(mutations_saved):
 		g["mutations"] = maxi(0, int(mutations_saved))
+	var mutator_saved: Variant = d.get("mutator")
+	if Validate.is_number(mutator_saved):
+		g["mutator"] = clampf(float(mutator_saved), 1.0, MUTATOR_FOLD_TOP)
 	return g

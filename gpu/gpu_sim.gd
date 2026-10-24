@@ -334,7 +334,8 @@ func _fill_params() -> void:
 	var names_to_index := {"detection_floor": 9, "noise_reference": 10, "gradient_noise": 11, "reference_sense": 12, "reference_size": 13, "mass_um": 14, "base_upkeep": 16, "maintenance_per_mass": 17, "sense_upkeep": 18, "maintenance_floor": 19, "growth_rate": 20, "cost_per_mass": 21, "reserve_per_mass": 22, "uptake_per_size": 23, "half_saturation": 24,
 		"trait_mutations": 32, "harmful_mutations": 33, "compensatory_mutations": 34, "lethal_fraction": 35, "harm_shape": 36, "mean_harm": 37, "mean_repair": 38, "max_harm": 39,
 		"hue_step": 40, "sat_step": 41, "val_step": 42, "val_min": 43, "add_mass_factor": 56, "drag_upkeep": 57, "division_spread": 58,
-		"min_length_px": 74, "width": 75, "min_width_px": 76, "max_trail_px": 77}
+		"min_length_px": 74, "width": 75, "min_width_px": 76, "max_trail_px": 77,
+		"mutator_rate": 80, "mutator_down_share": 81, "mutator_fold_weak": 82, "mutator_fold_strong": 83, "mutator_fold_top": 84}
 	for key in names_to_index:
 		p[names_to_index[key]] = float(consts[key])
 	p[8] = float(consts["death_release"]) * float(consts["cost_per_mass"])  # (what a death gives back per unit of the body's mass)

@@ -138,7 +138,7 @@ func _events_against_the_cpu() -> void:
 			var parent: int = cpu.lineage_info(id)["parent"]
 			e.encode_u32(8, parent & 0xFFFFFFFF); e.encode_u32(12, parent >> 32)
 			e.encode_u32(16, k); e.encode_u32(20, info["generation"]); e.encode_u32(24, info["mutations"])
-			var words := [info["speed"], info["sense"], info["metabolism"], info["size_gene"], info["hue"], info["sat"], info["val"], info["harm"]]
+			var words := [info["speed"], info["sense"], info["metabolism"], info["size_gene"], info["hue"], info["sat"], info["val"], info["harm"], info["mutator"]]
 			for w in words.size():
 				e.encode_float(28 + 4 * w, words[w])
 			births.append_array(e)

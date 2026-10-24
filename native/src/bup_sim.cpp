@@ -250,7 +250,8 @@ void BupSim::note_mutation(Genome &g) {
 BupSim::Genome BupSim::mutate(const Genome &parent) {
 	Genome g = parent;
 	g.lethal = false;
-	int traits = poisson(G.trait_mutations);
+	const double rate = parent.mutator; // (the mutation rate of the parent: the daughter is made with it)
+	int traits = poisson(G.trait_mutations * rate);
 	for (int i = 0; i < traits; i++) {
 		int gene = (int)(uniform() * 4.0) % 4;
 		double changed = std::clamp((double)g.genes[gene] + gaussian() * G.gene_step[gene], G.gene_min[gene], G.gene_max[gene]);
@@ -259,7 +260,7 @@ BupSim::Genome BupSim::mutate(const Genome &parent) {
 			note_mutation(g);
 		}
 	}
-	int harmful = poisson(G.harmful_mutations);
+	int harmful = poisson(G.harmful_mutations * rate);
 	for (int i = 0; i < harmful; i++) {
 		if (uniform() < G.lethal_fraction) {
 			g.lethal = true;
@@ -269,11 +270,23 @@ BupSim::Genome BupSim::mutate(const Genome &parent) {
 		note_mutation(g);
 	}
 	if (g.harm > 0.0f) {
-		int repairs = poisson(G.compensatory_mutations);
+		int repairs = poisson(G.compensatory_mutations * rate);
 		for (int i = 0; i < repairs; i++) {
 			g.harm = (float)std::max((double)g.harm + std::log(std::max(uniform(), 1e-12)) * G.mean_repair, 0.0);
 			note_mutation(g);
 		}
+	}
+	// The mutation rate itself changes in jumps, as the loss of a repair gene does (see Genome): a mutator allele sets the rate to one of three
+	// real folds (weak, strong, top; strong the commonest, mutS and mutL), an antimutator halves it (not below the usual).
+	double allele = uniform();
+	if (allele < G.mutator_rate) {
+		double pick = uniform();
+		double fold = pick < 0.2 ? G.mutator_fold_weak : (pick < 0.8 ? G.mutator_fold_strong : G.mutator_fold_top);
+		g.mutator = (float)std::max((double)g.mutator, fold);
+		note_mutation(g);
+	} else if (g.mutator > 1.0f && allele < G.mutator_rate * (1.0 + G.mutator_down_share)) {
+		g.mutator = (float)std::max(1.0, (double)g.mutator * 0.5);
+		note_mutation(g);
 	}
 	return g;
 }
@@ -288,6 +301,7 @@ Dictionary BupSim::mutate_genome(const Dictionary &genome) {
 	parent.val = (float)(double)genome.get("val", G.founder_val);
 	parent.harm = (float)(double)genome.get("harm", 0.0);
 	parent.mutations = (int)genome.get("mutations", 0);
+	parent.mutator = (float)(double)genome.get("mutator", 1.0);
 	parent.lethal = false;
 	Genome child = mutate(parent);
 	Dictionary out;
@@ -298,6 +312,7 @@ Dictionary BupSim::mutate_genome(const Dictionary &genome) {
 	out["sat"] = child.sat;
 	out["val"] = child.val;
 	out["harm"] = child.harm;
+	out["mutator"] = child.mutator;
 	out["mutations"] = child.mutations;
 	out["lethal"] = child.lethal;
 	return out;
@@ -350,6 +365,7 @@ int64_t BupSim::add_bup(const Vector2 &pos, const Dictionary &genome, double ene
 	b.sat = (float)(double)genome.get("sat", G.founder_sat);  // (the usual saturation, for a genome built without one)
 	b.val = (float)(double)genome.get("val", G.founder_val);
 	b.harm = (float)(double)genome.get("harm", 0.0);
+	b.mutator = (float)(double)genome.get("mutator", 1.0);
 	b.mutations = (int)genome.get("mutations", 0);
 	b.generation = generation;
 	derive(b);
@@ -380,6 +396,7 @@ void BupSim::make_record(const Bup &b, int64_t parent) {
 	r.sat = b.sat;
 	r.val = b.val;
 	r.harm = b.harm;
+	r.mutator = b.mutator;
 	records[b.id] = r;
 }
 
@@ -447,6 +464,7 @@ Dictionary BupSim::record_info(int64_t id, const Record &r) const {
 	out["sat"] = r.sat;
 	out["val"] = r.val;
 	out["harm"] = r.harm;
+	out["mutator"] = r.mutator;
 	out["mutations"] = r.mutations;
 	out["max_energy"] = r.max_energy;
 	out["name"] = r.name;
@@ -523,6 +541,7 @@ void BupSim::lineage_import(const Array &saved, const PackedInt64Array &pinned) 
 		r.sat = (float)(double)d.get("sat", G.founder_sat);
 		r.val = (float)(double)d.get("val", G.founder_val);
 		r.harm = (float)(double)d.get("harm", 0.0);
+		r.mutator = (float)(double)d.get("mutator", 1.0);
 		r.max_energy = (float)(double)d.get("max_energy", 0.0);
 		r.name = d.get("name", String());
 		r.alive = living.count(id) > 0;
@@ -604,6 +623,7 @@ PackedByteArray BupSim::lineage_export_bytes() const {
 		put<float>(at, r.sat);
 		put<float>(at, r.val);
 		put<float>(at, r.harm);
+		put<float>(at, r.mutator);
 		put<float>(at, r.max_energy);
 	}
 	put<uint32_t>(at, (uint32_t)names);
@@ -648,6 +668,7 @@ void BupSim::lineage_import_bytes(const PackedByteArray &data, const PackedInt64
 		r.sat = take<float>(at);
 		r.val = take<float>(at);
 		r.harm = take<float>(at);
+		r.mutator = take<float>(at);
 		r.max_energy = take<float>(at);
 		r.alive = living.count(id) > 0;
 		if (r.alive) {
@@ -733,6 +754,7 @@ Dictionary BupSim::info_of(const Bup &b) const {
 	out["sat"] = b.sat;
 	out["val"] = b.val;
 	out["harm"] = b.harm;
+	out["mutator"] = b.mutator;
 	out["mutations"] = b.mutations;
 	out["upkeep"] = upkeep(b);
 	out["steering"] = steering_of(b.x, b.y, b.genes[0], sense_range(b)).z;
@@ -953,8 +975,9 @@ double BupSim::bup_tumble_rate(int64_t id, double concentration, double delta, d
 // ---- statistics and picking ----------------------------------------------------------------
 
 Dictionary BupSim::population_stats() const {
-	double genes[4] = { 0, 0, 0, 0 }, harm = 0.0, mutations = 0.0;
+	double genes[4] = { 0, 0, 0, 0 }, harm = 0.0, mutations = 0.0, mutator = 0.0;
 	for (const Bup &b : bups) {
+		mutator += b.mutator;
 		for (int g = 0; g < 4; g++) {
 			genes[g] += b.genes[g];
 		}
@@ -969,6 +992,7 @@ Dictionary BupSim::population_stats() const {
 	}
 	out["harm"] = harm / n;
 	out["mutations"] = mutations / n;
+	out["mutator"] = mutator / n;
 	return out;
 }
 
@@ -1016,7 +1040,7 @@ Vector2 BupSim::nearest_and_count(const Vector2 &local, double near) const {
 	return Vector2(nearest_sq < 0.0 ? -1.0f : (float)std::sqrt(nearest_sq), (float)count);
 }
 
-// Every bup as 24 floats: id, x, y, dx, dy, energy, mass, birth_mass, speed, sense, metabolism, size, yield, add_mass, drag_upkeep, harm,
+// Every bup as 24 floats: id, x, y, dx, dy, energy, mass, birth_mass, speed, sense, metabolism, size, yield, mutator, drag_upkeep, harm,
 // hue, sat, val, mutations, generation, parent id (0: not kept here), 2 spare.
 PackedFloat32Array BupSim::export_state() const {
 	PackedFloat32Array out;
@@ -1038,7 +1062,7 @@ PackedFloat32Array BupSim::export_state() const {
 		p[10] = b.genes[2];
 		p[11] = b.genes[3];
 		p[12] = b.yield;
-		p[13] = b.add_mass;
+		p[13] = b.mutator;
 		p[14] = b.drag_upkeep;
 		p[15] = b.harm;
 		p[16] = b.hue;
@@ -1056,7 +1080,7 @@ PackedFloat32Array BupSim::export_state() const {
 // ---- the GPU simulation's records and events ------------------------------------------------
 
 // Every bup as the GPU simulation's record (gpu/kernels.gd): 24 32-bit words, 0 the id's low word, 1-20 x, y, dx, dy, energy, mass,
-// birth_mass, speed, sense, metabolism, size, yield, add_mass, drag_upkeep, harm, hue, sat, val, mutations, generation (floats),
+// birth_mass, speed, sense, metabolism, size, yield, mutator, drag_upkeep, harm, hue, sat, val, mutations, generation (floats),
 // 21 the id's high word, 22-23 where it was in the last picture (NO_PICTURE if nowhere yet).
 PackedByteArray BupSim::export_state_bytes() const {
 	PackedByteArray out;
@@ -1066,7 +1090,7 @@ PackedByteArray BupSim::export_state_bytes() const {
 		const Bup &b = bups[i];
 		uint8_t *r = w + i * STATE_WORDS * 4;
 		const float words[20] = { b.x, b.y, b.dx, b.dy, b.energy, b.mass, b.birth_mass, b.genes[0], b.genes[1], b.genes[2], b.genes[3], b.yield,
-			b.add_mass, b.drag_upkeep, b.harm, b.hue, b.sat, b.val, (float)b.mutations, (float)b.generation };
+			b.mutator, b.drag_upkeep, b.harm, b.hue, b.sat, b.val, (float)b.mutations, (float)b.generation };
 		put_u32(r, 0, (uint32_t)((uint64_t)b.id & 0xFFFFFFFFULL));
 		for (int k = 0; k < 20; k++) {
 			put_f32(r, 1 + k, words[k]);
@@ -1091,6 +1115,7 @@ BupSim::Bup BupSim::bup_from_record(const uint8_t *record) const {
 	for (int g = 0; g < 4; g++) {
 		b.genes[g] = get_f32(record, 8 + g);
 	}
+	b.mutator = get_f32(record, 13);
 	b.harm = get_f32(record, 15);
 	b.hue = get_f32(record, 16);
 	b.sat = get_f32(record, 17);
@@ -1100,7 +1125,7 @@ BupSim::Bup BupSim::bup_from_record(const uint8_t *record) const {
 	float px = get_f32(record, 22), py = get_f32(record, 23);
 	b.px = px >= 1e30f ? std::numeric_limits<float>::quiet_NaN() : px;
 	b.py = py >= 1e30f ? std::numeric_limits<float>::quiet_NaN() : py;
-	derive(b); // (yield, add_mass and drag_upkeep, as the CPU works them out)
+	derive(b); // (yield, add_mass and drag_upkeep, as the CPU works them out: the record keeps the mutator in word 13 where the GPU's building size was)
 	return b;
 }
 
@@ -1132,7 +1157,7 @@ Dictionary BupSim::info_from_state(const PackedByteArray &state, int index) cons
 
 // The family records of a batch of GPU steps (little-endian 32-bit words):
 //   a birth, 16 words: id lo, id hi, parent lo, parent hi, step, generation, mutations (uints), speed, sense, metabolism, size, hue, sat,
-//     val, harm (floats), 0;
+//     val, harm, mutator (floats);
 //   a death, 8 words: id lo, id hi, step, generation (uints), mass, x, y, the nutrient energy it gives back (floats; 0 for one that does not:
 //     a trimmed one). With husks on, the last three make the husk.
 // `step` is the step's place in the batch (from 0), and step k ended at first_step_end_seconds + k * step_seconds, which is when its
@@ -1172,6 +1197,7 @@ void BupSim::apply_events(const PackedByteArray &births, const PackedByteArray &
 			b.sat = get_f32(e, 12);
 			b.val = get_f32(e, 13);
 			b.harm = get_f32(e, 14);
+			b.mutator = get_f32(e, 15);
 			make_record(b, get_id(e, 2, 3));
 			next_id = std::max(next_id, b.id + 1); // (a bup added here later never takes a number the GPU has given)
 		}
@@ -1650,7 +1676,7 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 			double keep_share = std::clamp(0.5 + G.division_spread * gaussian(), 0.35, 0.65);
 			Vector2 daughter = split_off(b, keep_share);
 			double daughter_mass = daughter.x, daughter_energy = daughter.y;
-			Genome parent = { { b.genes[0], b.genes[1], b.genes[2], b.genes[3] }, b.hue, b.sat, b.val, b.harm, b.mutations, false };
+			Genome parent = { { b.genes[0], b.genes[1], b.genes[2], b.genes[3] }, b.hue, b.sat, b.val, b.harm, b.mutations, false, b.mutator };
 			Genome child_genome = mutate(parent);
 			if (!child_genome.lethal) { // a lethal daughter is never born; the parent still paid for her
 				Bup child;
@@ -1663,6 +1689,7 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 				child.val = child_genome.val;
 				child.harm = child_genome.harm;
 				child.mutations = child_genome.mutations;
+				child.mutator = child_genome.mutator;
 				derive(child);
 				child.mass = (float)daughter_mass;
 				child.birth_mass = child.mass;
