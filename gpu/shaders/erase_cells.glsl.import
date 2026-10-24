@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://hud04t5oydst"
+path="res://.godot/imported/erase_cells.glsl-39b7c18459d8ae7a5e269bedaa7c110f.res"
+
+[deps]
+
+source_file="res://gpu/shaders/erase_cells.glsl"
+dest_files=["res://.godot/imported/erase_cells.glsl-39b7c18459d8ae7a5e269bedaa7c110f.res"]
+
+[params]
+

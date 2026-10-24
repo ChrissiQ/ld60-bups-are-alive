@@ -138,6 +138,51 @@ layout_mode = 2
 label_text = "@free_setup.medium_thickness"
 label_tip = "@free_setup.thickness_tip"
 
+[node name="BackendBox" type="VBoxContainer" parent="Panel/Box/Scroll/Rows/Advanced"]
+layout_mode = 2
+theme_type_variation = &"TightStack"
+
+[node name="BackendRow" type="HBoxContainer" parent="Panel/Box/Scroll/Rows/Advanced/BackendBox"]
+layout_mode = 2
+
+[node name="BackendLabel" type="Label" parent="Panel/Box/Scroll/Rows/Advanced/BackendBox/BackendRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+tooltip_text = "@free_setup.backend_tip"
+mouse_filter = 0
+text = "@free_setup.backend"
+
+[node name="AutoButton" type="Button" parent="Panel/Box/Scroll/Rows/Advanced/BackendBox/BackendRow"]
+layout_mode = 2
+theme_type_variation = &"ToolButton"
+toggle_mode = true
+text = "@free_setup.backend_auto"
+
+[node name="OnButton" type="Button" parent="Panel/Box/Scroll/Rows/Advanced/BackendBox/BackendRow"]
+layout_mode = 2
+theme_type_variation = &"ToolButton"
+toggle_mode = true
+text = "@free_setup.backend_on"
+
+[node name="OffButton" type="Button" parent="Panel/Box/Scroll/Rows/Advanced/BackendBox/BackendRow"]
+layout_mode = 2
+theme_type_variation = &"ToolButton"
+toggle_mode = true
+text = "@free_setup.backend_off"
+
+[node name="BackendHint" type="Label" parent="Panel/Box/Scroll/Rows/Advanced/BackendBox"]
+layout_mode = 2
+theme_type_variation = &"Hint"
+text = "@free_setup.backend_hint"
+autowrap_mode = 3
+
+[node name="BackendNotice" type="Label" parent="Panel/Box/Scroll/Rows/Advanced/BackendBox"]
+visible = false
+layout_mode = 2
+theme_type_variation = &"Notice"
+text = "@free_setup.backend_unavailable"
+autowrap_mode = 3
+
 [node name="Actions" type="HBoxContainer" parent="Panel/Box"]
 layout_mode = 2
 

@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://bv8jmlj6x6ft7"
+path="res://.godot/imported/pfa2.glsl-86ee3e65b8753f1a02353447c2369853.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pfa2.glsl"
+dest_files=["res://.godot/imported/pfa2.glsl-86ee3e65b8753f1a02353447c2369853.res"]
+
+[params]
+

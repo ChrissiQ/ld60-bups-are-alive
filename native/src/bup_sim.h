@@ -13,6 +13,7 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
@@ -122,7 +123,13 @@ class BupSim : public RefCounted {
 	double gamma(double shape);
 	void note_mutation(Genome &g);
 	Genome mutate(const Genome &parent);
-	void derive(Bup &b);
+	void derive(Bup &b) const;
+	// The GPU simulation's bup record (gpu/kernels.gd): STATE_WORDS 32-bit words, see export_state_bytes.
+	static constexpr int STATE_WORDS = 24;
+	Bup bup_from_record(const uint8_t *record) const; // a bup as the record has it (the derived figures worked out again, no chemotaxis memory)
+	Dictionary info_of(const Bup &b) const; // what bup_info says of a bup
+	Vector3 steering_of(double x, double y, double speed, double sense_range) const;
+	void emit_sources(double delta, const PackedVector2Array &source_pos, const PackedFloat32Array &source_rates); // a step of the sources' emissions
 	int find(int64_t id) const;
 	Bup *get(int64_t id);
 
@@ -205,6 +212,19 @@ public:
 	void set_seed(int64_t seed);
 	void set_limit(int bup_limit) { limit = bup_limit; }
 	void set_upkeep_scale(double scale) { upkeep_scale = scale; }
+	PackedFloat32Array export_state() const; // every bup, 24 floats each (see the order in the .cpp; the id as a float): for the GPU tools' comparisons
+	// The bups and the GPU simulation (gpu/gpu_world.gd), which keeps the bups on the GPU and the family records here:
+	// export_state_bytes / import_state_bytes move every bup as the GPU's record (see the .cpp) without touching the records;
+	// info_from_state is bup_info for one such record; apply_events builds the records from the GPU's births and deaths;
+	// alive_ids is bup_ids from the records (the bups are on the GPU); step_world is only the sources' part of `step`;
+	// steering_at is bup_steering for a swimmer of this speed and sense range at a point.
+	PackedByteArray export_state_bytes() const;
+	void import_state_bytes(const PackedByteArray &state);
+	Dictionary info_from_state(const PackedByteArray &state, int index) const;
+	void apply_events(const PackedByteArray &births, const PackedByteArray &deaths, double first_step_end_seconds, double step_seconds);
+	PackedInt64Array alive_ids() const;
+	void step_world(double delta, const PackedVector2Array &source_pos, const PackedFloat32Array &source_rates, double sim_time = -1.0);
+	Vector3 steering_at(const Vector2 &local, double speed, double sense_range) const;
 	void set_threads(int count) {
 		threads = count;
 		field->set_threads(count);

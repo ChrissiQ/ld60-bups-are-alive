@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://brpenoditym7"
+path="res://.godot/imported/bn1.glsl-f95828eeaa59912f4b27db34ece3afb4.res"
+
+[deps]
+
+source_file="res://gpu/shaders/bn1.glsl"
+dest_files=["res://.godot/imported/bn1.glsl-f95828eeaa59912f4b27db34ece3afb4.res"]
+
+[params]
+

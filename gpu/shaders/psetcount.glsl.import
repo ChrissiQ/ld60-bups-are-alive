@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://1n70aelpluc7"
+path="res://.godot/imported/psetcount.glsl-9fa2ee7a8df916065e42c46cc5bd9b7d.res"
+
+[deps]
+
+source_file="res://gpu/shaders/psetcount.glsl"
+dest_files=["res://.godot/imported/psetcount.glsl-9fa2ee7a8df916065e42c46cc5bd9b7d.res"]
+
+[params]
+

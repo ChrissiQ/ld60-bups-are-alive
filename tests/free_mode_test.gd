@@ -603,7 +603,7 @@ func _init() -> void:
 	var limit_copy := _make_dish()
 	check(limit_copy.from_dict(TestUtil.saved(limited)) and limit_copy.bup_limit == 50, "the limit survives save and load")
 	check(StartConditions.from_dict({"bup_limit": 99999999}).bup_limit == StartConditions.MAX_BUP_LIMIT and StartConditions.from_dict({"bup_limit": 1}).bup_limit == StartConditions.MIN_BUP_LIMIT, "a saved limit is clamped to the slider's range")
-	check(StartConditions.MAX_DISH_RADIUS == 90000.0 and StartConditions.MAX_BUP_LIMIT == 100000, "free mode offers dishes up to 90000 µm and limits up to 100000")
+	check(StartConditions.MAX_DISH_RADIUS == 90000.0 and StartConditions.MAX_BUP_LIMIT == 1000000, "free mode offers dishes up to 90000 µm and limits up to 1,000,000")
 	limited.free()
 	limit_copy.free()
 
@@ -801,6 +801,7 @@ func _init() -> void:
 	check(HistoryGraph.nice_ceil(73.0) == 100.0 and HistoryGraph.nice_ceil(101.0) == 150.0 and HistoryGraph.nice_ceil(301.0) == 500.0, "axis max rounds up to a round number (large)")
 	check(HistoryGraph.nice_ceil(1234.0) == 1600.0 and HistoryGraph.nice_ceil(35300.0) == 40000.0 and HistoryGraph.nice_ceil(100000.0) == 100000.0 and HistoryGraph.nice_ceil(9000.0) == 10000.0, "axis max beyond the table rounds up to a round number that halves to one (%s, %s)" % [HistoryGraph.nice_ceil(1234.0), HistoryGraph.nice_ceil(35300.0)])
 	check(SimClock.format(0) == "0:00" and SimClock.format(65) == "1:05" and SimClock.format(900) == "15:00" and SimClock.format(3600) == "1:00:00" and SimClock.format(3725) == "1:02:05", "the clock reads simulation time as m:ss, then h:mm:ss")
+	check(HistoryGraph.pop_axis_max(1.2e6, 1000000) == 1000000.0 and HistoryGraph.pop_axis_max(1000000.0, 1000000) == 1000000.0 and HistoryGraph.pop_axis_max(4.0e5, 1000000) == 4.0e5 and HistoryGraph.pop_axis_max(1.2e6, 0) == 1.2e6, "the population axis never tops out above the bup limit (and rounds up to it below)")
 	check(HistoryGraph.format_time(3600) == "1h" and HistoryGraph.format_time(7200) == "2h", "graph ticks count hours of simulation time")
 	check(HistoryGraph.time_ticks(0.0, 900.0, 300.0) == [0.0, 300.0, 600.0, 900.0], "time ticks over the first window")
 	check(HistoryGraph.time_ticks(399.0, 1299.0, 300.0) == [600.0, 900.0, 1200.0], "time ticks over a scrolled window")
@@ -1149,6 +1150,15 @@ func _init() -> void:
 	m._open_menu()
 	check(m.pause_menu.initial_panel.visible and m.pause_menu.initial_bups.value_label.text == "150" and m.pause_menu.initial_nutrients.value_label.text == "40/mm²" and m.pause_menu.initial_rate.value_label.text == "11.0 /mm²/h" and m.pause_menu.initial_dish.value_label.text == "0.3 mm" and m.pause_menu.initial_limit.value_label.text == UiText.thousands(chosen.bup_limit), "the Escape menu records how the dish started, unchanged by later changes (dish %s)" % m.pause_menu.initial_dish.value_label.text)
 	check(m.pause_menu.initial_bups.name_label.text == "Bups" and m.pause_menu.initial_rate.name_label.text == "Nutrient feed", "its rows carry their labels")
+	check(m.pause_menu.initial_running.visible and m.pause_menu.initial_running.name_label.text == "Simulating on" and m.pause_menu.initial_running.value_label.text == "CPU (auto)", "the record says where the bups are simulated now: the processor, chosen by the game")
+	check(not m.pause_menu.initial_backend.visible, "the record has no row for the GPU setting while it is Auto (like the other advanced settings at their defaults)")
+	var gpu_start := chosen.copy()
+	gpu_start.sim_backend = StartConditions.BACKEND_GPU
+	m.pause_menu.open(m.dish, true, gpu_start)
+	check(m.pause_menu.initial_backend.visible and m.pause_menu.initial_backend.value_label.text == "On" and m.pause_menu.initial_backend.name_label.text == "GPU simulation", "...and a row saying On when it was not")
+	gpu_start.sim_backend = StartConditions.BACKEND_CPU
+	m.pause_menu.open(m.dish, true, gpu_start)
+	check(m.pause_menu.initial_backend.visible and m.pause_menu.initial_backend.value_label.text == "Off", "...or Off")
 	m._close_menu()
 	# The dish-size slider covers every size, so a dish at its largest can still shrink.
 	m.dish.resize_to(StartConditions.MAX_DISH_RADIUS)
@@ -1200,4 +1210,75 @@ func _init() -> void:
 	for k in range(1, spread.size()):
 		spread_in_order = spread_in_order and absf(fposmod(spread[k].h - spread[k - 1].h, 1.0) - 0.2) < 0.001 and is_equal_approx(spread[k].s, 1.0) and is_equal_approx(spread[k].v, 1.0)
 	check(spread_in_order, "spread colours go round the wheel in order, a fifth of it apart for five founders")
+	_backend_rule_tests()
 	TestUtil.finish(self, "FREE MODE TESTS OK")
+
+
+## The GPU setting and the rule that picks the backend (Dish.backend_wants_gpu is a function of sizes, speed and population alone).
+## A step of 18.5 s is a frame at x10,000 (9 steps), 16.7 s one at x1,000 (1 step), 1.67 s one at x100; moves are BupSim.moves_for of the step.
+func _backend_rule_tests() -> void:
+	var auto := StartConditions.BACKEND_AUTO
+	var on := StartConditions.BACKEND_GPU
+	var off := StartConditions.BACKEND_CPU
+	# The setting: saved with the rest, anything else is Auto, goal mode's dish is always Auto.
+	var chosen := StartConditions.new()
+	check(chosen.sim_backend == auto, "the GPU setting starts as Auto")
+	chosen.sim_backend = on
+	check(StartConditions.from_dict(chosen.to_dict()).sim_backend == on and chosen.copy().sim_backend == on, "the GPU setting is saved and loaded with the rest")
+	check(StartConditions.from_dict({"sim_backend": "fast"}).sim_backend == auto and StartConditions.from_dict({"sim_backend": 3}).sim_backend == auto and StartConditions.from_dict({}).sim_backend == auto, "a setting that is not one of the three is Auto")
+	var d := _make_dish()
+	d.strike(chosen)
+	check(d.backend_setting == on and d.backend_running() == "cpu", "a dish takes the setting from its start (and runs on the processor where there is no GPU path: %s)" % d.backend_running())
+	d.strike()
+	check(d.backend_setting == auto, "goal mode's dish (no start given) is always Auto")
+	# Fine steps never run on the GPU, whatever the setting says (it has no fine path).
+	for setting: String in [auto, on, off]:
+		check(not Dish.backend_wants_gpu(setting, Dish.FINE_STEP, 1, 400, 1000000, false, true) and not Dish.backend_wants_gpu(setting, 0.1, 1, 400, 1000000, true, true), "'%s': a fine step (x1) is never the GPU's, even with a million bups" % setting)
+	check(not Dish.backend_wants_gpu(off, 18.5, 7, 400, 1000000, true, true), "Off: never")
+	check(Dish.backend_wants_gpu(on, 1.67, 1, 100, 4, false, true) and Dish.backend_wants_gpu(on, 16.7, 1, 100, 4, false, true), "On: at x100 and up, whatever the crowd")
+	check(not Dish.backend_wants_gpu(on, 1.67, 1, 100, 4, false, false), "On, but no usable GPU: the processor")
+	check(not Dish.backend_wants_gpu(auto, 18.5, 7, 400, 999, false, true) and not Dish.backend_wants_gpu(auto, 18.5, 7, 400, 999, true, true), "Auto: under AUTO_MIN_POPULATION bups, the processor, whatever the grid costs")
+	# Auto at x10,000 on a 10 mm dish with the usual grid: the processor's nine steps are 6 ms at about 2,400 bups.
+	var up := 0
+	for n in range(1000, 20001, 100):
+		if Dish.backend_wants_gpu(auto, 18.5, 7, 100, n, false, true):
+			up = n
+			break
+	check(up >= 2000 and up <= 3000, "Auto at x10,000 on a 10 mm dish goes to the GPU from about 2,400 bups (the processor's frame passes AUTO_CPU_UP_USEC): %d" % up)
+	check(Dish.backend_wants_gpu(auto, 18.5, 7, 100, up - 100, true, true) and not Dish.backend_wants_gpu(auto, 18.5, 7, 100, up - 100, false, true), "...and just below that it keeps the GPU once there (the processor's frame is still above AUTO_CPU_DOWN_USEC), without having gone to it")
+	# Hysteresis where one step is a whole frame (x1,000 on a fine grid: 668 + 0.044 n microseconds): between 3 ms and 6 ms, the answer is where it is.
+	check(not Dish.backend_wants_gpu(auto, 16.7, 6, 400, 80000, false, true) and Dish.backend_wants_gpu(auto, 16.7, 6, 400, 80000, true, true), "Auto: 80,000 bups at x1,000 on a fine grid is between the thresholds: the processor stays, the GPU stays")
+	check(Dish.backend_wants_gpu(auto, 16.7, 6, 400, 130000, false, true) and not Dish.backend_wants_gpu(auto, 16.7, 6, 400, 40000, true, true), "...130,000 sends it to the GPU, 40,000 sends it back")
+	# At x1,000 and x100 the processor keeps up with 100,000 bups on every grid: Auto stays on it.
+	for fit: Array in [[100, 1], [400, 6]]:  # (cells across, motion sub-steps of a 16.7 s step on that grid)
+		check(not Dish.backend_wants_gpu(auto, 1.67, 1, fit[0], 100000, false, true), "Auto at x100, %d cells, 100,000 bups: the processor" % fit[0])
+		check(not Dish.backend_wants_gpu(auto, 16.7, fit[1], fit[0], 100000, false, true), "Auto at x1,000, %d cells, 100,000 bups: the processor" % fit[0])
+	# Re-evaluated after anything that changes it, by the same call: speed down, a bigger grid, a new setting.
+	check(Dish.backend_wants_gpu(auto, 18.5, 7, 100, 5000, false, true), "5,000 bups at x10,000: the GPU")
+	check(not Dish.backend_wants_gpu(auto, 1.67, 1, 100, 5000, true, true), "...the speed drops to x100: the processor, at once")
+	check(not Dish.backend_wants_gpu(auto, 0.1, 1, 100, 5000, true, true), "...to x1: the processor")
+	check(Dish.backend_wants_gpu(auto, 18.5, 7, 400, 5000, false, true), "...a finer grid at x10,000: still the GPU")
+	check(not Dish.backend_wants_gpu(off, 18.5, 7, 400, 5000, true, true), "...the setting set to Off: the processor")
+	# A frame of several steps shorter than TOP_SPEED_STEP (x10,000 on a 120 Hz screen: 5 steps of 16.7 s): said by the caller, not guessed from the length.
+	check(not Dish.backend_wants_gpu(auto, 16.7, 6, 400, 15000, false, true) and Dish.backend_wants_gpu(auto, 16.7, 6, 400, 15000, false, true, 5), "a frame of 5 steps of 16.7 s (x10,000 at 120 Hz) is the GPU's at 15,000 bups on a fine grid, where one such step (x1,000) is not")
+	check(Dish.backend_frame_costs(16.7, 400, 6, 15000, 5).x > 4.9 * Dish.backend_frame_costs(16.7, 400, 6, 15000, 1).x, "...the frame's cost goes with the steps it holds")
+	# Plankton clouds slow both backends (the processor more): 10,000 of them send 10,000 bups at x10,000 on a coarse grid to the GPU.
+	check(not Dish.backend_wants_gpu(auto, 18.5, 1, 100, 10000, false, true, 0, 0) and Dish.backend_wants_gpu(auto, 18.5, 1, 100, 10000, false, true, 0, 10000), "10,000 bups at x10,000 on a 90 mm dish: the processor, until 10,000 clouds are floating")
+	# The device's room: a dish whose limit the GPU cannot hold stays on the processor (GpuWorld.most_bups).
+	check(Dish.backend_usable(true, 1000000, 5000000) and not Dish.backend_usable(true, 1000000, 700000) and not Dish.backend_usable(false, 10, 1000000000), "the GPU is used only where it exists and holds the limit")
+	# The costs the rule goes by rise with the crowd and with the grid, and the GPU's rise slower.
+	var small := Dish.backend_frame_costs(18.5, 100, 7, 2000)
+	var big := Dish.backend_frame_costs(18.5, 100, 7, 50000)
+	var fine_grid := Dish.backend_frame_costs(18.5, 400, 7, 2000)
+	check(big.x > small.x and big.y > small.y and fine_grid.x > small.x and fine_grid.y > small.y, "both backends cost more with more bups and with a finer grid")
+	check((big.x - small.x) > 3.0 * (big.y - small.y), "...the processor's cost rises faster with the crowd")
+	# Without a GPU nothing is ever loaded, and the frames of coarse steps are counted (a fine step starts the count again).
+	var w := _make_dish()
+	w.strike(chosen)
+	for i in 29:
+		w._choose_backend(1.67)
+	check(w._coarse_frames == 29 and not w.gpu_active, "29 coarse frames are counted, and the processor still runs (the GPU takes over at %d)" % Dish.COARSE_FRAMES_TO_GPU)
+	w._choose_backend(0.1)
+	check(w._coarse_frames == 0, "a fine step starts the count again")
+	w.set_backend_setting("garbage")
+	check(w.backend_setting == auto, "a setting that is not one of the three is Auto, for the dish too")

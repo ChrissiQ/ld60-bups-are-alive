@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://dd4i6ja7sd1s4"
+path="res://.godot/imported/probe.glsl-240a7476f2843466177d267bc94ee50b.res"
+
+[deps]
+
+source_file="res://gpu/shaders/probe.glsl"
+dest_files=["res://.godot/imported/probe.glsl-240a7476f2843466177d267bc94ee50b.res"]
+
+[params]
+

@@ -156,6 +156,13 @@ func _color(name: String) -> Color:
 	return get_theme_color(name, THEME_TYPE)
 
 
+## The population axis's top: the round maximum that holds the peak, but never above the dish's bup limit (the population cannot
+## go higher, so the scale must not show it going there). At the limit the population line sits on the top of the plot.
+static func pop_axis_max(peak: float, bup_limit: int) -> float:
+	var top := nice_ceil(peak)
+	return minf(top, float(bup_limit)) if bup_limit > 0 else top
+
+
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), _color("background"))
 	draw_rect(Rect2(Vector2.ZERO, size), _color("border"), false, 1.0)
@@ -180,7 +187,7 @@ func _draw() -> void:
 	var peak := 10.0
 	for p in pops:
 		peak = maxf(peak, p.y)
-	var pop_max := nice_ceil(peak)
+	var pop_max := pop_axis_max(peak, dish.bup_limit)
 	var margin_left := maxf(MARGIN_LEFT, font.get_string_size(UiText.thousands(pop_max), HORIZONTAL_ALIGNMENT_LEFT, -1, tick_size).x + 10.0)  # (room for the widest population label)
 	var plot := Rect2(margin_left, MARGIN_TOP, size.x - margin_left - MARGIN_RIGHT, size.y - MARGIN_TOP - MARGIN_BOTTOM)
 	var in_days := ticks_in_days(mode, window)
@@ -220,8 +227,8 @@ func _draw() -> void:
 	draw_string(font, Vector2(plot.position.x, 16.0), Strings.t(SPAN_LEGENDS[mode]), HORIZONTAL_ALIGNMENT_CENTER, plot.size.x, legend_size, muted)
 	draw_string(font, Vector2(0.0, 16.0), Strings.t("graph.trait", [Strings.t("genes.graph_" + trait_name)]), HORIZONTAL_ALIGNMENT_RIGHT, size.x - 6.0, legend_size, trait_color)
 
-	_plot_line(pops, plot, 0.0, pop_max, x_min, window, population_color)
 	_plot_line(vals, plot, lo, hi, x_min, window, trait_color)
+	_plot_line(pops, plot, 0.0, pop_max, x_min, window, population_color)  # (last: at the cap the population sits on the top edge and must not be hidden by the trait)
 
 
 ## The samples of a series as (time, value), the ones from `x_min` on. In the whole-run view they are the whole run's (thinned: see

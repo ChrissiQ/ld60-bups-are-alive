@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://co4403qppg0se"
+path="res://.godot/imported/erase_puffs.glsl-c90d2401f626771609b980f1447d56ca.res"
+
+[deps]
+
+source_file="res://gpu/shaders/erase_puffs.glsl"
+dest_files=["res://.godot/imported/erase_puffs.glsl-c90d2401f626771609b980f1447d56ca.res"]
+
+[params]
+

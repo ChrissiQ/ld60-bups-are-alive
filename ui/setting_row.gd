@@ -20,9 +20,9 @@ signal value_changed(value: float)
 ## Column widths. The defaults suit the setup and menu screens; a narrow panel sets smaller ones in its scene,
 ## so a row never makes its panel wider than the other things in it.
 @export var label_min_width := 148.0
-@export var slider_min_width := 180.0
+@export var slider_min_width := 156.0  ## (with the value's 112, a row is as wide as it was with 180 and 88: the setup screen's panel keeps clear of its preview)
 @export var slider_min_height := 28.0
-@export var value_min_width := 88.0
+@export var value_min_width := 112.0  ## (room for "1,000,000", the most bups a dish holds)
 @export var unit_min_width := 100.0
 ## A small row for a sidebar: the readout's text size, and no reset button.
 @export var compact := false

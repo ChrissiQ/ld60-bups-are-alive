@@ -50,6 +50,7 @@ static func report(dish: Dish, scene: Node, extra: Dictionary) -> String:
 			"layers_hidden": _layers_hidden(dish),
 			"pick_mode": Dish.PickMode.keys()[dish.pick_mode],
 		}
+		data["backend"] = backend(dish)
 		data["nutrient"] = {
 			"cells_across": field.get_size(),
 			"max_across": field.get_max_across(),
@@ -64,13 +65,36 @@ static func report(dish: Dish, scene: Node, extra: Dictionary) -> String:
 	return JSON.stringify(data, "\t", false, true)  # (in the order written here: what is looked at first comes first)
 
 
+## Where the bups are simulated: the setting, where they run now, whether this machine can use the GPU at all, the GPU's name, and
+## what the GPU path has lost for want of room (clouds sent to the grid, list entries cut, births and deaths with no event slot).
+static func backend(dish: Dish) -> Dictionary:
+	var out := {
+		"setting": dish.backend_setting,
+		"running": dish.backend_running(),
+		"gpu_available": GpuWorld.available(),
+		"gpu_device": dish.gpu_world.device_name() if dish.gpu_world != null else "",
+		"coarse_frames": dish._coarse_frames,
+		"state_on_cpu": dish._gpu_on_cpu,
+		"gpu_overflows": {},
+	}
+	var world := dish.gpu_world
+	if world != null and world.gpu != null:
+		var counts := {}
+		if world.has_method("overflow_counts"):  # (the pipeline of Step 3B keeps them as read back each frame)
+			counts = world.call("overflow_counts")
+		else:
+			world._transfer_call(func() -> void: counts.assign(world.gpu.overflows()))
+		out["gpu_overflows"] = counts
+	return out
+
+
 ## The mean nutrient at each of RIM_FRACTIONS of the radius, averaged around the dish: where a ring or a step shows up.
 static func nutrient_profile(dish: Dish) -> Dictionary:
 	var out := {}
 	for fraction: float in RIM_FRACTIONS:
 		var total := 0.0
 		for k in RIM_DIRECTIONS:
-			total += dish.field.read(Vector2.from_angle(TAU * k / RIM_DIRECTIONS) * dish.radius * fraction).x
+			total += dish.nutrient_reading(Vector2.from_angle(TAU * k / RIM_DIRECTIONS) * dish.radius * fraction).x
 		out["%.3f" % fraction] = total / RIM_DIRECTIONS
 	return out
 
@@ -143,10 +167,10 @@ static func _layers_hidden(dish: Dish) -> Array:
 
 
 static func _selected(dish: Dish) -> Dictionary:
-	if dish.has_bup(dish.selected_id):
-		var info := dish.bup_info(dish.selected_id)
-		info["steering_reading"] = dish.sim.bup_steering(dish.selected_id)
-		info["nutrient_here"] = dish.field.read(info["pos"])
+	var info := dish.bup_info(dish.selected_id) if dish.has_bup(dish.selected_id) else {}
+	if not info.is_empty():  # (on the GPU path a bup's info comes a few frames after it is chosen, and goes as it dies)
+		info["steering_reading"] = dish.bup_steering(dish.selected_id)
+		info["nutrient_here"] = dish.nutrient_reading(info["pos"])
 		return {"bup": info}
 	if dish.selected_source != null:
 		return {"source": dish.source_details(dish.selected_source)}

@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://djwkah2nq25vl"
+path="res://.godot/imported/pf2.glsl-278e02321c88d23b05dc40b2a0c11183.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pf2.glsl"
+dest_files=["res://.godot/imported/pf2.glsl-278e02321c88d23b05dc40b2a0c11183.res"]
+
+[params]
+

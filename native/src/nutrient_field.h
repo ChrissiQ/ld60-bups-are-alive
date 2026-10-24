@@ -7,6 +7,7 @@
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
@@ -38,6 +39,7 @@ class NutrientField : public RefCounted {
 		double cut = 1.0; // how far out it is looked for, as a multiple of cloud_cut (less for the clouds of a source: hundreds overlap, and their trimmed tails would add up to a missing far field)
 	};
 	std::vector<Puff> puffs;
+	std::vector<double> hmass; // the clouds' masses as the step began (what a bup's wish was shared out by: see take_from_clouds)
 	// A source (a pipette) releases nutrient steadily at a point; on a grid too coarse for the plume near it, what it releases
 	// is kept up and let go as a small cloud every so often (at first often, then every EMIT_INTERVAL seconds), each given the
 	// spread that what it released over that time has had. Keyed by where the source is.
@@ -86,6 +88,14 @@ class NutrientField : public RefCounted {
 	std::vector<double> fill_weights;
 	double fill_weight_total = 0.0;
 	bool fill_weights_valid = false;
+	void ensure_fill_weights();
+	// Recording (for the GPU spike): the clouds and deposits that would change this field are kept as events instead, for the GPU,
+	// which holds the clouds and the grid. A cloud is x, y, mass, variance, cut; a deposit is a cell and a concentration to add to it.
+	bool recording = false;
+	std::vector<float> rec_puffs;
+	std::vector<int> rec_cells;
+	std::vector<float> rec_amounts;
+	void add_to_cell(int cell, float amount);
 	int threads = 0; // 0: as many as the machine has; 1: just this one (the results are the same)
 	// Runs fn(job, block) for each of `blocks` blocks of lines or rows, on the worker threads when the grid is big enough to pay for it.
 	void run_blocks(void (*fn)(void *, uint32_t), void *job, int blocks);
@@ -148,6 +158,18 @@ public:
 	double total() const;
 	bool is_empty() const { return total() <= 0.0; }
 	PackedFloat32Array values() const;
+	void set_recording(bool on) { recording = on; }
+	PackedFloat32Array take_recorded_puffs();
+	PackedInt32Array take_recorded_cells();
+	PackedFloat32Array take_recorded_amounts();
+	PackedFloat32Array export_fill_weights(); // what fill(1.0) adds to each cell: for the GPU spike's tests
+	PackedInt32Array export_owner() const; // for each cell the cell whose nutrient it has (-1: none): for the GPU spike's tests
+	// The grid and the clouds as packed arrays, for moving them to and from the GPU (and for the copy of the GPU's field the dish
+	// reads while the GPU runs): {"conc": the n*n concentrations, "puffs": 5 floats a cloud, x, y, mass, variance, cut}.
+	// import_packed replaces both (cells outside the dish stay empty, clouds with nothing in them are dropped); the sources'
+	// kept-back nutrient is not touched.
+	Dictionary export_packed() const;
+	void import_packed(const PackedFloat32Array &conc, const PackedFloat32Array &puffs);
 	Vector2 cell_centre(int i) const;
 	PackedByteArray steer_bytes(double speed, double sense_range, double max_alpha) const; // where a swimmer like this could steer: RGBA, one pixel a cell
 	PackedByteArray haze_bytes(double visible_above, double alpha_scale, double max_alpha) const; // the picture of the medium: RGBA, one pixel a cell

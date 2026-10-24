@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://b6inwygglr1gm"
+path="res://.godot/imported/ev_puffs.glsl-d96395785205c7e5e594bec3371b3997.res"
+
+[deps]
+
+source_file="res://gpu/shaders/ev_puffs.glsl"
+dest_files=["res://.godot/imported/ev_puffs.glsl-d96395785205c7e5e594bec3371b3997.res"]
+
+[params]
+

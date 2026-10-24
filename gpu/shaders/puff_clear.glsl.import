@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://b5w6gwjml7bux"
+path="res://.godot/imported/puff_clear.glsl-8e0172d7141aeb4f6db83db546fa4f58.res"
+
+[deps]
+
+source_file="res://gpu/shaders/puff_clear.glsl"
+dest_files=["res://.godot/imported/puff_clear.glsl-8e0172d7141aeb4f6db83db546fa4f58.res"]
+
+[params]
+

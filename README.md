@@ -13,6 +13,18 @@ The game is Godot 4.7 (GDScript). The simulation itself is C++ (a GDExtension in
 
 In game, **Controls** on the title screen lists the keys. The main ones: Space pauses, `1`-`4` set the speed (x1 to x10,000), `I` inspects, `H` pans, scroll or `+`/`-` zoom, `W A S D` move the view, `Z X C V B` show or hide layers.
 
+## CPU and GPU simulation
+
+The simulation has two backends that implement the same model: C++ on the CPU (`native/`) and compute shaders on the GPU (`gpu/`, run through Godot's `RenderingDevice`). The GPU is much faster with large populations at high playback speeds. Slow playback always runs on the CPU.
+
+The **GPU simulation** setting has three values:
+
+- **Auto** (default): chooses the backend while the game runs, from the dish size, the population and the playback speed.
+- **On**: runs on the GPU, except at slow playback.
+- **Off**: runs on the CPU only.
+
+Free mode offers the setting under the setup screen's Advanced options; goal mode always uses Auto. A machine with no usable GPU runs on the CPU.
+
 ## Build and run from source
 
 You need Godot 4.7, Python 3 with SCons (`pip install scons`), and a C++ compiler (Xcode command line tools on macOS, MSVC on Windows, gcc/clang on Linux).
@@ -62,6 +74,7 @@ It builds the libraries for Windows, Linux and macOS, exports the three builds, 
 - **The interface is styled only through the theme** (`scenes/menu_theme.tres`); `ui_lint_test` fails on hand-styling. See `AGENTS.md`.
 - **Motion table:** `scripts/motion_table.gd` is generated (`tools/gen_motion_table.gd`, about 5 minutes). Regenerate it when `motion_table_test` says it is stale.
 - **Changing C++:** rebuild the library for your platform; Windows and Linux libraries for releases come from the release workflow.
+- **Changing the model:** every change to the simulation model must be made in both backends, the C++ in `native/` and the GPU kernels in `gpu/`. See the GPU path section of `AGENTS.md`.
 - **macOS exports** need ETC2/ASTC texture import enabled (already set in `project.godot`).
 - **Saves** are `save.json` (goal mode) and `free_settings.json` (free-mode setup) in Godot's user data folder; the format may change before release.
 - Font: Commit Mono (SIL Open Font License, `fonts/OFL.txt`).

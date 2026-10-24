@@ -40,6 +40,14 @@ void NutrientField::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("total"), &NutrientField::total);
 	ClassDB::bind_method(D_METHOD("is_empty"), &NutrientField::is_empty);
 	ClassDB::bind_method(D_METHOD("values"), &NutrientField::values);
+	ClassDB::bind_method(D_METHOD("export_owner"), &NutrientField::export_owner);
+	ClassDB::bind_method(D_METHOD("export_packed"), &NutrientField::export_packed);
+	ClassDB::bind_method(D_METHOD("import_packed", "conc", "puffs"), &NutrientField::import_packed);
+	ClassDB::bind_method(D_METHOD("export_fill_weights"), &NutrientField::export_fill_weights);
+	ClassDB::bind_method(D_METHOD("set_recording", "on"), &NutrientField::set_recording);
+	ClassDB::bind_method(D_METHOD("take_recorded_puffs"), &NutrientField::take_recorded_puffs);
+	ClassDB::bind_method(D_METHOD("take_recorded_cells"), &NutrientField::take_recorded_cells);
+	ClassDB::bind_method(D_METHOD("take_recorded_amounts"), &NutrientField::take_recorded_amounts);
 	ClassDB::bind_method(D_METHOD("cell_centre", "i"), &NutrientField::cell_centre);
 	ClassDB::bind_method(D_METHOD("haze_bytes", "visible_above", "alpha_scale", "max_alpha"), &NutrientField::haze_bytes);
 	ClassDB::bind_method(D_METHOD("steer_bytes", "speed", "sense_range", "max_alpha"), &NutrientField::steer_bytes);
@@ -197,6 +205,10 @@ void NutrientField::snapshot() {
 	eff.resize((size_t)n * n);
 	run_blocks(&NutrientField::run_snapshot_block, this, (n + LINE_BLOCK - 1) / LINE_BLOCK);
 	rebuild_hash();
+	hmass.resize(puffs.size());
+	for (size_t k = 0; k < puffs.size(); k++) {
+		hmass[k] = puffs[k].mass;
+	}
 }
 
 // ---- the clouds --------------------------------------------------------------------------------
@@ -327,14 +339,61 @@ void NutrientField::deposit_gaussian(double x, double y, double mass, double var
 		return;
 	}
 	for (const auto &w : weights) {
-		conc[w.first] += (float)(mass * w.second / sum / (spacing * spacing));
+		add_to_cell(w.first, (float)(mass * w.second / sum / (spacing * spacing)));
 	}
 }
 
 static const double MIN_CLOUD_VARIANCE = 100.0; // µm^2: a cloud is never thinner than 10 µm across (a dose of one nutrient lands on a point)
 static const size_t MAX_CLOUDS = 200000; // past this a new one goes onto the grid
 
+void NutrientField::add_to_cell(int cell, float amount) {
+	if (recording) {
+		rec_cells.push_back(cell);
+		rec_amounts.push_back(amount);
+	} else {
+		conc[cell] += amount;
+	}
+}
+
+PackedFloat32Array NutrientField::take_recorded_puffs() {
+	PackedFloat32Array out;
+	out.resize((int64_t)rec_puffs.size());
+	if (!rec_puffs.empty()) {
+		memcpy(out.ptrw(), rec_puffs.data(), rec_puffs.size() * sizeof(float));
+	}
+	rec_puffs.clear();
+	return out;
+}
+
+PackedInt32Array NutrientField::take_recorded_cells() {
+	PackedInt32Array out;
+	out.resize((int64_t)rec_cells.size());
+	if (!rec_cells.empty()) {
+		memcpy(out.ptrw(), rec_cells.data(), rec_cells.size() * sizeof(int));
+	}
+	rec_cells.clear();
+	return out;
+}
+
+PackedFloat32Array NutrientField::take_recorded_amounts() {
+	PackedFloat32Array out;
+	out.resize((int64_t)rec_amounts.size());
+	if (!rec_amounts.empty()) {
+		memcpy(out.ptrw(), rec_amounts.data(), rec_amounts.size() * sizeof(float));
+	}
+	rec_amounts.clear();
+	return out;
+}
+
 void NutrientField::add_puff(double x, double y, double mass, double var, double cut) {
+	if (recording) {
+		rec_puffs.push_back((float)x);
+		rec_puffs.push_back((float)y);
+		rec_puffs.push_back((float)mass);
+		rec_puffs.push_back((float)var);
+		rec_puffs.push_back((float)cut);
+		return;
+	}
 	if (puffs.size() >= MAX_CLOUDS) {
 		deposit_gaussian(x, y, mass, var);
 		return;
@@ -542,11 +601,11 @@ void NutrientField::deposit_xy(double x, double y, double energy) {
 		return;
 	}
 	if (kept <= 1e-9) { // all the weight was on cells outside the dish: use the nearest one inside
-		conc[cells[0]] += (float)(energy / (spacing * spacing));
+		add_to_cell(cells[0], (float)(energy / (spacing * spacing)));
 		return;
 	}
 	for (int k = 0; k < count; k++) {
-		conc[cells[k]] += (float)(energy * weights[k] / kept / (spacing * spacing));
+		add_to_cell(cells[k], (float)(energy * weights[k] / kept / (spacing * spacing)));
 	}
 }
 
@@ -586,7 +645,7 @@ void NutrientField::deposit_disc(const Vector2 &local, double disc_radius, doubl
 	}
 	float per_cell = (float)(energy / (targets.size() * spacing * spacing));
 	for (int i : targets) {
-		conc[i] += per_cell;
+		add_to_cell(i, per_cell);
 	}
 }
 
@@ -710,6 +769,10 @@ void NutrientField::concentration_parts_xy(double x, double y, double &from_grid
 }
 
 double NutrientField::take_xy(double x, double y, double energy) {
+	hmass.resize(puffs.size());
+	for (size_t k = 0; k < puffs.size(); k++) {
+		hmass[k] = puffs[k].mass;
+	}
 	double from_grid, from_clouds;
 	CloudShare share;
 	concentration_parts_xy(x, y, from_grid, from_clouds, share);
@@ -735,8 +798,9 @@ double NutrientField::take_from_clouds(double x, double y, double wanted, double
 		}
 		return taken;
 	}
-	each_puff(x, y, [&](int k, double, double, double r2) { // (more than the few kept: look again)
-		double part = std::min(puffs[k].mass, wanted * (puffs[k].mass * ha[k] * fast_exp(-r2 * hb[k])) / from_clouds);
+	each_puff(x, y, [&](int k, double, double, double r2) { // (more than the few kept: look again, by the masses as they were when the shares were made: the bups before this one have taken from the clouds since, and shares of the clouds as they are now would not add up to the whole)
+		double mass_then = (size_t)k < hmass.size() ? hmass[k] : puffs[k].mass;
+		double part = std::min(puffs[k].mass, wanted * (mass_then * ha[k] * fast_exp(-r2 * hb[k])) / from_clouds);
 		puffs[k].mass -= part;
 		taken += part;
 	});
@@ -823,18 +887,8 @@ double NutrientField::patch_noise(double x, double y) const {
 	return total;
 }
 
-void NutrientField::fill(double concentration) {
-	if (concentration <= 0.0 || inside_count == 0) {
-		return;
-	}
-	if (patch_amplitude <= 0.0) {
-		for (size_t i = 0; i < conc.size(); i++) {
-			if (inside[i]) {
-				conc[i] += (float)concentration;
-			}
-		}
-		return;
-	}
+// Each cell's share of a feed, patches included: made once and kept until the grid or the landscape changes (the weights depend on nothing else).
+void NutrientField::ensure_fill_weights() {
 	// The noise, scaled to zero mean and unit spread over the dish, then each cell gets (1 + amplitude * noise) of the
 	// concentration, kept above a floor and rescaled so that the dish still gets exactly `concentration` on average. The
 	// weights depend only on the grid and the landscape, so they are made once and kept until either changes.
@@ -864,6 +918,35 @@ void NutrientField::fill(double concentration) {
 		}
 		fill_weights_valid = true;
 	}
+}
+
+// What `fill(1.0)` adds to each cell (nothing outside the dish): for the GPU spike's tests.
+PackedFloat32Array NutrientField::export_fill_weights() {
+	PackedFloat32Array out;
+	out.resize((int64_t)conc.size());
+	float *w = out.ptrw();
+	if (patch_amplitude > 0.0) {
+		ensure_fill_weights();
+	}
+	for (size_t i = 0; i < conc.size(); i++) {
+		w[i] = !inside[i] ? 0.0f : patch_amplitude > 0.0 ? (float)(fill_weights[i] * inside_count / fill_weight_total) : 1.0f;
+	}
+	return out;
+}
+
+void NutrientField::fill(double concentration) {
+	if (concentration <= 0.0 || inside_count == 0) {
+		return;
+	}
+	if (patch_amplitude <= 0.0) {
+		for (size_t i = 0; i < conc.size(); i++) {
+			if (inside[i]) {
+				conc[i] += (float)concentration;
+			}
+		}
+		return;
+	}
+	ensure_fill_weights();
 	double scale = concentration * inside_count / fill_weight_total;
 	for (size_t i = 0; i < conc.size(); i++) {
 		if (inside[i]) {
@@ -955,6 +1038,53 @@ PackedFloat32Array NutrientField::values() const {
 	out.resize((int64_t)conc.size());
 	if (!conc.empty()) {
 		memcpy(out.ptrw(), conc.data(), conc.size() * sizeof(float));
+	}
+	return out;
+}
+
+Dictionary NutrientField::export_packed() const {
+	PackedFloat32Array packed;
+	packed.resize((int64_t)puffs.size() * 5);
+	float *w = packed.ptrw();
+	for (size_t k = 0; k < puffs.size(); k++) {
+		const Puff &p = puffs[k];
+		w[k * 5] = (float)p.x;
+		w[k * 5 + 1] = (float)p.y;
+		w[k * 5 + 2] = (float)p.mass;
+		w[k * 5 + 3] = (float)p.var;
+		w[k * 5 + 4] = (float)p.cut;
+	}
+	Dictionary out;
+	out["conc"] = values();
+	out["puffs"] = packed;
+	return out;
+}
+
+void NutrientField::import_packed(const PackedFloat32Array &new_conc, const PackedFloat32Array &new_puffs) {
+	ERR_FAIL_COND_MSG(new_conc.size() != (int64_t)conc.size(), "NutrientField.import_packed: the grid is not this field's size");
+	ERR_FAIL_COND_MSG(new_puffs.size() % 5 != 0, "NutrientField.import_packed: clouds are 5 floats each");
+	const float *c = new_conc.ptr();
+	for (size_t i = 0; i < conc.size(); i++) {
+		conc[i] = inside[i] ? c[i] : 0.0f;
+	}
+	const float *q = new_puffs.ptr();
+	int64_t clouds = new_puffs.size() / 5;
+	puffs.clear();
+	puffs.reserve((size_t)clouds);
+	for (int64_t k = 0; k < clouds; k++) {
+		Puff p = { q[k * 5], q[k * 5 + 1], q[k * 5 + 2], q[k * 5 + 3], q[k * 5 + 4] };
+		if (p.var > 0.0 && p.mass > 0.0) {
+			puffs.push_back(p);
+		}
+	}
+	hash_dirty = true;
+}
+
+PackedInt32Array NutrientField::export_owner() const {
+	PackedInt32Array out;
+	out.resize((int64_t)owner.size());
+	if (!owner.empty()) {
+		memcpy(out.ptrw(), owner.data(), owner.size() * sizeof(int));
 	}
 	return out;
 }

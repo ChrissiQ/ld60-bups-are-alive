@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://cxx2oxw5cpukd"
+path="res://.godot/imported/q_record.glsl-3e89ff082cc2119a148e8b989a6fed53.res"
+
+[deps]
+
+source_file="res://gpu/shaders/q_record.glsl"
+dest_files=["res://.godot/imported/q_record.glsl-3e89ff082cc2119a148e8b989a6fed53.res"]
+
+[params]
+

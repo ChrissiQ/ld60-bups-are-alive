@@ -7,7 +7,7 @@ const UM_PER_MM := 1000.0  ## the dish is chosen and shown in mm; the game works
 const MAX_BUPS := 250  ## the most founders a dish starts with (each can be named and coloured before the start)
 const MIN_BUP_LIMIT := 10
 const DEFAULT_BUP_LIMIT := 20000  ## what goal mode uses, and free mode starts with
-const MAX_BUP_LIMIT := 100000  ## how far the limit slider goes: how many the machine can run is for the player to find out
+const MAX_BUP_LIMIT := 1000000  ## how far the limit slider goes: how many the machine can run is for the player to find out (on the CPU, crowds near the top make slow playback crawl; the GPU path is meant for them)
 const MAX_NUTRIENT_DENSITY := 1000.0  ## units of nutrient in each mm² of the dish at the start (the info panel reads the nutrient in the same units/mm²)
 const MAX_FEED_DENSITY := 20.0  ## units of nutrient added to each mm² of the dish every hour
 const MIN_NUTRIENT_RESOLUTION := 100  ## the fewest cells across the dish's nutrient grid (the default: what a dish up to 2.5 mm across gets anyway)
@@ -19,6 +19,10 @@ const MAX_BLOOM_DENSITY := 10.0  ## plankton blooming in each mm² of the dish e
 const MIN_DISH_RADIUS := 1000.0  ## µm: 1 mm, the smallest dish a player can choose (smaller ones are not much use)
 const MIN_SIM_RADIUS := 150.0  ## µm: the smallest dish the simulation itself will run (the tests and old saves use small ones)
 const MAX_DISH_RADIUS := 90000.0  ## µm: 90 mm in radius, 180 mm across; the nutrient grid has the same number of cells at any size, so a big dish has coarse ones (1.8 mm each here)
+const BACKEND_AUTO := "auto"  ## the simulation runs on the GPU or the processor, whichever is faster for the dish (see Dish.backend_wants_gpu)
+const BACKEND_CPU := "cpu"  ## always on the processor
+const BACKEND_GPU := "gpu"  ## on the GPU whenever the machine has one and playback is fast enough for it (see Dish.FINE_STEP)
+const BACKENDS := [BACKEND_AUTO, BACKEND_CPU, BACKEND_GPU]
 
 var bups := 4
 var nutrient_density := 32.0  ## units of nutrient in each mm² of the dish at the start, spread evenly: enough that a few founders grow past the first goal (1,000 bups) with room to spare (measured at 10 mm radius, 10,000 units in all, about this much: all of 110 runs reached 1,000, at about 25-27 sim-hours; twice the nutrient gets there in about 12). A density, not a total, so the dish can be made any size without choosing the nutrient again.
@@ -32,6 +36,7 @@ var nutrient_resolution := MIN_NUTRIENT_RESOLUTION  ## cells across the dish's n
 var founders: Array = []
 var tutorial := false  ## the guided tour of the screen runs when the dish starts (goal mode decides that for itself)
 var bup_limit := DEFAULT_BUP_LIMIT  ## the most bups the dish holds: past it each birth displaces a random bup
+var sim_backend := BACKEND_AUTO  ## where the bups are simulated (an advanced option: the default picks the faster one while playing, and goal mode always does)
 
 
 ## Where free mode remembers the player's last choices (separate from the experiment save).
@@ -52,7 +57,7 @@ func copy() -> StartConditions:
 
 
 func to_dict() -> Dictionary:
-	return {"bups": bups, "nutrient_density": nutrient_density, "feed_density": feed_density, "bloom_density": bloom_density, "dish_radius": dish_radius, "medium_thickness": medium_thickness, "nutrient_resolution": nutrient_resolution, "bup_limit": bup_limit, "tutorial": tutorial, "founders": founders.slice(0, bups).duplicate(true)}  # (only the founders there are: nothing hidden is carried over)
+	return {"bups": bups, "nutrient_density": nutrient_density, "feed_density": feed_density, "bloom_density": bloom_density, "dish_radius": dish_radius, "medium_thickness": medium_thickness, "nutrient_resolution": nutrient_resolution, "bup_limit": bup_limit, "sim_backend": sim_backend, "tutorial": tutorial, "founders": founders.slice(0, bups).duplicate(true)}  # (only the founders there are: nothing hidden is carried over)
 
 
 ## Anything missing, malformed or out of range falls back to the default / the nearest valid value.
@@ -67,6 +72,8 @@ static func from_dict(d: Dictionary) -> StartConditions:
 	c.nutrient_resolution = clampi(int(_number(d, "nutrient_resolution", c.nutrient_resolution)), MIN_NUTRIENT_RESOLUTION, MAX_NUTRIENT_RESOLUTION)
 	c.bup_limit = clampi(int(_number(d, "bup_limit", c.bup_limit)), MIN_BUP_LIMIT, MAX_BUP_LIMIT)
 	c.bup_limit = maxi(c.bup_limit, c.bups)  # the dish holds at least its founders
+	var saved_backend: Variant = d.get("sim_backend")
+	c.sim_backend = saved_backend if saved_backend is String and saved_backend in BACKENDS else c.sim_backend
 	c.tutorial = d.get("tutorial") is bool and d["tutorial"]
 	var saved_founders: Variant = d.get("founders")
 	if saved_founders is Array:

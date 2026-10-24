@@ -152,6 +152,48 @@ func _init() -> void:
 	adv.queue_free()
 	await process_frame
 
+	# The GPU setting, an advanced option: three buttons of one group (Auto, On, Off), kept with the other choices, counted in the
+	# advanced heading, reset with the advanced options, and a one-line notice for On where this machine has no GPU to use.
+	Session.free_start = StartConditions.new()
+	var gs: Control = load("res://scenes/free_setup.tscn").instantiate()
+	root.add_child(gs)
+	await process_frame
+	var auto := StartConditions.BACKEND_AUTO
+	var on := StartConditions.BACKEND_GPU
+	var off := StartConditions.BACKEND_CPU
+	var buttons: Dictionary = gs.backend_buttons
+	var texts := [buttons[auto].text, buttons[on].text, buttons[off].text]
+	check(texts == ["Auto", "On", "Off"], "the three choices read Auto, On, Off (%s)" % str(texts))
+	check(buttons[auto].button_pressed and not buttons[on].button_pressed and not buttons[off].button_pressed and gs._start.sim_backend == auto, "the setting starts on Auto")
+	check(buttons[auto].button_group == buttons[on].button_group and buttons[on].button_group == buttons[off].button_group and buttons[auto].toggle_mode, "the choices are toggle buttons of one group, like the speed buttons")
+	check(not gs.backend_notice.visible and not gs.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "on Auto there is no notice and the advanced heading is as usual")
+	buttons[on].pressed.emit()
+	check(buttons[on].button_pressed and not buttons[auto].button_pressed and gs._start.sim_backend == on, "choosing On makes it the only one pressed and the setting")
+	check(gs.backend_notice.visible == not GpuWorld.available(), "On shows the one-line notice exactly where there is no GPU to use (here: %s)" % ("none" if not GpuWorld.available() else "one"))
+	check(gs.backend_notice.text == Strings.t("free_setup.backend_unavailable") and gs.backend_notice.text.length() < 100, "the notice is a line from strings.cfg")
+	check(gs.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "a setting that is not Auto shows 'changed' on the advanced heading")
+	check(Strings.t("free_setup.backend_hint").contains("x100 and up") and Strings.t("free_setup.backend_hint").contains("processor"), "the hint says the GPU applies at fast playback (x100 and up) and the processor runs the slow")
+	buttons[off].pressed.emit()
+	check(not gs.backend_notice.visible and gs._start.sim_backend == off, "Off needs no notice")
+	gs._go()
+	check(StartConditions.load_saved().sim_backend == off, "GO saves the setting")
+	gs.queue_free()
+	await process_frame
+	Session.free_start = StartConditions.load_saved()
+	var gs2: Control = load("res://scenes/free_setup.tscn").instantiate()
+	root.add_child(gs2)
+	await process_frame
+	check(gs2.backend_buttons[off].button_pressed and gs2._start.sim_backend == off, "the next launch shows the setting")
+	gs2.advanced_toggle.pressed.emit()
+	await process_frame
+	gs2.advanced_reset.pressed.emit()
+	check(gs2.backend_buttons[auto].button_pressed and gs2._start.sim_backend == auto and not gs2.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "the advanced options' own reset puts it back to Auto")
+	gs2.backend_buttons[on].pressed.emit()
+	gs2.reset_button.pressed.emit()
+	check(gs2.backend_buttons[auto].button_pressed and gs2._start.sim_backend == auto, "the screen's Use defaults does too")
+	gs2.queue_free()
+	await process_frame
+
 	# A number box: focus from the keyboard selects the whole number (typing replaces it); focus from a click selects nothing,
 	# so the mouse can then select part of it.
 	Session.free_start = StartConditions.new()

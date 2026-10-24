@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://cvm6dsloj314f"
+path="res://.godot/imported/puff_commit.glsl-8934600706bab6f1cd7cc412f8246da0.res"
+
+[deps]
+
+source_file="res://gpu/shaders/puff_commit.glsl"
+dest_files=["res://.godot/imported/puff_commit.glsl-8934600706bab6f1cd7cc412f8246da0.res"]
+
+[params]
+

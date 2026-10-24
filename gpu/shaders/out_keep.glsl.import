@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://7yja3xn8n16n"
+path="res://.godot/imported/out_keep.glsl-751a37f55913ffc1945157e73a14878b.res"
+
+[deps]
+
+source_file="res://gpu/shaders/out_keep.glsl"
+dest_files=["res://.godot/imported/out_keep.glsl-751a37f55913ffc1945157e73a14878b.res"]
+
+[params]
+

@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://82wfb45ldiwh"
+path="res://.godot/imported/q_pick2.glsl-7b0da31ea2cd69dd8358f353db5c2cbe.res"
+
+[deps]
+
+source_file="res://gpu/shaders/q_pick2.glsl"
+dest_files=["res://.godot/imported/q_pick2.glsl-7b0da31ea2cd69dd8358f353db5c2cbe.res"]
+
+[params]
+

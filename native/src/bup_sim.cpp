@@ -8,6 +8,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <unordered_set>
 
 using namespace godot;
 
@@ -30,6 +32,25 @@ int gene_index(const String &name) {
 double fposmod1(double v) {
 	return v - std::floor(v);
 }
+
+// The words of the GPU's records and events (little-endian 32-bit words, as the GPU writes them).
+const float NO_PICTURE = 3e38f; // px, py of a record with no last picture (any value from 1e30 up means the same)
+const int BIRTH_WORDS = 16, DEATH_WORDS = 8;
+void put_u32(uint8_t *record, int word, uint32_t v) { memcpy(record + word * 4, &v, 4); }
+void put_f32(uint8_t *record, int word, float v) { memcpy(record + word * 4, &v, 4); }
+uint32_t get_u32(const uint8_t *record, int word) {
+	uint32_t v;
+	memcpy(&v, record + word * 4, 4);
+	return v;
+}
+float get_f32(const uint8_t *record, int word) {
+	float v;
+	memcpy(&v, record + word * 4, 4);
+	return v;
+}
+int64_t get_id(const uint8_t *record, int lo_word, int hi_word) {
+	return (int64_t)((uint64_t)get_u32(record, lo_word) | ((uint64_t)get_u32(record, hi_word) << 32));
+}
 } // namespace
 
 void BupSim::_bind_methods() {
@@ -41,6 +62,14 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("grow", "new_radius"), &BupSim::grow);
 	ClassDB::bind_method(D_METHOD("shrink", "new_radius"), &BupSim::shrink);
 	ClassDB::bind_method(D_METHOD("set_threads", "count"), &BupSim::set_threads);
+	ClassDB::bind_method(D_METHOD("export_state"), &BupSim::export_state);
+	ClassDB::bind_method(D_METHOD("export_state_bytes"), &BupSim::export_state_bytes);
+	ClassDB::bind_method(D_METHOD("import_state_bytes", "state"), &BupSim::import_state_bytes);
+	ClassDB::bind_method(D_METHOD("info_from_state", "state", "index"), &BupSim::info_from_state);
+	ClassDB::bind_method(D_METHOD("apply_events", "births", "deaths", "first_step_end_seconds", "step_seconds"), &BupSim::apply_events);
+	ClassDB::bind_method(D_METHOD("alive_ids"), &BupSim::alive_ids);
+	ClassDB::bind_method(D_METHOD("step_world", "delta", "source_pos", "source_rates", "sim_time"), &BupSim::step_world, DEFVAL(-1.0));
+	ClassDB::bind_method(D_METHOD("steering_at", "local", "speed", "sense_range"), &BupSim::steering_at);
 	ClassDB::bind_method(D_METHOD("get_field"), &BupSim::get_field);
 	ClassDB::bind_method(D_METHOD("random_float"), &BupSim::random_float);
 	ClassDB::bind_method(D_METHOD("random_point", "reach"), &BupSim::random_point);
@@ -272,7 +301,7 @@ double BupSim::sample_gamma(double shape) {
 
 // ---- bup bookkeeping ------------------------------------------------------------------------
 
-void BupSim::derive(Bup &b) {
+void BupSim::derive(Bup &b) const {
 	double size_gene = b.genes[3];
 	b.add_mass = (float)(G.add_mass_factor * size_gene * size_gene);
 	b.yield = (float)(std::exp(-(double)b.harm) / std::sqrt((double)b.genes[2]));
@@ -295,7 +324,7 @@ BupSim::Bup *BupSim::get(int64_t id) {
 
 int64_t BupSim::add_bup(const Vector2 &pos, const Dictionary &genome, double energy, double size, double birth_mass, int generation, const Vector2 &dir, int64_t id, int64_t parent) {
 	Bup b;
-	if (id > 0 && find(id) < 0) {
+	if (id > 0 && !has_bup(id)) { // (every bup in `bups` has a living record: a look-up, not a search, so a big saved dish loads in time)
 		b.id = id;
 		next_id = std::max(next_id, id + 1);
 	} else {
@@ -461,6 +490,11 @@ Array BupSim::lineage_export() const {
 // A saved game's records: they replace those of the same numbers, and the counts that keep a dead
 // record are worked out again from the parents.
 void BupSim::lineage_import(const Array &saved, const PackedInt64Array &pinned) {
+	std::unordered_set<int64_t> living; // (looked up, not searched for: a big dish has as many records as bups)
+	living.reserve(bups.size());
+	for (const Bup &b : bups) {
+		living.insert(b.id);
+	}
 	for (int i = 0; i < saved.size(); i++) {
 		Dictionary d = saved[i];
 		int64_t id = (int64_t)(double)d.get("id", 0);
@@ -483,7 +517,7 @@ void BupSim::lineage_import(const Array &saved, const PackedInt64Array &pinned) 
 		r.harm = (float)(double)d.get("harm", 0.0);
 		r.max_energy = (float)(double)d.get("max_energy", 0.0);
 		r.name = d.get("name", String());
-		r.alive = find(id) >= 0;
+		r.alive = living.count(id) > 0;
 		if (r.alive) {
 			r.died = -1;
 		}
@@ -546,18 +580,21 @@ void BupSim::set_bup_pos(int64_t id, const Vector2 &pos) {
 }
 
 Dictionary BupSim::bup_info(int64_t id) const {
-	Dictionary out;
 	int i = find(id);
 	if (i < 0) {
-		return out;
+		return Dictionary();
 	}
-	const Bup &b = bups[i];
+	return info_of(bups[i]);
+}
+
+Dictionary BupSim::info_of(const Bup &b) const {
+	Dictionary out;
 	out["id"] = b.id;
 	out["pos"] = Vector2(b.x, b.y);
 	out["dir"] = Vector2(b.dx, b.dy);
 	out["energy"] = b.energy;
 	out["max_energy"] = max_energy(b);
-	auto record = records.find(id);
+	auto record = records.find(b.id);
 	out["born"] = record == records.end() ? 0 : record->second.born;
 	out["mass"] = b.mass;
 	out["birth_mass"] = b.birth_mass;
@@ -574,7 +611,7 @@ Dictionary BupSim::bup_info(int64_t id) const {
 	out["harm"] = b.harm;
 	out["mutations"] = b.mutations;
 	out["upkeep"] = upkeep(b);
-	out["steering"] = bup_steering(id).z;
+	out["steering"] = steering_of(b.x, b.y, b.genes[0], sense_range(b)).z;
 	return out;
 }
 
@@ -741,10 +778,19 @@ double BupSim::bup_estimate_error(int64_t id, double concentration) const { WITH
 // up to 1.
 Vector3 BupSim::bup_steering(int64_t id) const {
 	WITH_BUP(id, Vector3(0, 0, 0.5))
+	return steering_of(b.x, b.y, b.genes[0], sense_range(b));
+}
+
+// The same for any swimmer of this speed and sense range at a point (for a bup that lives on the GPU).
+Vector3 BupSim::steering_at(const Vector2 &local, double speed, double sense_range) const {
+	return steering_of(local.x, local.y, speed, sense_range);
+}
+
+Vector3 BupSim::steering_of(double x, double y, double speed, double sense_range) const {
 	double c, gx, gy;
-	field->read_xy(b.x, b.y, c, gx, gy);
+	field->read_xy(x, y, c, gx, gy);
 	double glen = std::sqrt(gx * gx + gy * gy);
-	double chance = steering_chance(b.genes[0], sense_range(b), c, glen);
+	double chance = steering_chance(speed, sense_range, c, glen);
 	return glen > 1e-12 ? Vector3((float)(gx / glen), (float)(gy / glen), (float)chance) : Vector3(0, 0, 0.5);
 }
 
@@ -844,6 +890,194 @@ Vector2 BupSim::nearest_and_count(const Vector2 &local, double near) const {
 		}
 	}
 	return Vector2(nearest_sq < 0.0 ? -1.0f : (float)std::sqrt(nearest_sq), (float)count);
+}
+
+// Every bup as 24 floats: id, x, y, dx, dy, energy, mass, birth_mass, speed, sense, metabolism, size, yield, add_mass, drag_upkeep, harm,
+// hue, sat, val, mutations, generation, parent id (0: not kept here), 2 spare.
+PackedFloat32Array BupSim::export_state() const {
+	PackedFloat32Array out;
+	out.resize((int64_t)bups.size() * 24);
+	float *w = out.ptrw();
+	for (size_t i = 0; i < bups.size(); i++) {
+		const Bup &b = bups[i];
+		float *p = w + i * 24;
+		p[0] = (float)b.id;
+		p[1] = b.x;
+		p[2] = b.y;
+		p[3] = b.dx;
+		p[4] = b.dy;
+		p[5] = b.energy;
+		p[6] = b.mass;
+		p[7] = b.birth_mass;
+		p[8] = b.genes[0];
+		p[9] = b.genes[1];
+		p[10] = b.genes[2];
+		p[11] = b.genes[3];
+		p[12] = b.yield;
+		p[13] = b.add_mass;
+		p[14] = b.drag_upkeep;
+		p[15] = b.harm;
+		p[16] = b.hue;
+		p[17] = b.sat;
+		p[18] = b.val;
+		p[19] = (float)b.mutations;
+		p[20] = (float)b.generation;
+		p[21] = 0.0f;
+		p[22] = 0.0f;
+		p[23] = 0.0f;
+	}
+	return out;
+}
+
+// ---- the GPU simulation's records and events ------------------------------------------------
+
+// Every bup as the GPU simulation's record (gpu/kernels.gd): 24 32-bit words, 0 the id's low word, 1-20 x, y, dx, dy, energy, mass,
+// birth_mass, speed, sense, metabolism, size, yield, add_mass, drag_upkeep, harm, hue, sat, val, mutations, generation (floats),
+// 21 the id's high word, 22-23 where it was in the last picture (NO_PICTURE if nowhere yet).
+PackedByteArray BupSim::export_state_bytes() const {
+	PackedByteArray out;
+	out.resize((int64_t)bups.size() * STATE_WORDS * 4);
+	uint8_t *w = out.ptrw();
+	for (size_t i = 0; i < bups.size(); i++) {
+		const Bup &b = bups[i];
+		uint8_t *r = w + i * STATE_WORDS * 4;
+		const float words[20] = { b.x, b.y, b.dx, b.dy, b.energy, b.mass, b.birth_mass, b.genes[0], b.genes[1], b.genes[2], b.genes[3], b.yield,
+			b.add_mass, b.drag_upkeep, b.harm, b.hue, b.sat, b.val, (float)b.mutations, (float)b.generation };
+		put_u32(r, 0, (uint32_t)((uint64_t)b.id & 0xFFFFFFFFULL));
+		for (int k = 0; k < 20; k++) {
+			put_f32(r, 1 + k, words[k]);
+		}
+		put_u32(r, 21, (uint32_t)((uint64_t)b.id >> 32));
+		put_f32(r, 22, std::isnan(b.px) ? NO_PICTURE : b.px);
+		put_f32(r, 23, std::isnan(b.py) ? NO_PICTURE : b.py);
+	}
+	return out;
+}
+
+BupSim::Bup BupSim::bup_from_record(const uint8_t *record) const {
+	Bup b;
+	b.id = get_id(record, 0, 21);
+	b.x = get_f32(record, 1);
+	b.y = get_f32(record, 2);
+	b.dx = get_f32(record, 3);
+	b.dy = get_f32(record, 4);
+	b.energy = get_f32(record, 5);
+	b.mass = get_f32(record, 6);
+	b.birth_mass = get_f32(record, 7);
+	for (int g = 0; g < 4; g++) {
+		b.genes[g] = get_f32(record, 8 + g);
+	}
+	b.harm = get_f32(record, 15);
+	b.hue = get_f32(record, 16);
+	b.sat = get_f32(record, 17);
+	b.val = get_f32(record, 18);
+	b.mutations = (int)get_f32(record, 19);
+	b.generation = (int)get_f32(record, 20);
+	float px = get_f32(record, 22), py = get_f32(record, 23);
+	b.px = px >= 1e30f ? std::numeric_limits<float>::quiet_NaN() : px;
+	b.py = py >= 1e30f ? std::numeric_limits<float>::quiet_NaN() : py;
+	derive(b); // (yield, add_mass and drag_upkeep, as the CPU works them out)
+	return b;
+}
+
+// The bups become those of the records (as export_state_bytes makes them); the family records are left as they are (on the GPU path
+// they are kept up by apply_events, which must have been given every birth and death up to this state first). The swimmers' memory
+// of the slow playback starts afresh. The next id never goes back past an id in the state.
+void BupSim::import_state_bytes(const PackedByteArray &state) {
+	ERR_FAIL_COND_MSG(state.size() % (STATE_WORDS * 4) != 0, "BupSim.import_state_bytes: not a whole number of 96-byte records");
+	size_t count = (size_t)state.size() / (STATE_WORDS * 4);
+	const uint8_t *r = state.ptr();
+	bups.clear();
+	bups.reserve(count);
+	int64_t largest = 0;
+	for (size_t i = 0; i < count; i++) {
+		bups.push_back(bup_from_record(r + i * STATE_WORDS * 4));
+		largest = std::max(largest, bups.back().id);
+	}
+	next_id = std::max(next_id, largest + 1);
+}
+
+// What bup_info would say of the bup in record `index` of `state` (its birth from the records, its steering from the field as it is).
+Dictionary BupSim::info_from_state(const PackedByteArray &state, int index) const {
+	ERR_FAIL_COND_V_MSG(state.size() % (STATE_WORDS * 4) != 0, Dictionary(), "BupSim.info_from_state: not a whole number of 96-byte records");
+	if (index < 0 || (int64_t)index >= state.size() / (STATE_WORDS * 4)) {
+		return Dictionary();
+	}
+	return info_of(bup_from_record(state.ptr() + (size_t)index * STATE_WORDS * 4));
+}
+
+// The family records of a batch of GPU steps (little-endian 32-bit words):
+//   a birth, 16 words: id lo, id hi, parent lo, parent hi, step, generation, mutations (uints), speed, sense, metabolism, size, hue, sat,
+//     val, harm (floats), 0;
+//   a death, 8 words: id lo, id hi, step, generation (uints), mass (float), 0, 0, 0.
+// `step` is the step's place in the batch (from 0), and step k ended at first_step_end_seconds + k * step_seconds, which is when its
+// records are stamped. Each list is in the order of its steps. Step by step, the births are recorded and then the deaths (a bup never
+// divides and dies in the same step, except one displaced at the limit after dividing, which is held by its daughter either way).
+// The bups themselves are not touched. A birth whose id already has a record (a batch given twice) is passed over. The next id is
+// kept past every id born.
+void BupSim::apply_events(const PackedByteArray &births, const PackedByteArray &deaths, double first_step_end_seconds, double step_seconds) {
+	ERR_FAIL_COND_MSG(births.size() % (BIRTH_WORDS * 4) != 0, "BupSim.apply_events: births are 64 bytes each");
+	ERR_FAIL_COND_MSG(deaths.size() % (DEATH_WORDS * 4) != 0, "BupSim.apply_events: deaths are 32 bytes each");
+	const int64_t born_count = births.size() / (BIRTH_WORDS * 4), died_count = deaths.size() / (DEATH_WORDS * 4);
+	const uint8_t *bp = births.ptr(), *dp = deaths.ptr();
+	const double now_before = now_seconds; // (the dish's clock is ahead of the batch: it is put back afterwards)
+	int64_t bi = 0, di = 0;
+	while (bi < born_count || di < died_count) {
+		uint32_t step = UINT32_MAX;
+		if (bi < born_count) {
+			step = get_u32(bp + bi * BIRTH_WORDS * 4, 4);
+		}
+		if (di < died_count) {
+			step = std::min(step, get_u32(dp + di * DEATH_WORDS * 4, 2));
+		}
+		now_seconds = first_step_end_seconds + step * step_seconds;
+		for (; bi < born_count && get_u32(bp + bi * BIRTH_WORDS * 4, 4) == step; bi++) {
+			const uint8_t *e = bp + bi * BIRTH_WORDS * 4;
+			Bup b;
+			b.id = get_id(e, 0, 1);
+			if (records.count(b.id) > 0) {
+				continue;
+			}
+			b.generation = (int)get_u32(e, 5);
+			b.mutations = (int)get_u32(e, 6);
+			for (int g = 0; g < 4; g++) {
+				b.genes[g] = get_f32(e, 7 + g);
+			}
+			b.hue = get_f32(e, 11);
+			b.sat = get_f32(e, 12);
+			b.val = get_f32(e, 13);
+			b.harm = get_f32(e, 14);
+			make_record(b, get_id(e, 2, 3));
+			next_id = std::max(next_id, b.id + 1); // (a bup added here later never takes a number the GPU has given)
+		}
+		for (; di < died_count && get_u32(dp + di * DEATH_WORDS * 4, 2) == step; di++) {
+			const uint8_t *e = dp + di * DEATH_WORDS * 4;
+			Bup b;
+			b.id = get_id(e, 0, 1);
+			b.generation = (int)get_u32(e, 3);
+			b.mass = get_f32(e, 4);
+			record_death(b);
+		}
+	}
+	now_seconds = now_before;
+}
+
+// The ids of the living bups from their records, in order (bup_ids, for when the bups are on the GPU).
+PackedInt64Array BupSim::alive_ids() const {
+	std::vector<int64_t> ids;
+	ids.reserve(records.size());
+	for (const auto &entry : records) {
+		if (entry.second.alive) {
+			ids.push_back(entry.first);
+		}
+	}
+	std::sort(ids.begin(), ids.end());
+	PackedInt64Array out;
+	out.resize((int64_t)ids.size());
+	if (!ids.empty()) {
+		memcpy(out.ptrw(), ids.data(), ids.size() * sizeof(int64_t));
+	}
+	return out;
 }
 
 // ---- the step ------------------------------------------------------------------------------
@@ -1112,16 +1346,28 @@ int BupSim::moves_for_structure(double delta, double structure) const {
 	return std::max(1, (int)std::ceil(delta / (G.motion_step * scale * scale)));
 }
 
-void BupSim::step(double delta, const PackedVector2Array &source_pos, const PackedFloat32Array &source_rates, double feed_per_second, double sim_time) {
-	if (sim_time >= 0.0) {
-		now_seconds = sim_time;
-	}
+void BupSim::emit_sources(double delta, const PackedVector2Array &source_pos, const PackedFloat32Array &source_rates) {
 	int sources = (int)std::min(source_pos.size(), source_rates.size());
 	field->begin_emissions();
 	for (int i = 0; i < sources; i++) {
 		field->emit_xy(source_pos[i].x, source_pos[i].y, source_rates[i] / 60.0 * delta * G.nutrient_energy, delta);
 	}
 	field->end_emissions();
+}
+
+// Only the sources' part of a step (no feed, diffusion, clouds or bups): what the dish's own world does while the GPU runs the rest.
+void BupSim::step_world(double delta, const PackedVector2Array &source_pos, const PackedFloat32Array &source_rates, double sim_time) {
+	if (sim_time >= 0.0) {
+		now_seconds = sim_time;
+	}
+	emit_sources(delta, source_pos, source_rates);
+}
+
+void BupSim::step(double delta, const PackedVector2Array &source_pos, const PackedFloat32Array &source_rates, double feed_per_second, double sim_time) {
+	if (sim_time >= 0.0) {
+		now_seconds = sim_time;
+	}
+	emit_sources(delta, source_pos, source_rates);
 	feed_concentration += feed_per_second * delta;
 	diffuse_accum += delta;
 	if (diffuse_accum >= G.diffuse_interval) {

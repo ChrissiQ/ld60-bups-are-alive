@@ -154,6 +154,14 @@ label_text = "@pause.record_nutrient_detail"
 layout_mode = 2
 label_text = "@pause.record_medium_thickness"
 
+[node name="BackendRow" parent="Initial/Box" instance=ExtResource("3")]
+layout_mode = 2
+label_text = "@pause.record_backend"
+
+[node name="RunningRow" parent="Initial/Box" instance=ExtResource("3")]
+layout_mode = 2
+label_text = "@pause.record_running"
+
 [node name="LimitRow" parent="Initial/Box" instance=ExtResource("3")]
 layout_mode = 2
 label_text = "@pause.record_bup_limit"

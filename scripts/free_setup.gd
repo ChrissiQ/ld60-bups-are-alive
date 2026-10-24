@@ -22,6 +22,12 @@ const PLANKTON_SETTLE_SECONDS := 0.5  ## how long the settings are still before 
 @onready var advanced: VBoxContainer = $Panel/Box/Scroll/Rows/Advanced  ## options for testing the simulation itself, hidden until asked for
 @onready var detail_row: SettingRow = $Panel/Box/Scroll/Rows/Advanced/DetailRow
 @onready var thickness_row: SettingRow = $Panel/Box/Scroll/Rows/Advanced/ThicknessRow
+@onready var backend_buttons: Dictionary = {  ## the choices of the GPU setting: StartConditions.BACKEND_* -> its button
+	StartConditions.BACKEND_AUTO: $Panel/Box/Scroll/Rows/Advanced/BackendBox/BackendRow/AutoButton,
+	StartConditions.BACKEND_GPU: $Panel/Box/Scroll/Rows/Advanced/BackendBox/BackendRow/OnButton,
+	StartConditions.BACKEND_CPU: $Panel/Box/Scroll/Rows/Advanced/BackendBox/BackendRow/OffButton,
+}
+@onready var backend_notice: Label = $Panel/Box/Scroll/Rows/Advanced/BackendBox/BackendNotice  ## says so when On is chosen and this machine has no GPU to use
 @onready var limit_row: SettingRow = $Panel/Box/Scroll/Rows/LimitRow
 @onready var back_button: Button = $Panel/Box/Actions/BackButton
 @onready var go_button: Button = $Panel/Box/Actions/GoButton
@@ -68,6 +74,13 @@ func _ready() -> void:
 	dish_row.value_changed.connect(func(v: float) -> void: _start.dish_radius = snappedf(v * StartConditions.UM_PER_MM, 1.0); _refresh())
 	detail_row.value_changed.connect(func(v: float) -> void: _start.nutrient_resolution = int(v); _refresh(); _update_advanced_label())
 	thickness_row.value_changed.connect(func(v: float) -> void: _start.medium_thickness = v; _refresh(); _update_advanced_label())
+	var backend_group := ButtonGroup.new()  # (like the speed buttons: exactly one choice is on)
+	for choice: String in backend_buttons:
+		var button: Button = backend_buttons[choice]
+		button.button_group = backend_group
+		button.set_pressed_no_signal(choice == _start.sim_backend)
+		button.pressed.connect(func() -> void: _choose_backend(choice))
+	_update_backend_notice()
 	tutorial_toggle.tooltip_text = Strings.t("free_setup.tutorial_tip")
 	tutorial_toggle.set_pressed_no_signal(_start.tutorial)
 	_update_tutorial_label()
@@ -81,7 +94,8 @@ func _ready() -> void:
 	advanced_reset.tooltip_text = Strings.t("free_setup.advanced_reset_tip")
 	advanced_reset.pressed.connect(func() -> void:
 		for row: SettingRow in [detail_row, thickness_row]:
-			row.value = row.default_value)
+			row.value = row.default_value
+		_choose_backend(StartConditions.new().sim_backend))
 	limit_row.value_changed.connect(func(v: float) -> void: _start.bup_limit = int(v); _refresh())
 
 	_sync_limit_floor()
@@ -127,6 +141,20 @@ func _fit_scroll() -> void:
 	scroll.get_v_scroll_bar().modulate.a = 1.0 if wanted > scroll.custom_minimum_size.y + 0.5 else 0.0  # (nothing to scroll: the strip stays, the bar does not show)
 
 
+## Sets where the bups are simulated (a StartConditions.BACKEND_*) and shows it on the buttons.
+func _choose_backend(choice: String) -> void:
+	_start.sim_backend = choice
+	for key: String in backend_buttons:
+		backend_buttons[key].set_pressed_no_signal(key == choice)
+	_update_backend_notice()
+	_update_advanced_label()
+
+
+## One line says so when On is chosen and this machine has no GPU the simulation can run on.
+func _update_backend_notice() -> void:
+	backend_notice.visible = _start.sim_backend == StartConditions.BACKEND_GPU and not GpuWorld.available()
+
+
 func _update_tutorial_label() -> void:
 	tutorial_toggle.text = Strings.t("free_setup.tutorial_on" if _start.tutorial else "free_setup.tutorial_off")
 
@@ -134,7 +162,7 @@ func _update_tutorial_label() -> void:
 ## The advanced options' heading says whether they are open, and, so that a changed one is not forgotten while it is shut,
 ## whether any is not at its usual value.
 func _update_advanced_label() -> void:
-	var changed := not is_equal_approx(detail_row.value, detail_row.default_value) or not is_equal_approx(thickness_row.value, thickness_row.default_value)
+	var changed := not is_equal_approx(detail_row.value, detail_row.default_value) or not is_equal_approx(thickness_row.value, thickness_row.default_value) or _start.sim_backend != StartConditions.new().sim_backend
 	advanced_toggle.text = Strings.t("free_setup.advanced_open" if advanced.visible else "free_setup.advanced_closed") + (Strings.t("free_setup.advanced_changed") if changed else "")
 
 
@@ -176,6 +204,7 @@ func _reset_to_defaults() -> void:
 	for row: SettingRow in [bups_row, nutrients_row, rate_row, bloom_row, dish_row, detail_row, thickness_row, limit_row]:
 		row.value = row.default_value
 	tutorial_toggle.button_pressed = false
+	_choose_backend(StartConditions.new().sim_backend)
 
 
 func _go() -> void:

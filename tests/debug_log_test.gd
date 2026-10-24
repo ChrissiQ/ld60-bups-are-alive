@@ -43,6 +43,8 @@ func _init() -> void:
 	if data is Dictionary:
 		for key in ["written", "godot", "dish", "nutrient", "selected", "constants", "screen"]:
 			check(data.has(key), "the report has %s" % key)
+		check(data.has("backend") and data["backend"]["setting"] == "auto" and data["backend"]["running"] == "cpu" and data["backend"]["gpu_available"] == GpuWorld.available(), "it says where the bups run: the setting, and that they run on the processor (headless has no GPU path)")
+		check(data["backend"].has("gpu_device") and data["backend"].has("gpu_overflows") and data["backend"]["gpu_overflows"] is Dictionary, "...the GPU's name and its overflow counters (none here)")
 		check(data["nutrient"]["by_distance_from_centre"].size() == DebugLog.RIM_FRACTIONS.size(), "it has the nutrient by distance from the centre")
 		check(data["selected"].has("bup") and data["selected"]["bup"].has("genome") == false and data["selected"]["bup"].has("sense"), "it has the selected bup")
 		check(data["screen"]["tutorial_step"] == 0, "it says the tour is up, and where")

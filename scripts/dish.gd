@@ -190,6 +190,11 @@ var _extinct_signalled := false
 var _history_accum := 0.0
 var _bups_mesh: MultiMeshInstance2D = null  ## all the bups, drawn in one go
 var _overlay: Node2D = null  ## the selection and hover rings, drawn above the bups
+## The GPU path (gpu/gpu_world.gd): while `gpu_active`, the GPU runs the bups and answers for them; everything the dish asks the
+## simulation about the bups goes to `gpu_world` (the branches below), and the CPU's BupSim keeps the records, names and pins.
+## `_choose_backend` makes `gpu_world` and switches (see the GPU path's functions at the end of this file).
+var gpu_world: GpuWorld = null
+var gpu_active := false
 
 
 func _init() -> void:
@@ -244,6 +249,8 @@ func refresh_drawing() -> void:
 ## The picture holds room for the bups there are (with some to spare, never past the limit), not for the
 ## most there could be: a buffer for 100,000 bups is rewritten every frame, which costs when only a few live.
 func _fit_render_capacity(needed: int) -> void:
+	if gpu_world != null and gpu_active:
+		return  # (on the GPU path the picture is made once at the GPU's capacity: see _draw_bups_gpu)
 	var multimesh := _bups_mesh.multimesh
 	var wanted := mini(bup_limit, maxi(RENDER_MIN_CAPACITY, nearest_po2(needed + needed / 2)))
 	if needed > multimesh.instance_count or wanted * 4 <= multimesh.instance_count or multimesh.instance_count > bup_limit:
@@ -266,7 +273,13 @@ func _sync_render_capacity() -> void:
 ## picture is refreshed here, once a frame, from the native simulation.
 func _process(delta: float) -> void:
 	flash = maxf(0.0, flash - delta * 1.5)
-	if _bups_mesh != null:
+	if _bups_mesh != null and gpu_world != null and gpu_active:
+		for id in [selected_id, hovered_id]:  # (the bups the overlay shows: their records come back every frame)
+			if id >= 0:
+				gpu_world.track(id)
+		_draw_bups_gpu()
+		_overlay.queue_redraw()
+	elif _bups_mesh != null:
 		_fit_render_capacity(sim.bup_count())
 		var multimesh := _bups_mesh.multimesh
 		# The picture is rebuilt only when what it shows may have changed: time has passed, or the bups, the zoom or
@@ -319,6 +332,9 @@ func strike(start: StartConditions = null) -> void:
 	if start == null:  # goal mode's dish: the usual conditions, and founders in evenly spaced colours (more interesting than all green)
 		start = StartConditions.new()
 		start.spread_founders()
+	if gpu_world != null and gpu_active:
+		_discard_gpu_state()  # (a new dish: what the GPU holds, and every result still on its way, is for the old one)
+	set_backend_setting(start.sim_backend)
 	flash = 1.0
 	_render_stale = true
 	edit_count += 1
@@ -327,6 +343,8 @@ func strike(start: StartConditions = null) -> void:
 	sources.clear()
 	plankton.clear()
 	bloom_density = start.bloom_density
+	_bloom_due = time  # (a new dish's bloom starts now: the setter does this only when the bloom is switched on, and the last dish may have had the same)
+	_burst_clock = 0.0
 	upkeep_factor = 1.0
 	_reset_runtime_state()
 	radius = clampf(start.dish_radius, StartConditions.MIN_SIM_RADIUS, StartConditions.MAX_DISH_RADIUS)
@@ -350,6 +368,8 @@ func strike(start: StartConditions = null) -> void:
 	patch_seed = int(sim.random_float() * 2147483647.0)
 	field.set_patchiness(NUTRIENT_PATCHINESS, radius, patch_seed)  # (the largest patches about the size of the dish; the feed follows the same landscape)
 	field.fill(clampf(start.nutrient_density, 0.0, StartConditions.MAX_NUTRIENT_DENSITY) * CONCENTRATION_PER_DENSITY)  # the medium the colony starts in
+	if gpu_world != null and gpu_active:
+		_mark_gpu_dirty()  # (a new dish: what the GPU held is gone)
 
 
 ## Changes the dish's size about its centre, with everything in it.
@@ -361,6 +381,8 @@ func resize_to(new_radius: float) -> void:
 	new_radius = clampf(new_radius, StartConditions.MIN_DISH_RADIUS, StartConditions.MAX_DISH_RADIUS)
 	if is_equal_approx(new_radius, radius):
 		return
+	if gpu_world != null and gpu_active:
+		_to_cpu_for_edit()
 	if new_radius > radius:
 		sim.grow(new_radius)  # the bups and the nutrient stay
 	else:
@@ -379,11 +401,17 @@ func resize_to(new_radius: float) -> void:
 	edit_count += 1
 	_render_stale = true
 	queue_redraw()
+	if gpu_world != null and gpu_active:
+		_mark_gpu_dirty()
 
 
 ## Changes how many bups the dish holds, without ever going below how many there are now.
 func change_limit(value: int) -> void:
+	if gpu_world != null and gpu_active:
+		_to_cpu_for_edit()
 	bup_limit = maxi(value, population())
+	if gpu_world != null and gpu_active:
+		_mark_gpu_dirty()
 
 
 ## Moves the dish. Bups are held relative to the dish centre, so only the sources (global) shift.
@@ -408,6 +436,9 @@ func advance(seconds: float, budget_usec := 0) -> float:
 		return 0.0
 	var steps := maxi(1, ceili(seconds / MAX_STEP))
 	var delta := seconds / steps
+	_choose_backend(delta, steps)
+	if gpu_world != null and gpu_active:
+		return _advance_gpu(seconds, budget_usec)
 	var started := Time.get_ticks_usec()
 	var done := 0.0
 	for i in steps:
@@ -419,6 +450,9 @@ func advance(seconds: float, budget_usec := 0) -> float:
 
 
 func step(delta: float) -> void:
+	if gpu_world != null and gpu_active:
+		_advance_gpu(delta, 0)
+		return
 	time += delta
 	_step_plankton(delta)
 	var positions := PackedVector2Array()
@@ -438,7 +472,12 @@ func step(delta: float) -> void:
 
 
 func _record_history() -> void:
-	var stats := sim.population_stats()
+	_record_history_from(sim.population_stats())
+
+
+## One sample of the history graph from these figures (BupSim.population_stats' keys). The GPU path records its samples, taken on
+## the GPU at the steps they belong to, through this too.
+func _record_history_from(stats: Dictionary) -> void:
 	history["pop"].append(stats["count"])
 	if stats["count"] == 0 and not history["harm"].is_empty():  # (nobody left to average: the traits stay as they last were)
 		for series in HISTORY_SERIES:
@@ -478,6 +517,8 @@ func _thin_history_all() -> void:
 # --- The bups --------------------------------------------------------------------------------
 
 func population() -> int:
+	if gpu_world != null and gpu_active:
+		return gpu_world.bup_count()
 	return sim.bup_count()
 
 
@@ -486,25 +527,67 @@ func has_bup(id: int) -> bool:
 
 
 func bup_ids() -> PackedInt64Array:
+	if gpu_world != null and gpu_active:
+		return sim.alive_ids()  # (the bups are on the GPU; their records are here)
 	return sim.bup_ids()
 
 
 ## Everything about one bup (see BupSim.bup_info): its position is relative to the dish centre.
 func bup_info(id: int) -> Dictionary:
+	if gpu_world != null and gpu_active:
+		return gpu_world.bup_info(id)
 	return sim.bup_info(id)
 
 
 ## The bup's position in the world, like the sources'.
 func bup_world_pos(id: int) -> Vector2:
-	return global_position + sim.bup_pos(id)
+	return global_position + _bup_pos(id)
+
+
+## Whether the bup is alive and its place is known, so it can be drawn round. On the GPU path a bup chosen by its id (the watch list, the
+## lineage) has no place for the few frames until its record comes back.
+func _bup_shown(id: int) -> bool:
+	return sim.has_bup(id) and (gpu_world == null or not gpu_active or gpu_world.knows(id))
+
+
+## The bup's position in the dish (relative to its centre).
+func _bup_pos(id: int) -> Vector2:
+	if gpu_world != null and gpu_active:
+		return gpu_world.bup_pos(id)
+	return sim.bup_pos(id)
+
+
+## Half the length the bup is drawn at (BupSim.bup_radius).
+func _bup_radius(id: int, pixel_um: float) -> float:
+	if gpu_world != null and gpu_active:
+		return gpu_world.bup_radius(id, pixel_um)
+	return sim.bup_radius(id, pixel_um)
+
+
+## Which way the bup's drift tends where it is and how surely (BupSim.bup_steering).
+func bup_steering(id: int) -> Vector3:
+	if gpu_world != null and gpu_active:
+		return gpu_world.bup_steering(id)
+	return sim.bup_steering(id)
+
+
+## The nutrient at a point of the dish: concentration, and the gradient's x and y (NutrientField.read). On the GPU path `field` is
+## the copy of the GPU's field, so this is the same call there.
+func nutrient_reading(local: Vector2) -> Vector3:
+	return field.read(local)
 
 
 ## Adds a bup at a world position and returns its id. `size` is its body now (the square root of
 ## its mass); negative means a newborn of this genome.
 func add_bup(world_pos: Vector2, genome: Dictionary, energy: float, size := -1.0, birth_mass := -1.0, generation := 0, dir := Vector2.RIGHT, id := -1) -> int:
+	if gpu_world != null and gpu_active:
+		_to_cpu_for_edit()
 	_render_stale = true
 	edit_count += 1
-	return sim.add_bup(world_pos - global_position, genome, energy, size, birth_mass, generation, dir, id)
+	var added := sim.add_bup(world_pos - global_position, genome, energy, size, birth_mass, generation, dir, id)
+	if gpu_world != null and gpu_active:
+		_mark_gpu_dirty()
+	return added
 
 
 ## What the bup is called: the name the player gave it, or else its size word and its number ("lil bup #578",
@@ -606,29 +689,54 @@ func unpin_bup(id: int) -> void:
 
 
 func remove_bup(id: int) -> void:
+	if gpu_world != null and gpu_active:
+		_to_cpu_for_edit()
 	_render_stale = true
 	edit_count += 1
 	sim.remove_bup(id)
+	if gpu_world != null and gpu_active:
+		_mark_gpu_dirty()
 
 
 func clear_bups() -> void:
+	if gpu_world != null and gpu_active:
+		_to_cpu_for_edit()
 	_render_stale = true
 	edit_count += 1
 	sim.clear_bups()
+	if gpu_world != null and gpu_active:
+		_mark_gpu_dirty()
 
 
 ## The count and averages the readouts show (each gene, "harm" as a share of yield lost, "mutations"), in one pass.
 func population_stats() -> Dictionary:
+	if gpu_world != null and gpu_active:
+		return gpu_world.population_stats()
 	return sim.population_stats()
 
 
 func fraction_with_gene_at_least(gene: String, threshold: float) -> float:
+	if not _fractions_asked.has([gene, threshold]):
+		if _fractions_asked.size() >= GpuKernels.FRACTIONS:
+			_fractions_asked.clear()  # (asked for something else now: the old pairs go)
+		_fractions_asked[[gene, threshold]] = true
+	if gpu_world != null and gpu_active:
+		return gpu_world.fraction_with_gene_at_least(gene, threshold)
 	return sim.fraction_with_gene_at_least(gene, threshold)
 
 
 ## The id of the bup under a world position, or -1. `slack` widens the target (e.g. for small bups).
 func cell_at(world_pos: Vector2, slack: float = 0.0) -> int:
+	if gpu_world != null and gpu_active:
+		return gpu_world.pick_bup(world_pos - global_position, slack, pixel())
 	return sim.pick_bup(world_pos - global_position, slack, pixel())
+
+
+## The distance to the nearest bup (-1 if there is none) and how many lie within `near` of a point of the dish.
+func _nearest_and_count(local: Vector2, near: float) -> Vector2:
+	if gpu_world != null and gpu_active:
+		return gpu_world.nearest_and_count(local, near)
+	return sim.nearest_and_count(local, near)
 
 
 ## How big a source is drawn, in µm: its own size, or at least a few pixels, so it shows from far out.
@@ -793,7 +901,7 @@ func plankton_details(cell: Plankton) -> Dictionary:
 ## What there is to know about a spot in the dish, given its place within it: where it is, the concentration there, and how
 ## many bups are close by and how far the nearest is.
 func _spot_details(local: Vector2) -> Dictionary:
-	var near := sim.nearest_and_count(local, SOURCE_NEARBY)
+	var near := _nearest_and_count(local, SOURCE_NEARBY)
 	return {
 		"offset": local,
 		"distance": local.length(),
@@ -889,7 +997,7 @@ func nutrient_at(world_pos: Vector2) -> Dictionary:
 		"distance": local.length(),
 		"concentration": reading.x,
 		"gradient": Vector2(reading.y, reading.z),
-		"nearest_bup": sim.nearest_and_count(local, 0.0).x,
+		"nearest_bup": _nearest_and_count(local, 0.0).x,
 		"nearest_source": nearest_source,
 	}
 
@@ -914,6 +1022,8 @@ func drop_nutrients(world_pos: Vector2, count: int) -> bool:
 ## its edge. Returns how many units were removed.
 func erase_nutrient(world_pos: Vector2, brush_radius: float) -> float:
 	edit_count += 1
+	if gpu_world != null and gpu_active and not _gpu_on_cpu:  # (the GPU holds the true field: its erase also changes the CPU's copy, which is what is shown until the next refresh. Not while a save has brought the state over: the CPU's field is the true one then, and a refresh from the GPU's would undo what was dropped in since)
+		return gpu_world.erase_disc(world_pos - global_position, brush_radius, ERASE_STRENGTH) / NUTRIENT_ENERGY
 	return field.erase_disc(world_pos - global_position, brush_radius, ERASE_STRENGTH) / NUTRIENT_ENERGY
 
 
@@ -921,19 +1031,23 @@ func erase_nutrient(world_pos: Vector2, brush_radius: float) -> float:
 
 ## Positions are saved relative to the dish centre so a resized window doesn't matter.
 func to_dict() -> Dictionary:
+	if gpu_world != null and gpu_active:
+		_to_cpu_for_edit()  # (the save is made from the CPU's state)
 	field.flush_emitters()  # (what the sources have kept to release as a cloud is let go, so that the save has it)
 	var saved_cells := []
-	for id in sim.bup_ids():
-		var b := sim.bup_info(id)
+	var records := sim.export_state_bytes()  # (every bup in one call, as the GPU's records: looking each one up would be too slow for a big dish)
+	var words := records.to_float32_array()
+	for i in words.size() / GpuSim.STRIDE:
+		var o := i * GpuSim.STRIDE
 		saved_cells.append({
-			"id": b["id"],
-			"pos": _vec_to_array(b["pos"]),
-			"dir": _vec_to_array(b["dir"]),
-			"energy": b["energy"],
-			"size": b["size"],
-			"birth_mass": b["birth_mass"],
-			"generation": b["generation"],
-			"genome": Genome.to_saved({"speed": b["speed"], "sense": b["sense"], "metabolism": b["metabolism"], "size": b["size_gene"], "hue": b["hue"], "sat": b["sat"], "val": b["val"], "harm": b["harm"], "mutations": b["mutations"]}),
+			"id": GpuSim.id_of(records, i),
+			"pos": [words[o + 1], words[o + 2]],
+			"dir": [words[o + 3], words[o + 4]],
+			"energy": words[o + 5],
+			"size": sqrt(words[o + 6]),
+			"birth_mass": words[o + 7],
+			"generation": int(words[o + 20]),
+			"genome": Genome.to_saved({"speed": words[o + 8], "sense": words[o + 9], "metabolism": words[o + 10], "size": words[o + 11], "hue": words[o + 16], "sat": words[o + 17], "val": words[o + 18], "harm": words[o + 15], "mutations": int(words[o + 19])}),
 		})
 	var saved_sources := []
 	for source in sources:
@@ -972,6 +1086,8 @@ func to_dict() -> Dictionary:
 func from_dict(d: Dictionary) -> bool:
 	if not (d.get("cells") is Array):
 		return false
+	if gpu_world != null and gpu_active:
+		_to_cpu_for_edit()  # (a load that is refused leaves the dish as it was: so the bups must be the CPU's, and the GPU reloads them at its next batch)
 	for key in ["radius", "bup_limit", "nutrients_placed", "time", "feed_density", "bloom_density", "nutrient_resolution", "medium_thickness"]:
 		if d.has(key) and not Validate.is_number(d[key]):
 			return false
@@ -1075,7 +1191,7 @@ func from_dict(d: Dictionary) -> bool:
 	_set_medium_thickness(loaded_thickness)
 	sim.reset(radius, -1)
 	bup_limit = loaded_limit
-	loaded_cells.resize(mini(loaded_cells.size(), loaded_limit))
+	loaded_cells.resize(mini(loaded_cells.size(), StartConditions.MAX_BUP_LIMIT))  # (not the dish's limit: a save made on the GPU at the limit can hold a step's births more, which the next step takes back, as in play)
 	_render_stale = true
 	edit_count += 1
 	for spec in loaded_cells:
@@ -1115,6 +1231,8 @@ func from_dict(d: Dictionary) -> bool:
 	watch_version += 1
 	# Samples are taken on multiples of the interval, so resume the timer part-way through one.
 	_history_accum = fposmod(time, HISTORY_INTERVAL)
+	if gpu_world != null and gpu_active:
+		_mark_gpu_dirty()  # (a loaded dish: what the GPU held is gone)
 	return true
 
 
@@ -1290,13 +1408,14 @@ func _draw_medium() -> void:
 ## noise in its own estimate of it (a keener or faster bup lights more of the dish; in a dilute medium nothing lights).
 ## Rebuilt a few times a second, like the haze it is drawn over.
 func _draw_steering() -> void:
-	if selected_id < 0 or not sim.has_bup(selected_id):
+	if selected_id < 0 or not _bup_shown(selected_id):
 		return
 	var key := [selected_id, field.size, Time.get_ticks_msec() / HAZE_REFRESH_MSEC]
 	if key != _steer_key:
 		_steer_key = key
 		var n := field.size
-		var image := Image.create_from_data(n, n, false, Image.FORMAT_RGBA8, sim.bup_steer_bytes(selected_id, STEER_ALPHA))
+		var pixels: PackedByteArray = gpu_world.bup_steer_bytes(selected_id, STEER_ALPHA) if gpu_world != null and gpu_active else sim.bup_steer_bytes(selected_id, STEER_ALPHA)
+		var image := Image.create_from_data(n, n, false, Image.FORMAT_RGBA8, pixels)
 		if _steer == null or _steer.get_width() != n:
 			_steer = ImageTexture.create_from_image(image)
 		else:
@@ -1360,13 +1479,13 @@ func _draw() -> void:
 ## A brighter stretch of the selection ring, centred on the way the bup's drift tends (up the slope), and shorter the
 ## more reliably it does: it narrows from the whole ring as the bup goes from guessing to certain.
 func _draw_steering_arc(canvas: CanvasItem, id: int) -> void:
-	var steering: Vector3 = sim.bup_steering(id)
+	var steering := bup_steering(id)
 	if steering.z < ARC_SHOWN_ABOVE:
 		return
 	var px := pixel()
 	var span := maxf(2.0 * (1.0 - steering.z) * TAU, MIN_STEER_ARC)
 	var heading := Vector2(steering.x, steering.y).angle()
-	canvas.draw_arc(sim.bup_pos(id), ring_radius_pixels(sim.bup_radius(id, px) / px) * px, heading - span / 2.0, heading + span / 2.0, 24, Color(1, 0.95, 0.7, 1.0), 3.0 * px)
+	canvas.draw_arc(_bup_pos(id), ring_radius_pixels(_bup_radius(id, px) / px) * px, heading - span / 2.0, heading + span / 2.0, 24, Color(1, 0.95, 0.7, 1.0), 3.0 * px)
 
 
 ## What goes above the bups (called by the overlay child): the selection and hover rings, the
@@ -1374,12 +1493,12 @@ func _draw_steering_arc(canvas: CanvasItem, id: int) -> void:
 ## line at any zoom.
 func draw_overlay(canvas: CanvasItem) -> void:
 	var px := pixel()
-	if selected_id >= 0 and sim.has_bup(selected_id):
-		draw_ring(canvas, sim.bup_pos(selected_id), sim.bup_radius(selected_id, px), Color(1, 0.75, 0.3, 0.95))
+	if selected_id >= 0 and _bup_shown(selected_id):
+		draw_ring(canvas, _bup_pos(selected_id), _bup_radius(selected_id, px), Color(1, 0.75, 0.3, 0.95))
 		if layer_shown(Layer.STEERING):
 			_draw_steering_arc(canvas, selected_id)
-	if hovered_id >= 0 and hovered_id != selected_id and sim.has_bup(hovered_id):
-		draw_ring(canvas, sim.bup_pos(hovered_id), sim.bup_radius(hovered_id, px), Color(1, 1, 1, 0.9))
+	if hovered_id >= 0 and hovered_id != selected_id and _bup_shown(hovered_id):
+		draw_ring(canvas, _bup_pos(hovered_id), _bup_radius(hovered_id, px), Color(1, 1, 1, 0.9))
 	_draw_pick_rings(canvas, selected_source, hovered_source, global_position, source_draw_radius())
 	_draw_pick_rings(canvas, selected_plankton, hovered_plankton, Vector2.ZERO, plankton_draw_radius())
 	if place_preview_radius >= 0.0:
@@ -1390,3 +1509,260 @@ func draw_overlay(canvas: CanvasItem) -> void:
 			canvas.draw_arc(place_preview_pos - global_position, maxf(place_preview_radius, 3.0 * px), 0.0, TAU, 32, brush, px)
 	if flash > 0.0:
 		canvas.draw_circle(Vector2.ZERO, radius, Color(0.85, 0.95, 1.0, flash))
+
+
+# --- The GPU path ------------------------------------------------------------------------------
+# The hooks of the GPU path: none is reached while `gpu_active` is false, except _choose_backend, which every `advance` asks.
+
+## (3B) Runs `seconds` of simulation on the GPU, as `advance` does on the CPU (steps of seconds / ceil(seconds / MAX_STEP), the same
+## budget rule), and returns the seconds simulated. First gpu_world.poll() (finished results: records, counts, stats, answers), and
+## each of gpu_world.take_history_samples() through _record_history_from. Then for each step: time += delta, _step_plankton(delta),
+## sim.step_world(delta, the sources' places and rates, time) for their emissions, source.emitted, the field's recorded clouds and
+## deposits (take_recorded_*) gathered into the batch's events, and the history steps from _history_accum; then one
+## gpu_world.queue_batch(plan) (see its keys). Emits `extinct` once when a polled count is 0, as `step` does.
+func _advance_gpu(seconds: float, _budget_usec: int) -> float:
+	gpu_world.poll()
+	for sample: Dictionary in gpu_world.take_history_samples():
+		_record_history_from(sample["stats"])
+	if gpu_world.count_known() and gpu_world.bup_count() == 0 and time > 0.0 and not _extinct_signalled:  # (once, as `step` does)
+		_extinct_signalled = true
+		extinct.emit()
+	if seconds <= 0.0:
+		return 0.0
+	var wanted := maxi(1, ceili(seconds / MAX_STEP))
+	var delta := seconds / wanted
+	var steps := gpu_world.steps_for(wanted)  # (the GPU's budget: fewer when the frames run long; 0 when its results are behind)
+	if steps == 0:
+		return 0.0
+	var start := time
+	var ranges := PackedInt32Array()
+	var puffs := PackedFloat32Array()
+	var cells := PackedInt32Array()
+	var amounts := PackedFloat32Array()
+	var history_steps := PackedInt32Array()
+	for k in steps:
+		time += delta
+		_step_plankton(delta)
+		var positions := PackedVector2Array()
+		var rates := PackedFloat32Array()
+		for source in sources:
+			positions.append(source.pos - global_position)
+			rates.append(source.rate)
+			source.emitted += source.rate / 60.0 * delta
+		sim.step_world(delta, positions, rates, time)  # (the sources' emissions only: the field records them, as it does the plankton's)
+		var pf := field.take_recorded_puffs()
+		var cc := field.take_recorded_cells()
+		ranges.append_array(PackedInt32Array([puffs.size() / 6, pf.size() / 5, cells.size(), cc.size()]))
+		for j in pf.size() / 5:
+			puffs.append_array(PackedFloat32Array([pf[j * 5], pf[j * 5 + 1], pf[j * 5 + 2], pf[j * 5 + 3], pf[j * 5 + 4], 0.0]))
+		cells.append_array(cc)
+		amounts.append_array(field.take_recorded_amounts())
+		_history_accum += delta
+		if _history_accum >= HISTORY_INTERVAL:
+			_history_accum -= HISTORY_INTERVAL
+			history_steps.append(k)  # (taken on the GPU after this step, recorded here when it comes back)
+	gpu_world.queue_batch({
+		"steps": steps, "delta": delta, "start_time": start, "history_steps": history_steps,
+		"events": {"ranges": ranges, "puffs": puffs, "cells": cells, "amounts": amounts},
+		"feed_per_second": feed_density * CONCENTRATION_PER_DENSITY / 3600.0, "upkeep_scale": upkeep_factor, "limit": bup_limit,
+	})
+	return steps * delta
+
+
+## (3A) Draws the bups from the GPU this frame (gpu/gpu_draw.gd): the MultiMesh is allocated at the GPU's capacity (not by
+## _fit_render_capacity; again only when the capacity changes), its visible_instance_count is the slots the bups need, and
+## gpu_world.draw_bups(its RD buffer, those slots, pixel()) records the render kernel when the picture must change (the same rule as
+## `_process`: time moved, the zoom or the slots changed, the GPU's state was loaded, or trails may show).
+func _draw_bups_gpu() -> void:
+	var gpu := gpu_world.gpu
+	if gpu == null or gpu.capacity <= 0 or not gpu.is_main:
+		return  # (only the main device can write the picture's buffer: a world on a local device, as tools make, is not drawn)
+	var multimesh := _bups_mesh.multimesh
+	if multimesh.instance_count != gpu.capacity:
+		multimesh.instance_count = gpu.capacity  # (a new RD buffer, all zero: the render kernel is set up again for it)
+		_render_stale = true
+	# The slots drawn: room for the bups there are, as on the CPU path (from the last count read back, which lags a few frames, or the
+	# count loaded while none has come back), not for all the GPU holds: every slot drawn costs, an empty one too (about 2 ms a frame
+	# for a million on an M1 Pro). The render kernel writes the slots past the live count as nothing; those past `slots` are not drawn.
+	var known := population()
+	if known <= 0:
+		known = gpu.count
+	var slots := mini(gpu.capacity, maxi(RENDER_MIN_CAPACITY, nearest_po2(known + known / 2)))
+	if multimesh.visible_instance_count != slots:
+		multimesh.visible_instance_count = slots
+	var target := RenderingServer.multimesh_get_buffer_rd_rid(multimesh.get_rid())
+	# Never multimesh.buffer or the per-instance setters here: a CPU copy of the instances would be uploaded over the GPU's.
+	var stamp := [time, pixel(), target, slots, GpuDraw.of(gpu).generation]  # (a load of the GPU's state is a new picture too)
+	var changed: bool = stamp != _render_stamp
+	if _render_stale or changed or _trails_may_show:
+		_render_stamp = stamp
+		_render_stale = false
+		_trails_may_show = changed  # (as on the CPU: a picture made as time moved may carry trails, the next still one clears them)
+		gpu_world.draw_bups(target, slots, pixel())
+
+
+## The setting's value as StartConditions.BACKEND_*: where the bups are simulated. Changing it (the setup screen sets it with the dish's
+## start, `set_backend_setting` is for anything that changes it while the dish runs) takes effect at the next `advance`.
+var backend_setting := StartConditions.BACKEND_AUTO
+
+## The rule that picks the backend (the measurements are in tools/gpu/switch_check.gd's bench mode):
+const AUTO_CPU_UP_USEC := 6000.0  ## Auto: the processor is left for the GPU once its steps for one frame are estimated to take more than this (two thirds of Main.FRAME_BUDGET_USEC: the picture and the rest of the frame need the remainder) ...
+const AUTO_CPU_DOWN_USEC := 3000.0  ## ... and taken back when they come below this (the gap is the hysteresis: a colony hovering about one threshold does not flip every few seconds)
+const AUTO_MIN_POPULATION := 1000  ## below this many bups Auto stays on the processor whatever the grid costs (the GPU would be moving nothing, and the colony is growing: it is asked again each frame)
+const COARSE_FRAMES_TO_GPU := 30  ## frames in a row of coarse steps (about half a second) before the GPU takes over: a speed button pressed in passing, or a hitch, does not move the whole state
+const AUTO_DOWN_FRAMES := 10  ## frames in a row that Auto's rule must want the processor before the GPU lets go (the GPU's count of bups arrives a few frames after a load; fine steps and the setting do not wait)
+const STEPS_AT_TOP_SPEED := 9  ## steps a frame takes at x10,000 at 60 frames a second (one frame is 167 s; the step is 18.5 s): what a step this long stands for when the caller does not say how many a frame holds
+const TOP_SPEED_STEP := 17.5  ## a step this long or longer is taken for a frame of several steps (x10,000 at 60 Hz: 18.5 s), shorter ones for a frame of one (x1,000: 16.7 s). A guess: `advance` knows, and passes `steps`
+const RULE_FRAME_SECONDS := 1.0 / 60.0  ## the frame Auto's costs are for: a frame's steps are scaled to one this long (the frame just past may be any length: a 120 Hz display's, or one a switch held up, whose many steps would otherwise make the processor look slower than it is and switch straight back)
+## Measured on the M1 Pro (tools/gpu/switch_check.gd bench, 2,000-50,000 bups, 3 dishes, 15 repeats, least of them; fits to every
+## point within 25%, no clouds): microseconds for one step by the processor, from the number of cells across, the motion sub-steps `m`
+## (BupSim.moves_for), the bups `n` and the clouds `k`: 104 + 0.0012 cells² + 62 m + n (0.0098 + 0.0057 m) + 0.06 k; by the GPU (the batch's
+## own cost, leaving the fixed ~220 µs of a submit and wait that only a local device pays): 146 + 0.00049 cells² + n (0.0044 + 0.0005 m) + 0.04 k.
+## The GPU's share of the frame that these do not have (drawing, the readbacks and queries of the frame) is GPU_FRAME_USEC and
+## GPU_FRAME_USEC_PER_BUP (measured with the game's pipeline, below).
+## With 10,000 plankton clouds in the dish each step took (measured the same way, 8 repeats) 330-1,200 µs more on the processor and
+## 150-1,000 µs more on the GPU (the clouds spread, and are read by every bup near them): 0.06 and 0.04 µs a cloud, good to about a
+## factor of two. Measured to 50,000 bups and 10,000 clouds only: past that (up to the 1,000,000 bups a dish may hold) the rule
+## extrapolates the lines, which have held so far (the processor's cost is linear in the bups by construction; the GPU's rose a little slower).
+const CPU_STEP_MODEL := [104.0, 0.0012, 62.0, 0.0098, 0.0057, 0.06]
+const GPU_STEP_MODEL := [146.0, 0.00049, 0.0044, 0.0005, 0.04]
+const GPU_FRAME_USEC := 250.0  ## what a frame on the GPU costs besides its steps, beyond the engine's own frame: the fixed part ...
+const GPU_FRAME_USEC_PER_BUP := 0.005  ## ... and the part for each bup (every one is drawn, and the frame's questions look at every slot). Measured on the M1 Pro (tools/gpu/game_check.gd frame: vsync off, the frame with the GPU's bups paused against the engine's frame with none, same sitting, a busy machine): about 0 ms at 20,000 bups, 0.3-0.65 ms at 100,000, 5.8 ms at 1,000,000 (the old assumption, 1,000 µs at any size, was 2-3x too high at 100,000 and 6x too low at a million). It moves none of the rule's switches to the GPU (game_check thresholds: at each the GPU's frame is far below the processor's), and one hand-back (90 mm, x10,000, 2,000 clouds: below 2,250 bups instead of 4,000)
+
+var _coarse_frames := 0  ## frames in a row whose steps were coarse
+var _cpu_votes := 0  ## frames in a row that Auto's rule wanted the processor while the GPU ran
+var _gpu_on_cpu := false  ## gpu_active, but the CPU's bups are the true ones just now (an edit or a save brought them over): the GPU reloads them before its next batch
+var _fractions_asked := {}  ## [gene, threshold] -> true for each share asked lately (fraction_with_gene_at_least): a load answers them from the CPU's bups
+
+
+## Estimated microseconds the steps of one frame take on the processor and on the GPU, as (cpu, gpu): `moves` the motion sub-steps of
+## a step (BupSim.moves_for(step_delta)), `step_delta` its length, `steps` how many steps the frame holds (0, when not known: the
+## length says, STEPS_AT_TOP_SPEED at TOP_SPEED_STEP or longer, else one).
+static func backend_frame_costs(step_delta: float, cells_across: int, moves: int, population: int, frame_steps := 0, clouds := 0) -> Vector2:
+	var steps := float(frame_steps if frame_steps > 0 else (STEPS_AT_TOP_SPEED if step_delta >= TOP_SPEED_STEP else 1))
+	var cells_squared := float(cells_across) * cells_across
+	var cpu: float = CPU_STEP_MODEL[0] + CPU_STEP_MODEL[1] * cells_squared + CPU_STEP_MODEL[2] * moves + population * (CPU_STEP_MODEL[3] + CPU_STEP_MODEL[4] * moves) + CPU_STEP_MODEL[5] * clouds
+	var gpu: float = GPU_STEP_MODEL[0] + GPU_STEP_MODEL[1] * cells_squared + population * (GPU_STEP_MODEL[2] + GPU_STEP_MODEL[3] * moves) + GPU_STEP_MODEL[4] * clouds
+	return Vector2(steps * cpu, GPU_FRAME_USEC + GPU_FRAME_USEC_PER_BUP * population + steps * gpu)
+
+
+## The backend rule, as a function of what it depends on alone (so that it can be tested and re-asked after anything changes): whether the
+## GPU should run these steps. `setting` is a StartConditions.BACKEND_*; `step_delta` this frame's step; `moves` BupSim.moves_for of it;
+## `frame_steps` how many steps the frame holds (0: guess), `clouds` the plankton clouds in the dish (NutrientField.puff_count());
+## `running_gpu` where the bups are now (Auto keeps the GPU until the processor would manage with room to spare, which is
+## the hysteresis); `gpu_ok` whether the machine has a usable GPU and one that holds `limit` bups. It does not wait for COARSE_FRAMES_TO_GPU:
+## `_choose_backend` does.
+## - steps of FINE_STEP or shorter: never (the GPU has no fine path: it follows no individual runs and tumbles);
+## - off: never; on: whenever it can; auto: when the processor's estimated time for the frame is above AUTO_CPU_UP_USEC (AUTO_CPU_DOWN_USEC
+##   once the GPU is running) and the GPU's is less, with at least AUTO_MIN_POPULATION bups.
+static func backend_wants_gpu(setting: String, step_delta: float, moves: int, cells_across: int, population: int, running_gpu: bool, gpu_ok: bool, frame_steps := 0, clouds := 0) -> bool:
+	if not gpu_ok or step_delta <= FINE_STEP or setting == StartConditions.BACKEND_CPU:
+		return false
+	if setting == StartConditions.BACKEND_GPU:
+		return true
+	if population < AUTO_MIN_POPULATION:
+		return false
+	var costs := backend_frame_costs(step_delta, cells_across, moves, population, frame_steps, clouds)
+	return costs.x > (AUTO_CPU_DOWN_USEC if running_gpu else AUTO_CPU_UP_USEC) and costs.y < costs.x
+
+
+## Whether the GPU can run a dish at all: the machine has a usable one (GpuWorld.available()) and it holds `limit` bups (`most` is
+## GpuWorld.most_bups()).
+static func backend_usable(gpu_available: bool, limit: int, most: int) -> bool:
+	return gpu_available and limit <= most
+
+
+## Where the bups run now, "gpu" or "cpu" (the debug log and the pause menu's record of the settings say it).
+func backend_running() -> String:
+	return "gpu" if gpu_world != null and gpu_active else "cpu"
+
+
+## Sets the setting (StartConditions.BACKEND_*; anything else is Auto) and has the next `advance` ask again.
+func set_backend_setting(value: String) -> void:
+	backend_setting = value if value in StartConditions.BACKENDS else StartConditions.BACKEND_AUTO
+	_coarse_frames = 0
+
+
+## (3C) Chooses where the bups run for this frame (the switch rule), from the setting (on, off, automatic),
+## `step_delta` (steps of FINE_STEP or shorter run on the CPU, so it switches back at once), `steps` (how many of them the frame holds, if
+## the caller knows: `advance` does; 0 guesses from the length; Auto's costs take them scaled to a frame of RULE_FRAME_SECONDS by the length
+## of the frame just past), the population, the dish and the limit:
+## makes `gpu_world` when first needed (if GpuWorld.available()), moves the state (gpu_world.load_from_cpu / export_to_cpu) and sets
+## `gpu_active`. Called at the top of every `advance`, before any step (never while paused). The processor takes over at once when the
+## step is fine, or the setting or the machine says so; when only Auto's rule says so, after AUTO_DOWN_FRAMES frames of it saying so
+## (the GPU's count of bups reaches the dish a few frames after a load). The GPU takes over only after COARSE_FRAMES_TO_GPU frames of
+## coarse steps in a row. Asked again on every frame, so a resize, a new limit, a new speed or a new setting (all of which `advance`
+## meets here) is re-evaluated at once.
+func _choose_backend(step_delta: float, steps := 0) -> void:
+	_coarse_frames = _coarse_frames + 1 if step_delta > FINE_STEP else 0
+	var allowed := backend_setting != StartConditions.BACKEND_CPU
+	var available := backend_usable(GpuWorld.available(), bup_limit, GpuWorld.most_bups())
+	var real := minf(get_process_delta_time(), 0.1)  # (the frame the caller advances for: main.gd's, capped as it caps it, MAX_FRAME_SECONDS)
+	var rule_steps := steps
+	if steps > 0 and real > 0.0:
+		rule_steps = maxi(1, roundi(steps * RULE_FRAME_SECONDS / real))  # (the same work per real second, whichever backend ran the last frame and however long it took)
+	var wants := backend_wants_gpu(backend_setting, step_delta, sim.moves_for(step_delta), field.get_size(), population(), gpu_world != null and gpu_active, available, rule_steps, field.puff_count())
+	if gpu_world != null and gpu_active:
+		_cpu_votes = 0 if wants else _cpu_votes + 1
+		var rule_only := allowed and available and step_delta > FINE_STEP  # (what is left to say 'no' is Auto's rule: it must say so for a while)
+		if not wants and (not rule_only or _cpu_votes >= AUTO_DOWN_FRAMES):
+			_to_cpu_for_edit()  # (its state, brought over unless an edit has just done so)
+			gpu_active = false
+			_gpu_on_cpu = false
+			_cpu_votes = 0
+			_render_stale = true
+			if rule_only:
+				_coarse_frames = 0  # (Auto's rule let go: it must want the GPU for as long again before the GPU takes over)
+		elif wants and _gpu_on_cpu:
+			_load_gpu()  # (a save or an edit has brought the bups over; the GPU takes them back before it runs)
+	elif wants and _coarse_frames >= COARSE_FRAMES_TO_GPU:
+		if gpu_world == null:
+			gpu_world = GpuWorld.new(sim)
+		_load_gpu()
+		gpu_active = true
+		_cpu_votes = 0
+		_render_stale = true
+
+
+## What load_from_cpu needs of the dish, and what it shows of the bups (the selected and hovered ones, the shares of a gene a goal
+## watches), so that the GPU's answers to these start from the CPU's instead of from nothing.
+func _gpu_params() -> Dictionary:
+	return {"radius": radius, "limit": bup_limit, "seed": patch_seed, "upkeep_scale": upkeep_factor, "feed_per_second": feed_density * CONCENTRATION_PER_DENSITY / 3600.0, "step_seconds": MAX_STEP,
+		"tracked": [selected_id, hovered_id], "fractions": _fractions_asked.keys()}
+
+
+## Hands the CPU's bups and field to the GPU (the CPU's are the true ones until it has).
+func _load_gpu() -> void:
+	gpu_world.load_from_cpu(field, _gpu_params())
+	_gpu_on_cpu = false
+
+
+## Forgets what the GPU holds, for a dish that is being replaced (a new one): no export, the CPU's field stops recording, and what
+## the GPU still has on its way is dropped. The CPU's own state is the new dish's, which the caller makes; `_mark_gpu_dirty` loads it.
+func _discard_gpu_state() -> void:
+	field.set_recording(false)
+	if gpu_world.has_method("_pipeline_reset"):
+		gpu_world.call("_pipeline_reset", 0)
+	gpu_world.take_history_samples()  # (the old dish's samples that came back and were not yet recorded: not the new dish's)
+	_gpu_on_cpu = true
+
+
+## (3C) Before an edit made by hand (adding or removing bups, a resize, the limit, a save): brings the GPU's state to the CPU
+## (gpu_world.export_to_cpu, which stalls), so the edit is made on the CPU's bups. Nothing to do when it already has them.
+func _to_cpu_for_edit() -> void:
+	if gpu_world == null or not gpu_active or _gpu_on_cpu:
+		return
+	gpu_world.export_to_cpu(field)
+	for sample: Dictionary in gpu_world.take_history_samples():  # (the history samples of the batches the stall finished: recorded, in order, before any CPU step)
+		_record_history_from(sample["stats"])
+	_gpu_on_cpu = true
+
+
+## (3C) After an edit made by hand, a new dish or a load: the CPU's state is the true one, so the GPU loads it (now, so that the picture and
+## the counts are the edited dish's, whether or not time is moving), and results of batches from before it are dropped.
+func _mark_gpu_dirty() -> void:
+	if gpu_world == null or not gpu_active:
+		return
+	_gpu_on_cpu = true
+	if bup_limit <= GpuWorld.most_bups():  # (a limit the device cannot hold stays on the CPU: the next `advance` says so)
+		_load_gpu()

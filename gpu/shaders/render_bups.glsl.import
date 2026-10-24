@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://csryrifunx5fk"
+path="res://.godot/imported/render_bups.glsl-6c173cf6b5cd4e37698cacf3bf88b8d5.res"
+
+[deps]
+
+source_file="res://gpu/shaders/render_bups.glsl"
+dest_files=["res://.godot/imported/render_bups.glsl-6c173cf6b5cd4e37698cacf3bf88b8d5.res"]
+
+[params]
+

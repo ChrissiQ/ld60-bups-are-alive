@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://bknpcalg3tvb"
+path="res://.godot/imported/ev_begin.glsl-b515a81d68e1ed6acf86a55b107ca900.res"
+
+[deps]
+
+source_file="res://gpu/shaders/ev_begin.glsl"
+dest_files=["res://.godot/imported/ev_begin.glsl-b515a81d68e1ed6acf86a55b107ca900.res"]
+
+[params]
+

@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://cr3ufmynu0li6"
+path="res://.godot/imported/q_track.glsl-52cfe7121400b9e79303ccd86c46e34f.res"
+
+[deps]
+
+source_file="res://gpu/shaders/q_track.glsl"
+dest_files=["res://.godot/imported/q_track.glsl-52cfe7121400b9e79303ccd86c46e34f.res"]
+
+[params]
+

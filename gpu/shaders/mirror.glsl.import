@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://duewdf3wnqxow"
+path="res://.godot/imported/mirror.glsl-6a108426b155178fe47bc78ed493fec5.res"
+
+[deps]
+
+source_file="res://gpu/shaders/mirror.glsl"
+dest_files=["res://.godot/imported/mirror.glsl-6a108426b155178fe47bc78ed493fec5.res"]
+
+[params]
+

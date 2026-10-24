@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://n70rr1nga821"
+path="res://.godot/imported/events.glsl-ac740bb54c49b207b7b2409189505f6f.res"
+
+[deps]
+
+source_file="res://gpu/shaders/events.glsl"
+dest_files=["res://.godot/imported/events.glsl-ac740bb54c49b207b7b2409189505f6f.res"]
+
+[params]
+

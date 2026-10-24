@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://g438dq7ccigk"
+path="res://.godot/imported/bna1.glsl-821f05680dc4c960f4f6cfca163c9a9c.res"
+
+[deps]
+
+source_file="res://gpu/shaders/bna1.glsl"
+dest_files=["res://.godot/imported/bna1.glsl-821f05680dc4c960f4f6cfca163c9a9c.res"]
+
+[params]
+
