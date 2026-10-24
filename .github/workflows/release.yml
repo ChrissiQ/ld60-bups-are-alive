@@ -43,6 +43,8 @@ jobs:
       - name: Export the three builds
         run: |
           godot --headless --path . --import || true # (the first import may exit badly yet leave a good result)
+          # The import above reports success even when a GPU shader fails to compile, so the shaders are checked here: a broken one stops the release.
+          godot --headless --path . -s tests/gpu_shaders_test.gd || { echo "::error::The GPU shader check failed (tests/gpu_shaders_test.gd): the release is stopped. The failures are listed above."; exit 1; }
           mkdir -p build/windows build/linux build/macos
           godot --headless --path . --export-release "Windows Desktop"
           godot --headless --path . --export-release "Linux"
