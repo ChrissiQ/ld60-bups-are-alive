@@ -7,7 +7,7 @@
 # Windows, Linux and macOS, and the Godot project (source plus the prebuilt native libraries for all
 # three, so it plays from inside Godot with nothing to compile).
 #
-# NOT YET RUN: expect to fix small things on its first run. The export presets are in export_presets.cfg.
+# The export presets are in export_presets.cfg.
 name: release
 on:
   push:
