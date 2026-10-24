@@ -158,6 +158,10 @@ label_text = "@pause.record_medium_thickness"
 layout_mode = 2
 label_text = "@pause.record_backend"
 
+[node name="HusksRow" parent="Initial/Box" instance=ExtResource("3")]
+layout_mode = 2
+label_text = "@pause.record_husks"
+
 [node name="RunningRow" parent="Initial/Box" instance=ExtResource("3")]
 layout_mode = 2
 label_text = "@pause.record_running"

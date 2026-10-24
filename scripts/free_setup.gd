@@ -27,6 +27,7 @@ const PLANKTON_SETTLE_SECONDS := 0.5  ## how long the settings are still before 
 	StartConditions.BACKEND_GPU: $Panel/Box/Scroll/Rows/Advanced/BackendBox/BackendRow/OnButton,
 	StartConditions.BACKEND_CPU: $Panel/Box/Scroll/Rows/Advanced/BackendBox/BackendRow/OffButton,
 }
+@onready var husks_toggle: Button = $Panel/Box/Scroll/Rows/Advanced/HusksToggle  ## whether a dead bup leaves a husk that leaks its nutrient slowly
 @onready var backend_notice: Label = $Panel/Box/Scroll/Rows/Advanced/BackendBox/BackendNotice  ## says so when On is chosen and this machine has no GPU to use
 @onready var limit_row: SettingRow = $Panel/Box/Scroll/Rows/LimitRow
 @onready var back_button: Button = $Panel/Box/Actions/BackButton
@@ -81,6 +82,10 @@ func _ready() -> void:
 		button.set_pressed_no_signal(choice == _start.sim_backend)
 		button.pressed.connect(func() -> void: _choose_backend(choice))
 	_update_backend_notice()
+	husks_toggle.tooltip_text = Strings.t("free_setup.husks_tip")
+	husks_toggle.set_pressed_no_signal(_start.death_husks)
+	_update_husks_label()
+	husks_toggle.toggled.connect(func(on: bool) -> void: _start.death_husks = on; _update_husks_label(); _update_advanced_label())
 	tutorial_toggle.tooltip_text = Strings.t("free_setup.tutorial_tip")
 	tutorial_toggle.set_pressed_no_signal(_start.tutorial)
 	_update_tutorial_label()
@@ -95,6 +100,7 @@ func _ready() -> void:
 	advanced_reset.pressed.connect(func() -> void:
 		for row: SettingRow in [detail_row, thickness_row]:
 			row.value = row.default_value
+		husks_toggle.button_pressed = false
 		_choose_backend(StartConditions.new().sim_backend))
 	limit_row.value_changed.connect(func(v: float) -> void: _start.bup_limit = int(v); _refresh())
 
@@ -155,6 +161,10 @@ func _update_backend_notice() -> void:
 	backend_notice.visible = _start.sim_backend == StartConditions.BACKEND_GPU and not GpuWorld.available()
 
 
+func _update_husks_label() -> void:
+	husks_toggle.text = Strings.t("free_setup.husks_on" if _start.death_husks else "free_setup.husks_off")
+
+
 func _update_tutorial_label() -> void:
 	tutorial_toggle.text = Strings.t("free_setup.tutorial_on" if _start.tutorial else "free_setup.tutorial_off")
 
@@ -162,7 +172,7 @@ func _update_tutorial_label() -> void:
 ## The advanced options' heading says whether they are open, and, so that a changed one is not forgotten while it is shut,
 ## whether any is not at its usual value.
 func _update_advanced_label() -> void:
-	var changed := not is_equal_approx(detail_row.value, detail_row.default_value) or not is_equal_approx(thickness_row.value, thickness_row.default_value) or _start.sim_backend != StartConditions.new().sim_backend
+	var changed := not is_equal_approx(detail_row.value, detail_row.default_value) or not is_equal_approx(thickness_row.value, thickness_row.default_value) or _start.sim_backend != StartConditions.new().sim_backend or _start.death_husks
 	advanced_toggle.text = Strings.t("free_setup.advanced_open" if advanced.visible else "free_setup.advanced_closed") + (Strings.t("free_setup.advanced_changed") if changed else "")
 
 
@@ -204,6 +214,7 @@ func _reset_to_defaults() -> void:
 	for row: SettingRow in [bups_row, nutrients_row, rate_row, bloom_row, dish_row, detail_row, thickness_row, limit_row]:
 		row.value = row.default_value
 	tutorial_toggle.button_pressed = false
+	husks_toggle.button_pressed = false
 	_choose_backend(StartConditions.new().sim_backend)
 
 

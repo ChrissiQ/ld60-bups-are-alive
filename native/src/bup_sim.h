@@ -104,6 +104,18 @@ class BupSim : public RefCounted {
 	std::unordered_map<int64_t, Record> records;
 	double now_seconds = 0.0;
 	double upkeep_scale = 1.0; // multiplies the base and per-mass maintenance costs (a harsher dish)
+	// What a dead bup leaves when husks are on (husk_seconds > 0): its nutrient, given back in HUSK_PIECES clouds over three lifetimes of
+	// that many seconds, as an exponential leak (a piece is what leaks in a quarter of a lifetime, put where the husk lies when the middle of
+	// that time comes) instead of all at once. The husks are the CPU's on both backends: the GPU's deaths reach it as events (see apply_events).
+	struct Husk {
+		float x, y, energy;
+		double age;
+		int next;
+	};
+	std::vector<Husk> husks;
+	double husk_seconds = 0.0;
+	void add_husk(float x, float y, float energy);
+	void advance_husks(double delta);
 	int now_minutes() const { return (int)(now_seconds / 60.0); }
 	void make_record(const Bup &b, int64_t parent);
 	void finish_lineage_import(const PackedInt64Array &pinned); // after the records of a save are in: counts, pins and pruning
@@ -214,6 +226,10 @@ public:
 	void set_seed(int64_t seed);
 	void set_limit(int bup_limit) { limit = bup_limit; }
 	void set_upkeep_scale(double scale) { upkeep_scale = scale; }
+	void set_husk_seconds(double seconds) { husk_seconds = seconds; }
+	int husk_count() const { return (int)husks.size(); }
+	PackedFloat64Array husks_export() const; // 5 numbers each: x, y, energy, age, the next piece
+	void husks_import(const PackedFloat64Array &saved);
 	PackedFloat32Array export_state() const; // every bup, 24 floats each (see the order in the .cpp; the id as a float): for the GPU tools' comparisons
 	// The bups and the GPU simulation (gpu/gpu_world.gd), which keeps the bups on the GPU and the family records here:
 	// export_state_bytes / import_state_bytes move every bup as the GPU's record (see the .cpp) without touching the records;
@@ -252,6 +268,7 @@ public:
 	void clear_bups() {
 		bups.clear();
 		records.clear();
+		husks.clear();
 	}
 	void set_time(double seconds) { now_seconds = seconds; }
 	bool has_record(int64_t id) const { return records.count(id) > 0; }

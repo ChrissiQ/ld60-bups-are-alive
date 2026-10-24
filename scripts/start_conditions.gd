@@ -37,6 +37,7 @@ var nutrient_resolution := MIN_NUTRIENT_RESOLUTION  ## cells across the dish's n
 var founders: Array = []
 var tutorial := false  ## the guided tour of the screen runs when the dish starts (goal mode decides that for itself)
 var bup_limit := DEFAULT_BUP_LIMIT  ## the most bups the dish holds: past it each birth displaces a random bup
+var death_husks := false  ## a dead bup leaves a husk that leaks its nutrient back slowly (Biology.HUSK_SECONDS) instead of giving it back at once (an advanced option: off by default)
 var sim_backend := BACKEND_AUTO  ## where the bups are simulated (an advanced option: the default picks the faster one while playing, and goal mode always does)
 
 
@@ -58,7 +59,7 @@ func copy() -> StartConditions:
 
 
 func to_dict() -> Dictionary:
-	return {"bups": bups, "nutrient_density": nutrient_density, "feed_density": feed_density, "bloom_density": bloom_density, "dish_radius": dish_radius, "medium_thickness": medium_thickness, "nutrient_resolution": nutrient_resolution, "bup_limit": bup_limit, "sim_backend": sim_backend, "tutorial": tutorial, "founders": founders.slice(0, bups).duplicate(true)}  # (only the founders there are: nothing hidden is carried over)
+	return {"bups": bups, "nutrient_density": nutrient_density, "feed_density": feed_density, "bloom_density": bloom_density, "dish_radius": dish_radius, "medium_thickness": medium_thickness, "nutrient_resolution": nutrient_resolution, "bup_limit": bup_limit, "sim_backend": sim_backend, "death_husks": death_husks, "tutorial": tutorial, "founders": founders.slice(0, bups).duplicate(true)}  # (only the founders there are: nothing hidden is carried over)
 
 
 ## Anything missing, malformed or out of range falls back to the default / the nearest valid value.
@@ -75,6 +76,7 @@ static func from_dict(d: Dictionary) -> StartConditions:
 	c.bup_limit = maxi(c.bup_limit, c.bups)  # the dish holds at least its founders
 	var saved_backend: Variant = d.get("sim_backend")
 	c.sim_backend = saved_backend if saved_backend is String and saved_backend in BACKENDS else c.sim_backend
+	c.death_husks = d.get("death_husks") is bool and d["death_husks"]
 	c.tutorial = d.get("tutorial") is bool and d["tutorial"]
 	var saved_founders: Variant = d.get("founders")
 	if saved_founders is Array:

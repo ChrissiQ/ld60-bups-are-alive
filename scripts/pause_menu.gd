@@ -25,6 +25,7 @@ signal bup_limit_chosen(limit: int)
 @onready var initial_detail: StatRow = $Initial/Box/DetailRow
 @onready var initial_thickness: StatRow = $Initial/Box/ThicknessRow
 @onready var initial_backend: StatRow = $Initial/Box/BackendRow
+@onready var initial_husks: StatRow = $Initial/Box/HusksRow  ## shown when the dish was started with husks
 @onready var initial_running: StatRow = $Initial/Box/RunningRow  ## where the bups are simulated right now (unlike the rest of the record, this follows the game)
 @onready var initial_limit: StatRow = $Initial/Box/LimitRow
 @onready var dish_row: SettingRow = $Content/Settings/Box/DishRow
@@ -77,6 +78,8 @@ func open(dish: Dish, free_mode: bool, started_as: StartConditions = null) -> vo
 		initial_thickness.value_text = UiText.thousands(started_as.medium_thickness) + Strings.t("pause.times_water")
 		initial_backend.visible = started_as.sim_backend != defaults.sim_backend
 		initial_backend.value_text = Strings.t("free_setup.backend_on" if started_as.sim_backend == StartConditions.BACKEND_GPU else "free_setup.backend_off")
+		initial_husks.visible = started_as.death_husks
+		initial_husks.value_text = Strings.t("pause.husks_value")
 		initial_limit.value_text = UiText.thousands(started_as.bup_limit)
 	if _record_shown:
 		initial_running.value_text = Strings.t("pause.running_gpu" if dish.backend_running() == "gpu" else "pause.running_cpu") + (Strings.t("pause.running_auto") if dish.backend_setting == StartConditions.BACKEND_AUTO else "")

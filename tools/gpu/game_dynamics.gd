@@ -70,6 +70,8 @@ func _hours_default(sc_name: String) -> int:
 
 func _line(hour: int, pop: int, means: Array, energy: float, nutrient: float) -> void:
 	print("SAMPLE %s %s %d %.2f %d %.4f %.4f %.5f %.5f %.5f %.4f %.2f" % [mode, scenario, seed_value, float(hour), pop, means[0], means[1], means[2], means[3], means[4], energy, nutrient])
+	if start.death_husks:
+		print("HUSKS %s %s %d %.2f husks %d clouds %d" % [mode, scenario, seed_value, float(hour), dish.sim.husk_count(), dish.field.puff_count()])
 
 
 func _initialize() -> void:
@@ -151,6 +153,7 @@ func _run() -> void:
 	dish.process_mode = Node.PROCESS_MODE_DISABLED  # (the game's _process draws: not what is measured here)
 	dish.set_seed(seed_value)
 	start = _start(scenario)
+	start.death_husks = OS.get_environment("DEATH_HUSKS") == "1"  # (DEATH_HUSKS=1: the dead leave husks, whose leak the CPU runs for both backends)
 	dish.strike(start)
 	_place_sources(dish, scenario)
 	dish.set_backend_setting(StartConditions.BACKEND_GPU if mode == "gpu" else StartConditions.BACKEND_CPU)

@@ -27,14 +27,14 @@ const TYPES := {
 	"EVB": "uint", "EVD": "uint", "EVN": "uint", "QIN": "uint", "OUT": "uint", "OUTK": "uint", "SPART": "float", "ERASE": "vec4", "QD": "uint", "MIRROR": "float",
 }
 
-# P (parameters, floats): 0 N, 1 n, 2 spacing, 3 origin, 4 radius, 5 delta (the step, s), 6 moves, 7 sub, 8 unused (the dish's seed is CNT[7]),
+# P (parameters, floats): 0 N, 1 n, 2 spacing, 3 origin, 4 radius, 5 delta (the step, s), 6 moves, 7 sub, 8 what a death gives back per unit of the body's mass (death_release x cost_per_mass; the dish's seed is CNT[7]),
 # 9 detection_floor, 10 noise_reference, 11 gradient_noise, 12 reference_sense, 13 reference_size, 14 mass_um, 15 unused (the upkeep scale is 79),
 # 16 base_upkeep, 17 maintenance_per_mass, 18 sense_upkeep, 19 maintenance_floor, 20 growth_rate, 21 cost_per_mass, 22 reserve_per_mass,
 # 23 uptake_per_size, 24 half_saturation, 25 ns, 26 ne, 27 ls0, 28 dls, 29 le0, 30 dle, 31 s_axis[0]
 # 32 trait_mutations, 33 harmful_mutations, 34 compensatory_mutations, 35 lethal_fraction, 36 harm_shape, 37 mean_harm, 38 mean_repair, 39 max_harm,
 # 40 hue_step, 41 sat_step, 42 val_step, 43 val_min, 44-47 gene_min, 48-51 gene_max, 52-55 gene_step, 56 add_mass_factor, 57 drag_upkeep,
 # 58 division_spread, 59 death chance per step, 60 limit (the most bups: a random share dies each step, as many as the colony is expected to exceed it by), 61 feed per step (concentration),
-# 62 capacity (slots), 63 what a death gives back per unit of the body's mass (death_release x cost_per_mass; 0: nothing), 64 handover distance (cloud_handover * spacing), 65 cloud_cut, 66 bin size, 67 bins across, 68 motion_step,
+# 62 capacity (slots), 63 what a death gives back at once, as a cloud, per unit of the body's mass (P[8], or 0 when husks are on: the CPU makes them from the events), 64 handover distance (cloud_handover * spacing), 65 cloud_cut, 66 bin size, 67 bins across, 68 motion_step,
 # 69 motion_structure, 70 cloud spread per step (2 D dt), 71 puff capacity, 72 entry capacity, 73 bins,
 # 74 min_length_px, 75 width (µm), 76 min_width_px, 77 max_trail_px (the drawing's constants), 78 event capacity (births, and deaths, per batch),
 # 79 upkeep_scale (the dish's upkeep factor: multiplies base_upkeep + maintenance_per_mass * mass).
@@ -54,7 +54,7 @@ const TYPES := {
 #       13 bups trimmed so far this step (`life` adds, `finalize` reads and clears), 14-15 spare
 # EVB / EVD (uint): EVENT_SETS sets of P[78] events each (a batch writes set `pcs.pb` of `events`): a birth is 16 words (id lo, id hi,
 #       parent lo, parent hi, step, generation, mutations; speed, sense, metabolism, size_gene, hue, sat, val, harm as float bits; 0),
-#       a death 8 (id lo, id hi, step, generation; mass as float bits; 0, 0, 0): BupSim.apply_events' layout. EVN (uint): per set, the
+#       a death 8 (id lo, id hi, step, generation; mass, x, y, the energy it gives back as float bits: 0 for a trimmed one): BupSim.apply_events' layout. EVN (uint): per set, the
 #       births and deaths of its batch (CNT[8], CNT[9] at its end; past P[78] they were lost). OUTK (uint): per event set, a copy of
 #       OUT as it was at the end of that set's batch (so a stalling read can still find a batch's samples after later frames).
 # QIN (uint, the frame's questions; floats by their bits): see Q_* in gpu/gpu_sim.gd. OUT (uint): the frame's answers, OUT_* there.
@@ -950,7 +950,8 @@ void main() {
 		if (slot < cap) {
 			uint o = (base + slot) * 8u;
 			EVD[o] = BUPS_U[b]; EVD[o + 1u] = BUPS_U[b + 21u]; EVD[o + 2u] = st; EVD[o + 3u] = uint(uintBitsToFloat(BUPS_U[b + 20u]));
-			EVD[o + 4u] = BUPS_U[b + 6u]; EVD[o + 5u] = 0u; EVD[o + 6u] = 0u; EVD[o + 7u] = 0u;
+			EVD[o + 4u] = BUPS_U[b + 6u]; EVD[o + 5u] = BUPS_U[b + 1u]; EVD[o + 6u] = BUPS_U[b + 2u];
+			EVD[o + 7u] = uintBitsToFloat(BUPS_U[b + 23u]) == -2.0 ? floatBitsToUint(P[8] * uintBitsToFloat(BUPS_U[b + 6u])) : 0u;  // (where it died and what it gives back: 0 for a trimmed one)
 		} else atomicAdd(CNT[11], 1u);
 	}
 }

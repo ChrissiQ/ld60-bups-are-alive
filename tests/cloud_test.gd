@@ -35,6 +35,7 @@ func _init() -> void:
 	_check_save()
 	_check_sources()
 	_check_death_release()
+	_check_husks()
 	_check_plume()
 	_check_threads()
 	TestUtil.finish(self, "CLOUD TESTS OK")
@@ -94,6 +95,30 @@ func _check_death_release() -> void:
 	var expected := Biology.DEATH_RELEASE * Cell.COST_PER_MASS * mass
 	check(d.population() == 0, "a bup with no energy dies in its first step")
 	check(d.field.puff_count() == 1 and absf(d.field.total() - expected) < 1e-4 * expected, "a bup that starves gives back a share of its body as a cloud where it died (%.3f of %.3f)" % [d.field.total(), expected])
+	d.free()
+
+
+func _check_husks() -> void:
+	var d := _dish(90.0)
+	d.death_husks = true
+	var mass := 12.0
+	d.sim.add_bup(Vector2(-3000, 2000), Genome.founder(), 0.0, sqrt(mass), mass, 0, Vector2.RIGHT)
+	d.sim.step(20.0, PackedVector2Array(), PackedFloat32Array(), 0.0, 0.0)
+	var expected := Biology.DEATH_RELEASE * Cell.COST_PER_MASS * mass
+	check(d.population() == 0 and d.sim.husk_count() == 1 and d.field.puff_count() == 0 and d.field.total() == 0.0, "with husks on a dead bup leaves a husk and no cloud yet")
+	var copy := Dish.new()
+	root.add_child(copy)
+	check(copy.from_dict(TestUtil.saved(d)) and copy.death_husks and copy.sim.husk_count() == 1, "a husk, and the setting, survive save and load")
+	copy.free()
+	var none := PackedVector2Array()
+	var rates := PackedFloat32Array()
+	for i in 180:  # (an hour: only the first piece, the middle of whose quarter-lifetime is 22 minutes, has leaked)
+		d.sim.step(20.0, none, rates, 0.0, 0.0)
+	var first := expected * (1.0 - exp(-0.25))
+	check(absf(d.field.total() - first) < 1e-3 * first and d.sim.husk_count() == 1, "an hour on, the first piece has leaked (%.3f of %.3f)" % [d.field.total(), first])
+	for i in 1500:  # (to nine hours and a little over: every piece)
+		d.sim.step(20.0, none, rates, 0.0, 0.0)
+	check(d.sim.husk_count() == 0 and absf(d.field.total() - expected) < 1e-3 * expected, "in the end the husk has given all of it back (%.3f of %.3f)" % [d.field.total(), expected])
 	d.free()
 
 

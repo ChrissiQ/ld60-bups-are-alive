@@ -128,6 +128,10 @@ var _plankton_mesh: MultiMesh = null  ## where each small plankton is, for drawi
 var _plankton_key: Array = []  ## what `_plankton_mesh` was last built for: how many plankton, the edit count and the radius drawn
 var _plankton_built := 0  ## when it was (msec)
 var _burst_clock := 0.0  ## sim seconds since the plankton were last looked over for bursts
+var death_husks := false:  ## a dead bup leaves a husk that leaks its nutrient back over Biology.HUSK_SECONDS instead of giving it back at once (see StartConditions.death_husks)
+	set(value):
+		death_husks = value
+		sim.set_husk_seconds(Biology.HUSK_SECONDS if value else 0.0)
 var upkeep_factor := 1.0:  ## multiplies what staying alive costs every bup (its base and per-mass maintenance)
 	set(value):
 		upkeep_factor = maxf(value, 0.0)
@@ -347,6 +351,7 @@ func strike(start: StartConditions = null) -> void:
 	_bloom_due = time  # (a new dish's bloom starts now: the setter does this only when the bloom is switched on, and the last dish may have had the same)
 	_burst_clock = 0.0
 	upkeep_factor = 1.0
+	death_husks = start.death_husks
 	_reset_runtime_state()
 	radius = clampf(start.dish_radius, StartConditions.MIN_SIM_RADIUS, StartConditions.MAX_DISH_RADIUS)
 	field.set_max_across(clampi(start.nutrient_resolution, StartConditions.MIN_NUTRIENT_RESOLUTION, StartConditions.MAX_NUTRIENT_RESOLUTION))
@@ -1055,6 +1060,8 @@ func to_dict() -> Dictionary:
 		"cells": _pack_bytes(sim.export_state_bytes()),  # (every bup as the GPU's record: a dictionary for each of a hundred thousand would take seconds to make and to write)
 		"field": Array(field.values()),
 		"clouds": field.puffs_export(),
+		"death_husks": death_husks,
+		"husks": Array(sim.husks_export()),
 		"sources": saved_sources,
 		"bloom_density": bloom_density,
 		"bloom_due": _bloom_due,
@@ -1185,6 +1192,13 @@ func from_dict(d: Dictionary) -> bool:
 	sim.lineage_import_bytes(loaded_family, loaded_watched)
 	field.load_values(saved_field)
 	field.puffs_import(saved_clouds)
+	death_husks = d.get("death_husks") is bool and d["death_husks"]
+	var saved_husks := PackedFloat64Array()
+	if d.get("husks") is Array:
+		for value: Variant in d["husks"]:
+			if Validate.is_number(value):
+				saved_husks.append(float(value))
+	sim.husks_import(saved_husks)
 	sources = loaded_sources
 	plankton = loaded_plankton
 	bloom_density = float(d["bloom_density"]) if Validate.is_number(d.get("bloom_density")) else 0.0
@@ -1529,6 +1543,7 @@ func _advance_gpu(seconds: float, _budget_usec: int) -> float:
 		"steps": steps, "delta": delta, "start_time": start, "history_steps": history_steps,
 		"events": {"ranges": ranges, "puffs": puffs, "cells": cells, "amounts": amounts},
 		"feed_per_second": feed_density * CONCENTRATION_PER_DENSITY / 3600.0, "upkeep_scale": upkeep_factor, "limit": bup_limit,
+		"death_puff": 0.0 if death_husks else Biology.DEATH_RELEASE * Cell.COST_PER_MASS,
 	})
 	return steps * delta
 

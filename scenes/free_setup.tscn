@@ -183,6 +183,13 @@ theme_type_variation = &"Notice"
 text = "@free_setup.backend_unavailable"
 autowrap_mode = 3
 
+[node name="HusksToggle" type="Button" parent="Panel/Box/Scroll/Rows/Advanced"]
+layout_mode = 2
+theme_type_variation = &"ListButton"
+toggle_mode = true
+alignment = 0
+text = "@free_setup.husks_off"
+
 [node name="Actions" type="HBoxContainer" parent="Panel/Box"]
 layout_mode = 2
 

@@ -40,7 +40,8 @@ void main() {
 		if (slot < cap) {
 			uint o = (base + slot) * 8u;
 			EVD[o] = BUPS_U[b]; EVD[o + 1u] = BUPS_U[b + 21u]; EVD[o + 2u] = st; EVD[o + 3u] = uint(uintBitsToFloat(BUPS_U[b + 20u]));
-			EVD[o + 4u] = BUPS_U[b + 6u]; EVD[o + 5u] = 0u; EVD[o + 6u] = 0u; EVD[o + 7u] = 0u;
+			EVD[o + 4u] = BUPS_U[b + 6u]; EVD[o + 5u] = BUPS_U[b + 1u]; EVD[o + 6u] = BUPS_U[b + 2u];
+			EVD[o + 7u] = uintBitsToFloat(BUPS_U[b + 23u]) == -2.0 ? floatBitsToUint(P[8] * uintBitsToFloat(BUPS_U[b + 6u])) : 0u;  // (where it died and what it gives back: 0 for a trimmed one)
 		} else atomicAdd(CNT[11], 1u);
 	}
 }

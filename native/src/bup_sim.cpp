@@ -59,6 +59,10 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_seed", "seed"), &BupSim::set_seed);
 	ClassDB::bind_method(D_METHOD("set_limit", "bup_limit"), &BupSim::set_limit);
 	ClassDB::bind_method(D_METHOD("set_upkeep_scale", "scale"), &BupSim::set_upkeep_scale);
+	ClassDB::bind_method(D_METHOD("set_husk_seconds", "seconds"), &BupSim::set_husk_seconds);
+	ClassDB::bind_method(D_METHOD("husk_count"), &BupSim::husk_count);
+	ClassDB::bind_method(D_METHOD("husks_export"), &BupSim::husks_export);
+	ClassDB::bind_method(D_METHOD("husks_import", "saved"), &BupSim::husks_import);
 	ClassDB::bind_method(D_METHOD("grow", "new_radius"), &BupSim::grow);
 	ClassDB::bind_method(D_METHOD("shrink", "new_radius"), &BupSim::shrink);
 	ClassDB::bind_method(D_METHOD("set_threads", "count"), &BupSim::set_threads);
@@ -177,6 +181,7 @@ void BupSim::reset(double dish_radius, int64_t seed) {
 	field->reset(dish_radius);
 	bups.clear();
 	records.clear();
+	husks.clear();
 	now_seconds = 0.0;
 	bups.reserve(cap() + 16);
 	next_id = 1;
@@ -203,6 +208,7 @@ int BupSim::shrink(double new_radius) {
 	}
 	radius = new_radius;
 	field->resize(new_radius);
+	husks.erase(std::remove_if(husks.begin(), husks.end(), [new_radius](const Husk &h) { return std::sqrt((double)h.x * h.x + (double)h.y * h.y) > new_radius; }), husks.end());
 	size_t keep = 0;
 	int culled = 0;
 	for (size_t i = 0; i < bups.size(); i++) {
@@ -1127,7 +1133,8 @@ Dictionary BupSim::info_from_state(const PackedByteArray &state, int index) cons
 // The family records of a batch of GPU steps (little-endian 32-bit words):
 //   a birth, 16 words: id lo, id hi, parent lo, parent hi, step, generation, mutations (uints), speed, sense, metabolism, size, hue, sat,
 //     val, harm (floats), 0;
-//   a death, 8 words: id lo, id hi, step, generation (uints), mass (float), 0, 0, 0.
+//   a death, 8 words: id lo, id hi, step, generation (uints), mass, x, y, the nutrient energy it gives back (floats; 0 for one that does not:
+//     a trimmed one). With husks on, the last three make the husk.
 // `step` is the step's place in the batch (from 0), and step k ended at first_step_end_seconds + k * step_seconds, which is when its
 // records are stamped. Each list is in the order of its steps. Step by step, the births are recorded and then the deaths (a bup never
 // divides and dies in the same step, except one displaced at the limit after dividing, which is held by its daughter either way).
@@ -1175,6 +1182,9 @@ void BupSim::apply_events(const PackedByteArray &births, const PackedByteArray &
 			b.generation = (int)get_u32(e, 3);
 			b.mass = get_f32(e, 4);
 			record_death(b);
+			if (husk_seconds > 0.0 && get_f32(e, 7) > 0.0f) {
+				add_husk(get_f32(e, 5), get_f32(e, 6), get_f32(e, 7));
+			}
 		}
 	}
 	now_seconds = now_before;
@@ -1474,11 +1484,75 @@ void BupSim::emit_sources(double delta, const PackedVector2Array &source_pos, co
 }
 
 // Only the sources' part of a step (no feed, diffusion, clouds or bups): what the dish's own world does while the GPU runs the rest.
+static const int HUSK_PIECES = 12;
+static const size_t MAX_HUSKS = 200000; // past this a death gives its nutrient back at once (as the clouds past MAX_CLOUDS go to the grid)
+
+// The share of a husk's nutrient that leaks in piece k: what an exponential leak lets go in the k-th quarter of a lifetime, and in the last
+// piece what is left after the HUSK_PIECES quarters.
+static double husk_share(int k) {
+	double share = std::exp(-0.25 * k) - std::exp(-0.25 * (k + 1));
+	return k == HUSK_PIECES - 1 ? share + std::exp(-0.25 * HUSK_PIECES) : share;
+}
+
+void BupSim::add_husk(float x, float y, float energy) {
+	if (husks.size() >= MAX_HUSKS) {
+		field->add_cloud(Vector2(x, y), 0.0, energy);
+		return;
+	}
+	husks.push_back({ x, y, energy, 0.0, 0 });
+}
+
+void BupSim::advance_husks(double delta) {
+	if (husks.empty()) {
+		return;
+	}
+	const double quarter = husk_seconds / 4.0;
+	size_t i = 0;
+	while (i < husks.size()) {
+		Husk &h = husks[i];
+		h.age += delta;
+		while (h.next < HUSK_PIECES && h.age >= (h.next + 0.5) * quarter) {
+			field->add_cloud(Vector2(h.x, h.y), 0.0, h.energy * husk_share(h.next));
+			h.next++;
+		}
+		if (h.next >= HUSK_PIECES) {
+			h = husks.back();
+			husks.pop_back();
+		} else {
+			i++;
+		}
+	}
+}
+
+PackedFloat64Array BupSim::husks_export() const {
+	PackedFloat64Array out;
+	out.resize((int64_t)husks.size() * 5);
+	double *w = out.ptrw();
+	for (size_t i = 0; i < husks.size(); i++) {
+		const Husk &h = husks[i];
+		w[i * 5] = h.x;
+		w[i * 5 + 1] = h.y;
+		w[i * 5 + 2] = h.energy;
+		w[i * 5 + 3] = h.age;
+		w[i * 5 + 4] = h.next;
+	}
+	return out;
+}
+
+void BupSim::husks_import(const PackedFloat64Array &saved) {
+	husks.clear();
+	const double *r = saved.ptr();
+	for (int64_t i = 0; i + 4 < saved.size(); i += 5) {
+		husks.push_back({ (float)r[i], (float)r[i + 1], (float)r[i + 2], r[i + 3], (int)r[i + 4] });
+	}
+}
+
 void BupSim::step_world(double delta, const PackedVector2Array &source_pos, const PackedFloat32Array &source_rates, double sim_time) {
 	if (sim_time >= 0.0) {
 		now_seconds = sim_time;
 	}
 	emit_sources(delta, source_pos, source_rates);
+	advance_husks(delta);
 }
 
 void BupSim::step(double delta, const PackedVector2Array &source_pos, const PackedFloat32Array &source_rates, double feed_per_second, double sim_time) {
@@ -1486,6 +1560,7 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 		now_seconds = sim_time;
 	}
 	emit_sources(delta, source_pos, source_rates);
+	advance_husks(delta);
 	feed_concentration += feed_per_second * delta;
 	diffuse_accum += delta;
 	if (diffuse_accum >= G.diffuse_interval) {
@@ -1610,7 +1685,11 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 	}
 	bups.resize(keep);
 	for (const DeathCloud &c : death_clouds) { // (after the loop: a cloud made in it would be found by the bups after it, and the clouds' lookup rebuilt for each)
-		field->add_cloud(Vector2(c.x, c.y), 0.0, c.energy);
+		if (husk_seconds > 0.0) {
+			add_husk(c.x, c.y, c.energy);
+		} else {
+			field->add_cloud(Vector2(c.x, c.y), 0.0, c.energy);
+		}
 	}
 	// At the carrying limit a birth takes the place of a random bup, so reproduction (not a blocked
 	// birth) is still what wins: numbers hold steady and the fitter lineage spreads (a Moran process).

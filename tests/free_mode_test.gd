@@ -1218,6 +1218,9 @@ func _backend_rule_tests() -> void:
 	check(chosen.sim_backend == auto, "the GPU setting starts as Auto")
 	chosen.sim_backend = on
 	check(StartConditions.from_dict(chosen.to_dict()).sim_backend == on and chosen.copy().sim_backend == on, "the GPU setting is saved and loaded with the rest")
+	chosen.death_husks = true
+	check(StartConditions.from_dict(chosen.to_dict()).death_husks and chosen.copy().death_husks and not StartConditions.new().death_husks and not StartConditions.from_dict({"death_husks": 1}).death_husks, "the husks setting is saved and loaded with the rest, starts off, and anything but a boolean is off")
+	chosen.death_husks = false
 	check(StartConditions.from_dict({"sim_backend": "fast"}).sim_backend == auto and StartConditions.from_dict({"sim_backend": 3}).sim_backend == auto and StartConditions.from_dict({}).sim_backend == auto, "a setting that is not one of the three is Auto")
 	var d := _make_dish()
 	d.strike(chosen)
