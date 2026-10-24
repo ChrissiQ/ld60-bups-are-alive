@@ -6,6 +6,8 @@ extends SceneTree
 ##   godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/switch_check.gd -- check
 ##       the state transfer: GPU -> CPU -> GPU round trips, rapid switches, and the saved dictionary.
 
+const Tools := preload("res://tools/gpu/world_tools.gd")
+
 const BENCH_COUNTS := [2000, 5000, 10000, 20000, 50000]
 const BENCH_DISHES := [[10000.0, 100], [90000.0, 100], [90000.0, 400]]  ## [radius, nutrient detail]
 const BENCH_DELTAS := [1.67, 16.7]
@@ -292,7 +294,7 @@ func _check() -> void:
 	_gpu_batches(dish, world, 4)
 	var g_save := _gpu_state(world)
 	var saved := dish.to_dict()
-	_ok(saved["cells"].size() == g_save["count"] and dish._gpu_on_cpu and dish.sim.bup_count() == g_save["count"], "to_dict in GPU mode saves the GPU's %d bups (the state came over first)" % g_save["count"])
+	_ok(Tools.saved_count(saved) == g_save["count"] and dish._gpu_on_cpu and dish.sim.bup_count() == g_save["count"], "to_dict in GPU mode saves the GPU's %d bups (the state came over first)" % g_save["count"])
 	dish.gpu_active = false
 	var saved_cpu := dish.to_dict()
 	_ok(JSON.stringify(saved) == JSON.stringify(saved_cpu), "the saved dictionary equals the one the CPU path saves for the same exported state")
@@ -300,7 +302,7 @@ func _check() -> void:
 	root.add_child(baseline)
 	baseline.set_seed(2)
 	_ok(baseline.from_dict(JSON.parse_string(JSON.stringify(saved))), "a CPU dish loads it")
-	_ok(baseline.sim.alive_ids().size() == saved["cells"].size(), "...with a living record for each of its %d bups (the records it has: %d)" % [saved["cells"].size(), baseline.sim.alive_ids().size()])
+	_ok(baseline.sim.alive_ids().size() == Tools.saved_count(saved), "...with a living record for each of its %d bups (the records it has: %d)" % [Tools.saved_count(saved), baseline.sim.alive_ids().size()])
 	var baseline_saved := JSON.stringify(baseline.to_dict())
 	var reloaded := Dish.new()
 	root.add_child(reloaded)
@@ -361,7 +363,7 @@ func _dish_switching() -> void:
 	dish.remove_bup(id)
 	_ok(world.bup_count() == pop, "remove_bup on the GPU: gone again (%d)" % world.bup_count())
 	var saved := dish.to_dict()
-	_ok(saved["cells"].size() == pop and dish._gpu_on_cpu, "to_dict on the GPU: %d bups saved, the CPU holds them until the GPU takes them back" % saved["cells"].size())
+	_ok(Tools.saved_count(saved) == pop and dish._gpu_on_cpu, "to_dict on the GPU: %d bups saved, the CPU holds them until the GPU takes them back" % Tools.saved_count(saved))
 	dish._choose_backend(1.67)
 	_ok(dish.gpu_active and not dish._gpu_on_cpu and world.bup_count() == pop, "the next coarse frame reloads the GPU")
 	dish.set_backend_setting(StartConditions.BACKEND_CPU)

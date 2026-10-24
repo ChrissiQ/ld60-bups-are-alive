@@ -21,6 +21,8 @@ extends SceneTree
 ## GAME_CHECK_FPS=60 caps the frame rate (Engine.max_fps), for a 60 Hz display on a faster one. GAME_CHECK_LOGS is where `edits` writes its debug log.
 ## Prints "GAME CHECK OK" or the failures. Every ERROR/WARNING line Godot prints is a failure too: grep the output for them.
 
+const Tools := preload("res://tools/gpu/world_tools.gd")
+
 const FRAME_BUDGET_USEC := 9000  ## Main.FRAME_BUDGET_USEC
 const MAX_FRAME_SECONDS := 0.1  ## Main.MAX_FRAME_SECONDS
 
@@ -676,7 +678,7 @@ func _edits() -> void:
 	await frame()
 	held = true
 	var saved_mid := dish.to_dict()
-	_ok(dish._gpu_on_cpu, "to_dict on the GPU: the CPU holds the state now (%d bups saved)" % saved_mid["cells"].size())
+	_ok(dish._gpu_on_cpu, "to_dict on the GPU: the CPU holds the state now (%d bups saved)" % Tools.saved_count(saved_mid))
 	var c0 := dish.field.total()
 	dish.drop_nutrients(spot, 40)
 	await frames(3)
@@ -780,7 +782,7 @@ func _edits() -> void:
 
 	# save and load
 	var saved := JSON.parse_string(JSON.stringify(dish.to_dict())) as Dictionary
-	var saved_pop: int = saved["cells"].size()
+	var saved_pop: int = Tools.saved_count(saved)
 	await frames(60)
 	t0 = Time.get_ticks_msec()
 	quiet_until = frames_run + 5
@@ -800,7 +802,7 @@ func _edits() -> void:
 	cpu_dish.queue_free()
 	quiet_until = frames_run + 5
 	_ok(dish.from_dict(cpu_saved), "a save made on the CPU loads into the dish on the GPU")
-	_ok(gpu_side(dish)["count"] == cpu_saved["cells"].size() and dish.backend_running() == "gpu", "...its %d bups on the GPU" % cpu_saved["cells"].size())
+	_ok(gpu_side(dish)["count"] == Tools.saved_count(cpu_saved) and dish.backend_running() == "gpu", "...its %d bups on the GPU" % Tools.saved_count(cpu_saved))
 	await frames(120)
 	consistent("120 frames after loading the CPU's save")
 

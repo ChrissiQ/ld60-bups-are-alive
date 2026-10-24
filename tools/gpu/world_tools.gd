@@ -68,3 +68,9 @@ static func release(dish: Dish) -> void:
 	if dish.gpu_world != null and dish.gpu_world.gpu != null:
 		var gpu := dish.gpu_world.gpu
 		RenderingServer.call_on_render_thread(gpu.release)
+
+
+## How many bups a dish's to_dict() holds (they are one compressed block of records: see Dish._pack_bytes).
+static func saved_count(saved: Dictionary) -> int:
+	var records: Variant = Dish._unpack_bytes(saved["cells"])
+	return records.size() / GpuSim.RECORD_BYTES if records != null else -1
