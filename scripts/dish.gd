@@ -1578,9 +1578,11 @@ const AUTO_DOWN_FRAMES := 10  ## frames in a row that Auto's rule must want the 
 const STEPS_AT_TOP_SPEED := 9  ## steps a frame takes at x10,000 at 60 frames a second (one frame is 167 s; the step is 18.5 s): what a step this long stands for when the caller does not say how many a frame holds
 const TOP_SPEED_STEP := 17.5  ## a step this long or longer is taken for a frame of several steps (x10,000 at 60 Hz: 18.5 s), shorter ones for a frame of one (x1,000: 16.7 s). A guess: `advance` knows, and passes `steps`
 const RULE_FRAME_SECONDS := 1.0 / 60.0  ## the frame Auto's costs are for: a frame's steps are scaled to one this long (the frame just past may be any length: a 120 Hz display's, or one a switch held up, whose many steps would otherwise make the processor look slower than it is and switch straight back)
-## Measured on the M1 Pro (tools/gpu/switch_check.gd bench, 2,000-50,000 bups, 3 dishes, 15 repeats, least of them; fits to every
-## point within 25%, no clouds): microseconds for one step by the processor, from the number of cells across, the motion sub-steps `m`
-## (BupSim.moves_for), the bups `n` and the clouds `k`: 104 + 0.0012 cells² + 62 m + n (0.0098 + 0.0057 m) + 0.06 k; by the GPU (the batch's
+## Measured on the M1 Pro (tools/gpu/switch_check.gd bench, 2,000-1,000,000 bups, 3 dishes, 2 step lengths, 5 repeats, least of them,
+## the processor alone with BENCH_CPU_ONLY=1; fits to every point within 16%, mean error 4.6%, no clouds; the earlier fit, to 50,000 bups
+## only, read up to 29% low at a million and at long steps): microseconds for one step by the processor, from the number of cells across,
+## the motion sub-steps `m` (BupSim.moves_for), the bups `n`, the step's length `d` in seconds and the clouds `k`: 81.3 + 0.00156 cells²
+## + 50.9 m + n (0.00993 + 0.00579 m + 0.000264 d) + 5.88 d + 0.06 k; by the GPU (unchanged; the batch's
 ## own cost, leaving the fixed ~220 µs of a submit and wait that only a local device pays): 146 + 0.00049 cells² + n (0.0044 + 0.0005 m) + 0.04 k.
 ## The GPU's share of the frame that these do not have (drawing, the readbacks and queries of the frame) is GPU_FRAME_USEC and
 ## GPU_FRAME_USEC_PER_BUP (measured with the game's pipeline, below).
@@ -1588,7 +1590,7 @@ const RULE_FRAME_SECONDS := 1.0 / 60.0  ## the frame Auto's costs are for: a fra
 ## 150-1,000 µs more on the GPU (the clouds spread, and are read by every bup near them): 0.06 and 0.04 µs a cloud, good to about a
 ## factor of two. Measured to 50,000 bups and 10,000 clouds only: past that (up to the 1,000,000 bups a dish may hold) the rule
 ## extrapolates the lines, which have held so far (the processor's cost is linear in the bups by construction; the GPU's rose a little slower).
-const CPU_STEP_MODEL := [104.0, 0.0012, 62.0, 0.0098, 0.0057, 0.06]
+const CPU_STEP_MODEL := [81.3, 0.00156, 50.9, 0.00993, 0.00579, 0.06, 0.000264, 5.88]
 const GPU_STEP_MODEL := [146.0, 0.00049, 0.0044, 0.0005, 0.04]
 const GPU_FRAME_USEC := 250.0  ## what a frame on the GPU costs besides its steps, beyond the engine's own frame: the fixed part ...
 const GPU_FRAME_USEC_PER_BUP := 0.005  ## ... and the part for each bup (every one is drawn, and the frame's questions look at every slot). Measured on the M1 Pro (tools/gpu/game_check.gd frame: vsync off, the frame with the GPU's bups paused against the engine's frame with none, same sitting, a busy machine): about 0 ms at 20,000 bups, 0.3-0.65 ms at 100,000, 5.8 ms at 1,000,000 (the old assumption, 1,000 µs at any size, was 2-3x too high at 100,000 and 6x too low at a million). It moves none of the rule's switches to the GPU (game_check thresholds: at each the GPU's frame is far below the processor's), and one hand-back (90 mm, x10,000, 2,000 clouds: below 2,250 bups instead of 4,000)
@@ -1608,7 +1610,7 @@ var _fractions_asked := {}  ## [gene, threshold] -> true for each share asked la
 static func backend_frame_costs(step_delta: float, cells_across: int, moves: int, population: int, frame_steps := 0, clouds := 0) -> Vector2:
 	var steps := float(frame_steps if frame_steps > 0 else (STEPS_AT_TOP_SPEED if step_delta >= TOP_SPEED_STEP else 1))
 	var cells_squared := float(cells_across) * cells_across
-	var cpu: float = CPU_STEP_MODEL[0] + CPU_STEP_MODEL[1] * cells_squared + CPU_STEP_MODEL[2] * moves + population * (CPU_STEP_MODEL[3] + CPU_STEP_MODEL[4] * moves) + CPU_STEP_MODEL[5] * clouds
+	var cpu: float = CPU_STEP_MODEL[0] + CPU_STEP_MODEL[1] * cells_squared + CPU_STEP_MODEL[2] * moves + population * (CPU_STEP_MODEL[3] + CPU_STEP_MODEL[4] * moves) + CPU_STEP_MODEL[5] * clouds + population * CPU_STEP_MODEL[6] * step_delta + CPU_STEP_MODEL[7] * step_delta
 	var gpu: float = GPU_STEP_MODEL[0] + GPU_STEP_MODEL[1] * cells_squared + population * (GPU_STEP_MODEL[2] + GPU_STEP_MODEL[3] * moves) + GPU_STEP_MODEL[4] * clouds
 	return Vector2(steps * cpu, GPU_FRAME_USEC + GPU_FRAME_USEC_PER_BUP * population + steps * gpu)
 

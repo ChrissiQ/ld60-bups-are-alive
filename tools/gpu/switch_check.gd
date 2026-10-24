@@ -3,6 +3,7 @@ extends SceneTree
 ##   godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/switch_check.gd -- bench [reps [clouds]]
 ##       CPU against GPU, time per step at 2k-50k bups (with `clouds` plankton clouds in the dish, 0 by default): what the Auto rule's
 ##       costs (Dish.CPU_STEP_MODEL, GPU_STEP_MODEL) were fitted to.
+##       BENCH_COUNTS=100000,500000 overrides the crowd sizes; BENCH_CPU_ONLY=1 times the processor alone (for the sizes past what the fit covers).
 ##   godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/switch_check.gd -- check
 ##       the state transfer: GPU -> CPU -> GPU round trips, rapid switches, and the saved dictionary.
 
@@ -432,9 +433,15 @@ func _bench_dish(n: int, radius: float, detail: int, clouds: int) -> Dish:
 
 func _bench(reps: int, clouds: int) -> void:
 	var consts := SimConstants.build()
+	var counts: Array = BENCH_COUNTS
+	if OS.get_environment("BENCH_COUNTS") != "":
+		counts = []
+		for text in OS.get_environment("BENCH_COUNTS").split(","):
+			counts.append(int(text))
+	var cpu_only := OS.get_environment("BENCH_CPU_ONLY") == "1"
 	for dish_cfg: Array in BENCH_DISHES:
 		for delta: float in BENCH_DELTAS:
-			for n: int in BENCH_COUNTS:
+			for n: int in counts:
 				var dish := _bench_dish(n, dish_cfg[0], dish_cfg[1], clouds)
 				var cpu := []
 				var none_pos := PackedVector2Array()
@@ -446,6 +453,11 @@ func _bench(reps: int, clouds: int) -> void:
 					for k in 4:
 						dish.sim.step(delta, none_pos, none_rates, 0.0, delta * k)
 					cpu.append(float(Time.get_ticks_usec() - t0) / 4.0)
+				if cpu_only:
+					cpu.sort()
+					print("BENCH clouds=%d r=%d cells=%d delta=%.2f N=%d | cpu %.0f us/step (median %.0f, max %.0f)" % [dish.field.puff_count(), dish_cfg[0], dish.field.get_size(), delta, n, cpu[0], cpu[cpu.size() / 2], cpu[cpu.size() - 1]])
+					dish.free()
+					continue
 				var field := dish.field
 				var gpu := GpuSim.new()
 				var records := dish.sim.export_state_bytes()
