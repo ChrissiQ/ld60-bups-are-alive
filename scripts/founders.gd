@@ -1,7 +1,7 @@
 extends Control
 ## Free mode's last step before the dish starts: every founder, in order (#1, #2 ...), to name and colour.
 ## Only founders can be given a colour here; their descendants drift from it as they mutate (see Genome).
-## What is chosen is kept with the starting conditions when the dish is started (START), so the next launch (and a restart)
+## What is chosen is kept with the starting conditions when the dish is started (START), so the next launch
 ## starts the same way. Nothing is kept by going back: that returns to the settings as they were, whatever was changed here.
 
 @onready var list: VBoxContainer = $Panel/Box/Scroll/List
@@ -111,7 +111,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		_back()
 
 
-## Keeps what the rows hold with the starting conditions (so it is there at the next launch and for a restart).
+## Keeps what the rows hold with the starting conditions (so it is there at the next launch).
 func _commit() -> void:
 	_start.founders = _collect()
 	Session.free_start = _start

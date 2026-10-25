@@ -1175,15 +1175,12 @@ func _init() -> void:
 	m.queue_free()
 	await process_frame
 
-	# R restarts with the same free conditions.
+	# The free scene begins the dish from the free start conditions.
 	Session.mode = Session.Mode.FREE
 	var m2: Node = load("res://scenes/main.tscn").instantiate()
 	root.add_child(m2)
 	await process_frame
-	m2.dish.clear_bups()
-	m2.dish.feed_density = 2.0
-	m2._restart()
-	check(m2.dish.population() == 150 and absf(TestUtil.density(m2.dish) - 40.0) < 1.0 and m2.dish.feed_density == 11.0, "restart reuses free start conditions")
+	check(m2.dish.population() == 150 and absf(TestUtil.density(m2.dish) - 40.0) < 1.0 and m2.dish.feed_density == 11.0, "the free scene begins with the free start conditions")
 	m2.queue_free()
 	await process_frame
 

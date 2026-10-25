@@ -63,7 +63,7 @@ const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) stil
 @onready var paused_label: Label = $HUD/PauseRing/PausedLabel
 
 ## The two modes share everything (dish, evolution, HUD, controls). Free mode differs in
-## exactly three ways: no goals, no saving, and restarts use the player's start conditions.
+## exactly two ways: no goals, and no saving.
 var free_mode := Session.mode == Session.Mode.FREE
 var tracker := GoalTracker.new()
 var dishes: Array[Dish] = []  ## every dish that runs; `dish` is the one in the main view (the others run beside it, see the strip)
@@ -155,7 +155,7 @@ func _ready() -> void:
 	if data.is_empty() or not dish.from_dict(data["dish"]):
 		if not data.is_empty():
 			SaveGame.delete()  # (a save that will not load is no save: the title screen stops offering it)
-		_restart()
+		_begin_dish()
 	else:
 		tracker.from_dict(data["goals"])
 		_fit_camera()
@@ -170,16 +170,8 @@ func _exit_tree() -> void:
 	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
 
 
-func _restart() -> void:
-	_stack.clear()
-	_lineage_shown = {}
-	_end_pipette_wait(false)
-	_pipette_clock = 0.0
-	_drop_other_dishes()
-	dish.selected_id = -1
+func _begin_dish() -> void:
 	dish.strike(Session.free_start if free_mode else null)
-	if not free_mode and tracker.index >= 1:
-		dish.upkeep_factor = Dish.GOAL_UPKEEP_FACTOR  # (strike resets it: a restart in experiment 2 or after costs what it did)
 	_fit_camera()
 	if free_mode:
 		toolbar.set_paused(true)  # the playground starts paused so you can set the scene
@@ -311,7 +303,7 @@ func _pick_slack() -> float:
 
 func _update_info_panel() -> void:
 	if dish.selected_id >= 0 and not dish.has_record(dish.selected_id):
-		dish.selected_id = -1  # its record is gone (a restart, say)
+		dish.selected_id = -1  # its record is gone
 	# A clicked bup, source or plankton is pinned to the panel. Until one is, the panel follows the pointer:
 	# whatever it is over, or else the nutrient at that spot.
 	var pinned := dish.has_selection()
@@ -568,9 +560,6 @@ func _on_key(event: InputEventKey) -> void:
 		KEY_DELETE, KEY_BACKSPACE:
 			if _tools_unlocked():
 				_delete_selected_source()
-		KEY_R:
-			_show_banner("", 0.0)
-			_restart()
 		KEY_ESCAPE:
 			_escape()
 
@@ -853,10 +842,7 @@ func _register_dish(d: Dish) -> void:
 func add_dish(start: StartConditions) -> Dish:
 	var d := Dish.new()
 	add_child(d)
-	var slot := 0  # (the first place no dish holds: after a restart the main dish may sit past the origin)
-	while dishes.any(func(other: Dish) -> bool: return is_equal_approx(other.global_position.x, DISH_SPACING * float(slot))):
-		slot += 1
-	d.global_position = Vector2(DISH_SPACING * float(slot), 0.0)
+	d.global_position = Vector2(DISH_SPACING * float(dishes.size()), 0.0)
 	d.strike(start)
 	d.time = world_time()  # (a dish that joins is at the world's time: one clock for all)
 	for layer: int in Dish.Layer.values():
@@ -883,21 +869,6 @@ func set_main_dish(d: Dish) -> void:
 		camera.position = d.view_position
 	else:
 		_fit_camera()
-
-
-## A restart is of the main dish only: the others are let go (their numbers start again).
-func _drop_other_dishes() -> void:
-	for d in dishes.duplicate():
-		if d != dish:
-			dishes.erase(d)
-			_dish_numbers.erase(d)
-			dish_strip.remove(d)
-			d.queue_free()
-	_next_dish_number = 2
-	_dish_numbers[dish] = 1
-	dish_strip.clear()
-	dish_strip.add(dish, 1, get_world_2d())
-	dish_strip.light(dish)
 
 
 func _resize_dish(new_radius: float) -> void:

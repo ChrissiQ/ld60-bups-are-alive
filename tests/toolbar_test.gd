@@ -110,8 +110,6 @@ func _init() -> void:
 	await create_timer(0.2).timeout
 	check(m.dish.time > t0, "resumed: the sim advances")
 	m.toolbar.set_paused(true)
-	m._restart()
-	check(m.paused and m.pause_ring.visible, "restarting in free mode pauses again")
 	m.toolbar.set_paused(false)
 
 	# --- Nutrient tool: click drops a dose, drag drops one at intervals along the path (and does not pan).

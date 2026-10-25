@@ -1,7 +1,7 @@
 extends SceneTree
 ## Run: godot --headless --path . -s tests/dishes_test.gd
 ## Several dishes on the game screen (free mode): a second dish runs beside the main one, has a thumbnail in the strip, and a click on it brings it into the
-## main view (the graph, the panels and the camera follow); a restart lets the others go.
+## main view (the graph, the panels and the camera follow).
 
 
 func check(ok: bool, what: String) -> void:
@@ -57,9 +57,13 @@ func _run() -> void:
 	check(m.camera.position.distance_to(other.global_position) < 1.0, "the camera is on it")
 	m.dish_strip.dish_chosen.emit(first)
 	check(m.dish == first and m.camera.position.distance_to(first.global_position) < 1.0, "the strip's click brings the first back")
-	m._restart()
+	m.queue_free()
 	await process_frame
-	check(m.dishes.size() == 1 and m.dish == first and not m.dish_strip.visible, "a restart lets the others go")
+	m = load("res://scenes/main.tscn").instantiate()
+	root.add_child(m)
+	await process_frame
+	first = m.dish
+	check(m.dishes.size() == 1 and not m.dish_strip.visible, "a new game screen has one dish and no strip")
 	# The pipette: the bups in the circle move to a new dish, the rest stay.
 	first.clear_bups()
 	for i in 10:
