@@ -694,6 +694,11 @@ func add_transferred(records: PackedByteArray, lineage: PackedByteArray, from_di
 	return ids
 
 
+## For each of these ids, how many bups alive in this dish have it in their family line (itself included).
+func living_descendants(ids: PackedInt64Array) -> PackedInt32Array:
+	return sim.living_descendants_of(ids)
+
+
 ## The number of the dish this bup's line began in, when it began in another (a bup founded by the pipette, or the descendant of one), else 0.
 func line_from_dish(id: int) -> int:
 	for ancestor in sim.lineage_chain(id):

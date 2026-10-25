@@ -84,6 +84,8 @@ func _run() -> void:
 	await process_frame
 	check(m.paused_label.offset_bottom <= -20.0 - m.dish_strip.size.y, "the word PAUSED sits above the strip of dishes (%.0f, strip %.0f tall)" % [m.paused_label.offset_bottom, m.dish_strip.size.y])
 	m.set_main_dish(first)
+	var elsewhere: Dictionary = m._alive_elsewhere(first.lineage_chain(parent))
+	check(elsewhere.get(parent, []) == [[1, m.dishes.find(made) + 1]], "a lineage entry says how many bups of that line are alive in another dish (%s)" % [elsewhere])
 	check(m.pipette(first.global_position + Vector2(5000.0, 5000.0), 30.0) == null and m.dishes.size() == 3, "a circle with no bups makes no dish")
 	# The pipette timer: the game pauses for the pipette after the set hours, Space cannot resume, and a pipette that moves something does.
 	m._set_pipette_timer(1.0)

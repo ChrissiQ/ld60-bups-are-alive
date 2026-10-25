@@ -22,6 +22,7 @@ const TOOLBAR_CLEARANCE := 120.0  ## screen pixels kept clear above the dish for
 const TUTORIAL_ZOOM := 6.0  ## how close the tutorial brings the camera to a bup it asks the player to click
 const TUTORIAL_BUP_PIXELS := 18.0  ## the lit square round that bup is this far out on each side
 const MAX_DISHES := 20  ## the most dishes at once (the strip holds that many)
+const LINEAGE_ELSEWHERE_MSEC := 30000  ## how often the lineage panel looks again for a line's bups alive in other dishes
 const PAUSE_TEXT_GAP := 8.0  ## screen pixels between the strip of dishes and the word PAUSED above it
 const LOCKSTEP_MIN_GAP := 1.0  ## a dish at least this many simulated seconds behind the world's target is advanced (a shorter step would be a fine one, which only the processor runs); nearer, it waits
 const LOCKSTEP_MIN_SHARE := 0.25  ## at speeds where a frame holds less than four of those seconds, a quarter of the frame's step
@@ -71,6 +72,8 @@ var _next_dish_number := 1
 var _pipette_hours := 0.0  ## the pipette timer: the game pauses for the pipette every this many simulated hours (0: off)
 var _pipette_clock := 0.0  ## simulated seconds since the last pause for the pipette
 var _pipette_waiting := false  ## paused for the pipette: only a pipette use resumes play
+var _elsewhere := {}  ## see _alive_elsewhere, and when it was worked out
+var _elsewhere_stamp := []
 var _switch_turn := 0  ## whose turn it is to change backend when no dish is waiting
 var _pipette_pulse: Tween
 var tool := Toolbar.Tool.SELECT  ## kept in step with the toolbar's selection (see _on_tool_selected)
@@ -635,9 +638,32 @@ func _open_info_of(id: int) -> void:
 
 ## Lists the family line that led to a bup (oldest first). It is rebuilt only when the line, or who in it is
 ## still alive, changes.
+## Who of a lineage is alive in the other dishes: ancestor id -> [[how many, the dish's number], ...]. Worked out when the lineage is first shown and then at most every
+## LINEAGE_ELSEWHERE_MSEC (a pass over a dish's records), and only for dishes that hold a record of someone in the line (the ones a pipette took bups into).
+func _alive_elsewhere(chain: PackedInt64Array) -> Dictionary:
+	if dishes.size() < 2 or chain.is_empty():
+		return {}
+	var stamp := [chain[-1], Time.get_ticks_msec() / LINEAGE_ELSEWHERE_MSEC]
+	if _elsewhere_stamp == stamp:
+		return _elsewhere
+	_elsewhere_stamp = stamp
+	_elsewhere = {}
+	for other in dishes:
+		if other == dish or not other.has_record(chain[0]):
+			continue
+		var counts := other.living_descendants(chain)
+		for k in chain.size():
+			if counts[k] > 0:
+				if not _elsewhere.has(chain[k]):
+					_elsewhere[chain[k]] = []
+				_elsewhere[chain[k]].append([counts[k], dishes.find(other) + 1])
+	return _elsewhere
+
+
 func _show_lineage(id: int) -> void:
 	var chain := dish.lineage_chain(id)
-	var key := []
+	var elsewhere := _alive_elsewhere(chain)
+	var key := [elsewhere]
 	for ancestor in chain:
 		key.append([ancestor, dish.has_bup(ancestor), dish.bup_name(ancestor)])
 	if _lineage_shown.get("id") == id and _lineage_shown.get("key") == key:
@@ -653,6 +679,8 @@ func _show_lineage(id: int) -> void:
 		var line := Strings.t("panel.lineage_entry", [dish.bup_name(ancestor), SimClock.format_minutes(info["born"])])  # (the times on a second row, so nothing is cut off)
 		if not info["alive"]:
 			line += Strings.t("panel.lineage_died", [SimClock.format_minutes(info["died"])])
+		for place: Array in elsewhere.get(ancestor, []):
+			line += Strings.t("panel.lineage_elsewhere", [place[0], place[1]])
 		var row := HBoxContainer.new()
 		var swatch := ColorRect.new()  # the bup's colour, so a clade can be followed by eye
 		swatch.color = Genome.color_of(info)

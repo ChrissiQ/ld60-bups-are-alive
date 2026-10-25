@@ -105,6 +105,7 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("remove_bup", "id"), &BupSim::remove_bup);
 	ClassDB::bind_method(D_METHOD("take_disc", "center", "radius"), &BupSim::take_disc);
 	ClassDB::bind_method(D_METHOD("ids_in_disc", "center", "radius"), &BupSim::ids_in_disc);
+	ClassDB::bind_method(D_METHOD("living_descendants_of", "ids"), &BupSim::living_descendants_of);
 	ClassDB::bind_method(D_METHOD("add_state_bytes", "state", "shift", "keep_ids"), &BupSim::add_state_bytes, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("clear_bups"), &BupSim::clear_bups);
 	ClassDB::bind_method(D_METHOD("set_bup_energy", "id", "energy"), &BupSim::set_bup_energy);
@@ -762,6 +763,37 @@ void BupSim::remove_bup(int64_t id) {
 		bups.erase(bups.begin() + i);
 		record_death(gone);
 	}
+}
+
+// One pass over the living records, each walked up its family line (the records, not the bups: on the GPU path the records are the processor's and the bups are not).
+PackedInt32Array BupSim::living_descendants_of(const PackedInt64Array &ids) const {
+	std::unordered_map<int64_t, int> place;
+	for (int64_t i = 0; i < ids.size(); i++) {
+		place[ids[i]] = (int)i;
+	}
+	PackedInt32Array counts;
+	counts.resize(ids.size());
+	for (int64_t i = 0; i < ids.size(); i++) {
+		counts.set(i, 0);
+	}
+	for (const auto &entry : records) {
+		if (!entry.second.alive) {
+			continue;
+		}
+		int64_t id = entry.first;
+		while (id > 0) {
+			auto at = place.find(id);
+			if (at != place.end()) {
+				counts.set(at->second, counts[at->second] + 1);
+			}
+			auto up = records.find(id);
+			if (up == records.end()) {
+				break;
+			}
+			id = up->second.parent;
+		}
+	}
+	return counts;
 }
 
 PackedInt64Array BupSim::ids_in_disc(const Vector2 &center, double disc_radius) const {
