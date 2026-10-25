@@ -11,15 +11,15 @@ uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
-shared float sm[8 * 256];
+shared float sm[9 * 256];
 void main() {
 	uint l = gl_LocalInvocationID.x, groups = uint(pcs.pa);
-	float v[8] = float[8](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-	for (uint g = l; g < groups; g += 256u) for (int k = 0; k < 8; k++) v[k] += SPART[g * 8u + uint(k)];
-	for (int k = 0; k < 8; k++) sm[k * 256 + int(l)] = v[k];
+	float v[9] = float[9](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+	for (uint g = l; g < groups; g += 256u) for (int k = 0; k < 9; k++) v[k] += SPART[g * 9u + uint(k)];
+	for (int k = 0; k < 9; k++) sm[k * 256 + int(l)] = v[k];
 	barrier();
 	for (uint half_ = 128u; half_ > 0u; half_ >>= 1u) {
-		if (l < half_) for (int k = 0; k < 8; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
+		if (l < half_) for (int k = 0; k < 9; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
 		barrier();
 	}
 	if (l == 0u) {
@@ -29,6 +29,7 @@ void main() {
 		OUT[o + 7u] = floatBitsToUint(pcs.pc);
 		OUT[o + 8u] = floatBitsToUint(sm[7 * 256]);  // (the mutator's sum)
 		OUT[o + 9u] = CNT[15];  // (the donors of the last step)
-		for (uint k = 10u; k < 16u; k++) OUT[o + k] = 0u;
+		OUT[o + 10u] = floatBitsToUint(sm[8 * 256]);  // (the key's count)
+		for (uint k = 11u; k < 16u; k++) OUT[o + k] = 0u;
 	}
 }

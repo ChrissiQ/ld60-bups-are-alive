@@ -11,22 +11,23 @@ uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
-shared float sm[8 * 256];
+shared float sm[9 * 256];
 void main() {
 	uint i = gl_GlobalInvocationID.x, l = gl_LocalInvocationID.x;
-	float v[8] = float[8](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+	float v[9] = float[9](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
 	if (i < CNT[0]) {
 		uint b = i * 24u;
 		float h = BUPS[b + 15u];
 		v[0] = 1.0; v[1] = BUPS[b + 8u]; v[2] = BUPS[b + 9u]; v[3] = BUPS[b + 10u]; v[4] = BUPS[b + 11u];
 		v[5] = h < 0.1 ? h * (1.0 - h * (0.5 - h * (0.16666667 - h * 0.041666668))) : 1.0 - exp(-h);  // (1 - exp(-h) without the loss of a small h's digits)
 		v[6] = BUPS[b + 19u]; v[7] = BUPS[b + 13u];
+		v[8] = ((int(BUPS[b + 12u] + 0.5) >> 8) & 3) == 2 ? 1.0 : 0.0;  // (the bups with the acetate key)
 	}
-	for (int k = 0; k < 8; k++) sm[k * 256 + int(l)] = v[k];
+	for (int k = 0; k < 9; k++) sm[k * 256 + int(l)] = v[k];
 	barrier();
 	for (uint half_ = 128u; half_ > 0u; half_ >>= 1u) {
-		if (l < half_) for (int k = 0; k < 8; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
+		if (l < half_) for (int k = 0; k < 9; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
 		barrier();
 	}
-	if (l == 0u) for (int k = 0; k < 8; k++) SPART[gl_WorkGroupID.x * 8u + uint(k)] = sm[k * 256];
+	if (l == 0u) for (int k = 0; k < 9; k++) SPART[gl_WorkGroupID.x * 9u + uint(k)] = sm[k * 256];
 }

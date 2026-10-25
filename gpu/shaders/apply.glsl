@@ -99,7 +99,7 @@ void main() {
 	float room = max_e - energy;
 	if (o >= 0 && room > 0.0 && CONC2[o] > 0.0) {
 		float ca = CONC2[o], cg = max(CONC[o], 0.0);
-		float rate = P[103] * P[23] * sqrt(mass) * BUPS[b + 10];
+		float rate = P[103] * (((int(BUPS[b + 12] + 0.5) >> 8) & 3) == 2 ? P[106] : 1.0) * P[23] * sqrt(mass) * BUPS[b + 10];
 		float w2 = min(rate * ca / (P[24] + ca) * (P[24] / (P[24] + cg)) * P[5], room / yld);
 		if (w2 > 0.0) {
 			WANT2[i] = w2; CELL2[i] = o;

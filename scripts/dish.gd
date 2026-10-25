@@ -77,7 +77,7 @@ const RENDER_MIN_CAPACITY := 256  ## the fewest bups the picture has room for
 const HISTORY_INTERVAL := 120.0  ## seconds between samples of the history graph
 const HISTORY_LEN := 5040  ## 168 hours (a week) of samples: the longest span of the fine history the graph shows
 const HISTORY_ALL_LEN := 1024  ## how many samples the whole-run history holds before its neighbours are merged in pairs (see `history_all`)
-const HISTORY_SERIES := ["pop", "speed", "sense", "metabolism", "size", "harm", "mutator", "donor"]  ## population, each gene's mean, mean harm (%) and the mean mutation rate (a multiple of the usual)
+const HISTORY_SERIES := ["pop", "speed", "sense", "metabolism", "size", "harm", "mutator", "donor", "key"]  ## population, each gene's mean, mean harm (%) and the mean mutation rate (a multiple of the usual)
 
 const BUP_SHADER := """
 shader_type canvas_item;
@@ -507,6 +507,7 @@ func _record_history_from(stats: Dictionary) -> void:
 		history["harm"].append(stats["harm"] * 100.0)
 		history["mutator"].append(stats["mutator"])
 		history["donor"].append(stats["donor"] * 100.0)
+		history["key"].append(stats["key"] * 100.0)
 	if history["pop"].size() > HISTORY_LEN:
 		for series in history.values():
 			series.pop_front()

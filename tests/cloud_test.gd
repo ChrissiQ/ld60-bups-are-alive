@@ -42,6 +42,7 @@ func _init() -> void:
 	_check_conjugation()
 	_check_reach()
 	_check_acetate()
+	_check_key()
 	_check_plume()
 	_check_threads()
 	TestUtil.finish(self, "CLOUD TESTS OK")
@@ -229,6 +230,59 @@ func _check_plankton_husks() -> void:
 	d.free()
 	copy.free()
 	plain.free()
+
+
+## The acetate key: a bup with it takes acetate up KEY_FACTOR times as fast and grows KEY_COST slower; a potentiated one (level 1) is like any other; the levels are
+## made at their rates (a daughter of a level-0 parent is potentiated at KEY_POTENTIATION_RATE, of a level-1 parent has the key at KEY_RATE, of a level-2 parent keeps it).
+func _check_key() -> void:
+	var none := PackedVector2Array()
+	var rates := PackedFloat32Array()
+	var mass := 12.0
+	var gains := {}
+	var growth := {}
+	for level in [0, 1, 2]:
+		var d := _dish(90.0)
+		d.acetate.fill(Cell.HALF_SATURATION * 4.0)
+		var genome := Genome.founder()
+		genome["reach"] = level << 8
+		for i in 100:
+			d.sim.add_bup(Vector2(float(i % 10 - 5) * 3000.0, float(i / 10 - 5) * 3000.0), genome, 0.3 * Cell.COST_PER_MASS * mass, sqrt(mass), mass, 0, Vector2.RIGHT)
+		var before: float = d.acetate.total()
+		d.sim.step(20.0, none, rates, 0.0, 0.0)
+		gains[level] = before - d.acetate.total()
+		d.free()
+		var g := _dish(90.0)
+		for i in 100:
+			g.sim.add_bup(Vector2(float(i % 10 - 5) * 3000.0, float(i / 10 - 5) * 3000.0), genome, 0.9 * Cell.COST_PER_MASS * mass, sqrt(mass), mass, 0, Vector2.RIGHT)
+		g.sim.step(20.0, none, rates, 0.0, 0.0)
+		var ex: PackedFloat32Array = g.sim.export_state()
+		var total := 0.0
+		for i in ex.size() / GpuSim.STRIDE:
+			total += ex[i * GpuSim.STRIDE + 6]
+		growth[level] = total
+		g.free()
+	check(absf(gains[2] / gains[0] - Genome.KEY_FACTOR) < 0.05 * Genome.KEY_FACTOR and absf(gains[1] / gains[0] - 1.0) < 0.01, "the key takes acetate up %.2f times as fast (expected %.1f), a potentiated bup as fast as any (%.3f)" % [gains[2] / gains[0], Genome.KEY_FACTOR, gains[1] / gains[0]])
+	var grown0: float = growth[0] - 100.0 * mass
+	check(grown0 > 0.0 and absf((growth[2] - 100.0 * mass) / grown0 - (1.0 - Genome.KEY_COST)) < 0.01 and absf((growth[1] - 100.0 * mass) / grown0 - 1.0) < 0.005, "the key costs %.1f%% of the growth (expected %.0f%%), potentiation nothing" % [100.0 * (1.0 - (growth[2] - 100.0 * mass) / grown0), 100.0 * Genome.KEY_COST])
+	check(Genome.key_level(2 << 8 | 5) == 2 and Genome.key_level(1 << 8) == 1 and Genome.key_level(255) == 0, "the key's level is read from bits 8-9 of the reach word")
+	var d := _dish(90.0)
+	var consts := SimConstants.build()
+	consts["key_potentiation_rate"] = 0.05
+	consts["key_rate"] = 0.1
+	BupSim.configure(consts)
+	var counts := [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
+	for level in [0, 1, 2]:
+		var parent := Genome.founder()
+		parent["reach"] = level << 8
+		for i in 20000:
+			var r: Dictionary = d.sim.mutate_genome(parent)
+			if not r["lethal"]:
+				counts[level][Genome.key_level(int(r["reach"]))] += 1
+	var from0: float = counts[0][1] / 20000.0
+	var from1: float = counts[1][2] / 20000.0
+	check(absf(from0 - 0.05) < 0.004 and absf(from1 - 0.1) < 0.006 and counts[0][2] == 0 and counts[1][0] == 0 and counts[2][2] > 19000, "a daughter is potentiated at its rate (%.4f of 0.05), made a key at its (%.4f of 0.1), only from a potentiated line, and keeps the key" % [from0, from1])
+	SimConstants.apply()
+	d.free()
 
 
 func _check_conjugation() -> void:

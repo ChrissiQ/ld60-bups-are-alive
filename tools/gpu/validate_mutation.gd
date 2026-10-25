@@ -7,8 +7,12 @@ func _init() -> void:
 	var parent_mutator := float(OS.get_cmdline_user_args()[1]) if OS.get_cmdline_user_args().size() > 1 else 1.0
 	SimConstants.apply()
 	var consts := SimConstants.build()
+	var parent_key := int(OS.get_cmdline_user_args()[5]) if OS.get_cmdline_user_args().size() > 5 else 0
 	if OS.get_cmdline_user_args().size() > 2:
 		consts["reach_rate"] = float(OS.get_cmdline_user_args()[2])
+		if OS.get_cmdline_user_args().size() > 4:
+			consts["key_potentiation_rate"] = float(OS.get_cmdline_user_args()[3])
+			consts["key_rate"] = float(OS.get_cmdline_user_args()[4])
 		BupSim.configure(consts)  # (the processor's side too, after apply)
 	var dish := Dish.new()
 	root.add_child(dish)
@@ -20,7 +24,7 @@ func _init() -> void:
 	var field = dish.field
 	var template: PackedFloat32Array = dish.sim.export_state().slice(0, GpuSim.STRIDE)
 	# a parent in the middle of every range, with a little harm already (so repairs can happen), the same for every bup
-	var genome := {"speed": 20.0, "sense": 50.0, "metabolism": 1.0, "size": 4.0, "hue": 0.33, "sat": 0.7, "val": 1.0, "harm": 0.2, "mutations": 0, "mutator": parent_mutator}
+	var genome := {"speed": 20.0, "sense": 50.0, "metabolism": 1.0, "size": 4.0, "hue": 0.33, "sat": 0.7, "val": 1.0, "harm": 0.2, "mutations": 0, "mutator": parent_mutator, "reach": parent_key << 8}
 	var bups := PackedFloat32Array()
 	bups.resize(m * GpuSim.STRIDE)
 	for i in m:
@@ -29,7 +33,7 @@ func _init() -> void:
 		var o := i * GpuSim.STRIDE
 		bups[o] = 0.0; bups[o + 21] = 0.0; bups[o + 22] = GpuSim.NO_PICTURE; bups[o + 23] = GpuSim.NO_PICTURE  # (the id is set below, as integers)
 		bups[o + 1] = randf_range(-5000.0, 5000.0) * 0.5; bups[o + 2] = randf_range(-5000.0, 5000.0) * 0.5
-		bups[o + 5] = 50.0; bups[o + 6] = 20.0; bups[o + 7] = 1.0; bups[o + 13] = parent_mutator  # (mass 20 >= birth 1 + add 4: divides)
+		bups[o + 5] = 50.0; bups[o + 6] = 20.0; bups[o + 7] = 1.0; bups[o + 12] = float(parent_key << 8); bups[o + 13] = parent_mutator  # (mass 20 >= birth 1 + add 4: divides)
 		bups[o + 8] = 20.0; bups[o + 9] = 50.0; bups[o + 10] = 1.0; bups[o + 11] = 4.0; bups[o + 15] = 0.2
 		bups[o + 16] = 0.33; bups[o + 17] = 0.7; bups[o + 18] = 1.0; bups[o + 19] = 0.0; bups[o + 20] = 0.0
 	var gpu := GpuSim.new()
@@ -48,6 +52,7 @@ func _init() -> void:
 	var gmut := 0.0
 	var gmut_n := 0
 	var greach := 0.0
+	var gkey := [0, 0, 0]
 	var gd := _acc()
 	for i in np:
 		var o := i * GpuSim.STRIDE
@@ -55,6 +60,7 @@ func _init() -> void:
 			continue  # a parent
 		gmut += out[o + 13]; gmut_n += 1
 		var rl := int(out[o + 12] + 0.5)
+		gkey[(rl >> 8) & 3] += 1
 		greach += (rl & 3) + ((rl >> 2) & 3) + ((rl >> 4) & 3) + ((rl >> 6) & 3)
 		_add(gd, out[o + 8] - 20.0, out[o + 9] - 50.0, out[o + 10] - 1.0, out[o + 11] - 4.0, out[o + 15] - 0.2, out[o + 19], out[o + 16] - 0.33, out[o + 17] - 0.7, out[o + 18] - 1.0)
 	var children: int = gd["n"]
@@ -63,6 +69,7 @@ func _init() -> void:
 	var cmut := 0.0
 	var cmut_n := 0
 	var creach := 0.0
+	var ckey := [0, 0, 0]
 	for i in m:
 		var r: Dictionary = dish.sim.mutate_genome(genome)
 		if r["lethal"]:
@@ -70,6 +77,7 @@ func _init() -> void:
 			continue
 		cmut += r["mutator"]; cmut_n += 1
 		var rc := int(r["reach"])
+		ckey[(rc >> 8) & 3] += 1
 		creach += (rc & 3) + ((rc >> 2) & 3) + ((rc >> 4) & 3) + ((rc >> 6) & 3)
 		_add(cd, r["speed"] - 20.0, r["sense"] - 50.0, r["metabolism"] - 1.0, r["size"] - 4.0, r["harm"] - 0.2, r["mutations"], fposmod(r["hue"] - 0.33 + 0.5, 1.0) - 0.5, r["sat"] - 0.7, r["val"] - 1.0)
 	print("lethal share: GPU %.5f  CPU %.5f" % [1.0 - float(children) / m, float(lethal) / m])
@@ -84,6 +92,7 @@ func _init() -> void:
 	var mg := _mean(gd, "mutations"); var mc := _mean(cd, "mutations")
 	print("Z mutation count mean: GPU %.5f CPU %.5f  %+.2f s.e." % [mg, mc, (mg - mc) / sqrt(pow(_sd(gd, "mutations"), 2) / maxf(gd["n"], 1) + pow(_sd(cd, "mutations"), 2) / maxf(cd["n"], 1))])
 	print("raised ceilings per daughter: GPU %.5f  CPU %.5f" % [greach / maxf(gmut_n, 1), creach / maxf(cmut_n, 1)])
+	print("key levels of the daughters (none, potentiated, key) from parent level %d: GPU %.5f %.5f %.5f  CPU %.5f %.5f %.5f" % [parent_key, gkey[0] / maxf(gmut_n, 1), gkey[1] / maxf(gmut_n, 1), gkey[2] / maxf(gmut_n, 1), ckey[0] / maxf(cmut_n, 1), ckey[1] / maxf(cmut_n, 1), ckey[2] / maxf(cmut_n, 1)])
 	print("daughter mutator mean: GPU %.4f  CPU %.4f (parent %.1f)" % [gmut / maxf(gmut_n, 1), cmut / maxf(cmut_n, 1), parent_mutator])
 	quit(0)
 

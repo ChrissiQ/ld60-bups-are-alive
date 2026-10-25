@@ -43,7 +43,7 @@ const TYPES := {
 # 96 reach_rate (a ceiling raised per division), 97 reach_cost (growth lost per raise), 98-100 the factors of the first, second and third raise,
 # 90 donor_gain, 91 donor_cost, 92 donor_loss, 93 contact_um, 94 the chance that a touching donor and recipient transfer in a step, 95 conj_continue,
 # 85 the stationary phase (1: on; the batch's plan says), 86 starve_maintenance x cost_per_mass, 87 starve_death_rate, 88 starve_death_exponent, 89 starve_min_mass_share,
-# 101 acetate_slope, 102 acetate_threshold, 103 acetate_uptake,
+# 101 acetate_slope, 102 acetate_threshold, 103 acetate_uptake, 104 key_potentiation_rate, 105 key_rate, 106 key_factor, 107 key_cost,
 # 79 upkeep_scale (the dish's upkeep factor: multiplies base_upkeep + maintenance_per_mass * mass).
 # The entries that depend on the step's length (5, 6, 7, 59, 61, 70, and the diffusion's k in the push constant) are set for every batch.
 # BUPS (the bup records): 24 words each: 0 id_lo (uint bits), 1 x, 2 y, 3 dx, 4 dy, 5 energy, 6 mass, 7 birth_mass, 8 speed, 9 sense,
@@ -240,7 +240,7 @@ void main() {
 	if (energy > P[19]) {
 		int rl = int(BUPS[b + 12] + 0.5);
 		float raised = float((rl & 3) + ((rl >> 2) & 3) + ((rl >> 4) & 3) + ((rl >> 6) & 3));
-		float grow = min(P[20] * metab * mass * delta * (donor > 0.5 ? 1.0 - P[91] : 1.0) * max(0.2, 1.0 - P[97] * raised), (energy - P[19]) / P[21]);  // (a donor, and a bup with raised ceilings, give up a share of their growth)
+		float grow = min(P[20] * metab * mass * delta * (donor > 0.5 ? 1.0 - P[91] : 1.0) * max(0.2, 1.0 - P[97] * raised) * (((rl >> 8) & 3) == 2 ? 1.0 - P[107] : 1.0), (energy - P[19]) / P[21]);  // (a donor, and a bup with raised ceilings, give up a share of their growth)
 		energy -= grow * P[21];
 		mass += grow;
 	}
@@ -422,7 +422,7 @@ void main() {
 	float room = max_e - energy;
 	if (o >= 0 && room > 0.0 && CONC2[o] > 0.0) {
 		float ca = CONC2[o], cg = max(CONC[o], 0.0);
-		float rate = P[103] * P[23] * sqrt(mass) * BUPS[b + 10];
+		float rate = P[103] * (((int(BUPS[b + 12] + 0.5) >> 8) & 3) == 2 ? P[106] : 1.0) * P[23] * sqrt(mass) * BUPS[b + 10];
 		float w2 = min(rate * ca / (P[24] + ca) * (P[24] / (P[24] + cg)) * P[5], room / yld);
 		if (w2 > 0.0) {
 			WANT2[i] = w2; CELL2[i] = o;
@@ -588,6 +588,8 @@ void main() {
 		float flip = u01(s);  // (the F factor integrates or leaves, rarely)
 		float child_donor = donor > 0.5 ? (flip < P[92] ? 0.0 : 1.0) : (flip < P[90] ? 1.0 : 0.0);
 		int child_reach = reach;  // (a rare mutation raises one gene's ceiling, up to three times)
+		int key_now = (child_reach >> 8) & 3;  // (the acetate key: potentiated at a rate, then made by a potentiated line at another)
+		if (key_now == 0 ? u01(s) < P[104] : (key_now == 1 && u01(s) < P[105])) { child_reach += 256; muts += 1.0; }
 		if (u01(s) < P[96]) {
 			int gg = int(u01(s) * 4.0) % 4;
 			if (((child_reach >> (2 * gg)) & 3) < 3) { child_reach += 1 << (2 * gg); muts += 1.0; }
@@ -1146,37 +1148,38 @@ void main() {
 ## Stats of the bups now, in two passes of fixed order (so a sample is the same every run): sums over groups of 256 bups into SPART,
 ## then one group sums those (`pcs.pa` of them) into OUT at word `pcs.pb`, with the step `pcs.pc`.
 const K_STATS1 := """
-shared float sm[8 * 256];
+shared float sm[9 * 256];
 void main() {
 	uint i = gl_GlobalInvocationID.x, l = gl_LocalInvocationID.x;
-	float v[8] = float[8](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+	float v[9] = float[9](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
 	if (i < CNT[0]) {
 		uint b = i * 24u;
 		float h = BUPS[b + 15u];
 		v[0] = 1.0; v[1] = BUPS[b + 8u]; v[2] = BUPS[b + 9u]; v[3] = BUPS[b + 10u]; v[4] = BUPS[b + 11u];
 		v[5] = h < 0.1 ? h * (1.0 - h * (0.5 - h * (0.16666667 - h * 0.041666668))) : 1.0 - exp(-h);  // (1 - exp(-h) without the loss of a small h's digits)
 		v[6] = BUPS[b + 19u]; v[7] = BUPS[b + 13u];
+		v[8] = ((int(BUPS[b + 12u] + 0.5) >> 8) & 3) == 2 ? 1.0 : 0.0;  // (the bups with the acetate key)
 	}
-	for (int k = 0; k < 8; k++) sm[k * 256 + int(l)] = v[k];
+	for (int k = 0; k < 9; k++) sm[k * 256 + int(l)] = v[k];
 	barrier();
 	for (uint half_ = 128u; half_ > 0u; half_ >>= 1u) {
-		if (l < half_) for (int k = 0; k < 8; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
+		if (l < half_) for (int k = 0; k < 9; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
 		barrier();
 	}
-	if (l == 0u) for (int k = 0; k < 8; k++) SPART[gl_WorkGroupID.x * 8u + uint(k)] = sm[k * 256];
+	if (l == 0u) for (int k = 0; k < 9; k++) SPART[gl_WorkGroupID.x * 9u + uint(k)] = sm[k * 256];
 }
 """
 
 const K_STATS2 := """
-shared float sm[8 * 256];
+shared float sm[9 * 256];
 void main() {
 	uint l = gl_LocalInvocationID.x, groups = uint(pcs.pa);
-	float v[8] = float[8](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-	for (uint g = l; g < groups; g += 256u) for (int k = 0; k < 8; k++) v[k] += SPART[g * 8u + uint(k)];
-	for (int k = 0; k < 8; k++) sm[k * 256 + int(l)] = v[k];
+	float v[9] = float[9](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+	for (uint g = l; g < groups; g += 256u) for (int k = 0; k < 9; k++) v[k] += SPART[g * 9u + uint(k)];
+	for (int k = 0; k < 9; k++) sm[k * 256 + int(l)] = v[k];
 	barrier();
 	for (uint half_ = 128u; half_ > 0u; half_ >>= 1u) {
-		if (l < half_) for (int k = 0; k < 8; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
+		if (l < half_) for (int k = 0; k < 9; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
 		barrier();
 	}
 	if (l == 0u) {
@@ -1186,7 +1189,8 @@ void main() {
 		OUT[o + 7u] = floatBitsToUint(pcs.pc);
 		OUT[o + 8u] = floatBitsToUint(sm[7 * 256]);  // (the mutator's sum)
 		OUT[o + 9u] = CNT[15];  // (the donors of the last step)
-		for (uint k = 10u; k < 16u; k++) OUT[o + k] = 0u;
+		OUT[o + 10u] = floatBitsToUint(sm[8 * 256]);  // (the key's count)
+		for (uint k = 11u; k < 16u; k++) OUT[o + k] = 0u;
 	}
 }
 """

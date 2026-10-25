@@ -266,7 +266,7 @@ func load_state(cells_across: int, cell_spacing: float, dish_radius: float, conc
 	_buf("OUT", _zeros(GpuKernels.OUT_WORDS * 4))
 	_buf("OUTK", _zeros(EVENT_SETS * GpuKernels.OUT_WORDS * 4))
 	_stats_groups = (capacity + 255) / 256
-	_buf("SPART", _zeros(_stats_groups * 8 * 4))
+	_buf("SPART", _zeros(_stats_groups * 9 * 4))
 	_buf("ERASE", _zeros(GpuKernels.MAX_ERASE * 16))
 	_buf("QD", _zeros(capacity * 4))
 	_buf("MIRROR", _zeros((1 + puff_capacity * 5) * 4))
@@ -351,7 +351,8 @@ func _fill_params() -> void:
 		"starve_death_rate": 87, "starve_death_exponent": 88, "starve_min_mass_share": 89,
 		"donor_gain": 90, "donor_cost": 91, "donor_loss": 92, "contact_um": 93, "conj_continue": 95,
 		"reach_rate": 96, "reach_cost": 97, "reach_factor_1": 98, "reach_factor_2": 99, "reach_factor_3": 100,
-		"acetate_slope": 101, "acetate_threshold": 102, "acetate_uptake": 103}
+		"acetate_slope": 101, "acetate_threshold": 102, "acetate_uptake": 103,
+		"key_potentiation_rate": 104, "key_rate": 105, "key_factor": 106, "key_cost": 107}
 	for key in names_to_index:
 		p[names_to_index[key]] = float(consts[key])
 	p[86] = float(consts["starve_maintenance"]) * float(consts["cost_per_mass"])

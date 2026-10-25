@@ -107,6 +107,8 @@ void main() {
 		float flip = u01(s);  // (the F factor integrates or leaves, rarely)
 		float child_donor = donor > 0.5 ? (flip < P[92] ? 0.0 : 1.0) : (flip < P[90] ? 1.0 : 0.0);
 		int child_reach = reach;  // (a rare mutation raises one gene's ceiling, up to three times)
+		int key_now = (child_reach >> 8) & 3;  // (the acetate key: potentiated at a rate, then made by a potentiated line at another)
+		if (key_now == 0 ? u01(s) < P[104] : (key_now == 1 && u01(s) < P[105])) { child_reach += 256; muts += 1.0; }
 		if (u01(s) < P[96]) {
 			int gg = int(u01(s) * 4.0) % 4;
 			if (((child_reach >> (2 * gg)) & 3) < 3) { child_reach += 1 << (2 * gg); muts += 1.0; }

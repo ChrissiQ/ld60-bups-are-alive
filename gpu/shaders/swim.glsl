@@ -159,7 +159,7 @@ void main() {
 	if (energy > P[19]) {
 		int rl = int(BUPS[b + 12] + 0.5);
 		float raised = float((rl & 3) + ((rl >> 2) & 3) + ((rl >> 4) & 3) + ((rl >> 6) & 3));
-		float grow = min(P[20] * metab * mass * delta * (donor > 0.5 ? 1.0 - P[91] : 1.0) * max(0.2, 1.0 - P[97] * raised), (energy - P[19]) / P[21]);  // (a donor, and a bup with raised ceilings, give up a share of their growth)
+		float grow = min(P[20] * metab * mass * delta * (donor > 0.5 ? 1.0 - P[91] : 1.0) * max(0.2, 1.0 - P[97] * raised) * (((rl >> 8) & 3) == 2 ? 1.0 - P[107] : 1.0), (energy - P[19]) / P[21]);  // (a donor, and a bup with raised ceilings, give up a share of their growth)
 		energy -= grow * P[21];
 		mass += grow;
 	}

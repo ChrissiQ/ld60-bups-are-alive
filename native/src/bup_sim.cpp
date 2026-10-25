@@ -318,6 +318,12 @@ BupSim::Genome BupSim::mutate(const Genome &parent) {
 	if (g.donor ? flip < G.donor_loss : flip < G.donor_gain) {
 		g.donor = !g.donor;
 	}
+	// The acetate key (see Genome.KEY_*): a line is potentiated, rarely and at no cost, and a potentiated line rarely makes the key.
+	int key = (g.reach >> 8) & 3;
+	if (key == 0 ? uniform() < G.key_potentiation_rate : (key == 1 && uniform() < G.key_rate)) {
+		g.reach += 1 << 8;
+		note_mutation(g);
+	}
 	// Rarely a mutation raises the ceiling of one gene (a regulatory change such as an insertion that makes a gene's product more abundant), up to three times.
 	if (uniform() < G.reach_rate) {
 		int gene = (int)(uniform() * 4.0) % 4;
@@ -953,7 +959,7 @@ void BupSim::pay_upkeep_and_grow(Bup &b, double delta) {
 	if (b.energy <= G.maintenance_floor) {
 		return;
 	}
-	double grow = std::min(G.growth_rate * b.genes[2] * b.mass * delta * (b.donor ? 1.0 - G.donor_cost : 1.0) * std::max(0.2, 1.0 - G.reach_cost * reach_levels(b.reach)), (b.energy - G.maintenance_floor) / G.cost_per_mass);
+	double grow = std::min(G.growth_rate * b.genes[2] * b.mass * delta * (b.donor ? 1.0 - G.donor_cost : 1.0) * std::max(0.2, 1.0 - G.reach_cost * reach_levels(b.reach)) * (((b.reach >> 8) & 3) == 2 ? 1.0 - G.key_cost : 1.0), (b.energy - G.maintenance_floor) / G.cost_per_mass);
 	b.energy -= (float)(grow * G.cost_per_mass);
 	b.mass += (float)grow;
 }
@@ -1091,9 +1097,10 @@ double BupSim::bup_tumble_rate(int64_t id, double concentration, double delta, d
 // ---- statistics and picking ----------------------------------------------------------------
 
 Dictionary BupSim::population_stats() const {
-	double genes[4] = { 0, 0, 0, 0 }, harm = 0.0, mutations = 0.0, mutator = 0.0, donors = 0.0;
+	double genes[4] = { 0, 0, 0, 0 }, harm = 0.0, mutations = 0.0, mutator = 0.0, donors = 0.0, keys = 0.0;
 	for (const Bup &b : bups) {
 		mutator += b.mutator;
+		keys += ((b.reach >> 8) & 3) == 2 ? 1.0 : 0.0;
 		donors += b.donor ? 1.0 : 0.0;
 		for (int g = 0; g < 4; g++) {
 			genes[g] += b.genes[g];
@@ -1111,6 +1118,7 @@ Dictionary BupSim::population_stats() const {
 	out["mutations"] = mutations / n;
 	out["mutator"] = mutator / n;
 	out["donor"] = donors / n;
+	out["key"] = keys / n;
 	return out;
 }
 
@@ -1660,7 +1668,7 @@ void BupSim::take_acetate(Bup &b, double delta) {
 	}
 	int glucose_cell = field->uptake_cell_xy(b.x, b.y);
 	double cg = glucose_cell >= 0 ? field->cell_concentration(glucose_cell) : 0.0;
-	double rate = G.acetate_uptake * G.uptake_per_size * std::sqrt((double)b.mass) * b.genes[2];
+	double rate = G.acetate_uptake * (((b.reach >> 8) & 3) == 2 ? G.key_factor : 1.0) * G.uptake_per_size * std::sqrt((double)b.mass) * b.genes[2];
 	double want = std::min(rate * ca / (G.half_saturation + ca) * (G.half_saturation / (G.half_saturation + std::max(cg, 0.0))) * delta, room / b.yield);
 	double got = acetate->take_cell(cell, want);
 	b.energy = (float)std::min((double)b.energy + got * b.yield, max_energy(b));

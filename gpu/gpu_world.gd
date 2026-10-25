@@ -935,6 +935,7 @@ func _stats_at(data: PackedByteArray, sample: int) -> Dictionary:
 	out["mutations"] = data.decode_float(o + 6 * 4) * per
 	out["mutator"] = data.decode_float(o + 8 * 4) * per
 	out["donor"] = float(data.decode_u32(o + 9 * 4)) * per
+	out["key"] = data.decode_float(o + 10 * 4) * per
 	return out
 
 

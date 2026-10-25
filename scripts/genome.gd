@@ -96,6 +96,19 @@ const REACH_COST := 0.05  ## the share of its growth a bup gives up for each rai
 ## & Schloetterer 2001), so one of 10% or more (the chance e^-5, about 0.7%) is about 7e-8 a generation; scaled as the mutator's rate is, by this dish's mutation rate over a real genome's.
 const REACH_RATE := 1.0e-5 * exp(-5.0) * (TRAIT_MUTATIONS + HARMFUL_MUTATIONS) / 0.003
 
+# --- The acetate key: a rare two-step change that lets a lineage live on acetate far better ---
+# Cross-feeding on acetate is kept in real populations by regulatory mutations (of acs) that raise uptake at low acetate (Rosenzweig et al. 1994; Treves et al. 1998). Like the citrate use of the
+# long-term experiment, which arose once in twelve populations after an earlier potentiating change (Blount et al. 2008: 6.6e-13 per cell division once potentiated, below 3.6e-13 before), it takes two
+# steps here: a neutral potentiation, then the key itself, which only a potentiated lineage can make.
+const KEY_POTENTIATION_RATE := 1.0e-5  ## the chance a division potentiates its daughter's line [choice: no measured rate; the potentiating change of the experiment was neutral, so it costs nothing]
+const KEY_RATE := 3.0e-6  ## the chance a division of a potentiated line makes the key [choice: the measured 6.6e-13 per division scaled up the way the mutation rates are, to about once or twice a simulated week in a dish of a hundred thousand]
+const KEY_FACTOR := 2.2  ## how many times faster a bup with the key takes acetate up: from 0.45 of its glucose rate to about its whole glucose rate [search: growth on acetate alone is 0.27-0.45 per hour, against about 1 on glucose (Pinhal et al. 2019; Basan et al. 2020), and the acs mutants of the chemostats close that gap (Treves et al. 1998)]
+const KEY_COST := 0.03  ## the share of its growth a bup with the key gives up (the cost of the extra enzyme) [choice: less than a raised ceiling's 5%; proteome costs of this size are a few percent (Ni et al. 2020)]
+
+## The level of a bup's key (its record's `reach` word keeps it in bits 8-9: 0 none, 1 potentiated, 2 the key).
+static func key_level(reach: int) -> int:
+	return (reach >> 8) & 3
+
 ## How each gene is shown: its short label and decimals, so every readout agrees.
 const LABELED := ["speed", "sense", "metabolism", "size", "mutator"]  ## the traits the readouts list, in order
 
