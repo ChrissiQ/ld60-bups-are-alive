@@ -519,6 +519,7 @@ func _init() -> void:
 
 	# --- Plankton can be picked: by Select all (under bups and sources) and by its own mode; the readout says what it holds.
 	m.dish.clear_bups()
+	m.dish.add_bup(m.dish.global_position + Vector2(-250, 0), Genome.founder(), 30.0)  # (a dish with no bup while the game runs is over: it would end the game)
 	m.dish.sources.clear()
 	m.dish.plankton.clear()
 	var float_spot: Vector2 = m.dish.global_position + Vector2(60, -50)
@@ -830,6 +831,7 @@ func _init() -> void:
 	# --- Nutrient sources: place, select, edit the rate, erase, delete.
 	m.dish.sources.clear()
 	m.dish.clear_bups()
+	m.dish.add_bup(m.dish.global_position + Vector2(0, 280), Genome.founder(), 30.0)  # (a dish with no bup while the game runs is over: it would end the game)
 	m.camera.zoom = Vector2.ONE
 	m.camera.position = m.dish.global_position
 	await process_frame

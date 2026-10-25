@@ -546,11 +546,6 @@ func _thin_history_all() -> void:
 
 # --- The bups --------------------------------------------------------------------------------
 
-## True once every bup has died out (the dish then stays empty: the screen says EXTINCT when it is the one in view).
-func is_extinct() -> bool:
-	return _extinct_signalled and population() == 0
-
-
 func population() -> int:
 	if gpu_world != null and gpu_active:
 		return gpu_world.bup_count()

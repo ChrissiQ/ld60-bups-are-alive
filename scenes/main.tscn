@@ -543,3 +543,14 @@ layer = 5
 layer = 10
 
 [node name="PauseMenu" parent="MenuLayer" instance=ExtResource("pause_menu")]
+
+[node name="EndDialog" type="ConfirmationDialog" parent="MenuLayer"]
+title = "@hud.end_title"
+initial_position = 2
+size = Vector2i(460, 130)
+visible = false
+ok_button_text = "@hud.end_again"
+dialog_text = "@hud.end_text"
+cancel_button_text = "@hud.end_quit"
+dialog_autowrap = true
+dialog_close_on_escape = false

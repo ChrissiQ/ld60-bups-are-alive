@@ -59,6 +59,7 @@ const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) stil
 @onready var dish_strip: DishStrip = $HUD/DishStrip  ## a thumbnail of every dish when there are several
 @onready var hud_layer: CanvasLayer = $HUD
 @onready var pause_menu: PauseMenu = $MenuLayer/PauseMenu
+@onready var end_dialog: ConfirmationDialog = $MenuLayer/EndDialog
 @onready var pause_ring: Panel = $HUD/PauseRing
 @onready var paused_label: Label = $HUD/PauseRing/PausedLabel
 
@@ -67,7 +68,9 @@ const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) stil
 var free_mode := Session.mode == Session.Mode.FREE
 var tracker := GoalTracker.new()
 var dishes: Array[Dish] = []  ## every dish that runs; `dish` is the one in the main view (the others run beside it, see the strip)
-var _dish_numbers := {}  ## Dish -> its number
+var _extinct_queue: Array[Dish] = []  ## dishes that have died out and are not yet deleted (the first is the one the screen has said so about)
+var _game_over := false  ## the last dish died out: only starting again or quitting goes on
+var _dish_numbers := {}  ## Dish -> its number (a number is never reused: a bup's "line from dish 2" stays true)
 var _next_dish_number := 1
 var _pipette_hours := 0.0  ## the pipette timer: the game pauses for the pipette every this many simulated hours (0: off)
 var _pipette_clock := 0.0  ## simulated seconds since the last pause for the pipette
@@ -120,6 +123,8 @@ func _ready() -> void:
 		sim_speed = multiplier
 		achieved_speed = multiplier)
 	toolbar.pause_toggled.connect(_set_paused)
+	end_dialog.confirmed.connect(_start_again)
+	end_dialog.canceled.connect(_quit_to_menu)
 	pause_menu.resume_requested.connect(_close_menu)
 	pause_menu.quit_requested.connect(_quit_to_menu)
 	pause_menu.dish_radius_chosen.connect(_resize_dish)
@@ -140,6 +145,7 @@ func _ready() -> void:
 	lineage_back_button.pressed.connect(_step_back)
 	watch_button.focus_mode = Control.FOCUS_NONE
 	watch_panel.dishes = dishes
+	watch_panel.numbers = _dish_numbers
 	layers_panel.layer_toggled.connect(func(layer: Dish.Layer, shown: bool) -> void:  # (what is shown is one choice for every dish)
 		for d in dishes:
 			d.show_layer(layer, shown))
@@ -172,6 +178,8 @@ func _exit_tree() -> void:
 
 func _begin_dish() -> void:
 	dish.strike(Session.free_start if free_mode else null)
+	if not free_mode and tracker.index >= 1:
+		dish.upkeep_factor = Dish.GOAL_UPKEEP_FACTOR  # (strike resets it: experiment 2 and after costs what it did)
 	_fit_camera()
 	if free_mode:
 		toolbar.set_paused(true)  # the playground starts paused so you can set the scene
@@ -194,6 +202,8 @@ func _sync_tool_locks() -> void:
 func _set_paused(is_paused: bool) -> void:
 	paused = is_paused
 	pause_ring.visible = is_paused
+	if not is_paused and not _extinct_queue.is_empty():
+		_retire_extinct.call_deferred()  # (play was resumed: the dish that died out goes)
 
 
 ## Frame the whole dish below the toolbar, but never zoom in past 1:1.
@@ -647,7 +657,7 @@ func _alive_elsewhere(chain: PackedInt64Array) -> Dictionary:
 			if counts[k] > 0:
 				if not _elsewhere.has(chain[k]):
 					_elsewhere[chain[k]] = []
-				_elsewhere[chain[k]].append([counts[k], dishes.find(other) + 1])
+				_elsewhere[chain[k]].append([counts[k], _dish_numbers[other]])
 	return _elsewhere
 
 
@@ -826,9 +836,7 @@ func world_time() -> float:
 func _register_dish(d: Dish) -> void:
 	dishes.append(d)
 	_dish_numbers[d] = _next_dish_number
-	d.extinct.connect(func() -> void:
-		if d == dish:
-			_on_extinct())
+	d.extinct.connect(_on_dish_extinct.bind(d))
 	d.selection_changed.connect(func() -> void:
 		if d == dish:
 			_on_selection_changed())
@@ -842,7 +850,10 @@ func _register_dish(d: Dish) -> void:
 func add_dish(start: StartConditions) -> Dish:
 	var d := Dish.new()
 	add_child(d)
-	d.global_position = Vector2(DISH_SPACING * float(dishes.size()), 0.0)
+	var slot := 0  # (the first place no dish holds: a dish that went extinct leaves its place free)
+	while dishes.any(func(other: Dish) -> bool: return is_equal_approx(other.global_position.x, DISH_SPACING * float(slot))):
+		slot += 1
+	d.global_position = Vector2(DISH_SPACING * float(slot), 0.0)
 	d.strike(start)
 	d.begin_at(world_time())  # (a dish that joins is at the world's time: one clock for all)
 	for layer: int in Dish.Layer.values():
@@ -860,10 +871,6 @@ func set_main_dish(d: Dish) -> void:
 	dish.view_zoom = camera.zoom.x  # (where it was being looked at, for when the view comes back)
 	dish.view_position = camera.position
 	dish = d
-	if d.is_extinct():
-		_on_extinct()
-	elif banner.text == Strings.t("hud.banner_extinct"):
-		_show_banner("", 0.0)  # (the word was about the dish that was in view)
 	d.pick_mode = tool_options.pick_mode()
 	graph.dish = d
 	layers_panel.sync_from(d)
@@ -1060,8 +1067,59 @@ func _on_goal_completed(goal: Goal) -> void:
 	save_game()
 
 
-func _on_extinct() -> void:
-	_show_banner(Strings.t("hud.banner_extinct"), 1e9)
+## A dish has no bups left. The game pauses on that dish and says so; resuming goes on without it (the dish before it, or the next when it was the first, comes
+## into view and the extinct one is deleted). When it was the last dish the game is over: only starting again or quitting to the menu go on.
+func _on_dish_extinct(d: Dish) -> void:
+	if _game_over or not dishes.has(d) or _extinct_queue.has(d):
+		return
+	_extinct_queue.append(d)
+	if _extinct_queue.size() == 1:
+		_announce_extinct()
+
+
+func _announce_extinct() -> void:
+	var d := _extinct_queue[0]
+	if d != dish:
+		set_main_dish(d)
+	toolbar.set_paused(true)
+	if dishes.size() == 1:
+		_game_over = true
+		_extinct_queue.clear()
+		toolbar.resume_locked = true
+		end_dialog.popup_centered()
+		return
+	_show_banner(Strings.t("hud.banner_dish_extinct", [_dish_numbers[d]]), 1e9)
+
+
+## Play was resumed after a dish went extinct: it is deleted as though it had never been, and the view goes to its neighbour.
+func _retire_extinct() -> void:
+	if _extinct_queue.is_empty() or _game_over:
+		return
+	var d: Dish = _extinct_queue.pop_front()
+	var at := dishes.find(d)
+	set_main_dish(dishes[at - 1] if at > 0 else dishes[1])
+	dishes.erase(d)
+	_dish_numbers.erase(d)
+	dish_strip.remove(d)
+	dish_strip.light(dish)
+	d.queue_free()
+	_elsewhere_stamp = []
+	_show_banner("", 0.0)
+	if not _extinct_queue.is_empty():
+		_announce_extinct()
+
+
+## The last dish died out and the player chose to begin again: the same beginning as the game screen's own.
+func _start_again() -> void:
+	_game_over = false
+	toolbar.resume_locked = false
+	_stack.clear()
+	_lineage_shown = {}
+	_end_pipette_wait(false)
+	_pipette_clock = 0.0
+	dish.selected_id = -1
+	_begin_dish()
+	toolbar.set_paused(free_mode)
 
 
 ## The rate box sits just under the readout. The feed is always there; the bloom comes with plankton. Both follow the dish.

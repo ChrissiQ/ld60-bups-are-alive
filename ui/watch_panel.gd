@@ -12,6 +12,7 @@ const LOOK_AGAIN_MSEC := 500
 @onready var title: Label = $Box/Title
 @onready var entries: VBoxContainer = $Box/Scroll/Entries
 
+var numbers := {}  ## Dish -> its number (the screen's own record, shared)
 var dishes: Array[Dish] = []  ## every dish: the list is one for all of them (a bup the pipette moved is followed to its new dish)
 var _version := ""  ## what this was built from: each dish's watch_version
 var _entries_list: Array = []  ## [dish, id] for each entry, youngest first
@@ -84,6 +85,6 @@ func _rebuild(count: int) -> void:
 
 ## A bup that has died keeps its place on the list, with its name in grey. With several dishes each entry says which dish its bup is in.
 func _style_entry(entry: Button, d: Dish, id: int) -> void:
-	var where := Strings.t("watch.in_dish", [dishes.find(d) + 1]) if dishes.size() > 1 else ""
+	var where := Strings.t("watch.in_dish", [numbers.get(d, 0)]) if dishes.size() > 1 else ""
 	entry.text = d.bup_name(id) + where
 	entry.theme_type_variation = &"CompactListButton" if d.has_bup(id) else &"DeceasedListButton"

@@ -57,14 +57,39 @@ func _run() -> void:
 	check(m.camera.position.distance_to(other.global_position) < 1.0, "the camera is on it")
 	m.dish_strip.dish_chosen.emit(first)
 	check(m.dish == first and m.camera.position.distance_to(first.global_position) < 1.0, "the strip's click brings the first back")
+	# A dish that dies out: the game pauses on it and says so; resuming deletes it and goes to the dish before it.
+	var third: Dish = m.add_dish(chosen)
+	check(m.dishes.size() == 3 and m.dish == first, "three dishes before one dies out")
+	m.toolbar.set_paused(false)
 	other.clear_bups()
 	for i in 5:
 		await process_frame
-	check(other.is_extinct() and m.banner.text == "", "a dish that dies out out of view says nothing yet")
-	m.dish_strip.dish_chosen.emit(other)
-	check(m.banner.text == Strings.t("hud.banner_extinct"), "bringing an extinct dish into view says EXTINCT")
-	m.dish_strip.dish_chosen.emit(first)
-	check(m.banner.text == "", "bringing a living dish back clears it")
+	check(m.paused and m.dish == other and m.banner.text == Strings.t("hud.banner_dish_extinct", [2]), "a dish that dies out out of view: the game pauses, shows it and says which (%s)" % m.banner.text)
+	check(m.dishes.size() == 3 and not m.toolbar.resume_locked, "...and it stays until play is resumed")
+	m.toolbar.set_paused(false)
+	for i in 3:
+		await process_frame
+	check(m.dishes.size() == 2 and not m.dishes.has(other) and (not is_instance_valid(other) or other.is_queued_for_deletion()), "resuming deletes the dish")
+	check(m.dish == first and m.banner.text == "" and not m.paused, "the view goes to the dish before it, the banner clears and play goes on")
+	check(m.dish_strip.count() == 2 and m._dish_numbers.values().has(3) and not m._dish_numbers.values().has(2), "its number is not reused or shown")
+	first.clear_bups()
+	for i in 5:
+		await process_frame
+	check(m.paused and m.dish == first and m.banner.text == Strings.t("hud.banner_dish_extinct", [1]), "the first dish dies out: it is shown")
+	m.toolbar.set_paused(false)
+	for i in 3:
+		await process_frame
+	check(m.dishes.size() == 1 and m.dish == third and not m.dish_strip.visible, "when the first of several goes, the next one comes into view")
+	# The last dish dying out ends the game: nothing but starting again or quitting resumes.
+	third.clear_bups()
+	for i in 5:
+		await process_frame
+	check(m._game_over and m.paused and m.toolbar.resume_locked and m.end_dialog.visible, "the last dish dying out ends the game with the window up")
+	m.toolbar.set_paused(false)
+	check(m.paused, "...and nothing resumes it")
+	m.end_dialog.confirmed.emit()
+	await process_frame
+	check(not m._game_over and not m.toolbar.resume_locked and m.dish.population() > 0 and m.dishes.size() == 1, "starting again begins the dish afresh")
 	m.queue_free()
 	await process_frame
 	m = load("res://scenes/main.tscn").instantiate()
