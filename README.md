@@ -45,40 +45,11 @@ You need Godot 4.7, Python 3 with SCons (`pip install scons`), and a C++ compile
 
 Only the C++ needs compiling. GDScript changes take effect on the next run.
 
-## Tests
-
-Headless scripts in `tests/`, each prints an OK line or the failures:
-
-```
-godot --headless --path . -s tests/ui_lint_test.gd
-godot --headless --path . -s tests/strings_test.gd
-godot --headless --path . res://tests/dialog_test.tscn
-```
-
-The quick ones cover the interface (`ui_lint_test`, `strings_test`, `fonts_test`, `screens_test`, `settings_test`, `toolbar_test`, `free_mode_test`, `tutorial_test`, `save_test`). The simulation ones are slow: `model_test`, `cloud_test`, `substep_test`, `motion_table_test`, and `smoke`, which plays a whole game. Run `godot --headless --path . --import` after adding a `class_name` script.
-
-## Making a release
-
-Push a version tag; the release workflow does the rest:
-
-```
-git tag v0.2.0
-git push origin v0.2.0
-```
-
-It builds the libraries for Windows, Linux and macOS, exports the three builds, and publishes a GitHub release with notes (the commit subjects since the previous tag), the three builds, and the Godot project zip with the prebuilt libraries. Pushes alone build nothing. To move a tag, delete the release on GitHub first, then force-push the tag.
-
 ## Things to know
 
-- **All player-facing text** is in `text/strings.cfg` (and `text/names.txt` for random names). Scenes use `@section.key`; code uses `Strings.t("section.key")`. If a built game shows raw keys like `menu.title`, those files are missing from the export: the export presets' `include_filter` must contain `text/*`.
-- **The interface is styled only through the theme** (`scenes/menu_theme.tres`); `ui_lint_test` fails on hand-styling. See `AGENTS.md`.
-- **Motion table:** `scripts/motion_table.gd` is generated (`tools/gen_motion_table.gd`, about 5 minutes). Regenerate it when `motion_table_test` says it is stale.
-- **Changing C++:** rebuild the library for your platform; Windows and Linux libraries for releases come from the release workflow.
-- **Changing the model:** every change to the simulation model must be made in both backends, the C++ in `native/` and the GPU kernels in `gpu/`. See the GPU path section of `AGENTS.md`.
-- **macOS exports** need ETC2/ASTC texture import enabled (already set in `project.godot`).
 - **Saves** are `save.json` (goal mode) and `free_settings.json` (free-mode setup) in Godot's user data folder; the format may change before release.
 - Font: Commit Mono (SIL Open Font License, `fonts/OFL.txt`).
 
 ## Contributing and license
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). The code is under the [MIT License](LICENSE); the bundled font keeps its own license (`fonts/OFL.txt`).
+Tests, releases and how to change the project are in [CONTRIBUTING.md](CONTRIBUTING.md). The code is under the [MIT License](LICENSE); the bundled font keeps its own license (`fonts/OFL.txt`).

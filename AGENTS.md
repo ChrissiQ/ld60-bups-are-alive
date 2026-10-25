@@ -32,7 +32,7 @@ There are exactly **two clocks**: real time, and the simulation clock (playback 
 - **Commit messages** are one short line in the present tense, third person ("Fixes source selection"), with no body and no attribution trailer.
 - **Secrets:** do not create, edit or delete `.env` files; reference their variables.
 - **Saves are not stable.** The game is unreleased, so do not write code that reads old save formats, and do not edit a real `save.json` or `free_settings.json` in the user data folder; tests use scratch paths.
-- **Releases** are made by pushing a `v*` tag (see the README); changing a workflow in `.github/workflows/` changes what builds.
+- **Releases** are made by pushing a `v*` tag (see CONTRIBUTING.md); changing a workflow in `.github/workflows/` changes what builds.
 
 ## Debug log
 
@@ -74,6 +74,6 @@ Tests are headless scripts: `godot --headless --path . -s tests/<name>.gd` (`dia
 
 - GDScript: `%g` is not a supported format; comparing a `String` to a `bool` with `==` is an error (check `is bool` first).
 - The editor re-saves scenes and the theme in its own format (`&"Label"`); keep lint patterns tolerant of both. Typed node exports in a `.tscn` need `node_paths=PackedStringArray("prop")`. `.uid` files are tracked.
-- Raw files (`.cfg`, `.txt`) are only exported when a preset's `include_filter` names them. The macOS export needs ETC2/ASTC import on (`project.godot`) and is ad-hoc signed, not notarized. A release is made by pushing a `v*` tag (see the README).
+- Raw files (`.cfg`, `.txt`) are only exported when a preset's `include_filter` names them. The macOS export needs ETC2/ASTC import on (`project.godot`) and is ad-hoc signed, not notarized. A release is made by pushing a `v*` tag (see CONTRIBUTING.md).
 - The tutorial runs on every goal-mode start and only when switched on in free mode; nothing about it is saved in goal mode.
 - The medium is 25x thicker than water (`Biology.MEDIUM_THICKNESS`): a stopgap so plankton clouds last long enough to climb, not a realism choice. The nutrient grid has cells 2R/100 across, so a big dish keeps plankton as sub-grid Gaussian "clouds" until they have spread to about a cell.
