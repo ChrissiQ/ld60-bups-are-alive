@@ -57,6 +57,14 @@ func _run() -> void:
 	check(m.camera.position.distance_to(other.global_position) < 1.0, "the camera is on it")
 	m.dish_strip.dish_chosen.emit(first)
 	check(m.dish == first and m.camera.position.distance_to(first.global_position) < 1.0, "the strip's click brings the first back")
+	other.clear_bups()
+	for i in 5:
+		await process_frame
+	check(other.is_extinct() and m.banner.text == "", "a dish that dies out out of view says nothing yet")
+	m.dish_strip.dish_chosen.emit(other)
+	check(m.banner.text == Strings.t("hud.banner_extinct"), "bringing an extinct dish into view says EXTINCT")
+	m.dish_strip.dish_chosen.emit(first)
+	check(m.banner.text == "", "bringing a living dish back clears it")
 	m.queue_free()
 	await process_frame
 	m = load("res://scenes/main.tscn").instantiate()

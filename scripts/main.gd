@@ -258,7 +258,7 @@ func _hover_dish(world: Vector2) -> void:
 ## Hover highlight (select tool) and the placement preview (nutrient tool).
 func _update_pointer() -> void:
 	# Nothing to look at again when neither the pointer, the view, the dish nor the tool has changed.
-	var stamp := [get_viewport().get_mouse_position(), camera.position, camera.zoom, dish.time, dish.edit_count, dish.radius, tool, _dragging, get_viewport().gui_get_hovered_control() != null, tool_options.nutrient_count(), tool_options.brush_radius(), dish.pick_mode]
+	var stamp := [get_viewport().get_mouse_position(), camera.position, camera.zoom, dish.get_instance_id(), dish.time, dish.edit_count, dish.radius, tool, _dragging, get_viewport().gui_get_hovered_control() != null, tool_options.nutrient_count(), tool_options.brush_radius(), dish.pick_mode]
 	if stamp == _pointer_stamp:
 		return
 	_pointer_stamp = stamp
@@ -844,7 +844,7 @@ func add_dish(start: StartConditions) -> Dish:
 	add_child(d)
 	d.global_position = Vector2(DISH_SPACING * float(dishes.size()), 0.0)
 	d.strike(start)
-	d.time = world_time()  # (a dish that joins is at the world's time: one clock for all)
+	d.begin_at(world_time())  # (a dish that joins is at the world's time: one clock for all)
 	for layer: int in Dish.Layer.values():
 		d.show_layer(layer, dish.layer_shown(layer))  # (what is shown is one choice for every dish)
 	_register_dish(d)
@@ -860,6 +860,10 @@ func set_main_dish(d: Dish) -> void:
 	dish.view_zoom = camera.zoom.x  # (where it was being looked at, for when the view comes back)
 	dish.view_position = camera.position
 	dish = d
+	if d.is_extinct():
+		_on_extinct()
+	elif banner.text == Strings.t("hud.banner_extinct"):
+		_show_banner("", 0.0)  # (the word was about the dish that was in view)
 	d.pick_mode = tool_options.pick_mode()
 	graph.dish = d
 	layers_panel.sync_from(d)

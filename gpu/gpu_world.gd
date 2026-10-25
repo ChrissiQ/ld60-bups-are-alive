@@ -45,6 +45,7 @@ const SAME_POINT_PIXELS := 2.0  ## an answer about a point serves a question abo
 const QUESTION_FRAMES := 2  ## a pick or nearest question is sent again for this many frames after it was last asked
 const TRACK_FRAMES := 10  ## a tracked bup not asked for in this many frames is dropped
 const FRACTION_FRAMES := 60  ## a fraction not asked for in this many frames is no longer asked
+const MIRROR_ROOM := 64  ## the least a copy of the clouds asks for past the slots known to be in use
 const MIRROR_MSEC := 100  ## the field's copy is refreshed this often (Dish.HAZE_REFRESH_MSEC) while the GPU's field changes
 
 var sim: BupSim  ## the dish's CPU simulation: records, names, pins, and the dish's own random numbers
@@ -91,6 +92,7 @@ var _batch_frame := -1
 var _clouds_sent := 0  ## clouds sent to the GPU so far (for the size of the field's copy)
 var _clouds_at_head := 0  ## ... as of the last OUT read
 var _last_pcnt := -1  ## cloud slots in use as of the last OUT read (-1: none read since the load)
+var _mirror_room := MIRROR_ROOM  ## slots the field's copy asks for past the ones it knows of (the clouds of deaths since the last OUT read): grows when a copy came back short
 var _changed := false  ## the GPU's field changed since its last copy was asked for
 var _mirror_in_flight := false
 var _mirror_msec := -1000000
@@ -238,6 +240,7 @@ func export_to_cpu(field: NutrientField) -> void:
 			clouds[w] = raw[o]; clouds[w + 1] = raw[o + 1]; clouds[w + 2] = raw[o + 2]; clouds[w + 3] = raw[o + 3]; clouds[w + 4] = raw[o + 4]
 			kept += 1
 	clouds.resize(kept * 5)
+	_apply_pending_erase(conc, clouds)
 	var late_cells := field.take_recorded_cells()
 	var late_amounts := field.take_recorded_amounts()
 	for i in late_cells.size():
@@ -756,7 +759,7 @@ func _flush_now(plan: Dictionary) -> void:
 	# the field's copy
 	request["mirror"] = 0
 	if _mirror_due():
-		request["mirror"] = mini(gpu.puff_capacity, _last_pcnt + (_clouds_sent - _clouds_at_head) + 64)
+		request["mirror"] = mini(gpu.puff_capacity, _last_pcnt + (_clouds_sent - _clouds_at_head) + _mirror_room)
 		_mirror_in_flight = true
 		_mirror_msec = Time.get_ticks_msec()
 		_changed = false
@@ -852,8 +855,28 @@ func _read_batches_now(sets: Dictionary, got: Dictionary) -> void:
 func _take_out(rid: int, data: PackedByteArray) -> void:
 	var request: Dictionary = _requests.get(rid, {})
 	_requests.erase(rid)
-	if request.is_empty() or rid < _last_out_rid:
+	if request.is_empty():
 		return
+	if rid >= _last_out_rid:  # (the answers of an older request than the newest read are stale; its batch still needs its head below)
+		_take_answers_from_out(rid, data, request)
+	var seq: int = request["seq"]
+	if seq >= 0 and _batches.has(seq):
+		var batch: Dictionary = _batches[seq]
+		batch["births"] = mini(data.decode_u32(8 * 4), gpu.event_capacity)
+		batch["deaths"] = mini(data.decode_u32(9 * 4), gpu.event_capacity)
+		batch["samples"] = _samples_from(data, batch)
+		batch["head"] = true
+		_last_births = data.decode_u32(8 * 4)
+		var per_step := maxf(data.decode_u32(8 * 4), data.decode_u32(9 * 4)) / maxf(batch["steps"], 1)
+		_event_rate = maxf(per_step, 0.8 * _event_rate)  # (up at once, down slowly)
+		if batch["births"] > 0 or batch["deaths"] > 0:
+			_pending_reads.append(seq)
+		else:
+			batch["asked"] = true
+
+
+## What the newest OUT says: the counts, the stats and the answers to the questions asked with it.
+func _take_answers_from_out(rid: int, data: PackedByteArray, request: Dictionary) -> void:
 	_last_out_rid = rid
 	var count := data.decode_u32(0)
 	_count = count
@@ -898,21 +921,6 @@ func _take_out(rid: int, data: PackedByteArray) -> void:
 			_records.erase(id)
 		else:
 			_records[id] = data.slice(w, w + GpuSim.RECORD_BYTES)
-	var seq: int = request["seq"]
-	if seq >= 0 and _batches.has(seq):
-		var batch: Dictionary = _batches[seq]
-		batch["births"] = mini(data.decode_u32(8 * 4), gpu.event_capacity)
-		batch["deaths"] = mini(data.decode_u32(9 * 4), gpu.event_capacity)
-		batch["samples"] = _samples_from(data, batch)
-		batch["head"] = true
-		_last_births = data.decode_u32(8 * 4)
-		var per_step := maxf(data.decode_u32(8 * 4), data.decode_u32(9 * 4)) / maxf(batch["steps"], 1)
-		_event_rate = maxf(per_step, 0.8 * _event_rate)  # (up at once, down slowly)
-		if batch["births"] > 0 or batch["deaths"] > 0:
-			_pending_reads.append(seq)
-		else:
-			batch["asked"] = true
-
 
 ## The batch's history samples in an OUT (as _take_out or finish_pending read it).
 func _samples_from(data: PackedByteArray, batch: Dictionary) -> Array:
@@ -993,6 +1001,7 @@ func _pipeline_reset(bups: int) -> void:
 	_mirror_in_flight = false
 	_changed = false
 	_last_pcnt = -1
+	_mirror_room = MIRROR_ROOM
 	_last_births = 0
 	_event_rate = 0.02 * bups
 
@@ -1007,7 +1016,34 @@ func _import_mirror(conc: PackedByteArray, mirror: PackedByteArray) -> void:
 	if floats.size() != field.get_size() * field.get_size():
 		return  # (the field was remade since)
 	var clouds := mirror.to_float32_array()
+	var copied := (clouds.size() - 1) / 5
+	var in_use := int(clouds[0])
+	if in_use > copied:
+		_mirror_room += in_use - copied  # (deaths since the last OUT read made clouds past the slots asked for: ask for room for them, and again soon)
+		_changed = true
 	field.import_packed(floats, clouds.slice(1))
+
+
+## The erasing the GPU has not run yet (discs asked since the last batch), done to a copy read back from it, as the erase kernels would: the
+## field on the CPU already lost it when it was asked, and the copy read back must not give it back.
+func _apply_pending_erase(conc: PackedFloat32Array, clouds: PackedFloat32Array) -> void:
+	var n := gpu.n
+	for e in _erase.size() / 4:
+		var x := _erase[e * 4]
+		var y := _erase[e * 4 + 1]
+		var reach := _erase[e * 4 + 2]
+		var strength := _erase[e * 4 + 3]
+		for i in n * n:
+			var dx := (float(i % n) + 0.5) * gpu.spacing - gpu.origin - x
+			var dy := (float(i / n) + 0.5) * gpu.spacing - gpu.origin - y
+			var dist := sqrt(dx * dx + dy * dy)
+			if dist < reach:
+				conc[i] -= conc[i] * strength * (1.0 - dist / reach)
+		for k in clouds.size() / 5:
+			var dist := Vector2(clouds[k * 5] - x, clouds[k * 5 + 1] - y).length()
+			if dist < reach:
+				clouds[k * 5 + 2] -= clouds[k * 5 + 2] * strength * (1.0 - dist / reach)
+	_erase = PackedFloat32Array()
 
 
 func _add_erase(x: float, y: float, disc_radius: float, strength: float) -> void:

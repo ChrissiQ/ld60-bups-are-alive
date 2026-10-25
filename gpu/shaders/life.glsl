@@ -35,6 +35,9 @@ int poisson(float mean, inout uint s) {
 	while (p > lim && count < 400) { count++; p *= u01(s); }
 	return count;
 }
+void drift(inout float hue, inout float sat, inout float val, inout uint s) {  // (the colour is a neutral marker: every counted mutation moves it, as the CPU's note_mutation)
+	hue = fract(hue + gauss(s) * P[40]); sat = clamp(sat + gauss(s) * P[41], 0.0, 1.0); val = clamp(val + gauss(s) * P[42], P[43], 1.0);
+}
 void main() {
 	uint i = gl_GlobalInvocationID.x;
 	if (i >= uint(P[62])) return;
@@ -75,7 +78,7 @@ void main() {
 			float changed = clamp(g[gene] + gauss(s) * P[52 + gene], P[44 + gene], P[48 + gene] * (lv == 0 ? 1.0 : (lv == 1 ? P[98] : (lv == 2 ? P[99] : P[100]))));
 			if (changed != g[gene]) {
 				g[gene] = changed; muts += 1.0;
-				hue = fract(hue + gauss(s) * P[40]); sat = clamp(sat + gauss(s) * P[41], 0.0, 1.0); val = clamp(val + gauss(s) * P[42], P[43], 1.0);
+				drift(hue, sat, val, s);
 			}
 		}
 		int harmful = poisson(P[33] * rate, s);
@@ -83,14 +86,14 @@ void main() {
 			if (u01(s) < P[35]) lethal = true;
 			else harm = min(harm + gamma_(P[36], s) * P[37] / P[36], P[39]);
 			muts += 1.0;
-			hue = fract(hue + gauss(s) * P[40]); sat = clamp(sat + gauss(s) * P[41], 0.0, 1.0); val = clamp(val + gauss(s) * P[42], P[43], 1.0);
+			drift(hue, sat, val, s);
 		}
 		if (harm > 0.0) {
 			int repairs = poisson(P[34] * rate, s);
 			for (int t = 0; t < repairs; t++) {
 				harm = max(harm + log(max(u01(s), 1e-12)) * P[38], 0.0);
 				muts += 1.0;
-				hue = fract(hue + gauss(s) * P[40]); sat = clamp(sat + gauss(s) * P[41], 0.0, 1.0); val = clamp(val + gauss(s) * P[42], P[43], 1.0);
+				drift(hue, sat, val, s);
 			}
 		}
 		// The mutation rate itself changes in jumps (see the CPU's mutate): a new mutator allele sets it to one of three folds, an antimutator halves it.
@@ -98,19 +101,19 @@ void main() {
 		if (allele < P[80]) {
 			float pick = u01(s);
 			mutator = max(mutator, pick < 0.2 ? P[82] : (pick < 0.8 ? P[83] : P[84]));
-			muts += 1.0;
+			muts += 1.0; drift(hue, sat, val, s);
 		} else if (mutator > 1.0 && allele < P[80] * (1.0 + P[81])) {
 			mutator = max(1.0, mutator * 0.5);
-			muts += 1.0;
+			muts += 1.0; drift(hue, sat, val, s);
 		}
 		float flip = u01(s);  // (the F factor integrates or leaves, rarely)
 		float child_donor = donor > 0.5 ? (flip < P[92] ? 0.0 : 1.0) : (flip < P[90] ? 1.0 : 0.0);
 		int child_reach = reach;  // (a rare mutation raises one gene's ceiling, up to three times)
 		int key_now = (child_reach >> 8) & 3;  // (the acetate key: potentiated at a rate, then made by a potentiated line at another)
-		if (key_now == 0 ? u01(s) < P[104] : (key_now == 1 && u01(s) < P[105])) { child_reach += 256; muts += 1.0; }
+		if (key_now == 0 ? u01(s) < P[104] : (key_now == 1 && u01(s) < P[105])) { child_reach += 256; muts += 1.0; drift(hue, sat, val, s); }
 		if (u01(s) < P[96]) {
 			int gg = int(u01(s) * 4.0) % 4;
-			if (((child_reach >> (2 * gg)) & 3) < 3) { child_reach += 1 << (2 * gg); muts += 1.0; }
+			if (((child_reach >> (2 * gg)) & 3) < 3) { child_reach += 1 << (2 * gg); muts += 1.0; drift(hue, sat, val, s); }
 		}
 		if (!lethal) {
 			KID[i] = 1u;

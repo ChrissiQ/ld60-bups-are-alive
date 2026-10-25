@@ -546,6 +546,11 @@ func _thin_history_all() -> void:
 
 # --- The bups --------------------------------------------------------------------------------
 
+## True once every bup has died out (the dish then stays empty: the screen says EXTINCT when it is the one in view).
+func is_extinct() -> bool:
+	return _extinct_signalled and population() == 0
+
+
 func population() -> int:
 	if gpu_world != null and gpu_active:
 		return gpu_world.bup_count()
@@ -605,6 +610,12 @@ func bup_steering(id: int) -> Vector3:
 ## the copy of the GPU's field, so this is the same call there.
 func nutrient_reading(local: Vector2) -> Vector3:
 	return field.read(local)
+
+
+## A dish that joins a world already under way begins at the world's time, and its bloom begins then too (not catching up on the time before).
+func begin_at(world_time: float) -> void:
+	time = world_time
+	_bloom_due = time
 
 
 ## Adds a bup at a world position and returns its id. `size` is its body now (the square root of
