@@ -27,6 +27,7 @@ There are exactly **two clocks**: real time, and the simulation clock (playback 
 
 ## Repository conventions
 
+- **Free-mode defaults are goal mode's settings.** `StartConditions.new()` holds the defaults, goal mode's dish is `StartConditions.for_goals()`, and the only differences are the listed `GOAL_OVERRIDES` (`tests/free_mode_test.gd` checks it). A feature that is on in goal mode and a toggle in free mode is on by default there, and "reset to defaults" restores `StartConditions.new()`'s value.
 - **Commit messages** are one short line in the present tense, third person ("Fixes source selection"), with no body and no attribution trailer.
 - **Secrets:** do not create, edit or delete `.env` files; reference their variables.
 - **Saves are not stable.** The game is unreleased, so do not write code that reads old save formats, and do not edit a real `save.json` or `free_settings.json` in the user data folder; tests use scratch paths.

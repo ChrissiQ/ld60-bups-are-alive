@@ -1221,6 +1221,14 @@ func _backend_rule_tests() -> void:
 	chosen.death_husks = true
 	check(StartConditions.from_dict(chosen.to_dict()).death_husks and chosen.copy().death_husks and not StartConditions.new().death_husks and not StartConditions.from_dict({"death_husks": 1}).death_husks, "the husks setting is saved and loaded with the rest, starts off, and anything but a boolean is off")
 	chosen.death_husks = false
+	var goal_dict := StartConditions.for_goals().to_dict()
+	var free_dict := StartConditions.new().to_dict()
+	var differing := []
+	for key: String in goal_dict:
+		if goal_dict[key] != free_dict.get(key):
+			differing.append(key)
+	var unlisted := differing.filter(func(key: String) -> bool: return not StartConditions.GOAL_OVERRIDES.has(key))
+	check(unlisted.is_empty() and goal_dict.size() == free_dict.size(), "free mode's defaults are goal mode's settings, apart from the listed overrides (not listed: %s)" % [unlisted])
 	check(StartConditions.from_dict({"sim_backend": "fast"}).sim_backend == auto and StartConditions.from_dict({"sim_backend": 3}).sim_backend == auto and StartConditions.from_dict({}).sim_backend == auto, "a setting that is not one of the three is Auto")
 	var d := _make_dish()
 	d.strike(chosen)

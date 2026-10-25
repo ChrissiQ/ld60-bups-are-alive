@@ -233,7 +233,7 @@ func _refresh() -> void:
 func _reset_to_defaults() -> void:
 	for row: SettingRow in [bups_row, nutrients_row, rate_row, bloom_row, dish_row, detail_row, thickness_row, limit_row]:
 		row.value = row.default_value
-	tutorial_toggle.button_pressed = false
+	tutorial_toggle.button_pressed = StartConditions.new().tutorial
 	husks_toggle.button_pressed = false
 	plankton_husks_toggle.button_pressed = false
 	stationary_toggle.button_pressed = StartConditions.new().stationary_phase

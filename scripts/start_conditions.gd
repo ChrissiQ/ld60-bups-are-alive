@@ -35,7 +35,7 @@ var nutrient_resolution := MIN_NUTRIENT_RESOLUTION  ## cells across the dish's n
 ## What the player chose for the founders, in order: {"name": "", "color": "#rrggbb"}. Founders beyond the list, and
 ## any with nothing chosen, start unnamed and in the default colour.
 var founders: Array = []
-var tutorial := false  ## the guided tour of the screen runs when the dish starts (goal mode decides that for itself)
+var tutorial := true  ## the guided tour of the screen runs when the dish starts (goal mode always has it); on by default, as every free-mode default is goal mode's
 var bup_limit := DEFAULT_BUP_LIMIT  ## the most bups the dish holds: past it each birth displaces a random bup
 var stationary_phase := true  ## starving bups stop growing, shrink and die at a constant rate, as E. coli does (Biology.STARVE_*), instead of dying when the reserve is gone. Free mode's option (on by default there: an advanced option); goal mode's dish never has it
 var plankton_husks := false  ## a plankton that dies leaves a husk that leaks its nutrient back slowly (Biology.HUSK_SECONDS) instead of bursting into a cloud (an advanced option: off by default)
@@ -49,6 +49,18 @@ static var settings_path := "user://free_settings.json"
 
 ## Gives the founders evenly spaced colours (as far apart in hue as they can be), at random. This is how goal mode and
 ## the title screen's dish start.
+## How goal mode's dish begins. The free-mode defaults are these same values (`StartConditions.new()`), except for the overrides listed in `GOAL_OVERRIDES`: a free-mode default is goal mode's setting unless one of those says otherwise.
+static func for_goals() -> StartConditions:
+	var start := StartConditions.new()
+	start.spread_founders()  # (goal mode's founders are in evenly spaced colours, more interesting than all green)
+	start.stationary_phase = false  # (the goals were tuned without starvation's slow death)
+	return start
+
+
+## The settings where goal mode differs from the free-mode defaults (tests/free_mode_test.gd checks that nothing else does).
+const GOAL_OVERRIDES := ["stationary_phase", "founders"]
+
+
 func spread_founders() -> void:
 	founders = []
 	for color in Genome.spread_colors(bups):
@@ -81,7 +93,7 @@ static func from_dict(d: Dictionary) -> StartConditions:
 	c.death_husks = d.get("death_husks") is bool and d["death_husks"]
 	c.plankton_husks = d.get("plankton_husks") is bool and d["plankton_husks"]
 	c.stationary_phase = d["stationary_phase"] if d.get("stationary_phase") is bool else c.stationary_phase
-	c.tutorial = d.get("tutorial") is bool and d["tutorial"]
+	c.tutorial = d["tutorial"] if d.get("tutorial") is bool else c.tutorial
 	var saved_founders: Variant = d.get("founders")
 	if saved_founders is Array:
 		for entry in saved_founders.slice(0, MAX_BUPS):

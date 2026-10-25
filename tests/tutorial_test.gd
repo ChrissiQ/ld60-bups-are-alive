@@ -179,17 +179,17 @@ func _init() -> void:
 
 	# The saved start conditions and the setup toggle.
 	var c := StartConditions.new()
-	c.tutorial = true
-	check(StartConditions.from_dict(c.to_dict()).tutorial and not StartConditions.new().tutorial and not StartConditions.from_dict({"tutorial": "yes"}).tutorial, "the setup's tutorial choice is saved and defaults to off")
+	c.tutorial = false
+	check(not StartConditions.from_dict(c.to_dict()).tutorial and StartConditions.new().tutorial and StartConditions.from_dict({}).tutorial and StartConditions.from_dict({"tutorial": "no"}).tutorial, "the setup's tutorial choice is saved, and it defaults to on")
 	Session.free_start = StartConditions.new()
 	var setup: Node = load("res://scenes/free_setup.tscn").instantiate()
 	root.add_child(setup)
 	await process_frame
-	check(setup.tutorial_toggle.text == "Tutorial: off", "free setup starts with the tutorial off")
-	setup.tutorial_toggle.button_pressed = true
-	check(setup._start.tutorial and setup.tutorial_toggle.text == "Tutorial: on", "its toggle turns the tutorial on")
+	check(setup.tutorial_toggle.text == "Tutorial: on" and setup._start.tutorial, "free setup starts with the tutorial on")
+	setup.tutorial_toggle.button_pressed = false
+	check(not setup._start.tutorial and setup.tutorial_toggle.text == "Tutorial: off", "its toggle turns the tutorial off")
 	setup._reset_to_defaults()
-	check(not setup._start.tutorial, "and reset turns it off")
+	check(setup._start.tutorial and setup.tutorial_toggle.text == "Tutorial: on", "and reset turns it back on")
 	setup.queue_free()
 
 	Session.mode = Session.Mode.GOALS
