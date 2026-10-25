@@ -102,6 +102,7 @@ void fragment() {
 """
 var sim := BupSim.new()  ## the native simulation core
 var field: NutrientField = sim.get_field()  ## the dissolved nutrient (owned by the simulation)
+var acetate: NutrientField = sim.get_acetate()  ## the second food, what fast growers let go of (same grid as `field`, no clouds)
 var radius := DEFAULT_RADIUS:  ## physical size of the dish; it changes only with a new dish (`strike`, a load) or `resize_to`
 	set(value):
 		radius = value
@@ -1067,6 +1068,7 @@ func to_dict() -> Dictionary:
 		"patch_seed": patch_seed,
 		"cells": _pack_bytes(sim.export_state_bytes()),  # (every bup as the GPU's record: a dictionary for each of a hundred thousand would take seconds to make and to write)
 		"field": Array(field.values()),
+		"acetate": Array(acetate.values()),
 		"clouds": field.puffs_export(),
 		"death_husks": death_husks,
 		"stationary_phase": stationary_phase,
@@ -1140,6 +1142,14 @@ func from_dict(d: Dictionary) -> bool:
 	for v in saved_field:
 		if not Validate.is_number(v):
 			return false
+	var saved_acetate = d.get("acetate", [])
+	if saved_field.is_empty():
+		saved_acetate = []  # (a clear medium has no acetate either)
+	if not (saved_acetate is Array) or (not saved_acetate.is_empty() and saved_acetate.size() != field_size * field_size):
+		return false
+	for v in saved_acetate:
+		if not Validate.is_number(v):
+			return false
 	var saved_clouds = d.get("clouds", [])  # the plankton's nutrient not yet given to the grid (a save from before them has none)
 	if not (saved_clouds is Array):
 		return false
@@ -1200,6 +1210,7 @@ func from_dict(d: Dictionary) -> bool:
 		sim.set_next_id(int(saved_next))  # so the next bup born doesn't take a number already used
 	sim.lineage_import_bytes(loaded_family, loaded_watched)
 	field.load_values(saved_field)
+	acetate.load_values(saved_acetate)
 	field.puffs_import(saved_clouds)
 	death_husks = d.get("death_husks") is bool and d["death_husks"]
 	stationary_phase = d.get("stationary_phase") is bool and d["stationary_phase"]

@@ -45,3 +45,21 @@ for sc in sorted({k[1] for k in rows} | {k[1] for k in reached}):
             z = (mg - mc) / math.hypot(ec, eg) if math.hypot(ec, eg) > 0 else 0.0
             rel = (mg - mc) / mc * 100 if mc else 0.0
             print("    %-8s CPU %12.4f +- %9.4f | GPU %12.4f +- %9.4f | diff %+7.2f%%  (%+.1f s.e.)" % (name, mc, ec, mg, eg, rel, z))
+
+# the ACETATE lines (the second food in the dish, per seed and hour): mean over seeds at the same hours
+ac = collections.defaultdict(dict)
+for line in open(sys.argv[1]):
+    f = line.split()
+    if f and f[0] == "ACETATE":
+        ac[(f[1], f[2])].setdefault(int(f[3]), {})[float(f[4])] = float(f[5])
+for sc in sorted({k[1] for k in ac}):
+    cpu = ac.get(("cpu", sc)); gpu = ac.get(("gpu", sc))
+    if not cpu or not gpu:
+        continue
+    hours = sorted(set.intersection(*[set(v) for v in list(cpu.values()) + list(gpu.values())]))
+    print("=== acetate, scenario", sc)
+    for h in sorted({hours[0], hours[len(hours) // 2], hours[-1]}):
+        c = [v[h] for v in cpu.values()]; g = [v[h] for v in gpu.values()]
+        mc, ec, _ = stats(c); mg, eg, _ = stats(g)
+        z = (mg - mc) / math.hypot(ec, eg) if math.hypot(ec, eg) > 0 else 0.0
+        print("  hour %g  CPU %12.2f +- %9.2f | GPU %12.2f +- %9.2f | diff %+7.2f%% (%+.1f s.e.)" % (h, mc, ec, mg, eg, (mg - mc) / mc * 100 if mc else 0.0, z))

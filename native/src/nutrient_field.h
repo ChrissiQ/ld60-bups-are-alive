@@ -237,6 +237,8 @@ public:
 	int uptake_cell_xy(double x, double y) const { return owner[index_at(x, y)]; }
 	double uptake_concentration_xy(double x, double y, int own) const;
 	double take_cell(int cell, double energy);
+	double cell_concentration(int cell) const { return conc[cell]; }
+	void deposit_cell(int cell, double energy) { conc[cell] += (float)(energy / (spacing * spacing)); } // (the second food lives at the cell's resolution: it is let go and taken up in the cell the bup is in)
 	double take_xy(double x, double y, double energy);
 	void deposit_xy(double x, double y, double energy);
 };

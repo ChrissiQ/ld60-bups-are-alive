@@ -17,6 +17,8 @@ const TYPES := {
 	"BINC": "uint", "BINS": "uint", "BCUR": "uint", "ENT": "uint", "ENTD": "vec4", "EVR": "int", "EVP": "float", "EVCC": "int", "EVCA": "float",
 	"PQ": "float", "PR": "float", "DPLO": "uint", "DPHI": "uint", "WANTC": "float", "PAL": "uint", "PEXC": "uint", "PS1": "uint", "PS1X": "uint", "PS2": "uint", "PS2X": "uint", "PS3": "uint",
 	"BS1": "uint", "BS1X": "uint", "BS2": "uint", "BS2X": "uint", "BS3": "uint",
+	# the second food (acetate): its grid (and the copy diffusion needs), the bups' wants and the places they take from, the per-cell sums of what is wanted and let go (2^30 to the unit, two words each) and the share of the want each cell can give
+	"CONC2": "float", "CONC2B": "float", "WANT2": "float", "CELL2": "int", "AWLO": "uint", "AWHI": "uint", "ADLO": "uint", "ADHI": "uint", "SCALE2": "float",
 	# The bup records read as integers: a record holds its id as two uint words (0 and 21), and an id below 2^23 is a denormal float
 	# pattern that a float-typed move may flush, so ids are read through the uint views and records are moved whole through the
 	# uvec4 views (16 bytes at a time, so that neighbouring threads touch neighbouring memory). Never copy a record as floats.
@@ -41,6 +43,7 @@ const TYPES := {
 # 96 reach_rate (a ceiling raised per division), 97 reach_cost (growth lost per raise), 98-100 the factors of the first, second and third raise,
 # 90 donor_gain, 91 donor_cost, 92 donor_loss, 93 contact_um, 94 the chance that a touching donor and recipient transfer in a step, 95 conj_continue,
 # 85 the stationary phase (1: on; the batch's plan says), 86 starve_maintenance x cost_per_mass, 87 starve_death_rate, 88 starve_death_exponent, 89 starve_min_mass_share,
+# 101 acetate_slope, 102 acetate_threshold, 103 acetate_uptake,
 # 79 upkeep_scale (the dish's upkeep factor: multiplies base_upkeep + maintenance_per_mass * mass).
 # The entries that depend on the step's length (5, 6, 7, 59, 61, 70, and the diffusion's k in the push constant) are set for every batch.
 # BUPS (the bup records): 24 words each: 0 id_lo (uint bits), 1 x, 2 y, 3 dx, 4 dy, 5 energy, 6 mass, 7 birth_mass, 8 speed, 9 sense,
@@ -367,30 +370,96 @@ void main() {
 """
 
 const K_APPLY := """
+// A bup that takes in more than its growth can use lets go of acetate besides (the CPU's `acetate_share`; its own gain is the same), and a bup with room then takes up acetate (`take_acetate`).
+void add_fixed2(uint cell, float w, int which) { // 2^30 to the unit, in 64 bits (two words): an exact sum whatever the order
+	while (w > 0.0) {
+		float part = min(w, 3.9);
+		w -= part;
+		uint q = uint(part * 1073741824.0 + 0.5);
+		if (which == 0) { uint old = atomicAdd(AWLO[cell], q); if (old + q < old) atomicAdd(AWHI[cell], 1u); }
+		else { uint old = atomicAdd(ADLO[cell], q); if (old + q < old) atomicAdd(ADHI[cell], 1u); }
+	}
+}
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
-	float wg = WANT[i], wc = WANTC[i];
-	if (wg <= 0.0 && wc <= 0.0) return;
 	uint b = i * 24u;
-	float got = wg > 0.0 ? wg * SCALE[CELLOF[i]] : 0.0;
-	if (wc > 0.0) {
-		float x = BUPS[b + 1], y = BUPS[b + 2];
-		float cc, pgx, pgy, psig; puffs_at(x, y, cc, pgx, pgy, psig);
-		int nb = int(P[67]); float bs = P[66];
-		int bx = clamp(int((x + P[3]) / bs), 0, nb - 1), by = clamp(int((y + P[3]) / bs), 0, nb - 1);
-		uint bin = uint(by * nb + bx);
-		uint e0 = BINS[bin], e1 = min(e0 + BINC[bin], uint(P[72]));
-		for (uint e = e0; e < e1; e++) {
-			vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];
-			float ddx = x - r0.x, ddy = y - r0.y, r2 = fma(ddy, ddy, ddx * ddx);
-			if (r2 <= r1.x) {
-				uint k = uint(r1.z);
-				float ci = r0.z / (6.2831853 * r0.w) * exp(-r2 * 0.5 / r0.w);
-				got += wc * ci / cc * PSCALE[k];
+	float wg = WANT[i], wc = WANTC[i];
+	float mass = BUPS[b + 6], yld = exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]);
+	float max_e = P[22] * mass;
+	float energy = BUPS[b + 5];
+	float x = BUPS[b + 1], y = BUPS[b + 2];
+	int n = int(P[1]);
+	int ix = clamp(int((x + P[3]) / P[2]), 0, n - 1), iy = clamp(int((y + P[3]) / P[2]), 0, n - 1);
+	int o = OWNER[iy * n + ix];
+	WANT2[i] = 0.0;
+	if (wg > 0.0 || wc > 0.0) {
+		float got = wg > 0.0 ? wg * SCALE[CELLOF[i]] : 0.0;
+		if (wc > 0.0) {
+			float cc, pgx, pgy, psig; puffs_at(x, y, cc, pgx, pgy, psig);
+			int nb = int(P[67]); float bs = P[66];
+			int bx = clamp(int((x + P[3]) / bs), 0, nb - 1), by = clamp(int((y + P[3]) / bs), 0, nb - 1);
+			uint bin = uint(by * nb + bx);
+			uint e0 = BINS[bin], e1 = min(e0 + BINC[bin], uint(P[72]));
+			for (uint e = e0; e < e1; e++) {
+				vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];
+				float ddx = x - r0.x, ddy = y - r0.y, r2 = fma(ddy, ddy, ddx * ddx);
+				if (r2 <= r1.x) {
+					uint k = uint(r1.z);
+					float ci = r0.z / (6.2831853 * r0.w) * exp(-r2 * 0.5 / r0.w);
+					got += wc * ci / cc * PSCALE[k];
+				}
 			}
 		}
+		float let_go = 0.0;
+		if (got > 0.0 && mass > 0.0 && o >= 0) {
+			float per_hour = got * yld / (P[21] * mass * P[5]) * 3600.0;
+			let_go = got * min(0.5, P[101] * max(0.0, per_hour - P[102]));
+			if (let_go > 0.0) add_fixed2(uint(o), let_go, 1);
+		}
+		energy = min(energy + got * yld, max_e);
 	}
-	BUPS[b + 5] = min(BUPS[b + 5] + got * exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]), P[22] * BUPS[b + 6]);
+	// the acetate in the cell, wanted after the glucose: with room left, at its share of the glucose rate, less while there is glucose
+	float room = max_e - energy;
+	if (o >= 0 && room > 0.0 && CONC2[o] > 0.0) {
+		float ca = CONC2[o], cg = max(CONC[o], 0.0);
+		float rate = P[103] * P[23] * sqrt(mass) * BUPS[b + 10];
+		float w2 = min(rate * ca / (P[24] + ca) * (P[24] / (P[24] + cg)) * P[5], room / yld);
+		if (w2 > 0.0) {
+			WANT2[i] = w2; CELL2[i] = o;
+			add_fixed2(uint(o), w2, 0);
+		}
+	}
+	BUPS[b + 5] = energy;
+}
+"""
+
+## The acetate's cells: what the bups there wanted is taken from the cell, all of it if it holds that much, else a share each (`SCALE2`);
+## then what they let go is added (it can be eaten from the next step).
+const K_AC_CELLS := """
+void main() {
+	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[1] * P[1])) return;
+	float d = float(AWHI[i]) * 4.0 + float(AWLO[i]) * 9.313225746154785e-10;
+	float dep = float(ADHI[i]) * 4.0 + float(ADLO[i]) * 9.313225746154785e-10;
+	float area = P[2] * P[2];
+	float c = CONC2[i];
+	float s = 0.0;
+	if (d > 0.0 && c > 0.0) {
+		s = min(1.0, c * area / d);
+		c = max(c - d * s / area, 0.0);
+	}
+	SCALE2[i] = s;
+	CONC2[i] = c + dep / area;
+	AWLO[i] = 0u; AWHI[i] = 0u; ADLO[i] = 0u; ADHI[i] = 0u;
+}
+"""
+
+const K_AC_APPLY := """
+void main() {
+	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
+	float w = WANT2[i];
+	if (w <= 0.0) return;
+	uint b = i * 24u;
+	BUPS[b + 5] = min(BUPS[b + 5] + w * SCALE2[CELL2[i]] * exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]), P[22] * BUPS[b + 6]);
 }
 """
 
@@ -1300,7 +1369,11 @@ static func core() -> Dictionary:
 	_add(out, "swim", K_SWIM, ["P", "CNT", "BUPS", "EFF", "TABLE", "ENTD", "BINS", "BINC"], FIELD_FUNCS + LOOKUP_FUNCS + CLOUD_FUNCS)
 	_add(out, "demand", K_DEMAND, ["P", "CNT", "BUPS", "EFF", "OWNER", "CONC", "WANT", "WANTC", "CELLOF", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "ENTD", "BINS", "BINC", "PDLO", "PDHI"], CLOUD_FUNCS)
 	_add(out, "cells", K_CELLS, ["P", "CONC", "OWNER", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "SCALE"])
-	_add(out, "apply", K_APPLY, ["P", "CNT", "BUPS", "WANT", "WANTC", "CELLOF", "SCALE", "ENTD", "BINS", "BINC", "PSCALE"], CLOUD_FUNCS)
+	_add(out, "apply", K_APPLY, ["P", "CNT", "BUPS", "WANT", "WANTC", "CELLOF", "SCALE", "ENTD", "BINS", "BINC", "PSCALE", "OWNER", "CONC", "CONC2", "WANT2", "CELL2", "AWLO", "AWHI", "ADLO", "ADHI"], CLOUD_FUNCS)
+	_add(out, "ac_cells", K_AC_CELLS, ["P", "CONC2", "AWLO", "AWHI", "ADLO", "ADHI", "SCALE2"])
+	_add(out, "ac_apply", K_AC_APPLY, ["P", "CNT", "BUPS", "WANT2", "CELL2", "SCALE2"])
+	_add(out, "diffuse2_a", K_DIFFUSE.replace("SRC", "CONC2").replace("DST", "CONC2B"), ["P", "INSIDE", "CONC2", "CONC2B"])
+	_add(out, "diffuse2_b", K_DIFFUSE.replace("SRC", "CONC2B").replace("DST", "CONC2"), ["P", "INSIDE", "CONC2B", "CONC2"])
 	_add(out, "diffuse_a", K_DIFFUSE.replace("SRC", "CONC").replace("DST", "EFF"), ["P", "INSIDE", "CONC", "EFF"])
 	_add(out, "diffuse_b", K_DIFFUSE.replace("SRC", "EFF").replace("DST", "CONC"), ["P", "INSIDE", "EFF", "CONC"])
 	_add(out, "life", K_LIFE, ["P", "CNT", "BUPS", "CHILD", "SURV", "KID"])

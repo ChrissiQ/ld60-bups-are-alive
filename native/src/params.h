@@ -17,6 +17,7 @@
 	X(nutrient_energy) X(max_cells) X(motion_step) X(motion_structure) X(cloud_handover) X(cloud_cut) X(steering_window) X(fine_step) X(diffuse_interval) X(diffuse_accuracy) \
 	X(division_spread) X(death_rate) X(death_release) \
 	X(starve_maintenance) X(starve_death_rate) X(starve_death_exponent) X(starve_min_mass_share) \
+	X(acetate_slope) X(acetate_threshold) X(acetate_uptake) \
 	X(reach_rate) X(reach_cost) X(reach_factor_1) X(reach_factor_2) X(reach_factor_3) \
 	X(donor_gain) X(donor_loss) X(donor_cost) X(contact_um) X(conj_rate) X(conj_continue) \
 	X(mutator_rate) X(mutator_down_share) X(mutator_fold_weak) X(mutator_fold_strong) X(mutator_fold_top) \

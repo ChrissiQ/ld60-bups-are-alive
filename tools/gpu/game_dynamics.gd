@@ -26,6 +26,7 @@ var start: StartConditions
 var hours := 0
 var chk_pending := []  ## [hour, readback values] waiting for the hour's history sample
 var donor_mean := 0.0  ## the share of donors at the last reading
+var acetate_total := 0.0  ## the acetate in the dish at the last reading (printed as an ACETATE line)
 var mutator_mean := 1.0  ## the mean mutator at the last reading (printed as a MUTATOR line after each SAMPLE)
 var wall_run := 0.0  ## µs spent advancing (not sampling)
 
@@ -76,6 +77,7 @@ func _hours_default(sc_name: String) -> int:
 func _line(hour: int, pop: int, means: Array, energy: float, nutrient: float) -> void:
 	print("SAMPLE %s %s %d %.2f %d %.4f %.4f %.5f %.5f %.5f %.4f %.2f" % [mode, scenario, seed_value, float(hour), pop, means[0], means[1], means[2], means[3], means[4], energy, nutrient])
 	print("MUTATOR %s %s %d %.2f %.4f donors %.5f transfers %d births %d" % [mode, scenario, seed_value, float(hour), mutator_mean, donor_mean, dish.sim.transfer_count() if mode == "cpu" else -1, dish.sim.record_count()])
+	print("ACETATE %s %s %d %.2f %.4f" % [mode, scenario, seed_value, float(hour), acetate_total])
 	if start.death_husks:
 		print("HUSKS %s %s %d %.2f husks %d clouds %d" % [mode, scenario, seed_value, float(hour), dish.sim.husk_count(), dish.field.puff_count()])
 
@@ -92,7 +94,7 @@ func _read_gpu() -> Array:
 		var bytes := gpu.read_bups()
 		var conc := gpu.read_conc()
 		var puffs := gpu.read_puffs()
-		out.append([bytes, conc, puffs]))
+		out.append([bytes, conc, puffs, gpu.rd.buffer_get_data(gpu.buffer("CONC2")).to_float32_array()]))
 	var bytes: PackedByteArray = out[0][0]
 	var bups := bytes.to_float32_array()
 	var np := bytes.size() / GpuSim.RECORD_BYTES
@@ -111,6 +113,10 @@ func _read_gpu() -> Array:
 	for v: float in out[0][1]:
 		total += v
 	total *= area
+	acetate_total = 0.0
+	for v: float in out[0][3]:
+		acetate_total += v
+	acetate_total *= area
 	for pf in out[0][2]:
 		total += pf[2]
 	for k in 5:
@@ -125,6 +131,7 @@ func _read_cpu() -> Array:
 	mutator_mean = st["mutator"]
 	donor_mean = st["donor"]
 	var energy := 0.0
+	acetate_total = dish.acetate.total()
 	var ex: PackedFloat32Array = dish.sim.export_state()
 	var np: int = ex.size() / GpuSim.STRIDE
 	for i in np:

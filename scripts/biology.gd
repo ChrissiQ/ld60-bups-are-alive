@@ -51,6 +51,14 @@ const STARVE_MAINTENANCE := 0.08 / 86400.0  ## per second, as a share of the bod
 const STARVE_DEATH_RATE := 0.22 / 86400.0  ## per second at a growth rate of nothing: the prefactor of the death rate of starving cells, 0.21-0.23 per day [search: Biselli et al. 2020]
 const STARVE_DEATH_GROWTH_HOURS := 0.95  ## the death rate grows as exp(this x the growth rate before starvation, per hour): cells that grew faster die faster, 0.9-1.0 hours [search: Biselli et al. 2020]
 const STARVE_MIN_MASS_SHARE := 0.25  ## a starving bup that has digested itself down to this share of its birth mass dies [choice: starved cells dwindle (Navarro Llorens et al. 2010, dwarfing) with no measured floor]
+# --- Overflow: acetate as a second food ---
+# A fast-growing E. coli lets go of acetate (threshold-linear in its growth rate: Basan et al. 2015; in MG1655 from about 0.27 per hour, 8.5% of the glucose
+# carbon at 0.51 per hour: Valgepea et al. 2010) and takes it up again when glucose is short (growth on acetate alone is 0.27-0.45 per hour, 30-60% of glucose's:
+# Pinhal et al. 2019; Basan et al. 2020). Acetate does not slow growth at the concentrations a dish reaches (unchanged to 8 mM, 6% lower at 10 mM, half at about
+# 100 mM at neutral pH: Enjalbert et al. 2017; Millard et al. 2023; Pinhal et al. 2019), so no inhibition is modelled.
+const ACETATE_THRESHOLD := 0.27  ## per hour: the growth rate (the one the bup's intake could sustain) above which a bup lets go of acetate [search: Valgepea et al. 2010, Nahku et al. 2010: onset 0.27-0.34 per hour in MG1655]
+const ACETATE_SLOPE := 0.354  ## share of the food taken in that is let go as well (the bup keeps its whole gain: the yield per glucose does not fall, Valgepea et al. 2010) per (per hour) of growth rate above the threshold: 8.5% at 0.51 per hour [search: Valgepea et al. 2010, derived]
+const ACETATE_UPTAKE := 0.45  ## the most a bup takes up of acetate, as a share of its glucose uptake rate [search: growth on acetate is 30-60% of that on glucose: Pinhal et al. 2019, Basan et al. 2020]
 const DEATH_PER_SECOND := 1.0e-6  ## death from causes other than starvation while growing: negligible [search: Biselli 2020 ties death to starvation, not growth]
 
 # --- Mutation (see Genome for the argument) -------------------------------------------------

@@ -40,6 +40,7 @@ func _init() -> void:
 	_check_starvation()
 	_check_conjugation()
 	_check_reach()
+	_check_acetate()
 	_check_plume()
 	_check_threads()
 	TestUtil.finish(self, "CLOUD TESTS OK")
@@ -160,6 +161,49 @@ func _check_starvation() -> void:
 		check(absf(share - expected[metabolism]) < 0.08, "a day of starvation at metabolism %s leaves %.2f of the bups alive (expected %.2f from the death rate)" % [metabolism, share, expected[metabolism]])
 	check(survivors["true_2.0"] < survivors["true_1.0"] and survivors["true_1.0"] < survivors["true_0.5"], "the fast metabolism dies first: the growth rate costs survival")
 	check(absf(masses["true_1.0"] / 12.0 - exp(-0.08)) < 0.02, "the survivors have shrunk by about the starving maintenance (%.3f of their mass, expected %.3f)" % [masses["true_1.0"] / 12.0, exp(-0.08)])
+
+
+## Overflow: a bup eating faster than it can grow lets go of acetate (up to the share the threshold-linear law gives), one that eats slowly does not,
+## and a bup with room and no glucose takes acetate up at its yield, to the amount it took out of the field.
+func _check_acetate() -> void:
+	var none := PackedVector2Array()
+	var rates := PackedFloat32Array()
+	var mass := 12.0
+	var rich := _dish(90.0)
+	rich.field.fill(Cell.HALF_SATURATION * 20.0)
+	for i in 200:
+		rich.sim.add_bup(rich.sim.random_point(80000.0), Genome.founder(), 0.0, sqrt(mass), mass, 0, Vector2.RIGHT)
+	var eaten_before: float = rich.field.total()
+	rich.sim.step(20.0, none, rates, 0.0, 0.0)
+	var let_go: float = rich.acetate.total()
+	var taken: float = eaten_before - rich.field.total()
+	check(let_go > 0.0 and let_go < 0.5 * taken, "bups eating fast let go of acetate, under half of what they eat (%.3f of %.3f)" % [let_go, taken])
+	rich.free()
+	var lean := _dish(90.0)
+	lean.field.fill(Cell.HALF_SATURATION * 0.05)
+	for i in 200:
+		lean.sim.add_bup(lean.sim.random_point(80000.0), Genome.founder(), 0.0, sqrt(mass), mass, 0, Vector2.RIGHT)
+	lean.sim.step(20.0, none, rates, 0.0, 0.0)
+	check(lean.acetate.total() < 0.01 * let_go, "bups eating slowly let go of none (%.5f)" % lean.acetate.total())
+	lean.free()
+	var bodies := []
+	var gone := 0.0
+	for with_acetate in [false, true]:
+		var d := _dish(90.0)
+		if with_acetate:
+			d.acetate.fill(Cell.HALF_SATURATION * 4.0)
+		var start: float = d.acetate.total()
+		for i in 200:
+			d.sim.add_bup(Vector2(float(i % 20 - 10) * 3000.0, float(i / 20 - 5) * 3000.0), Genome.founder(), 0.5 * Cell.COST_PER_MASS * mass, sqrt(mass), mass, 0, Vector2.RIGHT)
+		d.sim.step(20.0, none, rates, 0.0, 0.0)
+		var ex: PackedFloat32Array = d.sim.export_state()
+		var body := 0.0
+		for i in ex.size() / GpuSim.STRIDE:
+			body += ex[i * GpuSim.STRIDE + 5] + ex[i * GpuSim.STRIDE + 6] * Cell.COST_PER_MASS
+		bodies.append(body)
+		gone = start - d.acetate.total()
+		d.free()
+	check(gone > 0.0 and absf((bodies[1] - bodies[0]) / gone - 1.0) < 0.02, "a bup with room and no glucose takes acetate up at its yield (%.4f gone, bodies %.2f against %.2f without)" % [gone, bodies[1], bodies[0]])
 
 
 func _check_conjugation() -> void:

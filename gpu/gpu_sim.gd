@@ -45,6 +45,7 @@ var origin := 0.0
 var radius := 0.0
 var delta := 20.0  ## the step's length (s) of the last batch: every entry of P that depends on it is set again for each batch
 var diffusion := 0.0  ## the medium's diffusion coefficient (µm²/s)
+var acetate := PackedFloat32Array()  ## the acetate field (n*n concentrations) the next load_state starts from (empty: none)
 var feed_per_second := 0.0  ## the feed (concentration per second)
 var upkeep_scale := 1.0  ## the dish's upkeep factor (P[79])
 var stationary := false  ## the dish has the stationary phase on (P[85]; the batch's plan says)
@@ -181,6 +182,15 @@ func load_state(cells_across: int, cell_spacing: float, dish_radius: float, conc
 	_buf("CELLOF", _zeros(capacity * 4))
 	_buf("CONC", conc.to_byte_array())
 	_buf("EFF", _zeros(n * n * 4))
+	var acetate_values := acetate if acetate.size() == n * n else PackedFloat32Array()
+	if acetate_values.is_empty():
+		acetate_values.resize(n * n)
+	_buf("CONC2", acetate_values.to_byte_array())
+	_buf("CONC2B", _zeros(n * n * 4))
+	for nm in ["AWLO", "AWHI", "ADLO", "ADHI", "SCALE2"]:
+		_buf(nm, _zeros(n * n * 4))
+	_buf("WANT2", _zeros(capacity * 4))
+	_buf("CELL2", _zeros(capacity * 4))
 	_buf("OWNER", owner.to_byte_array())
 	_buf("INSIDE", inside.to_byte_array())
 	for nm in ["DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "SCALE"]:
@@ -340,7 +350,8 @@ func _fill_params() -> void:
 		"mutator_rate": 80, "mutator_down_share": 81, "mutator_fold_weak": 82, "mutator_fold_strong": 83, "mutator_fold_top": 84,
 		"starve_death_rate": 87, "starve_death_exponent": 88, "starve_min_mass_share": 89,
 		"donor_gain": 90, "donor_cost": 91, "donor_loss": 92, "contact_um": 93, "conj_continue": 95,
-		"reach_rate": 96, "reach_cost": 97, "reach_factor_1": 98, "reach_factor_2": 99, "reach_factor_3": 100}
+		"reach_rate": 96, "reach_cost": 97, "reach_factor_1": 98, "reach_factor_2": 99, "reach_factor_3": 100,
+		"acetate_slope": 101, "acetate_threshold": 102, "acetate_uptake": 103}
 	for key in names_to_index:
 		p[names_to_index[key]] = float(consts[key])
 	p[86] = float(consts["starve_maintenance"]) * float(consts["cost_per_mass"])
@@ -440,6 +451,8 @@ func _record_diffusion(cl: int, k_total: float) -> void:
 	for it in iterations / 2:
 		dispatch(cl, "diffuse_a", n * n, 0.0, k_total / iterations)
 		dispatch(cl, "diffuse_b", n * n, 0.0, k_total / iterations)
+		dispatch(cl, "diffuse2_a", n * n, 0.0, k_total / iterations)
+		dispatch(cl, "diffuse2_b", n * n, 0.0, k_total / iterations)
 
 
 ## After the nutrient has diffused: the clouds spread and some go to the grid, the grid is copied for the bups to read, the clouds are filed by place.
@@ -469,6 +482,8 @@ func _record_bups(cl: int) -> void:
 	dispatch(cl, "apply", capacity)
 	if has_clouds:
 		dispatch(cl, "puff_commit", puff_capacity)
+	dispatch(cl, "ac_cells", n * n)
+	dispatch(cl, "ac_apply", capacity)
 
 
 ## Drops the clouds that are gone (handed to the grid, or eaten): the places of the others, in order.
@@ -685,7 +700,7 @@ func profile(reps := 20) -> Dictionary:
 	var plan := {}
 	if has_clouds:
 		plan.merge({"puff_advance": puff_capacity, "dep_apply": n * n, "bin_clear": bins, "bin_count": puff_capacity, "bin_cursor": bins, "bin_scatter": puff_capacity, "bin_sort": bins, "puff_clear": puff_capacity, "puff_scale": puff_capacity, "puff_commit": puff_capacity})
-	plan.merge({"feed": n * n, "diffuse_a": n * n, "snapshot": n * n, "clear": n * n, "swim": capacity, "demand": capacity, "cells": n * n, "apply": capacity, "life": capacity, "scan0_s": capacity, "compact": capacity * 6, "copy": capacity * 6})
+	plan.merge({"feed": n * n, "diffuse_a": n * n, "snapshot": n * n, "clear": n * n, "swim": capacity, "demand": capacity, "cells": n * n, "apply": capacity, "ac_cells": n * n, "ac_apply": capacity, "life": capacity, "scan0_s": capacity, "compact": capacity * 6, "copy": capacity * 6})
 	for kname in plan:
 		var cl := rd.compute_list_begin()
 		var t0 := Time.get_ticks_usec()

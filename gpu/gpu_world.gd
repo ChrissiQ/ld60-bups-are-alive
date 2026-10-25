@@ -176,7 +176,7 @@ func load_from_cpu(field: NutrientField, dish_params: Dictionary) -> void:
 	var packed := field.export_packed()
 	var dish_seed := int(dish_params.get("seed", 1)) + int(sim.random_float() * 2147483647.0) * 0x9E3779B1
 	var args := {
-		"conc": packed["conc"], "puffs": packed["puffs"], "owner": field.export_owner(), "weights": field.export_fill_weights(),
+		"conc": packed["conc"], "acetate": sim.get_acetate().export_packed()["conc"], "puffs": packed["puffs"], "owner": field.export_owner(), "weights": field.export_fill_weights(),
 		"n": field.get_size(), "spacing": field.get_spacing(), "diffusion": field.get_diffusion(),
 		"records": records, "consts": SimConstants.build(), "next_id": sim.get_next_id(), "seed": dish_seed,
 		"radius": float(dish_params.get("radius", 0.0)), "limit": int(dish_params.get("limit", 0)),
@@ -186,6 +186,7 @@ func load_from_cpu(field: NutrientField, dish_params: Dictionary) -> void:
 	_transfer_call(func() -> void:
 		if gpu == null:
 			gpu = GpuSim.new(RenderingServer.get_rendering_device())
+		gpu.acetate = args["acetate"]
 		gpu.load_state(args["n"], args["spacing"], args["radius"], args["conc"], args["owner"], args["records"], args["consts"], args["limit"], args["weights"], args["feed"], args["step"], args["diffusion"], args["puffs"], args["seed"], args["upkeep"], args["next_id"]))
 	field.set_recording(true)
 	var answers := _answers_from_cpu(records, dish_params)  # (while the CPU still has the bups)
@@ -215,6 +216,7 @@ func export_to_cpu(field: NutrientField) -> void:
 		read["next_id"] = cnt.decode_u32(4 * 4) | (cnt.decode_u32(6 * 4) << 32)
 		read["records"] = rd.buffer_get_data(gpu.buffer("BUPS"), 0, live * GpuSim.RECORD_BYTES) if live > 0 else PackedByteArray()  # (a size of 0 would read the whole buffer)
 		read["conc"] = rd.buffer_get_data(gpu.buffer("CONC")).to_float32_array()
+		read["acetate"] = rd.buffer_get_data(gpu.buffer("CONC2")).to_float32_array()
 		var slots := rd.buffer_get_data(gpu.buffer("PCNT")).decode_u32(0)
 		read["slots"] = rd.buffer_get_data(gpu.buffer("PUFF"), 0, slots * 32).to_float32_array() if slots > 0 else PackedFloat32Array())
 	var sets: Array = []
@@ -243,6 +245,7 @@ func export_to_cpu(field: NutrientField) -> void:
 	clouds.append_array(field.take_recorded_puffs())
 	field.set_recording(false)
 	field.import_packed(conc, clouds)
+	sim.get_acetate().import_packed(read["acetate"], PackedFloat32Array())
 	sim.import_state_bytes(read["records"])
 	sim.set_next_id(maxi(int(read["next_id"]), sim.get_next_id()))
 	if has_method("_pipeline_reset"):

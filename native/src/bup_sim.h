@@ -134,6 +134,7 @@ class BupSim : public RefCounted {
 
 	std::vector<Bup> bups;
 	Ref<NutrientField> field;
+	Ref<NutrientField> acetate; // the second food: what fast-growing bups let go of, and what bups with room can live on (same grid and medium as `field`, no clouds)
 	int64_t next_id = 1;
 	Rng rng; // the simulation's own random stream
 	double diffuse_accum = 0.0, feed_concentration = 0.0; // (the feed since the last solve, as a concentration)
@@ -241,6 +242,8 @@ public:
 	int64_t transfer_count() const { return transfers; }
 	double gene_ceiling(int gene, int reach) const; // the highest value the gene can have for a bup whose ceilings are raised so far
 	static int reach_levels(int reach) { return (reach & 3) + ((reach >> 2) & 3) + ((reach >> 4) & 3) + ((reach >> 6) & 3); }
+	double acetate_share(const Bup &b, double got, double delta) const; // the share of what a bup took in that it lets go of as acetate
+	void take_acetate(Bup &b, double delta); // a bup with room takes what it can of the acetate where it is
 	void conjugate(double delta); // donors that touch a bup that is not one pass on a run of genes (see Genome.DONOR_*) // a starving bup's chance of dying this step, drawn
 	int husk_count() const { return (int)husks.size(); }
 	PackedFloat64Array husks_export() const; // 5 numbers each: x, y, energy, age, the next piece
@@ -265,6 +268,8 @@ public:
 	void grow(double new_radius); // a larger dish; the bups and the nutrient stay
 	int shrink(double new_radius); // a smaller dish about the same centre: bups past the new edge die (the number is returned), the nutrient there goes
 	Ref<NutrientField> get_field() const { return field; }
+	Ref<NutrientField> get_acetate() const { return acetate; }
+	void sync_acetate(); // gives the acetate the grid, the medium and the dish size of the main field, and empties it
 	double random_float() { return uniform(); }
 	Vector2 random_point(double reach);
 

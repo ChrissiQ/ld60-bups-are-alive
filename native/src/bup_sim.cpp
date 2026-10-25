@@ -62,6 +62,8 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_husk_seconds", "seconds"), &BupSim::set_husk_seconds);
 	ClassDB::bind_method(D_METHOD("set_stationary_phase", "on"), &BupSim::set_stationary_phase);
 	ClassDB::bind_method(D_METHOD("conjugate", "delta"), &BupSim::conjugate);
+	ClassDB::bind_method(D_METHOD("get_acetate"), &BupSim::get_acetate);
+	ClassDB::bind_method(D_METHOD("sync_acetate"), &BupSim::sync_acetate);
 	ClassDB::bind_method(D_METHOD("transfer_count"), &BupSim::transfer_count);
 	ClassDB::bind_method(D_METHOD("husk_count"), &BupSim::husk_count);
 	ClassDB::bind_method(D_METHOD("husks_export"), &BupSim::husks_export);
@@ -132,6 +134,7 @@ void BupSim::_bind_methods() {
 
 BupSim::BupSim() {
 	field.instantiate();
+	acetate.instantiate();
 }
 
 String BupSim::configure(const Dictionary &constants) {
@@ -182,6 +185,7 @@ void BupSim::set_seed(int64_t seed) {
 void BupSim::reset(double dish_radius, int64_t seed) {
 	radius = dish_radius;
 	field->reset(dish_radius);
+	sync_acetate();
 	bups.clear();
 	records.clear();
 	husks.clear();
@@ -195,12 +199,19 @@ void BupSim::reset(double dish_radius, int64_t seed) {
 	}
 }
 
+void BupSim::sync_acetate() {
+	acetate->set_max_across(field->get_max_across());
+	acetate->set_diffusion(field->get_diffusion());
+	acetate->reset(radius);
+}
+
 void BupSim::grow(double new_radius) {
 	if (new_radius <= radius) {
 		return;
 	}
 	radius = new_radius;
 	field->resize(new_radius);
+	acetate->resize(new_radius);
 }
 
 // The dish shrinks about its centre. A bup whose centre is past the new edge dies like any other death (so its family
@@ -211,6 +222,7 @@ int BupSim::shrink(double new_radius) {
 	}
 	radius = new_radius;
 	field->resize(new_radius);
+	acetate->resize(new_radius);
 	husks.erase(std::remove_if(husks.begin(), husks.end(), [new_radius](const Husk &h) { return std::sqrt((double)h.x * h.x + (double)h.y * h.y) > new_radius; }), husks.end());
 	size_t keep = 0;
 	int culled = 0;
@@ -1564,6 +1576,43 @@ void BupSim::emit_sources(double delta, const PackedVector2Array &source_pos, co
 	field->end_emissions();
 }
 
+// Overflow. A bup that takes food in faster than its growth can use lets go of acetate in proportion to how far its intake exceeds a threshold growth rate
+// (the acetate flux of E. coli is threshold-linear in the growth rate: Basan et al. 2015; in MG1655 it starts at about 0.27 per hour and is 8.5% of the
+// glucose carbon at 0.51 per hour: Valgepea et al. 2010). The intake is expressed as the growth rate it could sustain. The bup's own gain is not reduced:
+// the biomass yield per glucose stays 0.40-0.42 g/g across the onset of overflow (Valgepea et al. 2010), so the acetate is a by-product (the respiratory
+// carbon it replaces), added to the dish on top of the glucose, for the others or for the bup itself later.
+double BupSim::acetate_share(const Bup &b, double got, double delta) const {
+	if (got <= 0.0 || b.mass <= 0.0f) {
+		return 0.0;
+	}
+	double per_hour = got * b.yield / (G.cost_per_mass * b.mass * delta) * 3600.0;
+	return std::min(0.5, G.acetate_slope * std::max(0.0, per_hour - G.acetate_threshold));
+}
+
+// A bup with room in its reserve takes acetate from the cell it is in at up to `acetate_uptake` (30-60% of the glucose rate: growth on acetate alone is
+// 0.27-0.45 per hour against about 1 on glucose) of its glucose uptake, by Monod's law, and less while glucose is there (catabolite repression: half at the
+// half-saturation; the glucose of the cell, the grid's only).
+void BupSim::take_acetate(Bup &b, double delta) {
+	double room = max_energy(b) - b.energy;
+	if (room <= 0.0) {
+		return;
+	}
+	int cell = acetate->uptake_cell_xy(b.x, b.y);
+	if (cell < 0) {
+		return;
+	}
+	double ca = acetate->cell_concentration(cell);
+	if (ca <= 0.0) {
+		return;
+	}
+	int glucose_cell = field->uptake_cell_xy(b.x, b.y);
+	double cg = glucose_cell >= 0 ? field->cell_concentration(glucose_cell) : 0.0;
+	double rate = G.acetate_uptake * G.uptake_per_size * std::sqrt((double)b.mass) * b.genes[2];
+	double want = std::min(rate * ca / (G.half_saturation + ca) * (G.half_saturation / (G.half_saturation + std::max(cg, 0.0))) * delta, room / b.yield);
+	double got = acetate->take_cell(cell, want);
+	b.energy = (float)std::min((double)b.energy + got * b.yield, max_energy(b));
+}
+
 // Only the sources' part of a step (no feed, diffusion, clouds or bups): what the dish's own world does while the GPU runs the rest.
 static const int HUSK_PIECES = 12;
 static const size_t MAX_HUSKS = 200000; // past this a death gives its nutrient back at once (as the clouds past MAX_CLOUDS go to the grid)
@@ -1694,6 +1743,7 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 		int pieces = diffuse_pieces(diffuse_accum);
 		for (int piece = 0; piece < pieces; piece++) {
 			field->diffuse(diffuse_accum / pieces);
+			acetate->diffuse(diffuse_accum / pieces);
 		}
 		diffuse_accum = 0.0;
 	}
@@ -1758,8 +1808,16 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 			if (cloud_want[i] > 0.0) {
 				got += field->take_from_clouds(b.x, b.y, cloud_want[i], shares[i].total, shares[i]);
 			}
+			double let_go = got * acetate_share(b, got, delta);
 			eat(b, got);
+			if (let_go > 0.0) {
+				int cell = acetate->uptake_cell_xy(b.x, b.y);
+				if (cell >= 0) {
+					acetate->deposit_cell(cell, let_go);
+				}
+			}
 		}
+		take_acetate(b, delta);
 		bool dies = stationary_phase ? starved_to_death(b, delta) : b.energy <= 0.0f;
 		if (!dies && until_death-- == 0) {
 			dies = true;

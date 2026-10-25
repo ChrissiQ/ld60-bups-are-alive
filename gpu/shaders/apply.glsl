@@ -14,6 +14,15 @@ layout(set = 0, binding = 7, std430) buffer B_ENTD { vec4 ENTD[]; };
 layout(set = 0, binding = 8, std430) buffer B_BINS { uint BINS[]; };
 layout(set = 0, binding = 9, std430) buffer B_BINC { uint BINC[]; };
 layout(set = 0, binding = 10, std430) buffer B_PSCALE { float PSCALE[]; };
+layout(set = 0, binding = 11, std430) buffer B_OWNER { int OWNER[]; };
+layout(set = 0, binding = 12, std430) buffer B_CONC { float CONC[]; };
+layout(set = 0, binding = 13, std430) buffer B_CONC2 { float CONC2[]; };
+layout(set = 0, binding = 14, std430) buffer B_WANT2 { float WANT2[]; };
+layout(set = 0, binding = 15, std430) buffer B_CELL2 { int CELL2[]; };
+layout(set = 0, binding = 16, std430) buffer B_AWLO { uint AWLO[]; };
+layout(set = 0, binding = 17, std430) buffer B_AWHI { uint AWHI[]; };
+layout(set = 0, binding = 18, std430) buffer B_ADLO { uint ADLO[]; };
+layout(set = 0, binding = 19, std430) buffer B_ADHI { uint ADHI[]; };
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
@@ -38,28 +47,64 @@ void puffs_at(float x, float y, out float c, out float gx, out float gy, out flo
 	}
 }
 
+// A bup that takes in more than its growth can use lets go of acetate besides (the CPU's `acetate_share`; its own gain is the same), and a bup with room then takes up acetate (`take_acetate`).
+void add_fixed2(uint cell, float w, int which) { // 2^30 to the unit, in 64 bits (two words): an exact sum whatever the order
+	while (w > 0.0) {
+		float part = min(w, 3.9);
+		w -= part;
+		uint q = uint(part * 1073741824.0 + 0.5);
+		if (which == 0) { uint old = atomicAdd(AWLO[cell], q); if (old + q < old) atomicAdd(AWHI[cell], 1u); }
+		else { uint old = atomicAdd(ADLO[cell], q); if (old + q < old) atomicAdd(ADHI[cell], 1u); }
+	}
+}
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
-	float wg = WANT[i], wc = WANTC[i];
-	if (wg <= 0.0 && wc <= 0.0) return;
 	uint b = i * 24u;
-	float got = wg > 0.0 ? wg * SCALE[CELLOF[i]] : 0.0;
-	if (wc > 0.0) {
-		float x = BUPS[b + 1], y = BUPS[b + 2];
-		float cc, pgx, pgy, psig; puffs_at(x, y, cc, pgx, pgy, psig);
-		int nb = int(P[67]); float bs = P[66];
-		int bx = clamp(int((x + P[3]) / bs), 0, nb - 1), by = clamp(int((y + P[3]) / bs), 0, nb - 1);
-		uint bin = uint(by * nb + bx);
-		uint e0 = BINS[bin], e1 = min(e0 + BINC[bin], uint(P[72]));
-		for (uint e = e0; e < e1; e++) {
-			vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];
-			float ddx = x - r0.x, ddy = y - r0.y, r2 = fma(ddy, ddy, ddx * ddx);
-			if (r2 <= r1.x) {
-				uint k = uint(r1.z);
-				float ci = r0.z / (6.2831853 * r0.w) * exp(-r2 * 0.5 / r0.w);
-				got += wc * ci / cc * PSCALE[k];
+	float wg = WANT[i], wc = WANTC[i];
+	float mass = BUPS[b + 6], yld = exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]);
+	float max_e = P[22] * mass;
+	float energy = BUPS[b + 5];
+	float x = BUPS[b + 1], y = BUPS[b + 2];
+	int n = int(P[1]);
+	int ix = clamp(int((x + P[3]) / P[2]), 0, n - 1), iy = clamp(int((y + P[3]) / P[2]), 0, n - 1);
+	int o = OWNER[iy * n + ix];
+	WANT2[i] = 0.0;
+	if (wg > 0.0 || wc > 0.0) {
+		float got = wg > 0.0 ? wg * SCALE[CELLOF[i]] : 0.0;
+		if (wc > 0.0) {
+			float cc, pgx, pgy, psig; puffs_at(x, y, cc, pgx, pgy, psig);
+			int nb = int(P[67]); float bs = P[66];
+			int bx = clamp(int((x + P[3]) / bs), 0, nb - 1), by = clamp(int((y + P[3]) / bs), 0, nb - 1);
+			uint bin = uint(by * nb + bx);
+			uint e0 = BINS[bin], e1 = min(e0 + BINC[bin], uint(P[72]));
+			for (uint e = e0; e < e1; e++) {
+				vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];
+				float ddx = x - r0.x, ddy = y - r0.y, r2 = fma(ddy, ddy, ddx * ddx);
+				if (r2 <= r1.x) {
+					uint k = uint(r1.z);
+					float ci = r0.z / (6.2831853 * r0.w) * exp(-r2 * 0.5 / r0.w);
+					got += wc * ci / cc * PSCALE[k];
+				}
 			}
 		}
+		float let_go = 0.0;
+		if (got > 0.0 && mass > 0.0 && o >= 0) {
+			float per_hour = got * yld / (P[21] * mass * P[5]) * 3600.0;
+			let_go = got * min(0.5, P[101] * max(0.0, per_hour - P[102]));
+			if (let_go > 0.0) add_fixed2(uint(o), let_go, 1);
+		}
+		energy = min(energy + got * yld, max_e);
 	}
-	BUPS[b + 5] = min(BUPS[b + 5] + got * exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]), P[22] * BUPS[b + 6]);
+	// the acetate in the cell, wanted after the glucose: with room left, at its share of the glucose rate, less while there is glucose
+	float room = max_e - energy;
+	if (o >= 0 && room > 0.0 && CONC2[o] > 0.0) {
+		float ca = CONC2[o], cg = max(CONC[o], 0.0);
+		float rate = P[103] * P[23] * sqrt(mass) * BUPS[b + 10];
+		float w2 = min(rate * ca / (P[24] + ca) * (P[24] / (P[24] + cg)) * P[5], room / yld);
+		if (w2 > 0.0) {
+			WANT2[i] = w2; CELL2[i] = o;
+			add_fixed2(uint(o), w2, 0);
+		}
+	}
+	BUPS[b + 5] = energy;
 }

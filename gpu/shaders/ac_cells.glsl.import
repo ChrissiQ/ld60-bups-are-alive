@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://cki3x0bdysn83"
+path="res://.godot/imported/ac_cells.glsl-3f68b5f3d5362e2a81734715b7e8547a.res"
+
+[deps]
+
+source_file="res://gpu/shaders/ac_cells.glsl"
+dest_files=["res://.godot/imported/ac_cells.glsl-3f68b5f3d5362e2a81734715b7e8547a.res"]
+
+[params]
+
