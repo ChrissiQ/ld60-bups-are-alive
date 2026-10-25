@@ -43,7 +43,7 @@ void main() {
 	if (i >= n_now) return;
 	uint b = i * 24u;
 	uint s = hash(hash(CNT[7] ^ (CNT[5] * 0x85EBCA6BU) ^ 777U) + i * 0x9E3779B9U);  // (this dish's stream, this step, this bup)
-	float energy = BUPS[b + 5], mass = BUPS[b + 6], birth = BUPS[b + 7], add_mass = P[56] * BUPS[b + 11] * BUPS[b + 11], rate = BUPS[b + 13];  // (the building size from the size gene; the mutation rate of this bup, which its daughter is made at)
+	float energy = BUPS[b + 5], mass = BUPS[b + 6], birth = BUPS[b + 7], add_mass = P[56] * BUPS[b + 11] * BUPS[b + 11], rate = BUPS[b + 13], donor = BUPS[b + 14];  // (the building size from the size gene; the mutation rate of this bup, which its daughter is made at)
 	float trim = max(0.0, float(n_now) + float(CNT[12]) - P[60]) / float(n_now);
 	bool natural;
 	if (P[85] > 0.5) {  // the stationary phase: a starving bup (at the growth floor) dies at a constant rate that grows with its metabolism, or when it has shrunk to a share of its birth mass
@@ -102,6 +102,8 @@ void main() {
 			mutator = max(1.0, mutator * 0.5);
 			muts += 1.0;
 		}
+		float flip = u01(s);  // (the F factor integrates or leaves, rarely)
+		float child_donor = donor > 0.5 ? (flip < P[92] ? 0.0 : 1.0) : (flip < P[90] ? 1.0 : 0.0);
 		if (!lethal) {
 			KID[i] = 1u;
 			float a = u01(s) * 6.2831853, off = 0.5 * mass * P[14];
@@ -113,7 +115,7 @@ void main() {
 			CHILD[c + 8] = g[0]; CHILD[c + 9] = g[1]; CHILD[c + 10] = g[2]; CHILD[c + 11] = g[3];
 			CHILD[c + 12] = exp(-harm) / sqrt(g[2]);
 			CHILD[c + 13] = mutator;
-			CHILD[c + 14] = P[57] * g[0] * g[0];
+			CHILD[c + 14] = child_donor;
 			CHILD[c + 15] = harm;
 			CHILD[c + 16] = hue; CHILD[c + 17] = sat; CHILD[c + 18] = val; CHILD[c + 19] = muts; CHILD[c + 20] = gen + 1.0;
 			CHILD[c + 21] = 0.0; CHILD[c + 22] = 3e38; CHILD[c + 23] = 3e38;  // (no picture yet: no trail)

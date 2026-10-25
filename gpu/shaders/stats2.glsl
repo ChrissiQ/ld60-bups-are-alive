@@ -28,6 +28,7 @@ void main() {
 		for (int k = 1; k < 7; k++) OUT[o + uint(k)] = floatBitsToUint(sm[k * 256]);
 		OUT[o + 7u] = floatBitsToUint(pcs.pc);
 		OUT[o + 8u] = floatBitsToUint(sm[7 * 256]);  // (the mutator's sum)
-		for (uint k = 9u; k < 16u; k++) OUT[o + k] = 0u;
+		OUT[o + 9u] = CNT[15];  // (the donors of the last step)
+		for (uint k = 10u; k < 16u; k++) OUT[o + k] = 0u;
 	}
 }

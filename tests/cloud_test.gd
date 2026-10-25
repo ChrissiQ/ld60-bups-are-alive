@@ -38,6 +38,7 @@ func _init() -> void:
 	_check_death_release()
 	_check_husks()
 	_check_starvation()
+	_check_conjugation()
 	_check_plume()
 	_check_threads()
 	TestUtil.finish(self, "CLOUD TESTS OK")
@@ -158,6 +159,43 @@ func _check_starvation() -> void:
 		check(absf(share - expected[metabolism]) < 0.08, "a day of starvation at metabolism %s leaves %.2f of the bups alive (expected %.2f from the death rate)" % [metabolism, share, expected[metabolism]])
 	check(survivors["true_2.0"] < survivors["true_1.0"] and survivors["true_1.0"] < survivors["true_0.5"], "the fast metabolism dies first: the growth rate costs survival")
 	check(absf(masses["true_1.0"] / 12.0 - exp(-0.08)) < 0.02, "the survivors have shrunk by about the starving maintenance (%.3f of their mass, expected %.3f)" % [masses["true_1.0"] / 12.0, exp(-0.08)])
+
+
+func _check_conjugation() -> void:
+	var d := _dish(90.0)
+	var donor_genome := Genome.founder()
+	donor_genome.merge({"speed": 30.0, "sense": 100.0, "metabolism": 1.5, "size": 6.0, "donor": true}, true)
+	var plain := Genome.founder()
+	plain.merge({"speed": 10.0, "sense": 40.0, "metabolism": 0.5, "size": 3.0}, true)
+	var n := 600
+	var mass := 12.0
+	var recipients := []
+	for i in n:
+		var at := Vector2(-40000.0 + 120.0 * (i % 60), -40000.0 + 120.0 * (i / 60))
+		d.sim.add_bup(at, donor_genome, 50.0, sqrt(mass), mass, 0, Vector2.RIGHT)
+		recipients.append(d.sim.add_bup(at + Vector2(2.0, 0.0), plain, 50.0, sqrt(mass), mass, 0, Vector2.RIGHT))
+	var apart := d.sim.add_bup(Vector2(0.0, 0.0), plain, 50.0, sqrt(mass), mass, 0, Vector2.RIGHT)  # (a bup with no donor near it)
+	d.sim.conjugate(10.0)  # (a touching pair transfers with chance 1 - exp(-0.1 x 10), about 0.63)
+	var transferred := 0
+	var runs := [0, 0, 0, 0]
+	for id: int in recipients:
+		var info := d.sim.bup_info(id)
+		var genes := [info["speed"], info["sense"], info["metabolism"], info["size_gene"]]
+		if genes[0] == 30.0:
+			transferred += 1
+			for g in 4:
+				runs[g] += 1 if genes[g] == [30.0, 100.0, 1.5, 6.0][g] else 0
+	var share := float(transferred) / n
+	check(absf(share - (1.0 - exp(-Genome.CONJ_RATE * 10.0))) < 0.06, "touching pairs transfer at the rate: %.3f of %d (expected %.3f)" % [share, n, 1.0 - exp(-Genome.CONJ_RATE * 10.0)])
+	check(runs[0] == transferred and absf(float(runs[1]) / transferred - Genome.CONJ_CONTINUE) < 0.08 and absf(float(runs[2]) / transferred - 0.25) < 0.08 and absf(float(runs[3]) / transferred - 0.125) < 0.06, "a transfer is a run from the first gene, each next one with the chance %.2f: %s of %d" % [Genome.CONJ_CONTINUE, str(runs), transferred])
+	check(d.sim.bup_info(apart)["speed"] == 10.0, "a bup that touches no donor takes nothing")
+	var still_donors := 0
+	for id: int in d.sim.bup_ids():
+		var info := d.sim.bup_info(id)
+		if info["donor"] and info["speed"] != 30.0:
+			still_donors += 1
+	check(still_donors == 0, "a donor keeps its own genes")
+	d.free()
 
 
 func _check_uptake() -> void:

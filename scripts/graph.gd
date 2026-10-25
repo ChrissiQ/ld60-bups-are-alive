@@ -7,7 +7,7 @@ extends Control
 ## Colours and text sizes come from the theme type "HistoryGraph" (see scenes/menu_theme.tres),
 ## like any other widget; nothing about its look is decided here.
 
-const TRAITS := ["speed", "sense", "metabolism", "size", "harm", "mutator"]  ## harm is the average % of food yield lost to mutation; mutator the average mutation rate as a multiple of the usual
+const TRAITS := ["speed", "sense", "metabolism", "size", "harm", "mutator", "donor"]  ## harm is the average % of food yield lost to mutation; mutator the average mutation rate as a multiple of the usual
 const MUTATOR_STEPS := [2.0, 5.0, 20.0, 150.0]  ## the mutator axis (from 1, the usual rate) tops out at the first of these that holds the data
 const HARM_STEPS := [10.0, 20.0, 50.0, 100.0]  ## the harm axis tops out at the first of these that holds the data (mean harm can reach about 99%)
 const THEME_TYPE := "HistoryGraph"

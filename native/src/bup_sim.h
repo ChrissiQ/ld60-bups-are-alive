@@ -76,6 +76,7 @@ class BupSim : public RefCounted {
 		int mutations = 0;
 		// derived from the genome
 		float yield = 1, add_mass = 8, drag_upkeep = 0;
+		bool donor = false; // carries the F factor in its chromosome: it can pass its genes on to a bup it touches (the GPU's record keeps it in word 14, as 0 or 1)
 		float mutator = 1; // how many times the usual mutation rate it makes daughters at (the GPU's record keeps it in word 13)
 		// chemotaxis state (slow playback)
 		float fast = 0, slow = 0, noise = 0, tumbling = 0;
@@ -87,6 +88,7 @@ class BupSim : public RefCounted {
 		int mutations;
 		bool lethal;
 		float mutator = 1;
+		bool donor = false;
 	};
 
 	// The family record of every bup that is alive, and of every dead one that still has a living
@@ -232,7 +234,10 @@ public:
 	void set_upkeep_scale(double scale) { upkeep_scale = scale; }
 	void set_husk_seconds(double seconds) { husk_seconds = seconds; }
 	void set_stationary_phase(bool on) { stationary_phase = on; }
-	bool starved_to_death(const Bup &b, double delta); // a starving bup's chance of dying this step, drawn
+	bool starved_to_death(const Bup &b, double delta);
+	int64_t transfers = 0; // conjugation events so far (for the tools that measure how often they happen)
+	int64_t transfer_count() const { return transfers; }
+	void conjugate(double delta); // donors that touch a bup that is not one pass on a run of genes (see Genome.DONOR_*) // a starving bup's chance of dying this step, drawn
 	int husk_count() const { return (int)husks.size(); }
 	PackedFloat64Array husks_export() const; // 5 numbers each: x, y, energy, age, the next piece
 	void husks_import(const PackedFloat64Array &saved);

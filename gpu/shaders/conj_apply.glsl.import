@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://b0e45owaf5nat"
+path="res://.godot/imported/conj_apply.glsl-e151b52728b8dac32075f620eb021f24.res"
+
+[deps]
+
+source_file="res://gpu/shaders/conj_apply.glsl"
+dest_files=["res://.godot/imported/conj_apply.glsl-e151b52728b8dac32075f620eb021f24.res"]
+
+[params]
+

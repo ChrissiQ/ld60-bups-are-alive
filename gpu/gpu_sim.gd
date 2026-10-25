@@ -196,6 +196,7 @@ func load_state(cells_across: int, cell_spacing: float, dish_radius: float, conc
 	_buf("CNT", cnt)
 	for nm in ["SURV", "KID", "EXCS", "EXCK"]:
 		_buf(nm, _zeros(capacity * 4))
+	_buf("DTAB", _zeros(65536 * 4 * 4))  # (the conjugation donors by place: 65,536 cells of four slots)
 	_scan_sizes = [capacity, (capacity + 255) / 256, 0]
 	_scan_sizes[2] = (_scan_sizes[1] + 255) / 256
 	for nm in ["S1", "S1X"]:
@@ -337,7 +338,8 @@ func _fill_params() -> void:
 		"hue_step": 40, "sat_step": 41, "val_step": 42, "val_min": 43, "add_mass_factor": 56, "drag_upkeep": 57, "division_spread": 58,
 		"min_length_px": 74, "width": 75, "min_width_px": 76, "max_trail_px": 77,
 		"mutator_rate": 80, "mutator_down_share": 81, "mutator_fold_weak": 82, "mutator_fold_strong": 83, "mutator_fold_top": 84,
-		"starve_death_rate": 87, "starve_death_exponent": 88, "starve_min_mass_share": 89}
+		"starve_death_rate": 87, "starve_death_exponent": 88, "starve_min_mass_share": 89,
+		"donor_gain": 90, "donor_cost": 91, "donor_loss": 92, "contact_um": 93, "conj_continue": 95}
 	for key in names_to_index:
 		p[names_to_index[key]] = float(consts[key])
 	p[86] = float(consts["starve_maintenance"]) * float(consts["cost_per_mass"])
@@ -388,6 +390,7 @@ func _set_step(step_seconds: float, swim := true) -> void:
 	p[61] = feed_per_second * delta
 	p[70] = 2.0 * diffusion * delta
 	p[63] = death_puff
+	p[94] = 1.0 - exp(-float(consts["conj_rate"]) * delta)  # (the chance a touching pair transfers in a step)
 	p[85] = 1.0 if stationary else 0.0
 	p[79] = upkeep_scale
 	_k_total = diffusion * delta / (spacing * spacing)
@@ -480,6 +483,9 @@ func _record_puff_compaction(cl: int) -> void:
 ## Division, death and mutation, then the bups' new places; the step's family events go to event set `event_set` (`step`: its place in
 ## the batch).
 func _record_life(cl: int, step := 0, event_set := 0) -> void:
+	dispatch(cl, "conj_clear", 65536 * 4)
+	dispatch(cl, "conj_insert", capacity)
+	dispatch(cl, "conj_apply", capacity)
 	dispatch(cl, "life", capacity)
 	var c: int = _scan_sizes[0]
 	var n1: int = _scan_sizes[1]

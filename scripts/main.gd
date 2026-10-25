@@ -443,6 +443,8 @@ func _traits_text(b: Dictionary) -> String:
 	var text := ""
 	for gene: String in Genome.LABELED:
 		text += Strings.t("panel.gene_line", [Genome.label(gene).rpad(5), Genome.format(gene, b[Genome.INFO_KEYS[gene]])])
+	if b.get("donor", false):
+		text += Strings.t("panel.donor_line")
 	return text + Strings.t("panel.bup_tail", [b["mutations"], Genome.harm_share(b["harm"]) * 100.0])
 
 

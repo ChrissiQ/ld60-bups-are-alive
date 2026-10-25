@@ -77,7 +77,7 @@ void main() {
 	uint b = i * 24u;
 	float x = BUPS[b + 1], y = BUPS[b + 2], dx = BUPS[b + 3], dy = BUPS[b + 4];
 	float energy = BUPS[b + 5], mass = BUPS[b + 6];
-	float speed = BUPS[b + 8], sense = BUPS[b + 9], metab = BUPS[b + 10], drag = BUPS[b + 14];
+	float speed = BUPS[b + 8], sense = BUPS[b + 9], metab = BUPS[b + 10], drag = P[57] * BUPS[b + 8] * BUPS[b + 8], donor = BUPS[b + 14];  // (the drag cost from the speed gene; word 14 is the donor flag)
 	float delta = P[5];
 	uint s = hash(hash(CNT[7] ^ (CNT[5] * 0x85EBCA6BU) ^ 12345U) + i * 0x9E3779B9U);  // (this dish's stream, this step, this bup)
 	float size = sqrt(mass);
@@ -157,7 +157,7 @@ void main() {
 	float upkeep = P[79] * (P[16] + P[17] * mass) + drag * size + P[18] * sense;
 	energy -= upkeep * delta;
 	if (energy > P[19]) {
-		float grow = min(P[20] * metab * mass * delta, (energy - P[19]) / P[21]);
+		float grow = min(P[20] * metab * mass * delta * (donor > 0.5 ? 1.0 - P[91] : 1.0), (energy - P[19]) / P[21]);  // (a donor gives up a share of its growth)
 		energy -= grow * P[21];
 		mass += grow;
 	}

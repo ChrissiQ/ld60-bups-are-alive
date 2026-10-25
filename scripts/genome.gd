@@ -69,6 +69,20 @@ const MUTATOR_FOLD_TOP := 150.0  ## a mutT-like allele (a fifth)
 const MUTATOR_RATE := 5.0e-6 * (TRAIT_MUTATIONS + HARMFUL_MUTATIONS) / 0.003
 const MUTATOR_DOWN_SHARE := 0.3  ## antimutator mutations in a mutator, as a share of the mutator rate [choice: no measured ratio; Wielgoss et al. saw two in the time one mutator arose]
 
+# Conjugation: a donor is a bup with the F factor integrated in its chromosome (an Hfr cell). It passes a run of its genes to a bup that is not a
+# donor and that it touches (see BupSim.conjugate). Only the facts below are sourced; the rest are choices, marked as such.
+const DONOR_COST := 0.09  ## the share of its growth a donor gives up: carrying a conjugative plasmid costs about 9% (Vogwill & MacLean 2015)
+const CONTACT_UM := 1.0  ## how close the bodies must be, in µm: conjugation happens between cells in tight contact, and the F pilus is about 1 µm long (Goldlust et al. 2023)
+const CONJ_CONTINUE := 0.5  ## the chance that a transfer goes on to the next gene of the run (speed, sense, metabolism, size, from a fixed origin) [choice: the genes' places on the chromosome are not real, and so is this; in life transfer is sequential and breaks off at random, so the first genes move most]
+const DONOR_GAIN := 1.0e-4  ## the chance, per division, that a daughter's chromosome takes up the F factor [choice: no measured rate for the integration]
+const DONOR_LOSS := 1.0e-3  ## the chance that a donor's daughter loses it [choice]
+## How fast a touching donor and recipient transfer, per second. Real conjugation completes in minutes (a plasmid-sized piece in about 3 minutes at 620
+## nucleotides a second; Couturier et al. 2023); 0.1 a second is about eighteen times faster, so that a touch of a few seconds, which is all that swimming
+## bups have, can transfer [choice: scaled for playability]. It is not what limits the number of transfers: how often a donor touches a bup is (measured
+## in scenario D, tools/gpu/game_dynamics.gd: with about 0.1% of the bups donors, one transfer per 480 divisions at 0.1, only 1.4 times as many at 0.6).
+## In life chromosomal genes move at about 1e-4 per cell per generation (Cooper 2007), 3% of the mutation rate; here it is about 0.5% of it.
+const CONJ_RATE := 0.1
+
 ## How each gene is shown: its short label and decimals, so every readout agrees.
 const LABELED := ["speed", "sense", "metabolism", "size", "mutator"]  ## the traits the readouts list, in order
 
@@ -94,7 +108,7 @@ static func harm_share(harm: float) -> float:
 
 ## The genome of the first bups: green, no harm, no mutations yet.
 static func founder() -> Dictionary:
-	return {"speed": 20.0, "sense": 50.0, "metabolism": 1.0, "size": 4.0, "hue": 0.33, "sat": 0.7, "val": 1.0, "harm": 0.0, "mutations": 0, "mutator": 1.0}
+	return {"speed": 20.0, "sense": 50.0, "metabolism": 1.0, "size": 4.0, "hue": 0.33, "sat": 0.7, "val": 1.0, "harm": 0.0, "mutations": 0, "mutator": 1.0, "donor": false}
 
 
 ## The colour a genome shows (a colour is kept as hue, saturation and brightness).
@@ -152,7 +166,7 @@ static func to_saved(genome: Dictionary) -> Dictionary:
 	var values := {}
 	for gene in GENES:
 		values[gene] = genome[gene]
-	return {"values": values, "hue": genome["hue"], "sat": genome["sat"], "val": genome["val"], "mutations": genome["mutations"], "harm": genome["harm"], "mutator": genome.get("mutator", 1.0)}
+	return {"values": values, "hue": genome["hue"], "sat": genome["sat"], "val": genome["val"], "mutations": genome["mutations"], "harm": genome["harm"], "mutator": genome.get("mutator", 1.0), "donor": genome.get("donor", false)}
 
 
 ## A genome from a save file. Odd values are made safe instead of rejected: anything missing or
@@ -184,4 +198,5 @@ static func from_saved(d: Dictionary) -> Dictionary:
 	var mutator_saved: Variant = d.get("mutator")
 	if Validate.is_number(mutator_saved):
 		g["mutator"] = clampf(float(mutator_saved), 1.0, MUTATOR_FOLD_TOP)
+	g["donor"] = d.get("donor") is bool and d["donor"]
 	return g
