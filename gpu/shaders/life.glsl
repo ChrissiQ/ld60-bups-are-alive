@@ -63,8 +63,7 @@ void main() {
 		float dm = mass * (1.0 - keep), de = energy * (1.0 - keep);
 		mass *= keep; energy *= keep;
 		BUPS[b + 6] = mass; BUPS[b + 5] = energy; BUPS[b + 7] = mass;
-		float gen = BUPS[b + 20];
-		BUPS[b + 20] = gen + 1.0;
+		BUPS[b + 20] += 1.0;  // (the cell left in the parent's place is a product of this division, whether or not the daughter lives)
 		// the daughter's genome: the parent's, mutated
 		float g[4] = float[4](BUPS[b + 8], BUPS[b + 9], BUPS[b + 10], BUPS[b + 11]);
 		float hue = BUPS[b + 16], sat = BUPS[b + 17], val = BUPS[b + 18], harm = BUPS[b + 15], muts = BUPS[b + 19];
@@ -126,7 +125,7 @@ void main() {
 			CHILD[c + 13] = mutator;
 			CHILD[c + 14] = child_donor;
 			CHILD[c + 15] = harm;
-			CHILD[c + 16] = hue; CHILD[c + 17] = sat; CHILD[c + 18] = val; CHILD[c + 19] = muts; CHILD[c + 20] = gen + 1.0;
+			CHILD[c + 16] = hue; CHILD[c + 17] = sat; CHILD[c + 18] = val; CHILD[c + 19] = muts; CHILD[c + 20] = BUPS[b + 20];
 			CHILD[c + 21] = 0.0; CHILD[c + 22] = 3e38; CHILD[c + 23] = 3e38;  // (no picture yet: no trail)
 		}
 	}

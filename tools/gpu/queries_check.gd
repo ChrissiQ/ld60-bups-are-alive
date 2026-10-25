@@ -165,7 +165,7 @@ func _process(_delta: float) -> bool:
 			var gi := world.bup_info(id)
 			var ci := ref.bup_info(id)
 			var same := not gi.is_empty()
-			for key: String in ["pos", "dir", "energy", "mass", "birth_mass", "generation", "speed", "sense", "metabolism", "size_gene", "hue", "harm", "mutations", "upkeep", "max_energy", "steering"]:
+			for key: String in ["pos", "dir", "energy", "mass", "birth_mass", "divisions", "speed", "sense", "metabolism", "size_gene", "hue", "harm", "mutations", "upkeep", "max_energy", "steering"]:
 				same = same and gi.get(key) == ci.get(key)
 			_check(same, "tracked bup %d: bup_info GPU %s CPU %s" % [id, str(gi), str(ci)])
 			_check(world.bup_pos(id) == ref.bup_pos(id), "tracked bup %d: bup_pos GPU %s CPU %s" % [id, world.bup_pos(id), ref.bup_pos(id)])

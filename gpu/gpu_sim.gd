@@ -266,7 +266,7 @@ func load_state(cells_across: int, cell_spacing: float, dish_radius: float, conc
 	_buf("OUT", _zeros(GpuKernels.OUT_WORDS * 4))
 	_buf("OUTK", _zeros(EVENT_SETS * GpuKernels.OUT_WORDS * 4))
 	_stats_groups = (capacity + 255) / 256
-	_buf("SPART", _zeros(_stats_groups * 9 * 4))
+	_buf("SPART", _zeros(_stats_groups * 10 * 4))
 	_buf("ERASE", _zeros(GpuKernels.MAX_ERASE * 16))
 	_buf("QD", _zeros(capacity * 4))
 	_buf("MIRROR", _zeros((1 + puff_capacity * 5) * 4))

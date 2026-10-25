@@ -20,8 +20,8 @@ extends RefCounted
 ## _take_unapplied_events). On a local device (tools) a request is submitted and waited for at once, and its results are read at once.
 ##
 ## Layouts (32-bit words; the GLSL is in gpu/kernels.gd, the constants GpuKernels.Q_*, OUT_*):
-## - Lineage events (BupSim.apply_events): a birth is 16 words: id lo, id hi, parent lo, parent hi, step, generation, mutations (uints),
-##   speed, sense, metabolism, size_gene, hue, sat, val, harm (floats), 0; a death is 8 words: id lo, id hi, step, generation (uints),
+## - Lineage events (BupSim.apply_events): a birth is 16 words: id lo, id hi, parent lo, parent hi, step, divisions, mutations (uints),
+##   speed, sense, metabolism, size_gene, hue, sat, val, harm (floats), 0; a death is 8 words: id lo, id hi, step, divisions (uints),
 ##   mass (float), 0, 0, 0. `step` is the step's place in the batch. Made by the `events` kernel after `finalize` and before `compact`,
 ##   in bup-index order, into event set seq % GpuSim.EVENT_SETS (buffers EVB, EVD: room for P[78] = GpuSim.event_capacity of each per
 ##   set); counters CNT[8..11] (gpu/kernels.gd).
@@ -391,7 +391,7 @@ func count_known() -> bool:
 func population_stats() -> Dictionary:
 	_touch()
 	if _stats.is_empty():
-		var empty := {"count": _count, "harm": 0.0, "mutations": 0.0}
+		var empty := {"count": _count, "harm": 0.0, "mutations": 0.0, "generation": 0.0}
 		for gene in GENE_NAMES:
 			empty[gene] = 0.0
 		return empty
@@ -936,6 +936,7 @@ func _stats_at(data: PackedByteArray, sample: int) -> Dictionary:
 	out["mutator"] = data.decode_float(o + 8 * 4) * per
 	out["donor"] = float(data.decode_u32(o + 9 * 4)) * per
 	out["key"] = data.decode_float(o + 10 * 4) * per
+	out["generation"] = data.decode_float(o + 11 * 4) * per
 	return out
 
 

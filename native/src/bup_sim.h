@@ -70,7 +70,7 @@ class BupSim : public RefCounted {
 		float x = 0, y = 0, dx = 1, dy = 0;
 		float px = std::numeric_limits<float>::quiet_NaN(), py = std::numeric_limits<float>::quiet_NaN(); // where it was in the last picture (none yet: NaN), for its trail
 		float energy = 0, mass = 0, birth_mass = 0;
-		int generation = 0;
+		int divisions = 0;
 		float genes[4] = { 0, 0, 0, 0 }; // speed, sense, metabolism, size
 		float hue = 0, sat = 0, val = 0, harm = 0; // colour is hue, saturation and value (0..1 each)
 		int mutations = 0;
@@ -100,7 +100,7 @@ class BupSim : public RefCounted {
 		int64_t parent = 0; // 0: a founder
 		int born = 0, died = -1;
 		int holds = 0; // records that name this one as their parent, plus pins: while any, a dead record stays
-		int generation = 0, mutations = 0;
+		int divisions = 0, mutations = 0;
 		float genes[4] = { 0, 0, 0, 0 };
 		float hue = 0, sat = 0, val = 0, harm = 0;
 		float mutator = 1;
@@ -277,7 +277,7 @@ public:
 	Vector2 random_point(double reach);
 
 	// `id` < 0 gives the bup the next number in birth order; a saved game passes the bup's own number back
-	int64_t add_bup(const Vector2 &pos, const Dictionary &genome, double energy, double size, double birth_mass, int generation, const Vector2 &dir, int64_t id = -1, int64_t parent = 0);
+	int64_t add_bup(const Vector2 &pos, const Dictionary &genome, double energy, double size, double birth_mass, int divisions, const Vector2 &dir, int64_t id = -1, int64_t parent = 0);
 	int64_t get_next_id() const { return next_id; }
 	void set_next_id(int64_t value) { next_id = std::max(value, next_id); }
 	int bup_count() const { return (int)bups.size(); }
@@ -307,7 +307,7 @@ public:
 	Array lineage_export() const;
 	void lineage_import(const Array &saved, const PackedInt64Array &pinned = PackedInt64Array()); // `pinned`: ids to keep a hold on, whatever else is pruned
 	// The same records as one block of bytes (a save of a big dish: a dictionary for each of a hundred thousand records is slow to make and to
-	// write). Little-endian, and not a stable format: 32-bit count, the records (LINEAGE_BYTES each: id, parent, born, died, generation,
+	// write). Little-endian, and not a stable format: 32-bit count, the records (LINEAGE_BYTES each: id, parent, born, died, divisions,
 	// mutations, four genes, hue, sat, val, harm, max_energy), 32-bit count of names, and each name as id, byte length and UTF-8.
 	PackedByteArray lineage_export_bytes() const;
 	void lineage_import_bytes(const PackedByteArray &data, const PackedInt64Array &pinned = PackedInt64Array());

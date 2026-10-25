@@ -36,6 +36,17 @@ func _run() -> void:
 	check(other.time > t0 and first.time > t1, "both dishes run (%.1f and %.1f s)" % [other.time - t0, first.time - t1])
 	check(other.population() > 0, "the other dish has bups")
 	check(absf(other.time - first.time) <= m.sim_speed / 60.0 + 1.0, "the dishes keep one clock (%.1f and %.1f s)" % [other.time, first.time])
+	var counts := 0.0
+	var ids: Array = first.bup_ids()
+	for id: int in ids:
+		counts += first.bup_info(id)["divisions"]
+	check(absf(first.population_stats()["generation"] - counts / ids.size()) < 1e-3, "a dish's generation is the mean of its bups' divisions (%.3f)" % first.population_stats()["generation"])
+	var behind := 0
+	for id: int in ids:
+		var chain := first.lineage_chain(id)
+		if chain.size() >= 2 and first.has_bup(chain[chain.size() - 2]):
+			behind += 1 if first.bup_info(chain[chain.size() - 2])["divisions"] < first.bup_info(id)["divisions"] else 0
+	check(behind == 0, "a bup's count is never above its living parent's: the daughter takes the parent's count after the division")
 	var turns := []
 	for round in 4:
 		m._let_one_dish_switch()

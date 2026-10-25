@@ -47,7 +47,7 @@ const TYPES := {
 # 79 upkeep_scale (the dish's upkeep factor: multiplies base_upkeep + maintenance_per_mass * mass).
 # The entries that depend on the step's length (5, 6, 7, 59, 61, 70, and the diffusion's k in the push constant) are set for every batch.
 # BUPS (the bup records): 24 words each: 0 id_lo (uint bits), 1 x, 2 y, 3 dx, 4 dy, 5 energy, 6 mass, 7 birth_mass, 8 speed, 9 sense,
-#       10 metabolism, 11 size, 12 reach (the raised gene ceilings: two bits a gene, speed the lowest, as a float; the yield is exp(-harm) / sqrt(metabolism), worked out where it is read), 13 mutator (the mutation rate, a multiple of the usual; the building size is P[56] x size²), 14 donor (0 or 1: it carries the F factor; the drag cost is P[57] x speed²), 15 harm, 16 hue, 17 sat, 18 val, 19 mutations, 20 generation
+#       10 metabolism, 11 size, 12 reach (the raised gene ceilings: two bits a gene, speed the lowest, as a float; the yield is exp(-harm) / sqrt(metabolism), worked out where it is read), 13 mutator (the mutation rate, a multiple of the usual; the building size is P[56] x size²), 14 donor (0 or 1: it carries the F factor; the drag cost is P[57] x speed²), 15 harm, 16 hue, 17 sat, 18 val, 19 mutations, 20 divisions
 #       (both whole numbers as floats), 21 id_hi (uint bits), 22 px, 23 py (where it was in the last picture; >= 1e30: none, newborns 3e38).
 #       The same as BupSim.export_state_bytes().
 # PUFF: 8 floats each: x, y, mass, variance, cut, alive, reach^2, sigma;
@@ -60,8 +60,8 @@ const TYPES := {
 #       0 if negative) and a margin of CAP_SIGMAS standard deviations of the births and deaths, so the count stops just short of the limit,
 #       13 bups trimmed so far this step (`life` adds, `finalize` reads and clears), 14-15 spare
 # EVB / EVD (uint): EVENT_SETS sets of P[78] events each (a batch writes set `pcs.pb` of `events`): a birth is 16 words (id lo, id hi,
-#       parent lo, parent hi, step, generation, mutations; speed, sense, metabolism, size_gene, hue, sat, val, harm, mutator as float bits),
-#       a death 8 (id lo, id hi, step, generation; mass, x, y, the energy it gives back as float bits: 0 for a trimmed one): BupSim.apply_events' layout. EVN (uint): per set, the
+#       parent lo, parent hi, step, divisions, mutations; speed, sense, metabolism, size_gene, hue, sat, val, harm, mutator as float bits),
+#       a death 8 (id lo, id hi, step, divisions; mass, x, y, the energy it gives back as float bits: 0 for a trimmed one): BupSim.apply_events' layout. EVN (uint): per set, the
 #       births and deaths of its batch (CNT[8], CNT[9] at its end; past P[78] they were lost). OUTK (uint): per event set, a copy of
 #       OUT as it was at the end of that set's batch (so a stalling read can still find a batch's samples after later frames).
 # QIN (uint, the frame's questions; floats by their bits): see Q_* in gpu/gpu_sim.gd. OUT (uint): the frame's answers, OUT_* there.
@@ -544,8 +544,7 @@ void main() {
 		float dm = mass * (1.0 - keep), de = energy * (1.0 - keep);
 		mass *= keep; energy *= keep;
 		BUPS[b + 6] = mass; BUPS[b + 5] = energy; BUPS[b + 7] = mass;
-		float gen = BUPS[b + 20];
-		BUPS[b + 20] = gen + 1.0;
+		BUPS[b + 20] += 1.0;  // (the cell left in the parent's place is a product of this division, whether or not the daughter lives)
 		// the daughter's genome: the parent's, mutated
 		float g[4] = float[4](BUPS[b + 8], BUPS[b + 9], BUPS[b + 10], BUPS[b + 11]);
 		float hue = BUPS[b + 16], sat = BUPS[b + 17], val = BUPS[b + 18], harm = BUPS[b + 15], muts = BUPS[b + 19];
@@ -607,7 +606,7 @@ void main() {
 			CHILD[c + 13] = mutator;
 			CHILD[c + 14] = child_donor;
 			CHILD[c + 15] = harm;
-			CHILD[c + 16] = hue; CHILD[c + 17] = sat; CHILD[c + 18] = val; CHILD[c + 19] = muts; CHILD[c + 20] = gen + 1.0;
+			CHILD[c + 16] = hue; CHILD[c + 17] = sat; CHILD[c + 18] = val; CHILD[c + 19] = muts; CHILD[c + 20] = BUPS[b + 20];
 			CHILD[c + 21] = 0.0; CHILD[c + 22] = 3e38; CHILD[c + 23] = 3e38;  // (no picture yet: no trail)
 		}
 	}
@@ -1148,10 +1147,10 @@ void main() {
 ## Stats of the bups now, in two passes of fixed order (so a sample is the same every run): sums over groups of 256 bups into SPART,
 ## then one group sums those (`pcs.pa` of them) into OUT at word `pcs.pb`, with the step `pcs.pc`.
 const K_STATS1 := """
-shared float sm[9 * 256];
+shared float sm[10 * 256];
 void main() {
 	uint i = gl_GlobalInvocationID.x, l = gl_LocalInvocationID.x;
-	float v[9] = float[9](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+	float v[10] = float[10](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
 	if (i < CNT[0]) {
 		uint b = i * 24u;
 		float h = BUPS[b + 15u];
@@ -1159,27 +1158,28 @@ void main() {
 		v[5] = h < 0.1 ? h * (1.0 - h * (0.5 - h * (0.16666667 - h * 0.041666668))) : 1.0 - exp(-h);  // (1 - exp(-h) without the loss of a small h's digits)
 		v[6] = BUPS[b + 19u]; v[7] = BUPS[b + 13u];
 		v[8] = ((int(BUPS[b + 12u] + 0.5) >> 8) & 3) == 2 ? 1.0 : 0.0;  // (the bups with the acetate key)
+		v[9] = BUPS[b + 20u];
 	}
-	for (int k = 0; k < 9; k++) sm[k * 256 + int(l)] = v[k];
+	for (int k = 0; k < 10; k++) sm[k * 256 + int(l)] = v[k];
 	barrier();
 	for (uint half_ = 128u; half_ > 0u; half_ >>= 1u) {
-		if (l < half_) for (int k = 0; k < 9; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
+		if (l < half_) for (int k = 0; k < 10; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
 		barrier();
 	}
-	if (l == 0u) for (int k = 0; k < 9; k++) SPART[gl_WorkGroupID.x * 9u + uint(k)] = sm[k * 256];
+	if (l == 0u) for (int k = 0; k < 10; k++) SPART[gl_WorkGroupID.x * 10u + uint(k)] = sm[k * 256];
 }
 """
 
 const K_STATS2 := """
-shared float sm[9 * 256];
+shared float sm[10 * 256];
 void main() {
 	uint l = gl_LocalInvocationID.x, groups = uint(pcs.pa);
-	float v[9] = float[9](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-	for (uint g = l; g < groups; g += 256u) for (int k = 0; k < 9; k++) v[k] += SPART[g * 9u + uint(k)];
-	for (int k = 0; k < 9; k++) sm[k * 256 + int(l)] = v[k];
+	float v[10] = float[10](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+	for (uint g = l; g < groups; g += 256u) for (int k = 0; k < 10; k++) v[k] += SPART[g * 10u + uint(k)];
+	for (int k = 0; k < 10; k++) sm[k * 256 + int(l)] = v[k];
 	barrier();
 	for (uint half_ = 128u; half_ > 0u; half_ >>= 1u) {
-		if (l < half_) for (int k = 0; k < 9; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
+		if (l < half_) for (int k = 0; k < 10; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
 		barrier();
 	}
 	if (l == 0u) {
@@ -1190,7 +1190,8 @@ void main() {
 		OUT[o + 8u] = floatBitsToUint(sm[7 * 256]);  // (the mutator's sum)
 		OUT[o + 9u] = CNT[15];  // (the donors of the last step)
 		OUT[o + 10u] = floatBitsToUint(sm[8 * 256]);  // (the key's count)
-		for (uint k = 11u; k < 16u; k++) OUT[o + k] = 0u;
+		OUT[o + 11u] = floatBitsToUint(sm[9 * 256]);  // (the divisions' sum)
+		for (uint k = 12u; k < 16u; k++) OUT[o + k] = 0u;
 	}
 }
 """

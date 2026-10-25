@@ -470,7 +470,7 @@ func _away_text(distance: float) -> String:
 
 
 func _info_text(b: Dictionary, id: int) -> String:
-	var text := Strings.t("panel.bup", [b["generation"], SimClock.format_minutes(b["born"]), maxi(1, roundi(b["energy"])), b["max_energy"]])  # (a living bup never reads 0)
+	var text := Strings.t("panel.bup", [b["divisions"], SimClock.format_minutes(b["born"]), maxi(1, roundi(b["energy"])), b["max_energy"]])  # (a living bup never reads 0)
 	text += Strings.t("panel.steering", [_steering_word(b["steering"])])
 	var from_dish := dish.line_from_dish(id)
 	if from_dish > 0:
@@ -496,7 +496,7 @@ func _traits_text(b: Dictionary) -> String:
 
 
 func _deceased_text(b: Dictionary) -> String:
-	var text := Strings.t("panel.deceased", [SimClock.format_minutes(b["born"]), SimClock.format_minutes(b["died"]), b["generation"], b["max_energy"]])
+	var text := Strings.t("panel.deceased", [SimClock.format_minutes(b["born"]), SimClock.format_minutes(b["died"]), b["divisions"], b["max_energy"]])
 	if b.has("moved_to"):
 		text += Strings.t("panel.moved_line", [b["moved_to"]]).substr(1) + "\n"
 	return text + _traits_text(b)

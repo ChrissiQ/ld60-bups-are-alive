@@ -493,7 +493,7 @@ func _small() -> StartConditions:
 func _generations(dish: Dish) -> int:
 	var total := 0
 	for id in dish.bup_ids():
-		total += dish.bup_info(id)["generation"]
+		total += dish.bup_info(id)["divisions"]
 	return total
 
 

@@ -344,7 +344,7 @@ func _reset_history() -> void:
 	history_version += 1
 
 
-## Abiogenesis: founders appear near the centre, part-way through their first growth (generation 0: nothing precedes them).
+## Abiogenesis: founders appear near the centre, part-way through their first growth (no divisions in their line: nothing precedes them).
 ## Every mode starts a dish through here, so setup can't drift between modes.
 ## The medium: the nutrient spreads at the speed of water over this many. The usual thickness leaves the field to the
 ## simulation's own constant (SimConstants), so that anything that sets that one (the tests holding the nutrient still) still does.
@@ -609,12 +609,12 @@ func nutrient_reading(local: Vector2) -> Vector3:
 
 ## Adds a bup at a world position and returns its id. `size` is its body now (the square root of
 ## its mass); negative means a newborn of this genome.
-func add_bup(world_pos: Vector2, genome: Dictionary, energy: float, size := -1.0, birth_mass := -1.0, generation := 0, dir := Vector2.RIGHT, id := -1) -> int:
+func add_bup(world_pos: Vector2, genome: Dictionary, energy: float, size := -1.0, birth_mass := -1.0, divisions := 0, dir := Vector2.RIGHT, id := -1) -> int:
 	if gpu_world != null and gpu_active:
 		_to_cpu_for_edit()
 	_render_stale = true
 	edit_count += 1
-	var added := sim.add_bup(world_pos - global_position, genome, energy, size, birth_mass, generation, dir, id)
+	var added := sim.add_bup(world_pos - global_position, genome, energy, size, birth_mass, divisions, dir, id)
 	if gpu_world != null and gpu_active:
 		_mark_gpu_dirty()
 	return added
@@ -784,7 +784,7 @@ func clear_bups() -> void:
 		_mark_gpu_dirty()
 
 
-## The count and averages the readouts show (each gene, "harm" as a share of yield lost, "mutations"), in one pass.
+## The count and averages the readouts show (each gene, "harm" as a share of yield lost, "mutations"), and "generation", the population's: the mean of its bups' divisions (a pipette keeps the bups' counts, so the dish it founds carries on the count of the dish it came from).
 func population_stats() -> Dictionary:
 	if gpu_world != null and gpu_active:
 		return gpu_world.population_stats()

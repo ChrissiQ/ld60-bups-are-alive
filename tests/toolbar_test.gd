@@ -224,7 +224,7 @@ func _init() -> void:
 	await process_frame
 	await process_frame  # process_frame fires before nodes' _process, so allow a full frame
 	check(not m.name_row.swatch.visible, "a living bup, which can be seen in the dish, has no colour square")
-	check(m.info_panel.visible and m.name_row.visible and m.name_row.name_label.text.contains("bup #") and m.info_text.get_parsed_text().contains("generation"), "info panel shows the selected bup, named with its number ('%s')" % m.name_row.name_label.text)
+	check(m.info_panel.visible and m.name_row.visible and m.name_row.name_label.text.contains("bup #") and m.info_text.get_parsed_text().contains("divisions"), "info panel shows the selected bup, named with its number ('%s')" % m.name_row.name_label.text)
 	_click(m, centre + Vector2(-250, -250))
 	check(m.dish.selected_id == -1, "clicking empty space deselects")
 	m.dish.selected_id = bup
@@ -304,12 +304,12 @@ func _init() -> void:
 	check(m.info_text.get_parsed_text().contains("nearest bup  20 away") and m.info_text.get_parsed_text().contains("nearest source  60 away"), "the readout shows what is near: '%s'" % m.info_text.get_parsed_text().replace("\n", " | "))
 	# Hovering a bup or a source shows that instead; clicking pins it.
 	_hover_over(m, near_pos)
-	check(m.name_row.visible and m.info_text.get_parsed_text().contains("generation") and not m.name_row.rename_button.visible, "hovering a bup shows the bup, but can't rename it")
+	check(m.name_row.visible and m.info_text.get_parsed_text().contains("divisions") and not m.name_row.rename_button.visible, "hovering a bup shows the bup, but can't rename it")
 	_hover_over(m, m.dish.sources[0].pos)
 	check(m.info_text.get_parsed_text().begins_with("NUTRIENT SOURCE") and not m.source_rate_row.visible, "hovering a source shows it, read-only")
 	m.dish.select_at(near_pos)
 	_hover_over(m, spot)
-	check(m.name_row.visible and m.info_text.get_parsed_text().contains("generation") and not m.info_text.get_parsed_text().contains("NUTRIENT") and m.name_row.rename_button.visible, "a clicked bup stays on the panel while the pointer moves away, and can be renamed")
+	check(m.name_row.visible and m.info_text.get_parsed_text().contains("divisions") and not m.info_text.get_parsed_text().contains("NUTRIENT") and m.name_row.rename_button.visible, "a clicked bup stays on the panel while the pointer moves away, and can be renamed")
 	m.dish.select_at(m.dish.global_position + Vector2(-200, -200))
 	_hover_over(m, spot)
 	check(m.dish.selected_id == -1 and m.info_text.get_parsed_text().begins_with("NUTRIENT\nconcentration"), "clicking empty ground lets go, and the panel follows the pointer again")
@@ -498,7 +498,7 @@ func _init() -> void:
 	check(not m.info_panel.visible, "...and nothing over empty ground or a bup")
 	picks[2].button_pressed = true
 	_hover_over(m, mode_spot)
-	check(m.name_row.visible and m.info_text.get_parsed_text().contains("generation") and m.dish.hovered_source == null, "Bups: shows the bup, not the source on top of it")
+	check(m.name_row.visible and m.info_text.get_parsed_text().contains("divisions") and m.dish.hovered_source == null, "Bups: shows the bup, not the source on top of it")
 	_hover_over(m, m.dish.global_position + Vector2(120, -90))
 	check(not m.info_panel.visible, "...and nothing over empty ground")
 	picks[1].button_pressed = true
@@ -576,7 +576,7 @@ func _init() -> void:
 	m._update_info_panel()
 	check(m.info_text.get_parsed_text() != source_text, "...and do once it has passed")
 	_hover_over(m, mode_spot)
-	check(m.name_row.visible and m.info_text.get_parsed_text().contains("generation"), "hovering a bup switches the readout to it at once")
+	check(m.name_row.visible and m.info_text.get_parsed_text().contains("divisions"), "hovering a bup switches the readout to it at once")
 	m.toolbar.set_paused(true)
 	m.dish.clear_bups()
 	m.dish.sources.clear()

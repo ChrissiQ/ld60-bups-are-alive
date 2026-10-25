@@ -137,7 +137,7 @@ func _events_against_the_cpu() -> void:
 			e.encode_u32(0, id & 0xFFFFFFFF); e.encode_u32(4, id >> 32)
 			var parent: int = cpu.lineage_info(id)["parent"]
 			e.encode_u32(8, parent & 0xFFFFFFFF); e.encode_u32(12, parent >> 32)
-			e.encode_u32(16, k); e.encode_u32(20, info["generation"]); e.encode_u32(24, info["mutations"])
+			e.encode_u32(16, k); e.encode_u32(20, info["divisions"]); e.encode_u32(24, info["mutations"])
 			var words := [info["speed"], info["sense"], info["metabolism"], info["size_gene"], info["hue"], info["sat"], info["val"], info["harm"], info["mutator"]]
 			for w in words.size():
 				e.encode_float(28 + 4 * w, words[w])
@@ -149,7 +149,7 @@ func _events_against_the_cpu() -> void:
 			var e := PackedByteArray()
 			e.resize(32)
 			e.encode_u32(0, id & 0xFFFFFFFF); e.encode_u32(4, id >> 32); e.encode_u32(8, k)
-			e.encode_u32(12, kept["generation"] if not kept.is_empty() else before[id]["generation"])
+			e.encode_u32(12, kept["divisions"] if not kept.is_empty() else before[id]["divisions"])
 			e.encode_float(16, kept["max_energy"] / reserve if not kept.is_empty() else before[id]["mass"])
 			deaths.append_array(e)
 	check(births.size() / 64 > 20 and deaths.size() / 32 > 10, "the CPU run has births and deaths to compare (%d and %d)" % [births.size() / 64, deaths.size() / 32])
