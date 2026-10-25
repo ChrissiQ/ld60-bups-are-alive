@@ -21,6 +21,7 @@ const FIT_MARGIN := 40.0  ## screen pixels kept clear at the sides when framing 
 const TOOLBAR_CLEARANCE := 120.0  ## screen pixels kept clear above the dish for the toolbars
 const TUTORIAL_ZOOM := 6.0  ## how close the tutorial brings the camera to a bup it asks the player to click
 const TUTORIAL_BUP_PIXELS := 18.0  ## the lit square round that bup is this far out on each side
+const DISH_SPACING := 1.0e6  ## µm between the centres of the dishes in the shared world (past the farthest the camera can see of one)
 const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) still counts as pointing at it
 
 @onready var dish: Dish = $Dish
@@ -50,6 +51,7 @@ const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) stil
 @onready var watch_panel: WatchPanel = $HUD/WatchPanel
 @onready var tutorial: Tutorial = $TutorialLayer/Tutorial  ## the guided tour, when it is wanted (see Session.tutorial_wanted)
 @onready var layers_panel: LayersPanel = $HUD/LayersPanel  ## what the dish shows: each kind of thing can be hidden
+@onready var dish_strip: DishStrip = $HUD/DishStrip  ## a thumbnail of every dish when there are several
 @onready var hud_layer: CanvasLayer = $HUD
 @onready var pause_menu: PauseMenu = $MenuLayer/PauseMenu
 @onready var pause_ring: Panel = $HUD/PauseRing
@@ -58,6 +60,9 @@ const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) stil
 ## exactly three ways: no goals, no saving, and restarts use the player's start conditions.
 var free_mode := Session.mode == Session.Mode.FREE
 var tracker := GoalTracker.new()
+var dishes: Array[Dish] = []  ## every dish that runs; `dish` is the one in the main view (the others run beside it, see the strip)
+var _dish_numbers := {}  ## Dish -> its number
+var _next_dish_number := 1
 var tool := Toolbar.Tool.SELECT  ## kept in step with the toolbar's selection (see _on_tool_selected)
 var sim_speed := 1.0  ## seconds of simulation per real second (the toolbar sets it)
 var achieved_speed := 1.0  ## what the simulation actually managed lately: lower than sim_speed when the frame budget cut a step short
@@ -90,12 +95,12 @@ var _drag_threshold: float = ProjectSettings.get_setting("gui/common/drag_thresh
 
 
 func _ready() -> void:
-	dish.extinct.connect(_on_extinct)
+	_register_dish(dish)
+	dish_strip.dish_chosen.connect(set_main_dish)
 	tracker.goal_completed.connect(_on_goal_completed)
 	toolbar.tool_selected.connect(_on_tool_selected)
 	toolbar.zoom_in_requested.connect(_zoom_by.bind(ZOOM_BUTTON_STEP))
 	toolbar.zoom_out_requested.connect(_zoom_by.bind(1.0 / ZOOM_BUTTON_STEP))
-	dish.selection_changed.connect(_on_selection_changed)
 	tool_options.pick_mode_selected.connect(_on_pick_mode_selected)
 	toolbar.speed_selected.connect(func(multiplier: float) -> void:
 		sim_speed = multiplier
@@ -104,7 +109,7 @@ func _ready() -> void:
 	pause_menu.resume_requested.connect(_close_menu)
 	pause_menu.quit_requested.connect(_quit_to_menu)
 	pause_menu.dish_radius_chosen.connect(_resize_dish)
-	pause_menu.bup_limit_chosen.connect(dish.change_limit)
+	pause_menu.bup_limit_chosen.connect(func(limit: int) -> void: dish.change_limit(limit))
 	graph.dish = dish
 	banner.text = ""
 	source_rate_row.configure(Dish.MIN_SOURCE_RATE, Dish.MAX_SOURCE_RATE, 0.1, 10.0, Strings.t("hud.source_rate_unit"))
@@ -121,7 +126,7 @@ func _ready() -> void:
 	lineage_back_button.pressed.connect(_step_back)
 	watch_button.focus_mode = Control.FOCUS_NONE
 	watch_panel.dish = dish
-	layers_panel.layer_toggled.connect(dish.show_layer)
+	layers_panel.layer_toggled.connect(func(layer: Dish.Layer, shown: bool) -> void: dish.show_layer(layer, shown))
 	watch_panel.bup_chosen.connect(_open_watched)
 	lineage_button.pressed.connect(_open_lineage)
 	follow_button.focus_mode = Control.FOCUS_NONE
@@ -152,6 +157,7 @@ func _exit_tree() -> void:
 func _restart() -> void:
 	_stack.clear()
 	_lineage_shown = {}
+	_drop_other_dishes()
 	dish.selected_id = -1
 	dish.strike(Session.free_start if free_mode else null)
 	_fit_camera()
@@ -205,7 +211,11 @@ func _process(delta: float) -> void:
 	if not paused and not menu_open:
 		# The playback speed is how many seconds of simulation pass per real second.
 		var frame := minf(delta, MAX_FRAME_SECONDS)
-		var done := dish.advance(frame * sim_speed, FRAME_BUDGET_USEC)
+		var share := FRAME_BUDGET_USEC / dishes.size()  # (the dishes share the frame)
+		var done := dish.advance(frame * sim_speed, share)
+		for other in dishes:
+			if other != dish:
+				other.advance(frame * sim_speed, share)
 		if frame > 0.0:
 			achieved_speed = lerpf(achieved_speed, done / frame, 0.1)
 		if not free_mode:
@@ -219,6 +229,7 @@ func _process(delta: float) -> void:
 	dish.refresh_drawing()
 	graph.refresh()
 	watch_panel.refresh()
+	dish_strip.refresh(delta)
 	_update_hud()
 	_sync_bloom_panel()
 
@@ -642,6 +653,62 @@ func _close_menu() -> void:
 
 
 ## The player chose another size for the dish (in the pause menu): the view stays inside it.
+## Takes a dish into the set: the screen hears when it dies out or its selection changes (when it is the one in the main view), and the strip gets its thumbnail.
+func _register_dish(d: Dish) -> void:
+	dishes.append(d)
+	_dish_numbers[d] = _next_dish_number
+	d.extinct.connect(func() -> void:
+		if d == dish:
+			_on_extinct())
+	d.selection_changed.connect(func() -> void:
+		if d == dish:
+			_on_selection_changed())
+	dish_strip.add(d, _next_dish_number, get_world_2d())
+	_next_dish_number += 1
+	dish_strip.light(dish)
+
+
+## Another dish, run beside the main one in the same world, far enough away that the camera never sees two. It is started as `start` says (null: the usual
+## dish) and takes its place in the strip; the main view stays where it is. Returns it.
+func add_dish(start: StartConditions) -> Dish:
+	var d := Dish.new()
+	add_child(d)
+	d.global_position = Vector2(DISH_SPACING * float(_next_dish_number - 1), 0.0)
+	d.strike(start)
+	_register_dish(d)
+	return d
+
+
+## Brings another dish into the main view: the panels, the graph and the camera follow it; what was open on the old dish (a selection, a lineage) is closed.
+func set_main_dish(d: Dish) -> void:
+	if d == dish or not dishes.has(d):
+		return
+	_clear_selection()
+	following_id = -1
+	dish = d
+	d.pick_mode = tool_options.pick_mode()
+	graph.dish = d
+	watch_panel.dish = d
+	layers_panel.sync_from(d)
+	dish_strip.light(d)
+	_fit_camera()
+
+
+## A restart is of the main dish only: the others are let go (their numbers start again).
+func _drop_other_dishes() -> void:
+	for d in dishes.duplicate():
+		if d != dish:
+			dishes.erase(d)
+			_dish_numbers.erase(d)
+			dish_strip.remove(d)
+			d.queue_free()
+	_next_dish_number = 2
+	_dish_numbers[dish] = 1
+	dish_strip.clear()
+	dish_strip.add(dish, 1, get_world_2d())
+	dish_strip.light(dish)
+
+
 func _resize_dish(new_radius: float) -> void:
 	dish.resize_to(new_radius)
 	camera.position = camera.position.limit_length(dish.radius)

@@ -23,6 +23,7 @@
 [ext_resource type="PackedScene" path="res://ui/bup_name_row.tscn" id="bup_name_row"]
 [ext_resource type="PackedScene" path="res://ui/watch_panel.tscn" id="watch_panel"]
 [ext_resource type="PackedScene" path="res://ui/layers_panel.tscn" id="layers_panel"]
+[ext_resource type="PackedScene" path="res://ui/dish_strip.tscn" id="dish_strip"]
 [ext_resource type="PackedScene" path="res://ui/tutorial.tscn" id="tutorial"]
 [ext_resource type="Texture2D" path="res://icons/lineage.svg" id="lineage_icon"]
 [ext_resource type="Texture2D" path="res://icons/watch.svg" id="watch_icon"]
@@ -98,6 +99,8 @@ script = ExtResource("3")
 [node name="WatchPanel" parent="HUD" instance=ExtResource("watch_panel")]
 
 [node name="LayersPanel" parent="HUD" instance=ExtResource("layers_panel")]
+
+[node name="DishStrip" parent="HUD" instance=ExtResource("dish_strip")]
 
 
 [node name="Toolbars" type="VBoxContainer" parent="HUD"]
