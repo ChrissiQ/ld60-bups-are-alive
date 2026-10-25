@@ -22,6 +22,7 @@ const TOOLBAR_CLEARANCE := 120.0  ## screen pixels kept clear above the dish for
 const TUTORIAL_ZOOM := 6.0  ## how close the tutorial brings the camera to a bup it asks the player to click
 const TUTORIAL_BUP_PIXELS := 18.0  ## the lit square round that bup is this far out on each side
 const MAX_DISHES := 20  ## the most dishes at once (the strip holds that many)
+const LOCKSTEP_MIN_SHARE := 0.25  ## a dish this far (of a frame's simulated seconds) behind the world's target is advanced; nearer, it waits for the next frame
 const DISH_SPACING := 1.0e6  ## µm between the centres of the dishes in the shared world (past the farthest the camera can see of one)
 const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) still counts as pointing at it
 
@@ -68,6 +69,7 @@ var _next_dish_number := 1
 var _pipette_hours := 0.0  ## the pipette timer: the game pauses for the pipette every this many simulated hours (0: off)
 var _pipette_clock := 0.0  ## simulated seconds since the last pause for the pipette
 var _pipette_waiting := false  ## paused for the pipette: only a pipette use resumes play
+var _switch_turn := 0  ## whose turn it is to change backend when no dish is waiting
 var _pipette_pulse: Tween
 var tool := Toolbar.Tool.SELECT  ## kept in step with the toolbar's selection (see _on_tool_selected)
 var sim_speed := 1.0  ## seconds of simulation per real second (the toolbar sets it)
@@ -221,11 +223,7 @@ func _process(delta: float) -> void:
 	if not paused and not menu_open:
 		# The playback speed is how many seconds of simulation pass per real second.
 		var frame := minf(delta, MAX_FRAME_SECONDS)
-		var share := FRAME_BUDGET_USEC / dishes.size()  # (the dishes share the frame)
-		var done := dish.advance(frame * sim_speed, share)
-		for other in dishes:
-			if other != dish:
-				other.advance(frame * sim_speed, share)
+		var done := _advance_world(frame * sim_speed)
 		if frame > 0.0:
 			achieved_speed = lerpf(achieved_speed, done / frame, 0.1)
 		if _pipette_hours > 0.0 and not _pipette_waiting:
@@ -739,6 +737,54 @@ func pipette(world: Vector2, circle_radius: float) -> Dish:
 	return receiver
 
 
+## One world clock: every dish is advanced to the same time, so no dish runs faster than another over time. The target is a frame's simulated seconds past the
+## slowest dish; a dish that has reached it waits, and a dish that is short of it by less than a quarter of a frame's step waits for the next frame (a tiny step would take it
+## off the GPU). The dishes that move share the frame's budget. If the machine cannot keep up, the whole world slows together. Returns how far the world's clock moved.
+func _advance_world(asked: float) -> float:
+	var cpu_total := 0.0  # (the processor's load: what each dish still running on it is estimated to need for a frame)
+	for d in dishes:
+		if not d.gpu_active:
+			cpu_total += d.cpu_cost_estimate
+	for d in dishes:
+		d.other_cpu_load = cpu_total - (0.0 if d.gpu_active else d.cpu_cost_estimate)
+	_let_one_dish_switch()
+	var before := world_time()
+	var target := before + asked
+	var due: Array[Dish] = []
+	for d in dishes:
+		if target - d.time >= asked * LOCKSTEP_MIN_SHARE:
+			due.append(d)
+	var share := FRAME_BUDGET_USEC / maxi(due.size(), 1)
+	for d in due:
+		d.advance(target - d.time, share)
+	return maxf(world_time() - before, 0.0)
+
+
+## Auto moves one dish between the processor and the GPU at a time: dishes that all decide in the same frame would each see the others' load as it was, and all go (or all come
+## back) together. Of the dishes waiting, the one that wants the GPU and costs the processor most goes first; with none waiting, the turn goes round the dishes.
+func _let_one_dish_switch() -> void:
+	var chosen: Dish = null
+	for d in dishes:
+		if not d.switch_wanted:
+			continue
+		if chosen == null or (d.switch_wanted_gpu and (not chosen.switch_wanted_gpu or d.cpu_cost_estimate > chosen.cpu_cost_estimate)) or (not d.switch_wanted_gpu and not chosen.switch_wanted_gpu and d.cpu_cost_estimate < chosen.cpu_cost_estimate):
+			chosen = d
+	if chosen == null:  # (nobody is waiting: the turn goes round, so no two dishes ever decide in the same frame)
+		_switch_turn = (_switch_turn + 1) % dishes.size()
+		chosen = dishes[_switch_turn]
+	for d in dishes:
+		d.switch_allowed = d == chosen
+		d.switch_wanted = false  # (a dish that still wants a change says so again in this frame's advance; one that is not advanced has nothing to say)
+
+
+## The world's time: that of the slowest dish.
+func world_time() -> float:
+	var slowest := dish.time
+	for d in dishes:
+		slowest = minf(slowest, d.time)
+	return slowest
+
+
 ## Takes a dish into the set: the screen hears when it dies out or its selection changes (when it is the one in the main view), and the strip gets its thumbnail.
 func _register_dish(d: Dish) -> void:
 	dishes.append(d)
@@ -761,6 +807,7 @@ func add_dish(start: StartConditions) -> Dish:
 	add_child(d)
 	d.global_position = Vector2(DISH_SPACING * float(_next_dish_number - 1), 0.0)
 	d.strike(start)
+	d.time = world_time()  # (a dish that joins is at the world's time: one clock for all)
 	_register_dish(d)
 	return d
 

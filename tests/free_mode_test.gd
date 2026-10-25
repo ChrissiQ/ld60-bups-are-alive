@@ -1270,6 +1270,12 @@ func _backend_rule_tests() -> void:
 	check(Dish.rule_step(0.1, 1, 0.1, usual) <= Dish.FINE_STEP and Dish.rule_step(0.5, 1, 0.1, usual) <= Dish.FINE_STEP, "x1 and x5 stay fine in a hitch frame (0.1 s): the speed decides, not the frame")
 	check(Dish.rule_step(0.18, 0, 0.0018, usual) == 0.18 and Dish.rule_step(0.18, 3, 0.0018, usual) == 0.18 and Dish.rule_step(0.18, 1, 0.0, usual) == 0.18, "without the frame's steps or length, the step is taken as given")
 	check(not Dish.backend_wants_gpu(off, 18.5, 7, 400, 1000000, true, true), "Off: never")
+	# Several dishes share the frame: a dish the processor could manage alone goes to the GPU when the processor's whole load (what the others on it take) is too much.
+	var own := Dish.backend_frame_costs(2.0, 400, 1, 40000, 1, 0)
+	check(own.x < Dish.AUTO_CPU_UP_USEC and own.y < own.x, "(a 40,000-bup dish: the processor manages it alone, %.0f µs, and the GPU would be quicker, %.0f µs)" % [own.x, own.y])
+	check(not Dish.backend_wants_gpu(auto, 2.0, 1, 400, 40000, false, true, 1, 0, 0.0), "Auto: alone, the processor keeps it")
+	check(Dish.backend_wants_gpu(auto, 2.0, 1, 400, 40000, false, true, 1, 0, Dish.AUTO_CPU_UP_USEC), "Auto: with the other dishes' processor load added, it goes to the GPU")
+	check(Dish.backend_wants_gpu(auto, 2.0, 1, 400, 40000, true, true, 1, 0, Dish.AUTO_CPU_DOWN_USEC), "Auto: and stays there while the processor's total would still be too much")
 	check(Dish.backend_wants_gpu(on, 1.67, 1, 100, 4, false, true) and Dish.backend_wants_gpu(on, 16.7, 1, 100, 4, false, true), "On: at x100 and up, whatever the crowd")
 	check(not Dish.backend_wants_gpu(on, 1.67, 1, 100, 4, false, false), "On, but no usable GPU: the processor")
 	check(not Dish.backend_wants_gpu(auto, 18.5, 7, 400, 999, false, true) and not Dish.backend_wants_gpu(auto, 18.5, 7, 400, 999, true, true), "Auto: under AUTO_MIN_POPULATION bups, the processor, whatever the grid costs")

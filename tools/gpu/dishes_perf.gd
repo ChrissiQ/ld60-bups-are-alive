@@ -13,7 +13,7 @@ func _run() -> void:
 	var seconds := float(args[1]) if args.size() > 1 else 60.0
 	var start := StartConditions.new()
 	start.bups = 250
-	start.bup_limit = 100000
+	start.bup_limit = int(OS.get_environment("LIMIT")) if OS.get_environment("LIMIT") != "" else 100000
 	start.dish_radius = 90000.0
 	start.nutrient_density = 4.0
 	start.bloom_density = 2.0
@@ -25,7 +25,7 @@ func _run() -> void:
 	root.add_child(m)
 	await process_frame
 	m.toolbar.set_paused(false)
-	m.sim_speed = 10000.0
+	m.sim_speed = float(OS.get_environment("SPEED")) if OS.get_environment("SPEED") != "" else 10000.0
 	for i in count - 1:
 		m.add_dish(start)
 	var t0 := Time.get_ticks_msec()
@@ -44,5 +44,10 @@ func _run() -> void:
 			var line := "t=%.0fs achieved x%.0f fps %.0f" % [elapsed, m.achieved_speed, Engine.get_frames_per_second()]
 			for d: Dish in m.dishes:
 				line += " | %d bups %s sim-h %.1f" % [d.population(), d.backend_running(), d.time / 3600.0]
-			print(line)
+			var lo := 1e30
+			var hi := -1e30
+			for d: Dish in m.dishes:
+				lo = minf(lo, d.time)
+				hi = maxf(hi, d.time)
+			print(line + " | clock spread %.0f s" % (hi - lo))
 	quit(0)

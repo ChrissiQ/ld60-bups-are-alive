@@ -205,6 +205,11 @@ var _overlay: Node2D = null  ## the selection and hover rings, drawn above the b
 ## simulation about the bups goes to `gpu_world` (the branches below), and the CPU's BupSim keeps the records, names and pins.
 ## `_choose_backend` makes `gpu_world` and switches (see the GPU path's functions at the end of this file).
 var gpu_world: GpuWorld = null
+var cpu_cost_estimate := 0.0  ## µs the processor is estimated to need for one frame of this dish (the cost model's, at the last `advance`)
+var switch_allowed := true  ## whether Auto's rule may move this dish between the processor and the GPU this frame (the screen lets one dish at a time, so each choice sees the load the last left)
+var switch_wanted := false  ## Auto's rule wants this dish moved, and ...
+var switch_wanted_gpu := false  ## ... to the GPU (else to the processor)
+var other_cpu_load := 0.0  ## µs per frame the other dishes on the processor are estimated to take (the screen sets it, so that Auto weighs the processor's whole load)
 var gpu_active := false
 
 
@@ -1721,8 +1726,9 @@ static func rule_step(step_delta: float, steps: int, real: float, typical: float
 ## `_choose_backend` does.
 ## - steps of FINE_STEP or shorter: never (the GPU has no fine path: it follows no individual runs and tumbles);
 ## - off: never; on: whenever it can; auto: when the processor's estimated time for the frame is above AUTO_CPU_UP_USEC (AUTO_CPU_DOWN_USEC
-##   once the GPU is running) and the GPU's is less, with at least AUTO_MIN_POPULATION bups.
-static func backend_wants_gpu(setting: String, step_delta: float, moves: int, cells_across: int, population: int, running_gpu: bool, gpu_ok: bool, frame_steps := 0, clouds := 0) -> bool:
+##   once the GPU is running) and the GPU's is less, with at least AUTO_MIN_POPULATION bups. The processor's time for the frame is this dish's plus
+##   `other_cpu_usec`, what the other dishes still on the processor are estimated to take (several dishes share one frame: it is their total that must fit).
+static func backend_wants_gpu(setting: String, step_delta: float, moves: int, cells_across: int, population: int, running_gpu: bool, gpu_ok: bool, frame_steps := 0, clouds := 0, other_cpu_usec := 0.0) -> bool:
 	if not gpu_ok or step_delta <= FINE_STEP or setting == StartConditions.BACKEND_CPU:
 		return false
 	if setting == StartConditions.BACKEND_GPU:
@@ -1730,7 +1736,7 @@ static func backend_wants_gpu(setting: String, step_delta: float, moves: int, ce
 	if population < AUTO_MIN_POPULATION:
 		return false
 	var costs := backend_frame_costs(step_delta, cells_across, moves, population, frame_steps, clouds)
-	return costs.x > (AUTO_CPU_DOWN_USEC if running_gpu else AUTO_CPU_UP_USEC) and costs.y < costs.x
+	return costs.x + other_cpu_usec > (AUTO_CPU_DOWN_USEC if running_gpu else AUTO_CPU_UP_USEC) and costs.y < costs.x
 
 
 ## Whether the GPU can run a dish at all: the machine has a usable one (GpuWorld.available()) and it holds `limit` bups (`most` is
@@ -1776,11 +1782,17 @@ func _choose_backend(step_delta: float, steps := 0) -> void:
 	var rule_steps := steps
 	if steps > 0 and real > 0.0:
 		rule_steps = maxi(1, roundi(steps * RULE_FRAME_SECONDS / real))  # (the same work per real second, whichever backend ran the last frame and however long it took)
-	var wants := backend_wants_gpu(backend_setting, rule_delta, sim.moves_for(step_delta), field.get_size(), population(), gpu_world != null and gpu_active, available, rule_steps, field.puff_count())
+	cpu_cost_estimate = backend_frame_costs(rule_delta, field.get_size(), sim.moves_for(step_delta), population(), rule_steps, field.puff_count()).x
+	var wants := backend_wants_gpu(backend_setting, rule_delta, sim.moves_for(step_delta), field.get_size(), population(), gpu_world != null and gpu_active, available, rule_steps, field.puff_count(), other_cpu_load)
+	switch_wanted = false
 	if gpu_world != null and gpu_active:
 		_cpu_votes = 0 if wants else _cpu_votes + 1
 		var rule_only := allowed and available and rule_delta > FINE_STEP  # (what is left to say 'no' is Auto's rule: it must say so for a while)
 		if not wants and (not rule_only or _cpu_votes >= AUTO_DOWN_FRAMES):
+			if rule_only and backend_setting == StartConditions.BACKEND_AUTO and not switch_allowed:
+				switch_wanted = true  # (Auto's rule wants the processor: it waits its turn)
+				switch_wanted_gpu = false
+				return
 			_to_cpu_for_edit()  # (its state, brought over unless an edit has just done so)
 			gpu_active = false
 			_gpu_on_cpu = false
@@ -1791,6 +1803,10 @@ func _choose_backend(step_delta: float, steps := 0) -> void:
 		elif wants and _gpu_on_cpu:
 			_load_gpu()  # (a save or an edit has brought the bups over; the GPU takes them back before it runs)
 	elif wants and _coarse_frames >= COARSE_FRAMES_TO_GPU:
+		if backend_setting == StartConditions.BACKEND_AUTO and not switch_allowed:
+			switch_wanted = true  # (Auto's rule wants the GPU: it waits its turn)
+			switch_wanted_gpu = true
+			return
 		if gpu_world == null:
 			gpu_world = GpuWorld.new(sim)
 		_load_gpu()

@@ -35,6 +35,12 @@ func _run() -> void:
 		await process_frame
 	check(other.time > t0 and first.time > t1, "both dishes run (%.1f and %.1f s)" % [other.time - t0, first.time - t1])
 	check(other.population() > 0, "the other dish has bups")
+	check(absf(other.time - first.time) <= m.sim_speed / 60.0 + 1.0, "the dishes keep one clock (%.1f and %.1f s)" % [other.time, first.time])
+	var turns := []
+	for round in 4:
+		m._let_one_dish_switch()
+		turns.append(m.dishes.filter(func(d: Dish) -> bool: return d.switch_allowed).size())
+	check(turns == [1, 1, 1, 1], "exactly one dish at a time may change backend (%s)" % [turns])
 	m.set_main_dish(other)
 	check(m.dish == other and m.graph.dish == other and m.watch_panel.dish == other, "a choice brings the other dish into the main view, with the graph and the watch list")
 	check(m.camera.position.distance_to(other.global_position) < 1.0, "the camera is on it")
@@ -52,6 +58,7 @@ func _run() -> void:
 	var before := first.population()
 	var made: Dish = m.pipette(first.global_position + Vector2(18.0, 0.0), 30.0)
 	check(made != null and m.dishes.size() == 2 and m.dish == made, "the pipette makes a second dish and the main view moves to it")
+	check(absf(made.time - first.time) < 1.0, "the new dish is at the world's time (%.1f and %.1f s)" % [made.time, first.time])
 	check(made.population() == 10 and first.population() == 5 and before == 15, "the bups in the circle moved (%d in the new dish, %d left)" % [made.population(), first.population()])
 	var moved_id: int = made.sim.alive_ids()[0]
 	check(made.line_from_dish(moved_id) == 1, "a moved bup's line says it came from dish 1")
