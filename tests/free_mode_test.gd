@@ -245,7 +245,7 @@ func _init() -> void:
 	check(small_picture[12] >= Cell.MIN_VISIBLE_LENGTH_PX * picture.pixel() - 0.01 and small_picture[13] >= Cell.MIN_VISIBLE_WIDTH_PX * picture.pixel() - 0.01, "a dish drawn at 2%% size still draws each bup at least %.0f px long and %.0f px thick" % [Cell.MIN_VISIBLE_LENGTH_PX, Cell.MIN_VISIBLE_WIDTH_PX])
 	picture.free()
 
-	# --- Bup numbers and names: birth order, kept for life, restarting with the dish; names die with their bup.
+	# --- Bup numbers and names: birth order, kept for life; names die with their bup.
 	var numbered := _make_dish()
 	var number_start := _small()
 	number_start.bups = 5
