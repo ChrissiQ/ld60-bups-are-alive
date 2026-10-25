@@ -37,8 +37,15 @@ func _run() -> void:
 		if piped and elapsed >= 25.0:
 			piped = false
 			var before: int = m.dish.population()
+			var source: Dish = m.dish
+			var started := Time.get_ticks_msec()
 			var made: Dish = m.pipette(m.dish.global_position, 30000.0)
-			print("PIPETTE on %s: %d bups before, %d left, %d moved, new dish %s" % [m.dish.backend_running(), before, m.dish.population(), made.population() if made != null else -1, str(made != null)])
+			var took := Time.get_ticks_msec() - started
+			var chain := 0
+			if made != null:
+				var some: int = made.sim.alive_ids()[0]
+				chain = made.lineage_chain(some).size()
+			print("PIPETTE on %s: %d bups before, %d moved, new dish %s, took %d ms, a moved bup has a family line of %d" % [source.backend_running(), before, made.population() if made != null else -1, str(made != null), took, chain])
 		if elapsed >= next:
 			next += 10.0
 			var line := "t=%.0fs achieved x%.0f fps %.0f" % [elapsed, m.achieved_speed, Engine.get_frames_per_second()]

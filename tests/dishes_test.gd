@@ -42,7 +42,7 @@ func _run() -> void:
 		turns.append(m.dishes.filter(func(d: Dish) -> bool: return d.switch_allowed).size())
 	check(turns == [1, 1, 1, 1], "exactly one dish at a time may change backend (%s)" % [turns])
 	m.set_main_dish(other)
-	check(m.dish == other and m.graph.dish == other and m.watch_panel.dish == other, "a choice brings the other dish into the main view, with the graph and the watch list")
+	check(m.dish == other and m.graph.dish == other and m.watch_panel.dishes.has(other), "a choice brings the other dish into the main view, with the graph and the watch list")
 	check(m.camera.position.distance_to(other.global_position) < 1.0, "the camera is on it")
 	m.dish_strip.dish_chosen.emit(first)
 	check(m.dish == first and m.camera.position.distance_to(first.global_position) < 1.0, "the strip's click brings the first back")
@@ -55,15 +55,36 @@ func _run() -> void:
 		first.add_bup(first.global_position + Vector2(i * 4.0, 0.0), Genome.founder(), 30.0)
 	for i in 5:
 		first.add_bup(first.global_position + Vector2(200.0 + i, 100.0), Genome.founder(), 30.0)
+	var parent := first.add_bup(first.global_position + Vector2(300.0, 0.0), Genome.founder(), 30.0)  # (a bup with a parent, a name and a place on the watch list: all must go with it)
+	var child := first.sim.add_bup(Vector2(12.0, 0.0), Genome.founder(), 30.0, -1.0, -1.0, 1, Vector2.RIGHT, -1, parent)
+	first.rename_bup(child, "Zed")
+	first.watch_bup(child)
 	var before := first.population()
 	var made: Dish = m.pipette(first.global_position + Vector2(18.0, 0.0), 30.0)
+	check(made.has_bup(child) and made.bup_name(child) == "Zed" and made.lineage_chain(child).size() == 2 and made.lineage_chain(child)[0] == parent, "a moved bup is the same bup: its id, its name and its family line come with it")
+	check(made.is_watched(child) and not first.is_watched(child) and m.watch_panel.dishes.has(made), "...and so does its place on the watch list")
 	check(made != null and m.dishes.size() == 2 and m.dish == made, "the pipette makes a second dish and the main view moves to it")
 	check(absf(made.time - first.time) < 1.0, "the new dish is at the world's time (%.1f and %.1f s)" % [made.time, first.time])
-	check(made.population() == 10 and first.population() == 5 and before == 15, "the bups in the circle moved (%d in the new dish, %d left)" % [made.population(), first.population()])
+	check(made.population() == 11 and first.population() == 6 and before == 17, "the bups in the circle moved (%d in the new dish, %d left)" % [made.population(), first.population()])
 	var moved_id: int = made.sim.alive_ids()[0]
 	check(made.line_from_dish(moved_id) == 1, "a moved bup's line says it came from dish 1")
+	var seen_from := made.view_zoom
+	m.camera.zoom = Vector2.ONE * 0.37
+	m.camera.position = made.global_position + Vector2(40.0, -25.0)
 	m.set_main_dish(first)
-	check(m.pipette(first.global_position + Vector2(5000.0, 5000.0), 30.0) == null and m.dishes.size() == 2, "a circle with no bups makes no dish")
+	m.camera.zoom = Vector2.ONE * 0.9
+	m.camera.position = first.global_position + Vector2(-70.0, 15.0)
+	m.set_main_dish(made)
+	check(is_equal_approx(m.camera.zoom.x, 0.37) and m.camera.position.is_equal_approx(made.global_position + Vector2(40.0, -25.0)), "switching back to a dish returns to where and how close it was looked at (zoom %.2f)" % m.camera.zoom.x)
+	m.layers_panel.layer_toggled.emit(Dish.Layer.BUPS, false)
+	var third_dish: Dish = m.add_dish(chosen)
+	check(not first.layer_shown(Dish.Layer.BUPS) and not made.layer_shown(Dish.Layer.BUPS) and not third_dish.layer_shown(Dish.Layer.BUPS), "what is shown is one choice for every dish, new ones too")
+	m.layers_panel.layer_toggled.emit(Dish.Layer.BUPS, true)
+	await process_frame
+	await process_frame
+	check(m.paused_label.offset_bottom <= -20.0 - m.dish_strip.size.y, "the word PAUSED sits above the strip of dishes (%.0f, strip %.0f tall)" % [m.paused_label.offset_bottom, m.dish_strip.size.y])
+	m.set_main_dish(first)
+	check(m.pipette(first.global_position + Vector2(5000.0, 5000.0), 30.0) == null and m.dishes.size() == 3, "a circle with no bups makes no dish")
 	# The pipette timer: the game pauses for the pipette after the set hours, Space cannot resume, and a pipette that moves something does.
 	m._set_pipette_timer(1.0)
 	m.toolbar.set_paused(false)

@@ -22,6 +22,7 @@ const TOOLBAR_CLEARANCE := 120.0  ## screen pixels kept clear above the dish for
 const TUTORIAL_ZOOM := 6.0  ## how close the tutorial brings the camera to a bup it asks the player to click
 const TUTORIAL_BUP_PIXELS := 18.0  ## the lit square round that bup is this far out on each side
 const MAX_DISHES := 20  ## the most dishes at once (the strip holds that many)
+const PAUSE_TEXT_GAP := 8.0  ## screen pixels between the strip of dishes and the word PAUSED above it
 const LOCKSTEP_MIN_GAP := 1.0  ## a dish at least this many simulated seconds behind the world's target is advanced (a shorter step would be a fine one, which only the processor runs); nearer, it waits
 const LOCKSTEP_MIN_SHARE := 0.25  ## at speeds where a frame holds less than four of those seconds, a quarter of the frame's step
 const DISH_SPACING := 1.0e6  ## µm between the centres of the dishes in the shared world (past the farthest the camera can see of one)
@@ -135,8 +136,10 @@ func _ready() -> void:
 	watch_button.pressed.connect(_toggle_watch)
 	lineage_back_button.pressed.connect(_step_back)
 	watch_button.focus_mode = Control.FOCUS_NONE
-	watch_panel.dish = dish
-	layers_panel.layer_toggled.connect(func(layer: Dish.Layer, shown: bool) -> void: dish.show_layer(layer, shown))
+	watch_panel.dishes = dishes
+	layers_panel.layer_toggled.connect(func(layer: Dish.Layer, shown: bool) -> void:  # (what is shown is one choice for every dish)
+		for d in dishes:
+			d.show_layer(layer, shown))
 	watch_panel.bup_chosen.connect(_open_watched)
 	lineage_button.pressed.connect(_open_lineage)
 	follow_button.focus_mode = Control.FOCUS_NONE
@@ -243,6 +246,7 @@ func _process(delta: float) -> void:
 	graph.refresh()
 	watch_panel.refresh()
 	dish_strip.refresh(delta)
+	_place_pause_text()
 	_update_hud()
 	_sync_bloom_panel()
 
@@ -359,8 +363,9 @@ func _toggle_watch() -> void:
 		dish.watch_bup(id)
 
 
-## An entry of the watch list was clicked: that bup (living or not) in the inspect panel.
-func _open_watched(id: int) -> void:
+## An entry of the watch list was clicked: that bup (living or not), in whichever dish it is in, in the inspect panel.
+func _open_watched(watched_in: Dish, id: int) -> void:
+	set_main_dish(watched_in)  # (the bup may be in another dish: the view goes there)
 	if not dish.has_record(id):
 		return
 	toolbar.select_tool(Toolbar.Tool.SELECT)
@@ -687,6 +692,13 @@ func _set_pipette_timer(hours: float) -> void:
 		_end_pipette_wait(false)
 
 
+## The word PAUSED (or PIPETTE) sits at the bottom of the screen, above the strip of dishes when there is one.
+func _place_pause_text() -> void:
+	var lift := dish_strip.size.y + 20.0 + PAUSE_TEXT_GAP if dish_strip.visible else 0.0
+	paused_label.offset_bottom = -20.0 - lift
+	paused_label.offset_top = -88.0 - lift
+
+
 ## The timer has run out: the game pauses, and only using the pipette resumes it. Tools can still be changed; the pipette's button pulses.
 func _begin_pipette_wait() -> void:
 	_pipette_waiting = true
@@ -732,7 +744,12 @@ func pipette(world: Vector2, circle_radius: float) -> Dish:
 	receiver.clear_bups()
 	for i in count:
 		source.moved_out[GpuSim.id_of(taken, i)] = _dish_numbers[receiver]
-	receiver.add_transferred(taken, _dish_numbers[source])
+	var ids := receiver.add_transferred(taken, source.taken_lineage, _dish_numbers[source])
+	source.taken_lineage = PackedByteArray()
+	for id in ids:  # (the same bup in its new dish: a watched one stays on the watch list, now as one of that dish's)
+		if source.is_watched(id):
+			source.unwatch_bup(id)
+			receiver.watch_bup(id)
 	set_main_dish(receiver)  # (the view follows the bups to their new dish)
 	_end_pipette_wait(true)  # (a pipette that moved something is what the timer's pause waits for)
 	return receiver
@@ -809,23 +826,30 @@ func add_dish(start: StartConditions) -> Dish:
 	d.global_position = Vector2(DISH_SPACING * float(_next_dish_number - 1), 0.0)
 	d.strike(start)
 	d.time = world_time()  # (a dish that joins is at the world's time: one clock for all)
+	for layer: int in Dish.Layer.values():
+		d.show_layer(layer, dish.layer_shown(layer))  # (what is shown is one choice for every dish)
 	_register_dish(d)
 	return d
 
 
-## Brings another dish into the main view: the panels, the graph and the camera follow it; what was open on the old dish (a selection, a lineage) is closed.
+## Brings another dish into the main view: the panels and the graph follow it, and the camera goes back to where (and how close) it last looked at that dish, or frames the dish if it has not looked yet; what was open on the old dish (a selection, a lineage) is closed.
 func set_main_dish(d: Dish) -> void:
 	if d == dish or not dishes.has(d):
 		return
 	_clear_selection()
 	following_id = -1
+	dish.view_zoom = camera.zoom.x  # (where it was being looked at, for when the view comes back)
+	dish.view_position = camera.position
 	dish = d
 	d.pick_mode = tool_options.pick_mode()
 	graph.dish = d
-	watch_panel.dish = d
 	layers_panel.sync_from(d)
 	dish_strip.light(d)
-	_fit_camera()
+	if d.view_zoom > 0.0:
+		camera.zoom = Vector2.ONE * d.view_zoom
+		camera.position = d.view_position
+	else:
+		_fit_camera()
 
 
 ## A restart is of the main dish only: the others are let go (their numbers start again).

@@ -675,18 +675,23 @@ func take_in_disc(world_pos: Vector2, disc_radius: float) -> PackedByteArray:
 	_to_cpu_for_edit()
 	edit_count += 1
 	_render_stale = true
-	return sim.take_disc(world_pos - global_position, disc_radius)
+	var local := world_pos - global_position
+	taken_lineage = sim.lineage_export_bytes()  # (the family records as they are before the bups leave, for the dish they go to)
+	return sim.take_disc(local, disc_radius)
 
 
-## The pipette's giving half: the records `take_in_disc` made come in as new bups at the middle of the dish (a droplet), founders here; `from_dish` is the number of the
-## dish they came from, so that their line can say where it began.
-func add_transferred(records: PackedByteArray, from_dish: int) -> void:
+## The pipette's giving half: the records `take_in_disc` made come in as the same bups (same ids, so the same names, genes and colours) at the middle of the dish (a
+## droplet), with their whole family tree (`lineage`, from the dish they left: dead ancestors included, and the ones that stayed behind as dead here); `from_dish` is the
+## number of the dish they came from, so that their line can say where it was. Returns their ids.
+func add_transferred(records: PackedByteArray, lineage: PackedByteArray, from_dish: int) -> PackedInt64Array:
 	_to_cpu_for_edit()
-	var ids := sim.add_state_bytes(records, Vector2.ZERO)
-	for i in ids.size():
-		founded_from[ids[i]] = from_dish
+	var ids := sim.add_state_bytes(records, Vector2.ZERO, true)
+	sim.lineage_import_bytes(lineage, PackedInt64Array())
+	for id in ids:
+		founded_from[id] = from_dish
 	edit_count += 1
 	_render_stale = true
+	return ids
 
 
 ## The number of the dish this bup's line began in, when it began in another (a bup founded by the pipette, or the descendant of one), else 0.
@@ -714,6 +719,9 @@ func pin_bup(id: int) -> void:
 ## The bups the player is watching, newest first (see watch_bup). Their records, and their ancestors', are kept.
 var patch_seed := 0  ## which landscape of richer and poorer patches the nutrient follows (see NUTRIENT_PATCHINESS)
 var watched: Array[int] = []
+var taken_lineage := PackedByteArray()  ## the family records as they were when the last pipette took bups out (see take_in_disc)
+var view_zoom := 0.0  ## where the screen was looking at this dish when it last looked away: the camera's zoom (0: never looked yet) ...
+var view_position := Vector2.ZERO  ## ... and its position
 var moved_out := {}  ## the ids of bups the pipette took out of this dish -> the number of the dish they went to (kept for the records that outlast them)
 var founded_from := {}  ## the ids of bups the pipette put into this dish -> the number of the dish they came from
 var watch_version := 0  ## bumped whenever the list changes, so its panel can rebuild only then

@@ -288,8 +288,9 @@ public:
 	PackedInt64Array bup_ids() const;
 	Dictionary bup_info(int64_t id) const;
 	void remove_bup(int64_t id);
+	PackedInt64Array ids_in_disc(const Vector2 &center, double disc_radius) const; // the ids of the bups whose centres are in the disc, in the order take_disc writes them
 	PackedByteArray take_disc(const Vector2 &center, double disc_radius); // the pipette: every bup whose centre is in the disc leaves this dish; they come back as records (export_state_bytes' layout)
-	PackedInt64Array add_state_bytes(const PackedByteArray &state, const Vector2 &shift); // takes such records in as new bups (new ids, each a founder with a family record of its own), moved by `shift`; their ids
+	PackedInt64Array add_state_bytes(const PackedByteArray &state, const Vector2 &shift, bool keep_ids = false); // takes such records in as bups moved by `shift`: with new ids and each a founder with a family record of its own, or (`keep_ids`) with the ids they had and no family records (lineage_import_bytes brings them); their ids
 	void clear_bups() {
 		bups.clear();
 		records.clear();

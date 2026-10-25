@@ -689,8 +689,8 @@ func _init() -> void:
 	m._process(0.0)
 	await create_timer(0.6).timeout
 	m._process(0.0)
-	check(m.dish.has_record(watched_one) and m.watch_panel._buttons[watched_one].theme_type_variation == &"DeceasedListButton" and m.watch_panel._buttons[watched_one].text == m.dish.bup_name(watched_one), "a watched bup that dies stays on the list, its name in grey with no extra text ('%s')" % m.watch_panel._buttons[watched_one].text)
-	m.watch_panel._buttons[watched_one].pressed.emit()
+	check(m.dish.has_record(watched_one) and m.watch_panel._buttons[[m.dish, watched_one]].theme_type_variation == &"DeceasedListButton" and m.watch_panel._buttons[[m.dish, watched_one]].text == m.dish.bup_name(watched_one), "a watched bup that dies stays on the list, its name in grey with no extra text ('%s')" % m.watch_panel._buttons[[m.dish, watched_one]].text)
+	m.watch_panel._buttons[[m.dish, watched_one]].pressed.emit()
 	await process_frame
 	await process_frame
 	check(m.dish.selected_id == watched_one and m.info_panel.visible and m.info_panel.theme_type_variation == &"DeceasedPanel", "clicking its entry opens it in the inspect panel, as a deceased bup")
