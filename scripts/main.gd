@@ -22,7 +22,8 @@ const TOOLBAR_CLEARANCE := 120.0  ## screen pixels kept clear above the dish for
 const TUTORIAL_ZOOM := 6.0  ## how close the tutorial brings the camera to a bup it asks the player to click
 const TUTORIAL_BUP_PIXELS := 18.0  ## the lit square round that bup is this far out on each side
 const MAX_DISHES := 20  ## the most dishes at once (the strip holds that many)
-const LOCKSTEP_MIN_SHARE := 0.25  ## a dish this far (of a frame's simulated seconds) behind the world's target is advanced; nearer, it waits for the next frame
+const LOCKSTEP_MIN_GAP := 1.0  ## a dish at least this many simulated seconds behind the world's target is advanced (a shorter step would be a fine one, which only the processor runs); nearer, it waits
+const LOCKSTEP_MIN_SHARE := 0.25  ## at speeds where a frame holds less than four of those seconds, a quarter of the frame's step
 const DISH_SPACING := 1.0e6  ## µm between the centres of the dishes in the shared world (past the farthest the camera can see of one)
 const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) still counts as pointing at it
 
@@ -738,8 +739,8 @@ func pipette(world: Vector2, circle_radius: float) -> Dish:
 
 
 ## One world clock: every dish is advanced to the same time, so no dish runs faster than another over time. The target is a frame's simulated seconds past the
-## slowest dish; a dish that has reached it waits, and a dish that is short of it by less than a quarter of a frame's step waits for the next frame (a tiny step would take it
-## off the GPU). The dishes that move share the frame's budget. If the machine cannot keep up, the whole world slows together. Returns how far the world's clock moved.
+## slowest dish; a dish that has reached it waits, and a dish that is short of it by less than a second (or a quarter of a frame's step, if that is less) waits for the next frame
+## (a tiny step would take it off the GPU). A dish that is ahead of a slow world moves every frame by what the slow one gained, so it stays smooth. The dishes that move share the frame's budget. If the machine cannot keep up, the whole world slows together. Returns how far the world's clock moved.
 func _advance_world(asked: float) -> float:
 	var cpu_total := 0.0  # (the processor's load: what each dish still running on it is estimated to need for a frame)
 	for d in dishes:
@@ -752,7 +753,7 @@ func _advance_world(asked: float) -> float:
 	var target := before + asked
 	var due: Array[Dish] = []
 	for d in dishes:
-		if target - d.time >= asked * LOCKSTEP_MIN_SHARE:
+		if target - d.time >= minf(LOCKSTEP_MIN_GAP, asked * LOCKSTEP_MIN_SHARE):
 			due.append(d)
 	var share := FRAME_BUDGET_USEC / maxi(due.size(), 1)
 	for d in due:

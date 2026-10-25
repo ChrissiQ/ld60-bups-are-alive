@@ -1,13 +1,13 @@
 class_name DishStrip
 extends PanelContainer
 ## Every dish that is running, a thumbnail each along the bottom edge. The thumbnails are live: a small viewport looks at the same world through its own
-## camera and is redrawn twice a second. Each shows its number and how many bups it holds; the dish in the main view is lit, and a click on another reports
+## camera and is redrawn once a second. Each shows its number and how many bups it holds; the dish in the main view is lit, and a click on another reports
 ## it (`dish_chosen`) for the screen to bring into the main view. The strip is hidden while there is only one dish.
 
 signal dish_chosen(dish: Dish)
 
 const THUMB := 56  ## pixels across a thumbnail
-const REFRESH_SECONDS := 0.5  ## how often the thumbnails are redrawn and the counts read
+const REFRESH_SECONDS := 1.0  ## how often the thumbnails are redrawn and the counts read
 const MARGIN := 1.05  ## the dish fills this share of the thumbnail (its rim is not cut off)
 
 @onready var row: HBoxContainer = $Row
