@@ -15,9 +15,12 @@ extends PanelContainer
 @onready var erase_options: Control = $EraseOptions
 @onready var brush_size_box: SpinBox = $EraseOptions/BrushSize
 @onready var pipette_options: Control = $PipetteOptions
-@onready var pipette_radius_box: SpinBox = $PipetteOptions/PipetteRadius
+@onready var pipette_radius_box: SpinBox = $PipetteOptions/Row/PipetteRadius
+@onready var pipette_timer_button: Button = $PipetteOptions/Row/TimerButton
+@onready var pipette_hours_box: SpinBox = $PipetteOptions/Row/TimerHours
 
 signal pick_mode_selected(mode: Dish.PickMode)  ## the select tool's choice of what to look at changed
+signal pipette_timer_changed(hours: float)  ## the pipette's timer was switched on, off or set (0: off): the game pauses for the pipette every so many hours
 
 var pick_buttons: Dictionary = {}  ## Dish.PickMode -> the select tray's button for it
 var _groups: Dictionary = {}  ## tool -> the group of option controls shown for it
@@ -35,6 +38,11 @@ func _ready() -> void:
 	_compact(source_rate_box, Strings.t("tray.nutrients_per_minute"))
 	_compact(brush_size_box, Strings.t("tray.brush_radius"))
 	_compact(pipette_radius_box, Strings.t("tray.pipette_radius"))
+	_compact(pipette_hours_box, Strings.t("tray.pipette_hours"))
+	pipette_timer_button.tooltip_text = Strings.t("tray.pipette_timer")
+	pipette_timer_button.focus_mode = Control.FOCUS_NONE
+	pipette_timer_button.toggled.connect(func(_on: bool) -> void: pipette_timer_changed.emit(pipette_timer_hours()))
+	pipette_hours_box.value_changed.connect(func(_v: float) -> void: pipette_timer_changed.emit(pipette_timer_hours()))
 	resized.connect(_align)
 	toolbar.resized.connect(_align)
 	visibility_changed.connect(_align)
@@ -72,6 +80,11 @@ func brush_radius() -> float:
 
 func pipette_radius() -> float:
 	return pipette_radius_box.value
+
+
+## Hours between the pipette pauses, or 0 with the timer off.
+func pipette_timer_hours() -> float:
+	return pipette_hours_box.value if pipette_timer_button.button_pressed else 0.0
 
 
 ## A number box in the tray: small, with its hover text on the field as well, since the field takes the hover itself.

@@ -28,6 +28,7 @@ signal pause_toggled(paused: bool)
 
 var _tool_buttons: Dictionary = {}
 var _last_play: Button  ## the speed button to resume with
+var resume_locked := false  ## nothing but the screen can resume play (the game waits for the pipette): Space and the speed buttons do nothing
 
 
 func _ready() -> void:
@@ -58,6 +59,8 @@ func _ready() -> void:
 
 ## Pauses, or resumes at the last speed, exactly as clicking the buttons would.
 func set_paused(paused: bool) -> void:
+	if not paused and resume_locked:
+		return
 	if paused:
 		pause_button.button_pressed = true
 	else:
@@ -107,6 +110,9 @@ func _setup_tool(button: Button, tool: Tool, group: ButtonGroup, description: St
 func _setup_speed(button: Button, group: ButtonGroup, multiplier: float, description: String, key_label: String, key: Key) -> void:
 	_setup_toggle(button, group, description, key_label, [key], func() -> void:
 		_last_play = button
+		if resume_locked:
+			pause_button.button_pressed = true  # (the choice is kept for when play resumes)
+			return
 		pause_toggled.emit(false)
 		speed_selected.emit(multiplier))
 

@@ -56,6 +56,7 @@ const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) stil
 @onready var hud_layer: CanvasLayer = $HUD
 @onready var pause_menu: PauseMenu = $MenuLayer/PauseMenu
 @onready var pause_ring: Panel = $HUD/PauseRing
+@onready var paused_label: Label = $HUD/PauseRing/PausedLabel
 
 ## The two modes share everything (dish, evolution, HUD, controls). Free mode differs in
 ## exactly three ways: no goals, no saving, and restarts use the player's start conditions.
@@ -64,6 +65,10 @@ var tracker := GoalTracker.new()
 var dishes: Array[Dish] = []  ## every dish that runs; `dish` is the one in the main view (the others run beside it, see the strip)
 var _dish_numbers := {}  ## Dish -> its number
 var _next_dish_number := 1
+var _pipette_hours := 0.0  ## the pipette timer: the game pauses for the pipette every this many simulated hours (0: off)
+var _pipette_clock := 0.0  ## simulated seconds since the last pause for the pipette
+var _pipette_waiting := false  ## paused for the pipette: only a pipette use resumes play
+var _pipette_pulse: Tween
 var tool := Toolbar.Tool.SELECT  ## kept in step with the toolbar's selection (see _on_tool_selected)
 var sim_speed := 1.0  ## seconds of simulation per real second (the toolbar sets it)
 var achieved_speed := 1.0  ## what the simulation actually managed lately: lower than sim_speed when the frame budget cut a step short
@@ -103,6 +108,7 @@ func _ready() -> void:
 	toolbar.zoom_in_requested.connect(_zoom_by.bind(ZOOM_BUTTON_STEP))
 	toolbar.zoom_out_requested.connect(_zoom_by.bind(1.0 / ZOOM_BUTTON_STEP))
 	tool_options.pick_mode_selected.connect(_on_pick_mode_selected)
+	tool_options.pipette_timer_changed.connect(_set_pipette_timer)
 	toolbar.speed_selected.connect(func(multiplier: float) -> void:
 		sim_speed = multiplier
 		achieved_speed = multiplier)
@@ -158,6 +164,8 @@ func _exit_tree() -> void:
 func _restart() -> void:
 	_stack.clear()
 	_lineage_shown = {}
+	_end_pipette_wait(false)
+	_pipette_clock = 0.0
 	_drop_other_dishes()
 	dish.selected_id = -1
 	dish.strike(Session.free_start if free_mode else null)
@@ -220,6 +228,10 @@ func _process(delta: float) -> void:
 				other.advance(frame * sim_speed, share)
 		if frame > 0.0:
 			achieved_speed = lerpf(achieved_speed, done / frame, 0.1)
+		if _pipette_hours > 0.0 and not _pipette_waiting:
+			_pipette_clock += done
+			if _pipette_clock >= _pipette_hours * 3600.0:
+				_begin_pipette_wait()
 		if not free_mode:
 			tracker.update(dish, done)
 	_banner_left = maxf(0.0, _banner_left - delta)
@@ -663,6 +675,40 @@ func _close_menu() -> void:
 
 
 ## The player chose another size for the dish (in the pause menu): the view stays inside it.
+## The pipette timer was switched or set (hours; 0 is off). Switching it off ends a wait for the pipette (play stays paused).
+func _set_pipette_timer(hours: float) -> void:
+	_pipette_hours = hours
+	_pipette_clock = 0.0
+	if hours <= 0.0:
+		_end_pipette_wait(false)
+
+
+## The timer has run out: the game pauses, and only using the pipette resumes it. Tools can still be changed; the pipette's button pulses.
+func _begin_pipette_wait() -> void:
+	_pipette_waiting = true
+	_pipette_clock = 0.0
+	toolbar.set_paused(true)
+	toolbar.resume_locked = true
+	paused_label.text = Strings.t("hud.pipette_paused")
+	var button := toolbar.button_for(Toolbar.Tool.PIPETTE)
+	_pipette_pulse = create_tween().set_loops()
+	_pipette_pulse.tween_property(button, "modulate:a", 0.35, 0.5).set_trans(Tween.TRANS_SINE)
+	_pipette_pulse.tween_property(button, "modulate:a", 1.0, 0.5).set_trans(Tween.TRANS_SINE)
+
+
+func _end_pipette_wait(resume: bool) -> void:
+	if not _pipette_waiting:
+		return
+	_pipette_waiting = false
+	toolbar.resume_locked = false
+	paused_label.text = Strings.t("hud.paused")
+	if _pipette_pulse != null:
+		_pipette_pulse.kill()
+	toolbar.button_for(Toolbar.Tool.PIPETTE).modulate.a = 1.0
+	if resume:
+		toolbar.set_paused(false)
+
+
 ## The pipette: every bup in the circle moves to a new dish (a droplet in the middle of a fresh dish like this one, as the player started it), and the old dish
 ## goes on without them. The new dish takes its place in the strip; the main view stays. Returns the new dish, or null if there was nothing to move or no room.
 func pipette(world: Vector2, circle_radius: float) -> Dish:
@@ -683,6 +729,7 @@ func pipette(world: Vector2, circle_radius: float) -> Dish:
 	for i in count:
 		source.moved_out[GpuSim.id_of(taken, i)] = _dish_numbers[receiver]
 	receiver.add_transferred(taken, _dish_numbers[source])
+	_end_pipette_wait(true)  # (a pipette that moved something is what the timer's pause waits for)
 	return receiver
 
 

@@ -10,6 +10,7 @@
 [ext_resource type="Texture2D" path="res://icons/tool_source.svg" id="source_icon"]
 [ext_resource type="Texture2D" path="res://icons/tool_erase.svg" id="erase_icon"]
 [ext_resource type="Texture2D" path="res://icons/tool_pipette.svg" id="pipette_icon"]
+[ext_resource type="Texture2D" path="res://icons/pipette_timer.svg" id="pipette_timer_icon"]
 [ext_resource type="Texture2D" path="res://icons/zoom_out.svg" id="9"]
 [ext_resource type="Texture2D" path="res://icons/zoom_in.svg" id="10"]
 [ext_resource type="Texture2D" path="res://icons/pause.svg" id="11"]
@@ -319,16 +320,35 @@ visible = false
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 
-[node name="PipetteRadius" type="SpinBox" parent="HUD/Toolbars/ToolOptions/PipetteOptions"]
+[node name="Row" type="HBoxContainer" parent="HUD/Toolbars/ToolOptions/PipetteOptions"]
+layout_mode = 0
+theme_type_variation = &"TightRow"
+
+[node name="PipetteRadius" type="SpinBox" parent="HUD/Toolbars/ToolOptions/PipetteOptions/Row"]
 theme_type_variation = &"CompactSpinBox"
 custom_minimum_size = Vector2(60, 30)
-layout_mode = 0
-offset_right = 60.0
-offset_bottom = 30.0
+layout_mode = 2
 min_value = 50.0
 max_value = 9999.0
 step = 50.0
 value = 1000.0
+rounded = true
+
+[node name="TimerButton" type="Button" parent="HUD/Toolbars/ToolOptions/PipetteOptions/Row"]
+layout_mode = 2
+theme_type_variation = &"ToolButton"
+toggle_mode = true
+icon = ExtResource("pipette_timer_icon")
+icon_alignment = 1
+
+[node name="TimerHours" type="SpinBox" parent="HUD/Toolbars/ToolOptions/PipetteOptions/Row"]
+theme_type_variation = &"CompactSpinBox"
+custom_minimum_size = Vector2(52, 30)
+layout_mode = 2
+min_value = 1.0
+max_value = 999.0
+step = 1.0
+value = 12.0
 rounded = true
 
 [node name="InfoPanel" type="PanelContainer" parent="HUD"]

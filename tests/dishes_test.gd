@@ -56,6 +56,26 @@ func _run() -> void:
 	var moved_id: int = made.sim.alive_ids()[0]
 	check(made.line_from_dish(moved_id) == 1, "a moved bup's line says it came from dish 1")
 	check(m.pipette(first.global_position + Vector2(5000.0, 5000.0), 30.0) == null and m.dishes.size() == 2, "a circle with no bups makes no dish")
+	# The pipette timer: the game pauses for the pipette after the set hours, Space cannot resume, and a pipette that moves something does.
+	m._set_pipette_timer(1.0)
+	m.toolbar.set_paused(false)
+	m._pipette_clock = 3599.0
+	first.add_bup(first.global_position, Genome.founder(), 30.0)
+	m.sim_speed = 100.0
+	for i in 20:
+		await process_frame
+	check(m._pipette_waiting and m.paused and m.toolbar.resume_locked and m.paused_label.text == "PIPETTE", "after the hours the game pauses and says PIPETTE")
+	var space := InputEventKey.new()
+	space.keycode = KEY_SPACE
+	space.pressed = true
+	m.toolbar._shortcut_input(space)
+	m.toolbar.speed_1000_button.button_pressed = true
+	check(m.paused, "neither Space nor a speed button resumes while it waits")
+	m.pipette(first.global_position + Vector2(5000.0, 5000.0), 30.0)
+	check(m._pipette_waiting and m.paused, "a pipette that moves nothing does not resume it")
+	var again: Dish = m.pipette(first.global_position, 30.0)
+	check(again != null and not m._pipette_waiting and not m.paused and not m.toolbar.resume_locked, "a pipette that moves bups resumes play")
+	m._set_pipette_timer(0.0)
 	m.queue_free()
 	await process_frame
 	TestUtil.finish(self, "DISHES TESTS OK")
