@@ -715,7 +715,7 @@ func _end_pipette_wait(resume: bool) -> void:
 
 
 ## The pipette: every bup in the circle moves to a new dish (a droplet in the middle of a fresh dish like this one, as the player started it), and the old dish
-## goes on without them. The new dish takes its place in the strip; the main view stays. Returns the new dish, or null if there was nothing to move or no room.
+## goes on without them. The new dish takes its place in the strip and the main view moves to it. Returns the new dish, or null if there was nothing to move or no room.
 func pipette(world: Vector2, circle_radius: float) -> Dish:
 	if dishes.size() >= MAX_DISHES:
 		_show_banner(Strings.t("hud.banner_pipette_limit"), 1.5)
@@ -734,6 +734,7 @@ func pipette(world: Vector2, circle_radius: float) -> Dish:
 	for i in count:
 		source.moved_out[GpuSim.id_of(taken, i)] = _dish_numbers[receiver]
 	receiver.add_transferred(taken, _dish_numbers[source])
+	set_main_dish(receiver)  # (the view follows the bups to their new dish)
 	_end_pipette_wait(true)  # (a pipette that moved something is what the timer's pause waits for)
 	return receiver
 

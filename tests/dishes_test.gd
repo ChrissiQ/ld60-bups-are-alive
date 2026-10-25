@@ -51,10 +51,11 @@ func _run() -> void:
 		first.add_bup(first.global_position + Vector2(200.0 + i, 100.0), Genome.founder(), 30.0)
 	var before := first.population()
 	var made: Dish = m.pipette(first.global_position + Vector2(18.0, 0.0), 30.0)
-	check(made != null and m.dishes.size() == 2 and m.dish == first, "the pipette makes a second dish and leaves the main view where it is")
+	check(made != null and m.dishes.size() == 2 and m.dish == made, "the pipette makes a second dish and the main view moves to it")
 	check(made.population() == 10 and first.population() == 5 and before == 15, "the bups in the circle moved (%d in the new dish, %d left)" % [made.population(), first.population()])
 	var moved_id: int = made.sim.alive_ids()[0]
 	check(made.line_from_dish(moved_id) == 1, "a moved bup's line says it came from dish 1")
+	m.set_main_dish(first)
 	check(m.pipette(first.global_position + Vector2(5000.0, 5000.0), 30.0) == null and m.dishes.size() == 2, "a circle with no bups makes no dish")
 	# The pipette timer: the game pauses for the pipette after the set hours, Space cannot resume, and a pipette that moves something does.
 	m._set_pipette_timer(1.0)
@@ -73,8 +74,9 @@ func _run() -> void:
 	check(m.paused, "neither Space nor a speed button resumes while it waits")
 	m.pipette(first.global_position + Vector2(5000.0, 5000.0), 30.0)
 	check(m._pipette_waiting and m.paused, "a pipette that moves nothing does not resume it")
+	check(m.dish == first, "an empty pipette leaves the view where it is")
 	var again: Dish = m.pipette(first.global_position, 250.0)  # (the bups have swum a little since they were placed)
-	check(again != null and not m._pipette_waiting and not m.paused and not m.toolbar.resume_locked, "a pipette that moves bups resumes play (%s, waiting %s, paused %s, locked %s, bups %d)" % [again != null, m._pipette_waiting, m.paused, m.toolbar.resume_locked, first.population()])
+	check(again != null and m.dish == again and not m._pipette_waiting and not m.paused and not m.toolbar.resume_locked, "a pipette that moves bups resumes play (%s, waiting %s, paused %s, locked %s, bups %d)" % [again != null, m._pipette_waiting, m.paused, m.toolbar.resume_locked, first.population()])
 	m._set_pipette_timer(0.0)
 	m.queue_free()
 	await process_frame
