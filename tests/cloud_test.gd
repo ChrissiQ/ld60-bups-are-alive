@@ -39,6 +39,7 @@ func _init() -> void:
 	_check_husks()
 	_check_starvation()
 	_check_conjugation()
+	_check_reach()
 	_check_plume()
 	_check_threads()
 	TestUtil.finish(self, "CLOUD TESTS OK")
@@ -195,6 +196,34 @@ func _check_conjugation() -> void:
 		if info["donor"] and info["speed"] != 30.0:
 			still_donors += 1
 	check(still_donors == 0, "a donor keeps its own genes")
+	d.free()
+
+
+func _check_reach() -> void:
+	var d := _dish(90.0)
+	var top := Genome.founder()
+	top["speed"] = 39.9
+	var raised := top.duplicate()
+	raised["reach"] = 3  # (speed's ceiling raised three times: the lowest two bits)
+	var over_plain := 0
+	var over_raised := 0
+	var highest := 0.0
+	for i in 3000:
+		var a: Dictionary = d.sim.mutate_genome(top)
+		var b: Dictionary = d.sim.mutate_genome(raised)
+		over_plain += 1 if a["speed"] > 40.0 else 0
+		over_raised += 1 if b["speed"] > 40.0 else 0
+		highest = maxf(highest, b["speed"])
+	check(over_plain == 0 and over_raised > 100 and highest <= 40.0 * Genome.REACH_FACTOR_3, "a raised ceiling lets a gene pass its usual top (%d of 3000 daughters over 40, the highest %.1f, none past %.0f)" % [over_raised, highest, 40.0 * Genome.REACH_FACTOR_3])
+	var mass := 12.0
+	var gains := []
+	for genome in [Genome.founder(), raised]:
+		var id: int = d.sim.add_bup(Vector2(0.0, 0.0), genome, 90.0, sqrt(mass), mass, 0, Vector2.RIGHT)
+		d.sim.bup_pay_upkeep_and_grow(id, 60.0)
+		gains.append(float(d.sim.bup_info(id)["mass"]) - mass)
+	check(absf(gains[1] / gains[0] - (1.0 - 3.0 * Genome.REACH_COST)) < 0.03, "each raise costs a share of growth: a bup raised three times grows %.2f of what the usual one does (expected %.2f)" % [gains[1] / gains[0], 1.0 - 3.0 * Genome.REACH_COST])
+	var text := Genome.reach_text(0x0D)  # (speed +1, sense +3: two bits a gene)
+	check(text == "%s +1, %s +3" % [Genome.label("speed"), Genome.label("sense")], "the panel's text of raised ceilings: %s" % text)
 	d.free()
 
 

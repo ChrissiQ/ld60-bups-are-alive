@@ -76,6 +76,7 @@ class BupSim : public RefCounted {
 		int mutations = 0;
 		// derived from the genome
 		float yield = 1, add_mass = 8, drag_upkeep = 0;
+		int reach = 0; // how far each gene's ceiling has been raised: two bits a gene (0-3), speed the lowest (the GPU's record keeps it in word 12)
 		bool donor = false; // carries the F factor in its chromosome: it can pass its genes on to a bup it touches (the GPU's record keeps it in word 14, as 0 or 1)
 		float mutator = 1; // how many times the usual mutation rate it makes daughters at (the GPU's record keeps it in word 13)
 		// chemotaxis state (slow playback)
@@ -89,6 +90,7 @@ class BupSim : public RefCounted {
 		bool lethal;
 		float mutator = 1;
 		bool donor = false;
+		int reach = 0;
 	};
 
 	// The family record of every bup that is alive, and of every dead one that still has a living
@@ -237,6 +239,8 @@ public:
 	bool starved_to_death(const Bup &b, double delta);
 	int64_t transfers = 0; // conjugation events so far (for the tools that measure how often they happen)
 	int64_t transfer_count() const { return transfers; }
+	double gene_ceiling(int gene, int reach) const; // the highest value the gene can have for a bup whose ceilings are raised so far
+	static int reach_levels(int reach) { return (reach & 3) + ((reach >> 2) & 3) + ((reach >> 4) & 3) + ((reach >> 6) & 3); }
 	void conjugate(double delta); // donors that touch a bup that is not one pass on a run of genes (see Genome.DONOR_*) // a starving bup's chance of dying this step, drawn
 	int husk_count() const { return (int)husks.size(); }
 	PackedFloat64Array husks_export() const; // 5 numbers each: x, y, energy, age, the next piece

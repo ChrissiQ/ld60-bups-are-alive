@@ -27,6 +27,7 @@ void main() {
 	uint best = 0xFFFFFFFFu;
 	for (int ox = -1; ox <= 1; ox++) for (int oy = -1; oy <= 1; oy++) {
 		uint h = dhash(cx + ox, cy + oy);
+		if ((DTAB[(DMASK + 1u) * 4u + (h >> 5u)] & (1u << (h & 31u))) == 0u) continue;  // (no donor in this bucket: the bitmap is small enough to stay in cache)
 		for (uint s = 0u; s < 4u; s++) {
 			uint d = DTAB[h * 4u + s];
 			if (d == 0xFFFFFFFFu || d >= best) continue;
@@ -44,5 +45,6 @@ void main() {
 	}
 	uint db = best * 24u;
 	for (int g = 0; g < run; g++) BUPS[b + 8u + uint(g)] = BUPS[db + 8u + uint(g)];
-	BUPS[b + 12] = exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]);
+	int mask = (1 << (2 * run)) - 1;  // (the raised ceilings of the genes that moved go with them)
+	BUPS[b + 12] = float((int(BUPS[b + 12] + 0.5) & ~mask) | (int(BUPS[db + 12] + 0.5) & mask));
 }

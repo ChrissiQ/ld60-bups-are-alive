@@ -23,6 +23,7 @@ void main() {
 	if (BUPS[b + 14] < 0.5) return;
 	atomicAdd(CNT[15], 1u);
 	uint h = dhash(int(floor(BUPS[b + 1] / DCELL)), int(floor(BUPS[b + 2] / DCELL)));
+	atomicOr(DTAB[(DMASK + 1u) * 4u + (h >> 5u)], 1u << (h & 31u));
 	for (uint s = 0u; s < 4u; s++) {
 		if (atomicCompSwap(DTAB[h * 4u + s], 0xFFFFFFFFu, i) == 0xFFFFFFFFu) break;
 	}

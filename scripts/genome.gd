@@ -83,8 +83,31 @@ const DONOR_LOSS := 1.0e-3  ## the chance that a donor's daughter loses it [choi
 ## In life chromosomal genes move at about 1e-4 per cell per generation (Cooper 2007), 3% of the mutation rate; here it is about 0.5% of it.
 const CONJ_RATE := 0.1
 
+# Raised ceilings. Real adaptation has no hard ceiling: gains slow but go on for tens of thousands of generations (Wiser et al. 2013, Good et al. 2017),
+# and a single regulatory mutation can move a trait well past where it was: one in clpX raised the run speed of E. coli from 18.7 to 28.7 µm/s (Fraebel et al.
+# 2017); an insertion upstream of flhD made swarming seven times faster (Barker et al. 2004); cells grew to 1.5, 1.7 and 2.6 times their ancestors' volume in 2,000,
+# 10,000 and 50,000 generations, the gains shrinking each time (Grant et al. 2021). So a rare mutation raises one gene's upper bound for its line, up to three times,
+# by a smaller factor each time (larger gains have more negative epistasis: Khan et al. 2011). The sizes and the rate are derived, not measured: see below.
+const REACH_FACTOR_1 := 1.25  ## the first raise: the gene's bound times this [choice: below the +50% that Fraebel's strains reached with several mutations]
+const REACH_FACTOR_2 := 1.40  ## the second [choice]
+const REACH_FACTOR_3 := 1.50  ## the third
+const REACH_COST := 0.05  ## the share of its growth a bup gives up for each raise [Fraebel et al. 2017: about 10% less growth for about 50% more speed; motility costs several percent of protein and energy, in proportion to expression (Ni et al. 2020)], on top of what the larger trait already costs in upkeep
+## A raise per division: beneficial mutations arise at about 1e-5 per genome per generation with an exponential spread of effects of mean 2% (Perfeito et al. 2007; Imhof
+## & Schloetterer 2001), so one of 10% or more (the chance e^-5, about 0.7%) is about 7e-8 a generation; scaled as the mutator's rate is, by this dish's mutation rate over a real genome's.
+const REACH_RATE := 1.0e-5 * exp(-5.0) * (TRAIT_MUTATIONS + HARMFUL_MUTATIONS) / 0.003
+
 ## How each gene is shown: its short label and decimals, so every readout agrees.
 const LABELED := ["speed", "sense", "metabolism", "size", "mutator"]  ## the traits the readouts list, in order
+
+
+## The raised ceilings of a bup as text: "speed +2, sense +1" ("" for none). `reach` is two bits a gene, speed the lowest.
+static func reach_text(reach: int) -> String:
+	var parts := []
+	for i in LABELED.size() - 1:
+		var level := (reach >> (2 * i)) & 3
+		if level > 0:
+			parts.append("%s +%d" % [label(LABELED[i]), level])
+	return ", ".join(parts)
 
 
 ## A trait's name as the readouts show it (see text/strings.cfg).
@@ -108,7 +131,7 @@ static func harm_share(harm: float) -> float:
 
 ## The genome of the first bups: green, no harm, no mutations yet.
 static func founder() -> Dictionary:
-	return {"speed": 20.0, "sense": 50.0, "metabolism": 1.0, "size": 4.0, "hue": 0.33, "sat": 0.7, "val": 1.0, "harm": 0.0, "mutations": 0, "mutator": 1.0, "donor": false}
+	return {"speed": 20.0, "sense": 50.0, "metabolism": 1.0, "size": 4.0, "hue": 0.33, "sat": 0.7, "val": 1.0, "harm": 0.0, "mutations": 0, "mutator": 1.0, "donor": false, "reach": 0}
 
 
 ## The colour a genome shows (a colour is kept as hue, saturation and brightness).
@@ -166,7 +189,7 @@ static func to_saved(genome: Dictionary) -> Dictionary:
 	var values := {}
 	for gene in GENES:
 		values[gene] = genome[gene]
-	return {"values": values, "hue": genome["hue"], "sat": genome["sat"], "val": genome["val"], "mutations": genome["mutations"], "harm": genome["harm"], "mutator": genome.get("mutator", 1.0), "donor": genome.get("donor", false)}
+	return {"values": values, "hue": genome["hue"], "sat": genome["sat"], "val": genome["val"], "mutations": genome["mutations"], "harm": genome["harm"], "mutator": genome.get("mutator", 1.0), "donor": genome.get("donor", false), "reach": genome.get("reach", 0)}
 
 
 ## A genome from a save file. Odd values are made safe instead of rejected: anything missing or
@@ -199,4 +222,7 @@ static func from_saved(d: Dictionary) -> Dictionary:
 	if Validate.is_number(mutator_saved):
 		g["mutator"] = clampf(float(mutator_saved), 1.0, MUTATOR_FOLD_TOP)
 	g["donor"] = d.get("donor") is bool and d["donor"]
+	var reach_saved: Variant = d.get("reach")
+	if Validate.is_number(reach_saved):
+		g["reach"] = clampi(int(reach_saved), 0, 255)
 	return g

@@ -1,5 +1,5 @@
 extends SceneTree
-## godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/validate_mutation.gd -- M [parent mutator, default 1]
+## godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/validate_mutation.gd -- M [parent mutator, default 1] [reach rate, default the game's: raises of a gene's ceiling per division]
 ## The GPU's division and mutation against the CPU's `mutate_genome`: M bups, all ready to divide, with one parent genome; what the
 ## daughters' genomes look like (mutations, per-gene change, harm, lethal share, colour) from each.
 func _init() -> void:
@@ -7,6 +7,9 @@ func _init() -> void:
 	var parent_mutator := float(OS.get_cmdline_user_args()[1]) if OS.get_cmdline_user_args().size() > 1 else 1.0
 	SimConstants.apply()
 	var consts := SimConstants.build()
+	if OS.get_cmdline_user_args().size() > 2:
+		consts["reach_rate"] = float(OS.get_cmdline_user_args()[2])
+		BupSim.configure(consts)  # (the processor's side too, after apply)
 	var dish := Dish.new()
 	root.add_child(dish)
 	dish.set_seed(1)
@@ -44,24 +47,30 @@ func _init() -> void:
 	var gcount := {"n": 0, "lethal_free": 0}
 	var gmut := 0.0
 	var gmut_n := 0
+	var greach := 0.0
 	var gd := _acc()
 	for i in np:
 		var o := i * GpuSim.STRIDE
 		if GpuSim.id_of(raw, i) <= m:
 			continue  # a parent
 		gmut += out[o + 13]; gmut_n += 1
+		var rl := int(out[o + 12] + 0.5)
+		greach += (rl & 3) + ((rl >> 2) & 3) + ((rl >> 4) & 3) + ((rl >> 6) & 3)
 		_add(gd, out[o + 8] - 20.0, out[o + 9] - 50.0, out[o + 10] - 1.0, out[o + 11] - 4.0, out[o + 15] - 0.2, out[o + 19], out[o + 16] - 0.33, out[o + 17] - 0.7, out[o + 18] - 1.0)
 	var children: int = gd["n"]
 	var cd := _acc()
 	var lethal := 0
 	var cmut := 0.0
 	var cmut_n := 0
+	var creach := 0.0
 	for i in m:
 		var r: Dictionary = dish.sim.mutate_genome(genome)
 		if r["lethal"]:
 			lethal += 1
 			continue
 		cmut += r["mutator"]; cmut_n += 1
+		var rc := int(r["reach"])
+		creach += (rc & 3) + ((rc >> 2) & 3) + ((rc >> 4) & 3) + ((rc >> 6) & 3)
 		_add(cd, r["speed"] - 20.0, r["sense"] - 50.0, r["metabolism"] - 1.0, r["size"] - 4.0, r["harm"] - 0.2, r["mutations"], fposmod(r["hue"] - 0.33 + 0.5, 1.0) - 0.5, r["sat"] - 0.7, r["val"] - 1.0)
 	print("lethal share: GPU %.5f  CPU %.5f" % [1.0 - float(children) / m, float(lethal) / m])
 	for k in ["speed", "sense", "metab", "size", "harm", "mutations", "hue", "sat", "val"]:
@@ -74,6 +83,7 @@ func _init() -> void:
 	print("Z trait-change share: GPU %.5f CPU %.5f  %+.2f s.e." % [tg, tc, (tg - tc) / sqrt(tg * (1.0 - tg) / maxf(gd["n"], 1) + tc * (1.0 - tc) / maxf(cd["n"], 1))])
 	var mg := _mean(gd, "mutations"); var mc := _mean(cd, "mutations")
 	print("Z mutation count mean: GPU %.5f CPU %.5f  %+.2f s.e." % [mg, mc, (mg - mc) / sqrt(pow(_sd(gd, "mutations"), 2) / maxf(gd["n"], 1) + pow(_sd(cd, "mutations"), 2) / maxf(cd["n"], 1))])
+	print("raised ceilings per daughter: GPU %.5f  CPU %.5f" % [greach / maxf(gmut_n, 1), creach / maxf(cmut_n, 1)])
 	print("daughter mutator mean: GPU %.4f  CPU %.4f (parent %.1f)" % [gmut / maxf(gmut_n, 1), cmut / maxf(cmut_n, 1), parent_mutator])
 	quit(0)
 

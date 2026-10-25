@@ -250,6 +250,12 @@ void BupSim::note_mutation(Genome &g) {
 	g.val = (float)std::clamp((double)g.val + gaussian() * G.val_step, G.val_min, 1.0);
 }
 
+// Each raise of a gene's ceiling multiplies the bound the gene was given (see Genome.REACH_*): once, twice, three times.
+double BupSim::gene_ceiling(int gene, int reach) const {
+	int level = (reach >> (2 * gene)) & 3;
+	return G.gene_max[gene] * (level == 0 ? 1.0 : (level == 1 ? G.reach_factor_1 : (level == 2 ? G.reach_factor_2 : G.reach_factor_3)));
+}
+
 BupSim::Genome BupSim::mutate(const Genome &parent) {
 	Genome g = parent;
 	g.lethal = false;
@@ -257,7 +263,7 @@ BupSim::Genome BupSim::mutate(const Genome &parent) {
 	int traits = poisson(G.trait_mutations * rate);
 	for (int i = 0; i < traits; i++) {
 		int gene = (int)(uniform() * 4.0) % 4;
-		double changed = std::clamp((double)g.genes[gene] + gaussian() * G.gene_step[gene], G.gene_min[gene], G.gene_max[gene]);
+		double changed = std::clamp((double)g.genes[gene] + gaussian() * G.gene_step[gene], G.gene_min[gene], gene_ceiling(gene, g.reach));
 		if ((float)changed != g.genes[gene]) { // a push against a bound changes nothing and is not counted
 			g.genes[gene] = (float)changed;
 			note_mutation(g);
@@ -296,6 +302,14 @@ BupSim::Genome BupSim::mutate(const Genome &parent) {
 	if (g.donor ? flip < G.donor_loss : flip < G.donor_gain) {
 		g.donor = !g.donor;
 	}
+	// Rarely a mutation raises the ceiling of one gene (a regulatory change such as an insertion that makes a gene's product more abundant), up to three times.
+	if (uniform() < G.reach_rate) {
+		int gene = (int)(uniform() * 4.0) % 4;
+		if (((g.reach >> (2 * gene)) & 3) < 3) {
+			g.reach += 1 << (2 * gene);
+			note_mutation(g);
+		}
+	}
 	return g;
 }
 
@@ -311,6 +325,7 @@ Dictionary BupSim::mutate_genome(const Dictionary &genome) {
 	parent.mutations = (int)genome.get("mutations", 0);
 	parent.mutator = (float)(double)genome.get("mutator", 1.0);
 	parent.donor = (bool)genome.get("donor", false);
+	parent.reach = (int)genome.get("reach", 0);
 	parent.lethal = false;
 	Genome child = mutate(parent);
 	Dictionary out;
@@ -323,6 +338,7 @@ Dictionary BupSim::mutate_genome(const Dictionary &genome) {
 	out["harm"] = child.harm;
 	out["mutator"] = child.mutator;
 	out["donor"] = child.donor;
+	out["reach"] = child.reach;
 	out["mutations"] = child.mutations;
 	out["lethal"] = child.lethal;
 	return out;
@@ -377,6 +393,7 @@ int64_t BupSim::add_bup(const Vector2 &pos, const Dictionary &genome, double ene
 	b.harm = (float)(double)genome.get("harm", 0.0);
 	b.mutator = (float)(double)genome.get("mutator", 1.0);
 	b.donor = (bool)genome.get("donor", false);
+	b.reach = (int)genome.get("reach", 0);
 	b.mutations = (int)genome.get("mutations", 0);
 	b.generation = generation;
 	derive(b);
@@ -767,6 +784,7 @@ Dictionary BupSim::info_of(const Bup &b) const {
 	out["harm"] = b.harm;
 	out["mutator"] = b.mutator;
 	out["donor"] = b.donor;
+	out["reach"] = b.reach;
 	out["mutations"] = b.mutations;
 	out["upkeep"] = upkeep(b);
 	out["steering"] = steering_of(b.x, b.y, b.genes[0], sense_range(b)).z;
@@ -870,7 +888,7 @@ void BupSim::pay_upkeep_and_grow(Bup &b, double delta) {
 	if (b.energy <= G.maintenance_floor) {
 		return;
 	}
-	double grow = std::min(G.growth_rate * b.genes[2] * b.mass * delta * (b.donor ? 1.0 - G.donor_cost : 1.0), (b.energy - G.maintenance_floor) / G.cost_per_mass);
+	double grow = std::min(G.growth_rate * b.genes[2] * b.mass * delta * (b.donor ? 1.0 - G.donor_cost : 1.0) * std::max(0.2, 1.0 - G.reach_cost * reach_levels(b.reach)), (b.energy - G.maintenance_floor) / G.cost_per_mass);
 	b.energy -= (float)(grow * G.cost_per_mass);
 	b.mass += (float)grow;
 }
@@ -1075,7 +1093,7 @@ Vector2 BupSim::nearest_and_count(const Vector2 &local, double near) const {
 	return Vector2(nearest_sq < 0.0 ? -1.0f : (float)std::sqrt(nearest_sq), (float)count);
 }
 
-// Every bup as 24 floats: id, x, y, dx, dy, energy, mass, birth_mass, speed, sense, metabolism, size, yield, mutator, donor, harm,
+// Every bup as 24 floats: id, x, y, dx, dy, energy, mass, birth_mass, speed, sense, metabolism, size, reach, mutator, donor, harm,
 // hue, sat, val, mutations, generation, parent id (0: not kept here), 2 spare.
 PackedFloat32Array BupSim::export_state() const {
 	PackedFloat32Array out;
@@ -1096,7 +1114,7 @@ PackedFloat32Array BupSim::export_state() const {
 		p[9] = b.genes[1];
 		p[10] = b.genes[2];
 		p[11] = b.genes[3];
-		p[12] = b.yield;
+		p[12] = (float)b.reach;
 		p[13] = b.mutator;
 		p[14] = b.donor ? 1.0f : 0.0f;
 		p[15] = b.harm;
@@ -1115,7 +1133,7 @@ PackedFloat32Array BupSim::export_state() const {
 // ---- the GPU simulation's records and events ------------------------------------------------
 
 // Every bup as the GPU simulation's record (gpu/kernels.gd): 24 32-bit words, 0 the id's low word, 1-20 x, y, dx, dy, energy, mass,
-// birth_mass, speed, sense, metabolism, size, yield, mutator, donor, harm, hue, sat, val, mutations, generation (floats),
+// birth_mass, speed, sense, metabolism, size, reach, mutator, donor, harm, hue, sat, val, mutations, generation (floats),
 // 21 the id's high word, 22-23 where it was in the last picture (NO_PICTURE if nowhere yet).
 PackedByteArray BupSim::export_state_bytes() const {
 	PackedByteArray out;
@@ -1124,7 +1142,7 @@ PackedByteArray BupSim::export_state_bytes() const {
 	for (size_t i = 0; i < bups.size(); i++) {
 		const Bup &b = bups[i];
 		uint8_t *r = w + i * STATE_WORDS * 4;
-		const float words[20] = { b.x, b.y, b.dx, b.dy, b.energy, b.mass, b.birth_mass, b.genes[0], b.genes[1], b.genes[2], b.genes[3], b.yield,
+		const float words[20] = { b.x, b.y, b.dx, b.dy, b.energy, b.mass, b.birth_mass, b.genes[0], b.genes[1], b.genes[2], b.genes[3], (float)b.reach,
 			b.mutator, b.donor ? 1.0f : 0.0f, b.harm, b.hue, b.sat, b.val, (float)b.mutations, (float)b.generation };
 		put_u32(r, 0, (uint32_t)((uint64_t)b.id & 0xFFFFFFFFULL));
 		for (int k = 0; k < 20; k++) {
@@ -1150,6 +1168,7 @@ BupSim::Bup BupSim::bup_from_record(const uint8_t *record) const {
 	for (int g = 0; g < 4; g++) {
 		b.genes[g] = get_f32(record, 8 + g);
 	}
+	b.reach = (int)(get_f32(record, 12) + 0.5f);
 	b.mutator = get_f32(record, 13);
 	b.donor = get_f32(record, 14) > 0.5f;
 	b.harm = get_f32(record, 15);
@@ -1644,6 +1663,8 @@ void BupSim::conjugate(double delta) {
 			for (int g = 0; g < run; g++) {
 				to.genes[g] = from.genes[g];
 			}
+			int mask = (1 << (2 * run)) - 1; // (the raised ceilings of the genes that moved go with them)
+			to.reach = (to.reach & ~mask) | (from.reach & mask);
 			derive(to);
 			taken[r] = 1;
 			transfers++;
@@ -1755,7 +1776,7 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 			double keep_share = std::clamp(0.5 + G.division_spread * gaussian(), 0.35, 0.65);
 			Vector2 daughter = split_off(b, keep_share);
 			double daughter_mass = daughter.x, daughter_energy = daughter.y;
-			Genome parent = { { b.genes[0], b.genes[1], b.genes[2], b.genes[3] }, b.hue, b.sat, b.val, b.harm, b.mutations, false, b.mutator, b.donor };
+			Genome parent = { { b.genes[0], b.genes[1], b.genes[2], b.genes[3] }, b.hue, b.sat, b.val, b.harm, b.mutations, false, b.mutator, b.donor, b.reach };
 			Genome child_genome = mutate(parent);
 			if (!child_genome.lethal) { // a lethal daughter is never born; the parent still paid for her
 				Bup child;
@@ -1770,6 +1791,7 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 				child.mutations = child_genome.mutations;
 				child.mutator = child_genome.mutator;
 				child.donor = child_genome.donor;
+				child.reach = child_genome.reach;
 				derive(child);
 				child.mass = (float)daughter_mass;
 				child.birth_mass = child.mass;

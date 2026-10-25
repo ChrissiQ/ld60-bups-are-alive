@@ -157,7 +157,9 @@ void main() {
 	float upkeep = P[79] * (P[16] + P[17] * mass) + drag * size + P[18] * sense;
 	energy -= upkeep * delta;
 	if (energy > P[19]) {
-		float grow = min(P[20] * metab * mass * delta * (donor > 0.5 ? 1.0 - P[91] : 1.0), (energy - P[19]) / P[21]);  // (a donor gives up a share of its growth)
+		int rl = int(BUPS[b + 12] + 0.5);
+		float raised = float((rl & 3) + ((rl >> 2) & 3) + ((rl >> 4) & 3) + ((rl >> 6) & 3));
+		float grow = min(P[20] * metab * mass * delta * (donor > 0.5 ? 1.0 - P[91] : 1.0) * max(0.2, 1.0 - P[97] * raised), (energy - P[19]) / P[21]);  // (a donor, and a bup with raised ceilings, give up a share of their growth)
 		energy -= grow * P[21];
 		mass += grow;
 	}

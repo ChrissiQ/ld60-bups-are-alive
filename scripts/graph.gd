@@ -195,6 +195,8 @@ func _draw() -> void:
 	var spec: Array = Genome.GENES.get(trait_name, [1.0, mutator_axis_max(_values(vals))] if trait_name == "mutator" else [0.0, harm_axis_max(_values(vals))])
 	var lo: float = spec[0]
 	var hi: float = spec[1]
+	for v: float in _values(vals):  # (a gene whose ceiling was raised can pass its usual top)
+		hi = maxf(hi, ceilf(v))
 	var peak := 10.0
 	for p in pops:
 		peak = maxf(peak, p.y)

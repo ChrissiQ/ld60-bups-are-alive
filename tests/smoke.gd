@@ -3,15 +3,23 @@ extends SceneTree
 ## Plays goal mode as intended, in real simulation time, on the dish goal mode starts with: wait for experiment 1; then, as the game does
 ## when it is done (scripts/main.gd's _on_goal_completed), make staying alive cost more and let the plankton bloom at the rate the
 ## experiment's text suggests. Fails if either experiment is not done within MAX_DAYS simulated days (or the colony dies out).
+## SMOKE_SEED=<n> sets the dish's seed (default 1). SMOKE_CONSTS="name=value,name=value" overrides simulation constants (SimConstants.build()'s names)
+## for the run, to measure what one of them does to the goals' pace (for example trait_mutations=1.0,harmful_mutations=0.2,death_release=0).
 
 const DAY := 86400.0
 const CHUNK := 300.0  ## seconds of simulation time per call
 const MAX_DAYS := 30
 
 func _init() -> void:
+	SimConstants.apply()
+	if OS.get_environment("SMOKE_CONSTS") != "":
+		var consts := SimConstants.build()
+		for pair in OS.get_environment("SMOKE_CONSTS").split(","):
+			consts[pair.get_slice("=", 0)] = float(pair.get_slice("=", 1))
+		BupSim.configure(consts)
 	var dish := Dish.new()
 	root.add_child(dish)
-	dish.set_seed(1)
+	dish.set_seed(int(OS.get_environment("SMOKE_SEED")) if OS.get_environment("SMOKE_SEED") != "" else 1)
 	dish.strike()
 	var tracker := GoalTracker.new()
 	tracker.goal_completed.connect(func(g: Goal) -> void:

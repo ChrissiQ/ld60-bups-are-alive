@@ -61,5 +61,5 @@ void main() {
 			}
 		}
 	}
-	BUPS[b + 5] = min(BUPS[b + 5] + got * BUPS[b + 12], P[22] * BUPS[b + 6]);
+	BUPS[b + 5] = min(BUPS[b + 5] + got * exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]), P[22] * BUPS[b + 6]);
 }

@@ -38,12 +38,13 @@ const TYPES := {
 # 69 motion_structure, 70 cloud spread per step (2 D dt), 71 puff capacity, 72 entry capacity, 73 bins,
 # 74 min_length_px, 75 width (µm), 76 min_width_px, 77 max_trail_px (the drawing's constants), 78 event capacity (births, and deaths, per batch),
 # 80 mutator_rate (a new mutator allele per division), 81 mutator_down_share, 82-84 the three mutator folds (weak, strong, top),
+# 96 reach_rate (a ceiling raised per division), 97 reach_cost (growth lost per raise), 98-100 the factors of the first, second and third raise,
 # 90 donor_gain, 91 donor_cost, 92 donor_loss, 93 contact_um, 94 the chance that a touching donor and recipient transfer in a step, 95 conj_continue,
 # 85 the stationary phase (1: on; the batch's plan says), 86 starve_maintenance x cost_per_mass, 87 starve_death_rate, 88 starve_death_exponent, 89 starve_min_mass_share,
 # 79 upkeep_scale (the dish's upkeep factor: multiplies base_upkeep + maintenance_per_mass * mass).
 # The entries that depend on the step's length (5, 6, 7, 59, 61, 70, and the diffusion's k in the push constant) are set for every batch.
 # BUPS (the bup records): 24 words each: 0 id_lo (uint bits), 1 x, 2 y, 3 dx, 4 dy, 5 energy, 6 mass, 7 birth_mass, 8 speed, 9 sense,
-#       10 metabolism, 11 size, 12 yield, 13 mutator (the mutation rate, a multiple of the usual; the building size is P[56] x size²), 14 donor (0 or 1: it carries the F factor; the drag cost is P[57] x speed²), 15 harm, 16 hue, 17 sat, 18 val, 19 mutations, 20 generation
+#       10 metabolism, 11 size, 12 reach (the raised gene ceilings: two bits a gene, speed the lowest, as a float; the yield is exp(-harm) / sqrt(metabolism), worked out where it is read), 13 mutator (the mutation rate, a multiple of the usual; the building size is P[56] x size²), 14 donor (0 or 1: it carries the F factor; the drag cost is P[57] x speed²), 15 harm, 16 hue, 17 sat, 18 val, 19 mutations, 20 generation
 #       (both whole numbers as floats), 21 id_hi (uint bits), 22 px, 23 py (where it was in the last picture; >= 1e30: none, newborns 3e38).
 #       The same as BupSim.export_state_bytes().
 # PUFF: 8 floats each: x, y, mass, variance, cut, alive, reach^2, sigma;
@@ -234,7 +235,9 @@ void main() {
 	float upkeep = P[79] * (P[16] + P[17] * mass) + drag * size + P[18] * sense;
 	energy -= upkeep * delta;
 	if (energy > P[19]) {
-		float grow = min(P[20] * metab * mass * delta * (donor > 0.5 ? 1.0 - P[91] : 1.0), (energy - P[19]) / P[21]);  // (a donor gives up a share of its growth)
+		int rl = int(BUPS[b + 12] + 0.5);
+		float raised = float((rl & 3) + ((rl >> 2) & 3) + ((rl >> 4) & 3) + ((rl >> 6) & 3));
+		float grow = min(P[20] * metab * mass * delta * (donor > 0.5 ? 1.0 - P[91] : 1.0) * max(0.2, 1.0 - P[97] * raised), (energy - P[19]) / P[21]);  // (a donor, and a bup with raised ceilings, give up a share of their growth)
 		energy -= grow * P[21];
 		mass += grow;
 	}
@@ -282,7 +285,7 @@ void add_puff_demand(uint k, float mass) { // 2^20 to the unit
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
 	uint b = i * 24u;
-	float x = BUPS[b + 1], y = BUPS[b + 2], energy = BUPS[b + 5], mass = BUPS[b + 6], metab = BUPS[b + 10], yld = BUPS[b + 12];
+	float x = BUPS[b + 1], y = BUPS[b + 2], energy = BUPS[b + 5], mass = BUPS[b + 6], metab = BUPS[b + 10], yld = exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]);  // (word 12 holds the raised ceilings now: the yield comes from harm and metabolism)
 	float max_e = P[22] * mass;
 	WANT[i] = -1.0; WANTC[i] = 0.0; CELLOF[i] = -1;
 	if (energy < max_e) {
@@ -387,7 +390,7 @@ void main() {
 			}
 		}
 	}
-	BUPS[b + 5] = min(BUPS[b + 5] + got * BUPS[b + 12], P[22] * BUPS[b + 6]);
+	BUPS[b + 5] = min(BUPS[b + 5] + got * exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]), P[22] * BUPS[b + 6]);
 }
 """
 
@@ -452,7 +455,8 @@ void main() {
 	if (i >= n_now) return;
 	uint b = i * 24u;
 	uint s = hash(hash(CNT[7] ^ (CNT[5] * 0x85EBCA6BU) ^ 777U) + i * 0x9E3779B9U);  // (this dish's stream, this step, this bup)
-	float energy = BUPS[b + 5], mass = BUPS[b + 6], birth = BUPS[b + 7], add_mass = P[56] * BUPS[b + 11] * BUPS[b + 11], rate = BUPS[b + 13], donor = BUPS[b + 14];  // (the building size from the size gene; the mutation rate of this bup, which its daughter is made at)
+	float energy = BUPS[b + 5], mass = BUPS[b + 6], birth = BUPS[b + 7], add_mass = P[56] * BUPS[b + 11] * BUPS[b + 11], rate = BUPS[b + 13], donor = BUPS[b + 14];
+	int reach = int(BUPS[b + 12] + 0.5);  // (the building size from the size gene; the mutation rate of this bup, which its daughter is made at)
 	float trim = max(0.0, float(n_now) + float(CNT[12]) - P[60]) / float(n_now);
 	bool natural;
 	if (P[85] > 0.5) {  // the stationary phase: a starving bup (at the growth floor) dies at a constant rate that grows with its metabolism, or when it has shrunk to a share of its birth mass
@@ -480,7 +484,8 @@ void main() {
 		int traits = poisson(P[32] * rate, s);
 		for (int t = 0; t < traits; t++) {
 			int gene = int(u01(s) * 4.0) % 4;
-			float changed = clamp(g[gene] + gauss(s) * P[52 + gene], P[44 + gene], P[48 + gene]);
+			int lv = (reach >> (2 * gene)) & 3;
+			float changed = clamp(g[gene] + gauss(s) * P[52 + gene], P[44 + gene], P[48 + gene] * (lv == 0 ? 1.0 : (lv == 1 ? P[98] : (lv == 2 ? P[99] : P[100]))));
 			if (changed != g[gene]) {
 				g[gene] = changed; muts += 1.0;
 				hue = fract(hue + gauss(s) * P[40]); sat = clamp(sat + gauss(s) * P[41], 0.0, 1.0); val = clamp(val + gauss(s) * P[42], P[43], 1.0);
@@ -513,6 +518,11 @@ void main() {
 		}
 		float flip = u01(s);  // (the F factor integrates or leaves, rarely)
 		float child_donor = donor > 0.5 ? (flip < P[92] ? 0.0 : 1.0) : (flip < P[90] ? 1.0 : 0.0);
+		int child_reach = reach;  // (a rare mutation raises one gene's ceiling, up to three times)
+		if (u01(s) < P[96]) {
+			int gg = int(u01(s) * 4.0) % 4;
+			if (((child_reach >> (2 * gg)) & 3) < 3) { child_reach += 1 << (2 * gg); muts += 1.0; }
+		}
 		if (!lethal) {
 			KID[i] = 1u;
 			float a = u01(s) * 6.2831853, off = 0.5 * mass * P[14];
@@ -522,7 +532,7 @@ void main() {
 			CHILD[c + 3] = 1.0; CHILD[c + 4] = 0.0;
 			CHILD[c + 5] = min(de, P[22] * dm); CHILD[c + 6] = dm; CHILD[c + 7] = dm;
 			CHILD[c + 8] = g[0]; CHILD[c + 9] = g[1]; CHILD[c + 10] = g[2]; CHILD[c + 11] = g[3];
-			CHILD[c + 12] = exp(-harm) / sqrt(g[2]);
+			CHILD[c + 12] = float(child_reach);
 			CHILD[c + 13] = mutator;
 			CHILD[c + 14] = child_donor;
 			CHILD[c + 15] = harm;
@@ -937,6 +947,7 @@ const K_CONJ_CLEAR := """
 void main() {
 	uint t = gl_GlobalInvocationID.x;
 	if (t < (DMASK + 1u) * 4u) DTAB[t] = 0xFFFFFFFFu;
+	else if (t < (DMASK + 1u) * 4u + 2048u) DTAB[t] = 0u;  // (the bitmap of the buckets in use)
 	if (t == 0u) CNT[15] = 0u;
 }
 """
@@ -948,6 +959,7 @@ void main() {
 	if (BUPS[b + 14] < 0.5) return;
 	atomicAdd(CNT[15], 1u);
 	uint h = dhash(int(floor(BUPS[b + 1] / DCELL)), int(floor(BUPS[b + 2] / DCELL)));
+	atomicOr(DTAB[(DMASK + 1u) * 4u + (h >> 5u)], 1u << (h & 31u));
 	for (uint s = 0u; s < 4u; s++) {
 		if (atomicCompSwap(DTAB[h * 4u + s], 0xFFFFFFFFu, i) == 0xFFFFFFFFu) break;
 	}
@@ -965,6 +977,7 @@ void main() {
 	uint best = 0xFFFFFFFFu;
 	for (int ox = -1; ox <= 1; ox++) for (int oy = -1; oy <= 1; oy++) {
 		uint h = dhash(cx + ox, cy + oy);
+		if ((DTAB[(DMASK + 1u) * 4u + (h >> 5u)] & (1u << (h & 31u))) == 0u) continue;  // (no donor in this bucket: the bitmap is small enough to stay in cache)
 		for (uint s = 0u; s < 4u; s++) {
 			uint d = DTAB[h * 4u + s];
 			if (d == 0xFFFFFFFFu || d >= best) continue;
@@ -982,7 +995,8 @@ void main() {
 	}
 	uint db = best * 24u;
 	for (int g = 0; g < run; g++) BUPS[b + 8u + uint(g)] = BUPS[db + 8u + uint(g)];
-	BUPS[b + 12] = exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]);
+	int mask = (1 << (2 * run)) - 1;  // (the raised ceilings of the genes that moved go with them)
+	BUPS[b + 12] = float((int(BUPS[b + 12] + 0.5) & ~mask) | (int(BUPS[db + 12] + 0.5) & mask));
 }
 """
 

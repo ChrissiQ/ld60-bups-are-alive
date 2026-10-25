@@ -43,7 +43,8 @@ void main() {
 	if (i >= n_now) return;
 	uint b = i * 24u;
 	uint s = hash(hash(CNT[7] ^ (CNT[5] * 0x85EBCA6BU) ^ 777U) + i * 0x9E3779B9U);  // (this dish's stream, this step, this bup)
-	float energy = BUPS[b + 5], mass = BUPS[b + 6], birth = BUPS[b + 7], add_mass = P[56] * BUPS[b + 11] * BUPS[b + 11], rate = BUPS[b + 13], donor = BUPS[b + 14];  // (the building size from the size gene; the mutation rate of this bup, which its daughter is made at)
+	float energy = BUPS[b + 5], mass = BUPS[b + 6], birth = BUPS[b + 7], add_mass = P[56] * BUPS[b + 11] * BUPS[b + 11], rate = BUPS[b + 13], donor = BUPS[b + 14];
+	int reach = int(BUPS[b + 12] + 0.5);  // (the building size from the size gene; the mutation rate of this bup, which its daughter is made at)
 	float trim = max(0.0, float(n_now) + float(CNT[12]) - P[60]) / float(n_now);
 	bool natural;
 	if (P[85] > 0.5) {  // the stationary phase: a starving bup (at the growth floor) dies at a constant rate that grows with its metabolism, or when it has shrunk to a share of its birth mass
@@ -71,7 +72,8 @@ void main() {
 		int traits = poisson(P[32] * rate, s);
 		for (int t = 0; t < traits; t++) {
 			int gene = int(u01(s) * 4.0) % 4;
-			float changed = clamp(g[gene] + gauss(s) * P[52 + gene], P[44 + gene], P[48 + gene]);
+			int lv = (reach >> (2 * gene)) & 3;
+			float changed = clamp(g[gene] + gauss(s) * P[52 + gene], P[44 + gene], P[48 + gene] * (lv == 0 ? 1.0 : (lv == 1 ? P[98] : (lv == 2 ? P[99] : P[100]))));
 			if (changed != g[gene]) {
 				g[gene] = changed; muts += 1.0;
 				hue = fract(hue + gauss(s) * P[40]); sat = clamp(sat + gauss(s) * P[41], 0.0, 1.0); val = clamp(val + gauss(s) * P[42], P[43], 1.0);
@@ -104,6 +106,11 @@ void main() {
 		}
 		float flip = u01(s);  // (the F factor integrates or leaves, rarely)
 		float child_donor = donor > 0.5 ? (flip < P[92] ? 0.0 : 1.0) : (flip < P[90] ? 1.0 : 0.0);
+		int child_reach = reach;  // (a rare mutation raises one gene's ceiling, up to three times)
+		if (u01(s) < P[96]) {
+			int gg = int(u01(s) * 4.0) % 4;
+			if (((child_reach >> (2 * gg)) & 3) < 3) { child_reach += 1 << (2 * gg); muts += 1.0; }
+		}
 		if (!lethal) {
 			KID[i] = 1u;
 			float a = u01(s) * 6.2831853, off = 0.5 * mass * P[14];
@@ -113,7 +120,7 @@ void main() {
 			CHILD[c + 3] = 1.0; CHILD[c + 4] = 0.0;
 			CHILD[c + 5] = min(de, P[22] * dm); CHILD[c + 6] = dm; CHILD[c + 7] = dm;
 			CHILD[c + 8] = g[0]; CHILD[c + 9] = g[1]; CHILD[c + 10] = g[2]; CHILD[c + 11] = g[3];
-			CHILD[c + 12] = exp(-harm) / sqrt(g[2]);
+			CHILD[c + 12] = float(child_reach);
 			CHILD[c + 13] = mutator;
 			CHILD[c + 14] = child_donor;
 			CHILD[c + 15] = harm;

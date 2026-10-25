@@ -86,7 +86,7 @@ void add_puff_demand(uint k, float mass) { // 2^20 to the unit
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
 	uint b = i * 24u;
-	float x = BUPS[b + 1], y = BUPS[b + 2], energy = BUPS[b + 5], mass = BUPS[b + 6], metab = BUPS[b + 10], yld = BUPS[b + 12];
+	float x = BUPS[b + 1], y = BUPS[b + 2], energy = BUPS[b + 5], mass = BUPS[b + 6], metab = BUPS[b + 10], yld = exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]);  // (word 12 holds the raised ceilings now: the yield comes from harm and metabolism)
 	float max_e = P[22] * mass;
 	WANT[i] = -1.0; WANTC[i] = 0.0; CELLOF[i] = -1;
 	if (energy < max_e) {

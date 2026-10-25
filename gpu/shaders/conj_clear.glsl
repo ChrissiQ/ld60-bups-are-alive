@@ -18,5 +18,6 @@ float keyed01(uint a, uint b, uint c) { uint h = hash(hash(hash(a ^ 0x9E3779B9u)
 void main() {
 	uint t = gl_GlobalInvocationID.x;
 	if (t < (DMASK + 1u) * 4u) DTAB[t] = 0xFFFFFFFFu;
+	else if (t < (DMASK + 1u) * 4u + 2048u) DTAB[t] = 0u;  // (the bitmap of the buckets in use)
 	if (t == 0u) CNT[15] = 0u;
 }
