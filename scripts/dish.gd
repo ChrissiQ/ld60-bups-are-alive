@@ -132,6 +132,10 @@ var death_husks := false:  ## a dead bup leaves a husk that leaks its nutrient b
 	set(value):
 		death_husks = value
 		sim.set_husk_seconds(Biology.HUSK_SECONDS if value else 0.0)
+var stationary_phase := false:  ## starving bups stop growing, shrink and die at a constant rate (Biology.STARVE_*) instead of dying when the reserve is gone: free mode's option, never on in goal mode (see StartConditions.stationary_phase)
+	set(value):
+		stationary_phase = value
+		sim.set_stationary_phase(value)
 var upkeep_factor := 1.0:  ## multiplies what staying alive costs every bup (its base and per-mass maintenance)
 	set(value):
 		upkeep_factor = maxf(value, 0.0)
@@ -337,6 +341,7 @@ func strike(start: StartConditions = null) -> void:
 	if start == null:  # goal mode's dish: the usual conditions, and founders in evenly spaced colours (more interesting than all green)
 		start = StartConditions.new()
 		start.spread_founders()
+		start.stationary_phase = false  # (goal mode keeps the goals as they were tuned)
 	if gpu_world != null and gpu_active:
 		_discard_gpu_state()  # (a new dish: what the GPU holds, and every result still on its way, is for the old one)
 	set_backend_setting(start.sim_backend)
@@ -352,6 +357,7 @@ func strike(start: StartConditions = null) -> void:
 	_burst_clock = 0.0
 	upkeep_factor = 1.0
 	death_husks = start.death_husks
+	stationary_phase = start.stationary_phase
 	_reset_runtime_state()
 	radius = clampf(start.dish_radius, StartConditions.MIN_SIM_RADIUS, StartConditions.MAX_DISH_RADIUS)
 	field.set_max_across(clampi(start.nutrient_resolution, StartConditions.MIN_NUTRIENT_RESOLUTION, StartConditions.MAX_NUTRIENT_RESOLUTION))
@@ -1062,6 +1068,7 @@ func to_dict() -> Dictionary:
 		"field": Array(field.values()),
 		"clouds": field.puffs_export(),
 		"death_husks": death_husks,
+		"stationary_phase": stationary_phase,
 		"husks": Array(sim.husks_export()),
 		"sources": saved_sources,
 		"bloom_density": bloom_density,
@@ -1194,6 +1201,7 @@ func from_dict(d: Dictionary) -> bool:
 	field.load_values(saved_field)
 	field.puffs_import(saved_clouds)
 	death_husks = d.get("death_husks") is bool and d["death_husks"]
+	stationary_phase = d.get("stationary_phase") is bool and d["stationary_phase"]
 	var saved_husks := PackedFloat64Array()
 	if d.get("husks") is Array:
 		for value: Variant in d["husks"]:
@@ -1544,7 +1552,7 @@ func _advance_gpu(seconds: float, _budget_usec: int) -> float:
 		"steps": steps, "delta": delta, "start_time": start, "history_steps": history_steps,
 		"events": {"ranges": ranges, "puffs": puffs, "cells": cells, "amounts": amounts},
 		"feed_per_second": feed_density * CONCENTRATION_PER_DENSITY / 3600.0, "upkeep_scale": upkeep_factor, "limit": bup_limit,
-		"death_puff": 0.0 if death_husks else Biology.DEATH_RELEASE * Cell.COST_PER_MASS,
+		"death_puff": 0.0 if death_husks else Biology.DEATH_RELEASE * Cell.COST_PER_MASS, "stationary": stationary_phase,
 	})
 	return steps * delta
 

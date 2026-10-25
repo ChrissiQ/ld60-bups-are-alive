@@ -36,6 +36,7 @@ static func small_start() -> StartConditions:
 	var start := StartConditions.new()
 	start.dish_radius = 300.0
 	start.bup_limit = Dish.cap_for(300.0)
+	start.stationary_phase = false  # (the tests that use this dish pin the model's other rules, among them that a bup with no energy dies at once)
 	return start
 
 

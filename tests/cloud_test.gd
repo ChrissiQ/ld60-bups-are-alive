@@ -22,6 +22,7 @@ func _dish(radius_mm: float, seed_value := 5) -> Dish:
 	start.bups = 1
 	start.bup_limit = 50000
 	d.strike(start)
+	d.stationary_phase = false  # (the tests below that starve bups on purpose want the old rule: a bup with no energy dies at once; the starvation test turns the phase on itself)
 	d.clear_bups()
 	return d
 
@@ -36,6 +37,7 @@ func _init() -> void:
 	_check_sources()
 	_check_death_release()
 	_check_husks()
+	_check_starvation()
 	_check_plume()
 	_check_threads()
 	TestUtil.finish(self, "CLOUD TESTS OK")
@@ -120,6 +122,42 @@ func _check_husks() -> void:
 		d.sim.step(20.0, none, rates, 0.0, 0.0)
 	check(d.sim.husk_count() == 0 and absf(d.field.total() - expected) < 1e-3 * expected, "in the end the husk has given all of it back (%.3f of %.3f)" % [d.field.total(), expected])
 	d.free()
+
+
+func _check_starvation() -> void:
+	var n := 400
+	var none := PackedVector2Array()
+	var rates := PackedFloat32Array()
+	var survivors := {}
+	var masses := {}
+	for setting in [false, true]:
+		for metabolism in [0.5, 1.0, 2.0]:
+			var d := _dish(90.0)
+			d.stationary_phase = setting
+			var genome := Genome.founder()
+			genome["metabolism"] = metabolism
+			var mass := 12.0
+			for i in n:
+				d.sim.add_bup(d.sim.random_point(80000.0), genome, 0.0, sqrt(mass), mass, 0, Vector2.RIGHT)
+			for i in 4320:  # (a day of 20 s steps with nothing to eat)
+				d.sim.step(20.0, none, rates, 0.0, 0.0)
+				if not setting and i == 0:
+					survivors["off_first_%s" % metabolism] = d.population()
+			survivors["%s_%s" % [setting, metabolism]] = d.population()
+			var total := 0.0
+			var ex: PackedFloat32Array = d.sim.export_state()
+			var np: int = ex.size() / GpuSim.STRIDE
+			for i in np:
+				total += ex[i * GpuSim.STRIDE + 6]
+			masses["%s_%s" % [setting, metabolism]] = total / maxf(np, 1)
+			d.free()
+	check(survivors["off_first_1.0"] == 0, "with the stationary phase off every bup with no energy dies in its first step")
+	var expected := {0.5: exp(-0.22 * exp(0.95 * 1.0397 * 0.5)), 1.0: exp(-0.22 * exp(0.95 * 1.0397)), 2.0: exp(-0.22 * exp(0.95 * 1.0397 * 2.0))}
+	for metabolism in [0.5, 1.0, 2.0]:
+		var share: float = survivors["true_%s" % metabolism] / float(n)
+		check(absf(share - expected[metabolism]) < 0.08, "a day of starvation at metabolism %s leaves %.2f of the bups alive (expected %.2f from the death rate)" % [metabolism, share, expected[metabolism]])
+	check(survivors["true_2.0"] < survivors["true_1.0"] and survivors["true_1.0"] < survivors["true_0.5"], "the fast metabolism dies first: the growth rate costs survival")
+	check(absf(masses["true_1.0"] / 12.0 - exp(-0.08)) < 0.02, "the survivors have shrunk by about the starving maintenance (%.3f of their mass, expected %.3f)" % [masses["true_1.0"] / 12.0, exp(-0.08)])
 
 
 func _check_uptake() -> void:

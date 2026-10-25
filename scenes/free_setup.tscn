@@ -183,6 +183,14 @@ theme_type_variation = &"Notice"
 text = "@free_setup.backend_unavailable"
 autowrap_mode = 3
 
+[node name="StationaryToggle" type="Button" parent="Panel/Box/Scroll/Rows/Advanced"]
+layout_mode = 2
+theme_type_variation = &"ListButton"
+toggle_mode = true
+button_pressed = true
+alignment = 0
+text = "@free_setup.stationary_on"
+
 [node name="HusksToggle" type="Button" parent="Panel/Box/Scroll/Rows/Advanced"]
 layout_mode = 2
 theme_type_variation = &"ListButton"

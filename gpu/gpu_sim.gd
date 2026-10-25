@@ -47,6 +47,7 @@ var delta := 20.0  ## the step's length (s) of the last batch: every entry of P 
 var diffusion := 0.0  ## the medium's diffusion coefficient (µm²/s)
 var feed_per_second := 0.0  ## the feed (concentration per second)
 var upkeep_scale := 1.0  ## the dish's upkeep factor (P[79])
+var stationary := false  ## the dish has the stationary phase on (P[85]; the batch's plan says)
 var death_puff := 0.0  ## what a death gives back at once, per unit of mass (P[63]): P[8], or 0 when the dish makes husks of its deaths (the batch's plan says)
 var limit := 0  ## the most bups (P[60]): past it a random share dies each step
 var has_clouds := false  ## whether any cloud has been loaded or sent, or deaths make them: until then the cloud kernels are not run
@@ -335,9 +336,11 @@ func _fill_params() -> void:
 		"trait_mutations": 32, "harmful_mutations": 33, "compensatory_mutations": 34, "lethal_fraction": 35, "harm_shape": 36, "mean_harm": 37, "mean_repair": 38, "max_harm": 39,
 		"hue_step": 40, "sat_step": 41, "val_step": 42, "val_min": 43, "add_mass_factor": 56, "drag_upkeep": 57, "division_spread": 58,
 		"min_length_px": 74, "width": 75, "min_width_px": 76, "max_trail_px": 77,
-		"mutator_rate": 80, "mutator_down_share": 81, "mutator_fold_weak": 82, "mutator_fold_strong": 83, "mutator_fold_top": 84}
+		"mutator_rate": 80, "mutator_down_share": 81, "mutator_fold_weak": 82, "mutator_fold_strong": 83, "mutator_fold_top": 84,
+		"starve_death_rate": 87, "starve_death_exponent": 88, "starve_min_mass_share": 89}
 	for key in names_to_index:
 		p[names_to_index[key]] = float(consts[key])
+	p[86] = float(consts["starve_maintenance"]) * float(consts["cost_per_mass"])
 	p[8] = float(consts["death_release"]) * float(consts["cost_per_mass"])  # (what a death gives back per unit of the body's mass)
 	death_puff = p[8]
 	var s_axis: Array = consts["motion_s"]
@@ -385,6 +388,7 @@ func _set_step(step_seconds: float, swim := true) -> void:
 	p[61] = feed_per_second * delta
 	p[70] = 2.0 * diffusion * delta
 	p[63] = death_puff
+	p[85] = 1.0 if stationary else 0.0
 	p[79] = upkeep_scale
 	_k_total = diffusion * delta / (spacing * spacing)
 	var pb := p.to_byte_array()
@@ -554,12 +558,13 @@ func _upload_events(steps: int, events: Dictionary) -> void:
 
 ## The uploads of a batch of `steps` steps, made before its compute list is begun (the device refuses buffer updates while a list is
 ## open). `plan` (every key optional): "delta" (the step's length, s: every entry of P that depends on it is set from it),
-## "feed_per_second", "upkeep_scale", "death_puff", "limit", "events" (see _upload_events). What is not given stays as it was.
+## "feed_per_second", "upkeep_scale", "death_puff", "stationary", "limit", "events" (see _upload_events). What is not given stays as it was.
 func prepare_steps(steps: int, plan := {}) -> void:
 	assert(steps <= MAX_STEPS_PER_BATCH)
 	feed_per_second = float(plan.get("feed_per_second", feed_per_second))
 	upkeep_scale = float(plan.get("upkeep_scale", upkeep_scale))
 	death_puff = float(plan.get("death_puff", death_puff))
+	stationary = bool(plan.get("stationary", stationary))
 	limit = int(plan.get("limit", limit))
 	_set_step(float(plan.get("delta", delta)))
 	_upload_events(steps, plan.get("events", {}))

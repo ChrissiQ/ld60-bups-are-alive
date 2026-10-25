@@ -52,6 +52,9 @@ func _start(sc_name: String) -> StartConditions:
 		"L":  # D with a 300,000 cap and a heavier bloom
 			sc.bups = 250; sc.bup_limit = 300000; sc.dish_radius = 90000.0; sc.nutrient_density = 4.0; sc.bloom_density = 4.0
 			sc.spread_founders()
+		"S":  # a 10 mm dish with a little food and no more: it fills, the food runs out, and the crowd starves (the stationary phase's test)
+			sc.bups = 250; sc.bup_limit = 20000; sc.dish_radius = 10000.0; sc.nutrient_density = 8.0
+			sc.spread_founders()
 		"M":  # 90 mm dish, a million bups
 			sc.bups = 250; sc.bup_limit = 1000000; sc.dish_radius = 90000.0; sc.nutrient_density = 32.0; sc.feed_density = 5.0; sc.bloom_density = 5.0
 			sc.spread_founders()
@@ -66,7 +69,7 @@ func _place_sources(d: Dish, sc_name: String) -> void:
 
 
 func _hours_default(sc_name: String) -> int:
-	return {"A": 60, "B": 12, "C": 30, "D": 24, "E": 24, "F": 24, "L": 16, "M": 12}[sc_name]
+	return {"A": 60, "B": 12, "C": 30, "D": 24, "E": 24, "F": 24, "L": 16, "M": 12, "S": 120}[sc_name]
 
 
 func _line(hour: int, pop: int, means: Array, energy: float, nutrient: float) -> void:
@@ -159,6 +162,8 @@ func _run() -> void:
 	dish.process_mode = Node.PROCESS_MODE_DISABLED  # (the game's _process draws: not what is measured here)
 	dish.set_seed(seed_value)
 	start = _start(scenario)
+	if OS.get_environment("STATIONARY") != "":  # (STATIONARY=0 or 1 overrides the stationary phase, on by default)
+		start.stationary_phase = OS.get_environment("STATIONARY") == "1"
 	if OS.get_environment("DETAIL") != "":  # (DETAIL=200: the nutrient grid's cells across)
 		start.nutrient_resolution = int(OS.get_environment("DETAIL"))
 	start.death_husks = OS.get_environment("DEATH_HUSKS") == "1"  # (DEATH_HUSKS=1: the dead leave husks, whose leak the CPU runs for both backends)

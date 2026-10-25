@@ -38,6 +38,7 @@ const TYPES := {
 # 69 motion_structure, 70 cloud spread per step (2 D dt), 71 puff capacity, 72 entry capacity, 73 bins,
 # 74 min_length_px, 75 width (µm), 76 min_width_px, 77 max_trail_px (the drawing's constants), 78 event capacity (births, and deaths, per batch),
 # 80 mutator_rate (a new mutator allele per division), 81 mutator_down_share, 82-84 the three mutator folds (weak, strong, top),
+# 85 the stationary phase (1: on; the batch's plan says), 86 starve_maintenance x cost_per_mass, 87 starve_death_rate, 88 starve_death_exponent, 89 starve_min_mass_share,
 # 79 upkeep_scale (the dish's upkeep factor: multiplies base_upkeep + maintenance_per_mass * mass).
 # The entries that depend on the step's length (5, 6, 7, 59, 61, 70, and the diffusion's k in the push constant) are set for every batch.
 # BUPS (the bup records): 24 words each: 0 id_lo (uint bits), 1 x, 2 y, 3 dx, 4 dy, 5 energy, 6 mass, 7 birth_mass, 8 speed, 9 sense,
@@ -221,7 +222,14 @@ void main() {
 	}
 	if (pending) { dx = hx / hl; dy = hy / hl; }
 	BUPS[b + 1] = x; BUPS[b + 2] = y; BUPS[b + 3] = dx; BUPS[b + 4] = dy;
-	// then it pays its upkeep and grows
+	// then it pays its upkeep and grows (with the stationary phase on, a bup at the growth floor pays only the starving maintenance, from the
+	// reserve and then from its body)
+	if (P[85] > 0.5 && energy <= P[19]) {
+		energy -= P[86] * mass * delta;
+		if (energy < 0.0) { mass += energy / P[21]; energy = 0.0; }
+		BUPS[b + 5] = energy; BUPS[b + 6] = mass;
+		return;
+	}
 	float upkeep = P[79] * (P[16] + P[17] * mass) + drag * size + P[18] * sense;
 	energy -= upkeep * delta;
 	if (energy > P[19]) {
@@ -445,7 +453,13 @@ void main() {
 	uint s = hash(hash(CNT[7] ^ (CNT[5] * 0x85EBCA6BU) ^ 777U) + i * 0x9E3779B9U);  // (this dish's stream, this step, this bup)
 	float energy = BUPS[b + 5], mass = BUPS[b + 6], birth = BUPS[b + 7], add_mass = P[56] * BUPS[b + 11] * BUPS[b + 11], rate = BUPS[b + 13];  // (the building size from the size gene; the mutation rate of this bup, which its daughter is made at)
 	float trim = max(0.0, float(n_now) + float(CNT[12]) - P[60]) / float(n_now);
-	bool natural = energy <= 0.0 || u01(s) < P[59];
+	bool natural;
+	if (P[85] > 0.5) {  // the stationary phase: a starving bup (at the growth floor) dies at a constant rate that grows with its metabolism, or when it has shrunk to a share of its birth mass
+		natural = u01(s) < P[59];
+		if (!natural && energy <= P[19]) natural = mass < P[89] * birth || u01(s) < 1.0 - exp(-P[87] * exp(P[88] * BUPS[b + 10]) * P[5]);
+	} else {
+		natural = energy <= 0.0 || u01(s) < P[59];
+	}
 	bool trimmed = !natural && u01(s) < trim;  // (the same draws as one chain of `||`)
 	if (trimmed) atomicAdd(CNT[13], 1u);  // (counted, so that the growth the next trim expects leaves out the trim's own deaths)
 	if (natural) BUPS[b + 23] = -2.0;  // (a death by starvation or chance, not a trim: `death_clouds` gives its body back; the record is gone after `copy`)

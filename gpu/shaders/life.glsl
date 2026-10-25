@@ -45,7 +45,13 @@ void main() {
 	uint s = hash(hash(CNT[7] ^ (CNT[5] * 0x85EBCA6BU) ^ 777U) + i * 0x9E3779B9U);  // (this dish's stream, this step, this bup)
 	float energy = BUPS[b + 5], mass = BUPS[b + 6], birth = BUPS[b + 7], add_mass = P[56] * BUPS[b + 11] * BUPS[b + 11], rate = BUPS[b + 13];  // (the building size from the size gene; the mutation rate of this bup, which its daughter is made at)
 	float trim = max(0.0, float(n_now) + float(CNT[12]) - P[60]) / float(n_now);
-	bool natural = energy <= 0.0 || u01(s) < P[59];
+	bool natural;
+	if (P[85] > 0.5) {  // the stationary phase: a starving bup (at the growth floor) dies at a constant rate that grows with its metabolism, or when it has shrunk to a share of its birth mass
+		natural = u01(s) < P[59];
+		if (!natural && energy <= P[19]) natural = mass < P[89] * birth || u01(s) < 1.0 - exp(-P[87] * exp(P[88] * BUPS[b + 10]) * P[5]);
+	} else {
+		natural = energy <= 0.0 || u01(s) < P[59];
+	}
 	bool trimmed = !natural && u01(s) < trim;  // (the same draws as one chain of `||`)
 	if (trimmed) atomicAdd(CNT[13], 1u);  // (counted, so that the growth the next trim expects leaves out the trim's own deaths)
 	if (natural) BUPS[b + 23] = -2.0;  // (a death by starvation or chance, not a trim: `death_clouds` gives its body back; the record is gone after `copy`)

@@ -27,6 +27,7 @@ const PLANKTON_SETTLE_SECONDS := 0.5  ## how long the settings are still before 
 	StartConditions.BACKEND_GPU: $Panel/Box/Scroll/Rows/Advanced/BackendBox/BackendRow/OnButton,
 	StartConditions.BACKEND_CPU: $Panel/Box/Scroll/Rows/Advanced/BackendBox/BackendRow/OffButton,
 }
+@onready var stationary_toggle: Button = $Panel/Box/Scroll/Rows/Advanced/StationaryToggle  ## whether starving bups shrink and die slowly (on) or die as soon as the reserve is gone
 @onready var husks_toggle: Button = $Panel/Box/Scroll/Rows/Advanced/HusksToggle  ## whether a dead bup leaves a husk that leaks its nutrient slowly
 @onready var backend_notice: Label = $Panel/Box/Scroll/Rows/Advanced/BackendBox/BackendNotice  ## says so when On is chosen and this machine has no GPU to use
 @onready var limit_row: SettingRow = $Panel/Box/Scroll/Rows/LimitRow
@@ -82,6 +83,10 @@ func _ready() -> void:
 		button.set_pressed_no_signal(choice == _start.sim_backend)
 		button.pressed.connect(func() -> void: _choose_backend(choice))
 	_update_backend_notice()
+	stationary_toggle.tooltip_text = Strings.t("free_setup.stationary_tip")
+	stationary_toggle.set_pressed_no_signal(_start.stationary_phase)
+	_update_stationary_label()
+	stationary_toggle.toggled.connect(func(on: bool) -> void: _start.stationary_phase = on; _update_stationary_label(); _update_advanced_label())
 	husks_toggle.tooltip_text = Strings.t("free_setup.husks_tip")
 	husks_toggle.set_pressed_no_signal(_start.death_husks)
 	_update_husks_label()
@@ -101,6 +106,7 @@ func _ready() -> void:
 		for row: SettingRow in [detail_row, thickness_row]:
 			row.value = row.default_value
 		husks_toggle.button_pressed = false
+		stationary_toggle.button_pressed = StartConditions.new().stationary_phase
 		_choose_backend(StartConditions.new().sim_backend))
 	limit_row.value_changed.connect(func(v: float) -> void: _start.bup_limit = int(v); _refresh())
 
@@ -161,6 +167,10 @@ func _update_backend_notice() -> void:
 	backend_notice.visible = _start.sim_backend == StartConditions.BACKEND_GPU and not GpuWorld.available()
 
 
+func _update_stationary_label() -> void:
+	stationary_toggle.text = Strings.t("free_setup.stationary_on" if _start.stationary_phase else "free_setup.stationary_off")
+
+
 func _update_husks_label() -> void:
 	husks_toggle.text = Strings.t("free_setup.husks_on" if _start.death_husks else "free_setup.husks_off")
 
@@ -172,7 +182,7 @@ func _update_tutorial_label() -> void:
 ## The advanced options' heading says whether they are open, and, so that a changed one is not forgotten while it is shut,
 ## whether any is not at its usual value.
 func _update_advanced_label() -> void:
-	var changed := not is_equal_approx(detail_row.value, detail_row.default_value) or not is_equal_approx(thickness_row.value, thickness_row.default_value) or _start.sim_backend != StartConditions.new().sim_backend or _start.death_husks
+	var changed := not is_equal_approx(detail_row.value, detail_row.default_value) or not is_equal_approx(thickness_row.value, thickness_row.default_value) or _start.sim_backend != StartConditions.new().sim_backend or _start.death_husks or _start.stationary_phase != StartConditions.new().stationary_phase
 	advanced_toggle.text = Strings.t("free_setup.advanced_open" if advanced.visible else "free_setup.advanced_closed") + (Strings.t("free_setup.advanced_changed") if changed else "")
 
 
@@ -215,6 +225,7 @@ func _reset_to_defaults() -> void:
 		row.value = row.default_value
 	tutorial_toggle.button_pressed = false
 	husks_toggle.button_pressed = false
+	stationary_toggle.button_pressed = StartConditions.new().stationary_phase
 	_choose_backend(StartConditions.new().sim_backend)
 
 

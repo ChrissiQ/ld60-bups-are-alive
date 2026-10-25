@@ -146,7 +146,14 @@ void main() {
 	}
 	if (pending) { dx = hx / hl; dy = hy / hl; }
 	BUPS[b + 1] = x; BUPS[b + 2] = y; BUPS[b + 3] = dx; BUPS[b + 4] = dy;
-	// then it pays its upkeep and grows
+	// then it pays its upkeep and grows (with the stationary phase on, a bup at the growth floor pays only the starving maintenance, from the
+	// reserve and then from its body)
+	if (P[85] > 0.5 && energy <= P[19]) {
+		energy -= P[86] * mass * delta;
+		if (energy < 0.0) { mass += energy / P[21]; energy = 0.0; }
+		BUPS[b + 5] = energy; BUPS[b + 6] = mass;
+		return;
+	}
 	float upkeep = P[79] * (P[16] + P[17] * mass) + drag * size + P[18] * sense;
 	energy -= upkeep * delta;
 	if (energy > P[19]) {

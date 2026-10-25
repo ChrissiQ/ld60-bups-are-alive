@@ -60,6 +60,7 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_limit", "bup_limit"), &BupSim::set_limit);
 	ClassDB::bind_method(D_METHOD("set_upkeep_scale", "scale"), &BupSim::set_upkeep_scale);
 	ClassDB::bind_method(D_METHOD("set_husk_seconds", "seconds"), &BupSim::set_husk_seconds);
+	ClassDB::bind_method(D_METHOD("set_stationary_phase", "on"), &BupSim::set_stationary_phase);
 	ClassDB::bind_method(D_METHOD("husk_count"), &BupSim::husk_count);
 	ClassDB::bind_method(D_METHOD("husks_export"), &BupSim::husks_export);
 	ClassDB::bind_method(D_METHOD("husks_import", "saved"), &BupSim::husks_import);
@@ -832,7 +833,28 @@ double BupSim::tumble_rate(Bup &b, double concentration, double delta, double no
 	return G.tumble_base * std::clamp(1.0 - G.chemotaxis_gain * ((double)b.fast - b.slow + estimate_error(b, concentration) * b.noise), G.tumble_up_factor, 1.0);
 }
 
+// With the stationary phase on, a bup whose reserve is at the growth floor is starving: it dies at a constant rate that grows with the
+// growth rate its metabolism gene allows (the fast die first), or when it has shrunk to a share of its birth mass.
+bool BupSim::starved_to_death(const Bup &b, double delta) {
+	if (b.energy > G.maintenance_floor) {
+		return false;
+	}
+	if (b.mass < G.starve_min_mass_share * b.birth_mass) {
+		return true;
+	}
+	double rate = G.starve_death_rate * std::exp(G.starve_death_exponent * b.genes[2]);
+	return uniform() < 1.0 - std::exp(-rate * delta);
+}
+
 void BupSim::pay_upkeep_and_grow(Bup &b, double delta) {
+	if (stationary_phase && b.energy <= G.maintenance_floor) { // growth is off: only the starving maintenance is paid, from the reserve and then from the body (it shrinks)
+		b.energy -= (float)(G.starve_maintenance * G.cost_per_mass * b.mass * delta);
+		if (b.energy < 0.0f) {
+			b.mass += b.energy / (float)G.cost_per_mass;
+			b.energy = 0.0f;
+		}
+		return;
+	}
 	b.energy -= (float)(upkeep(b) * delta);
 	if (b.energy <= G.maintenance_floor) {
 		return;
@@ -1660,7 +1682,7 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 			}
 			eat(b, got);
 		}
-		bool dies = b.energy <= 0.0f;
+		bool dies = stationary_phase ? starved_to_death(b, delta) : b.energy <= 0.0f;
 		if (!dies && until_death-- == 0) {
 			dies = true;
 			until_death = death_gap(death_chance);

@@ -117,6 +117,7 @@ class BupSim : public RefCounted {
 	};
 	std::vector<Husk> husks;
 	double husk_seconds = 0.0;
+	bool stationary_phase = false; // starving bups stop growing, shrink and die at a constant rate (see Biology.STARVE_*), instead of dying when the reserve is gone
 	void add_husk(float x, float y, float energy);
 	void advance_husks(double delta);
 	int now_minutes() const { return (int)(now_seconds / 60.0); }
@@ -230,6 +231,8 @@ public:
 	void set_limit(int bup_limit) { limit = bup_limit; }
 	void set_upkeep_scale(double scale) { upkeep_scale = scale; }
 	void set_husk_seconds(double seconds) { husk_seconds = seconds; }
+	void set_stationary_phase(bool on) { stationary_phase = on; }
+	bool starved_to_death(const Bup &b, double delta); // a starving bup's chance of dying this step, drawn
 	int husk_count() const { return (int)husks.size(); }
 	PackedFloat64Array husks_export() const; // 5 numbers each: x, y, energy, age, the next piece
 	void husks_import(const PackedFloat64Array &saved);
