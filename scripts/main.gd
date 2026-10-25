@@ -178,6 +178,8 @@ func _restart() -> void:
 	_drop_other_dishes()
 	dish.selected_id = -1
 	dish.strike(Session.free_start if free_mode else null)
+	if not free_mode and tracker.index >= 1:
+		dish.upkeep_factor = Dish.GOAL_UPKEEP_FACTOR  # (strike resets it: a restart in experiment 2 or after costs what it did)
 	_fit_camera()
 	if free_mode:
 		toolbar.set_paused(true)  # the playground starts paused so you can set the scene
@@ -851,7 +853,10 @@ func _register_dish(d: Dish) -> void:
 func add_dish(start: StartConditions) -> Dish:
 	var d := Dish.new()
 	add_child(d)
-	d.global_position = Vector2(DISH_SPACING * float(_next_dish_number - 1), 0.0)
+	var slot := 0  # (the first place no dish holds: after a restart the main dish may sit past the origin)
+	while dishes.any(func(other: Dish) -> bool: return is_equal_approx(other.global_position.x, DISH_SPACING * float(slot))):
+		slot += 1
+	d.global_position = Vector2(DISH_SPACING * float(slot), 0.0)
 	d.strike(start)
 	d.time = world_time()  # (a dish that joins is at the world's time: one clock for all)
 	for layer: int in Dish.Layer.values():
@@ -897,7 +902,7 @@ func _drop_other_dishes() -> void:
 
 func _resize_dish(new_radius: float) -> void:
 	dish.resize_to(new_radius)
-	camera.position = camera.position.limit_length(dish.radius)
+	camera.position = dish.global_position + (camera.position - dish.global_position).limit_length(dish.radius)
 
 
 ## A goal-mode experiment is saved on the way out; free mode is not saved.
@@ -994,7 +999,7 @@ func _paint_to(world: Vector2) -> void:
 ## Moves the view by `world_delta`, but never off the dish. Panning by hand takes over from following.
 func _pan_camera(world_delta: Vector2) -> void:
 	following_id = -1
-	camera.position = (camera.position + world_delta).limit_length(dish.radius)
+	camera.position = dish.global_position + (camera.position + world_delta - dish.global_position).limit_length(dish.radius)
 
 
 ## W, A, S and D move the view while held. The keys are taken by their place on the keyboard, so they are the same four

@@ -220,6 +220,12 @@ func _init() -> void:
 	sim.reset(DEFAULT_RADIUS, 1)
 
 
+## A dish that is freed gives back the buffers, shaders and pipelines its GPU simulation made on the main device.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE and gpu_world != null and gpu_world.gpu != null and gpu_world.gpu.is_main:
+		RenderingServer.call_on_render_thread(gpu_world.gpu.release)
+
+
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR  # the haze is a small texture stretched over the dish
 	set_seed(Time.get_ticks_usec())
@@ -1035,7 +1041,7 @@ func _step_plankton(delta: float) -> void:
 		var cell := plankton[i]
 		if cell.burst_at <= time:
 			if plankton_husks:
-				sim.add_plankton_husk(cell.pos - global_position, cell.units * NUTRIENT_ENERGY)
+				sim.add_plankton_husk(cell.pos, cell.units * NUTRIENT_ENERGY)
 			else:
 				field.add_cloud(cell.pos, PLANKTON_PATCH_RADIUS, cell.units * NUTRIENT_ENERGY)
 			plankton.remove_at(i)
@@ -1315,7 +1321,7 @@ func from_dict(d: Dictionary) -> bool:
 ## A block of bytes as a save holds it: its size, and the bytes compressed (zstd) and as text. A bup's record is 96 bytes and a family
 ## record 68, so a hundred thousand of each is about 14 MB raw and a few MB compressed.
 static func _pack_bytes(bytes: PackedByteArray) -> Dictionary:
-	return {"raw": bytes.size(), "z": Marshalls.raw_to_base64(bytes.compress(FileAccess.COMPRESSION_ZSTD))}
+	return {"raw": bytes.size(), "z": "" if bytes.is_empty() else Marshalls.raw_to_base64(bytes.compress(FileAccess.COMPRESSION_ZSTD))}  # (nothing to compress: base64 of an empty array is an error)
 
 
 ## What `_pack_bytes` made of these, read back from a save; null if it is not one (or does not decompress to the size it says).

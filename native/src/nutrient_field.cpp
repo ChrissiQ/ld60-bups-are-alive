@@ -105,6 +105,7 @@ void NutrientField::build(double dish_radius, int cells_across) {
 // keeps the concentration where it was, and the nutrient past the new edge is gone.
 void NutrientField::resize(double dish_radius) {
 	bool shrinking = dish_radius < radius;
+	flush_emitters(); // (reset below forgets the sources' kept-back nutrient: let it go into the field first, so it is not lost)
 	std::vector<float> old_conc = conc;
 	int old_n = n;
 	double old_spacing = spacing, old_origin = origin, old_total = grid_total();

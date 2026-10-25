@@ -727,6 +727,8 @@ void BupSim::lineage_import_bytes(const PackedByteArray &data, const PackedInt64
 		r.alive = living.count(id) > 0;
 		if (r.alive) {
 			r.died = -1;
+		} else if (r.died < 0) {
+			r.died = now_minutes(); // (alive where it was exported from, but not among these bups: it is not alive here)
 		}
 		if (id > 0) {
 			records[id] = r;

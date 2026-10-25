@@ -103,7 +103,7 @@ func _ready() -> void:
 		for row: SettingRow in [detail_row, thickness_row]:
 			row.value = row.default_value
 		husks_toggle.button_pressed = StartConditions.new().death_husks
-		plankton_husks_toggle.button_pressed = StartConditions.new().death_husks
+		plankton_husks_toggle.button_pressed = StartConditions.new().plankton_husks
 		stationary_toggle.button_pressed = StartConditions.new().stationary_phase
 		_choose_backend(StartConditions.new().sim_backend))
 	limit_row.value_changed.connect(func(v: float) -> void: _start.bup_limit = int(v); _refresh())
@@ -211,7 +211,7 @@ func _reset_to_defaults() -> void:
 		row.value = row.default_value
 	tutorial_toggle.button_pressed = StartConditions.new().tutorial
 	husks_toggle.button_pressed = StartConditions.new().death_husks
-	plankton_husks_toggle.button_pressed = StartConditions.new().death_husks
+	plankton_husks_toggle.button_pressed = StartConditions.new().plankton_husks
 	stationary_toggle.button_pressed = StartConditions.new().stationary_phase
 	_choose_backend(StartConditions.new().sim_backend)
 
