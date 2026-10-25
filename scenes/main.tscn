@@ -9,6 +9,7 @@
 [ext_resource type="Texture2D" path="res://icons/tool_nutrient.svg" id="8"]
 [ext_resource type="Texture2D" path="res://icons/tool_source.svg" id="source_icon"]
 [ext_resource type="Texture2D" path="res://icons/tool_erase.svg" id="erase_icon"]
+[ext_resource type="Texture2D" path="res://icons/tool_pipette.svg" id="pipette_icon"]
 [ext_resource type="Texture2D" path="res://icons/zoom_out.svg" id="9"]
 [ext_resource type="Texture2D" path="res://icons/zoom_in.svg" id="10"]
 [ext_resource type="Texture2D" path="res://icons/pause.svg" id="11"]
@@ -160,6 +161,12 @@ theme_type_variation = &"ToolButton"
 icon = ExtResource("plankton_icon")
 icon_alignment = 1
 
+[node name="PipetteButton" type="Button" parent="HUD/Toolbars/Toolbar/Row"]
+layout_mode = 2
+theme_type_variation = &"ToolButton"
+icon = ExtResource("pipette_icon")
+icon_alignment = 1
+
 [node name="Separator1" type="VSeparator" parent="HUD/Toolbars/Toolbar/Row"]
 layout_mode = 2
 
@@ -305,6 +312,23 @@ min_value = 50.0
 max_value = 9999.0
 step = 50.0
 value = 2000.0
+rounded = true
+
+[node name="PipetteOptions" type="Control" parent="HUD/Toolbars/ToolOptions"]
+visible = false
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+
+[node name="PipetteRadius" type="SpinBox" parent="HUD/Toolbars/ToolOptions/PipetteOptions"]
+theme_type_variation = &"CompactSpinBox"
+custom_minimum_size = Vector2(60, 30)
+layout_mode = 0
+offset_right = 60.0
+offset_bottom = 30.0
+min_value = 50.0
+max_value = 9999.0
+step = 50.0
+value = 1000.0
 rounded = true
 
 [node name="InfoPanel" type="PanelContainer" parent="HUD"]

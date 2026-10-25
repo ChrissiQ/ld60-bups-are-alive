@@ -101,6 +101,8 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("bup_ids"), &BupSim::bup_ids);
 	ClassDB::bind_method(D_METHOD("bup_info", "id"), &BupSim::bup_info);
 	ClassDB::bind_method(D_METHOD("remove_bup", "id"), &BupSim::remove_bup);
+	ClassDB::bind_method(D_METHOD("take_disc", "center", "radius"), &BupSim::take_disc);
+	ClassDB::bind_method(D_METHOD("add_state_bytes", "state", "shift"), &BupSim::add_state_bytes);
 	ClassDB::bind_method(D_METHOD("clear_bups"), &BupSim::clear_bups);
 	ClassDB::bind_method(D_METHOD("set_bup_energy", "id", "energy"), &BupSim::set_bup_energy);
 	ClassDB::bind_method(D_METHOD("set_bup_pos", "id", "pos"), &BupSim::set_bup_pos);
@@ -749,6 +751,55 @@ void BupSim::remove_bup(int64_t id) {
 		bups.erase(bups.begin() + i);
 		record_death(gone);
 	}
+}
+
+// The pipette's two halves. Taking: each bup in the disc is removed as a death (its family record is kept while anything holds it) and written out
+// as a record, with the place where it was (relative to `center`, so that the disc is a droplet when it lands in another dish).
+PackedByteArray BupSim::take_disc(const Vector2 &center, double disc_radius) {
+	std::vector<Bup> taken;
+	size_t keep = 0;
+	const double r2 = disc_radius * disc_radius;
+	for (size_t i = 0; i < bups.size(); i++) {
+		const double dx = bups[i].x - center.x, dy = bups[i].y - center.y;
+		if (dx * dx + dy * dy <= r2) {
+			taken.push_back(bups[i]);
+			record_death(bups[i]);
+		} else {
+			if (keep != i) {
+				bups[keep] = bups[i];
+			}
+			keep++;
+		}
+	}
+	bups.resize(keep);
+	std::vector<Bup> saved = bups;
+	bups = taken;
+	for (Bup &b : bups) {
+		b.x -= center.x;
+		b.y -= center.y;
+		b.px = std::numeric_limits<float>::quiet_NaN();
+		b.py = std::numeric_limits<float>::quiet_NaN();
+	}
+	PackedByteArray out = export_state_bytes();
+	bups = saved;
+	return out;
+}
+
+PackedInt64Array BupSim::add_state_bytes(const PackedByteArray &state, const Vector2 &shift) {
+	PackedInt64Array ids;
+	ERR_FAIL_COND_V_MSG(state.size() % (STATE_WORDS * 4) != 0, ids, "BupSim.add_state_bytes: not a whole number of 96-byte records");
+	const size_t count = (size_t)state.size() / (STATE_WORDS * 4);
+	const uint8_t *r = state.ptr();
+	for (size_t i = 0; i < count; i++) {
+		Bup b = bup_from_record(r + i * STATE_WORDS * 4);
+		b.id = next_id++;
+		b.x += shift.x;
+		b.y += shift.y;
+		bups.push_back(b);
+		make_record(b, -1);
+		ids.push_back(b.id);
+	}
+	return ids;
 }
 
 void BupSim::set_bup_energy(int64_t id, double energy) {

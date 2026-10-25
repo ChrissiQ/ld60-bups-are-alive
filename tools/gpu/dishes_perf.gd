@@ -29,10 +29,16 @@ func _run() -> void:
 	for i in count - 1:
 		m.add_dish(start)
 	var t0 := Time.get_ticks_msec()
+	var piped := OS.get_environment("PIPETTE") == "1"  # (PIPETTE=1: at 25 s the pipette takes the bups within 30 mm of the middle into a new dish)
 	var next := 10.0
 	while (Time.get_ticks_msec() - t0) / 1000.0 < seconds:
 		await process_frame
 		var elapsed := (Time.get_ticks_msec() - t0) / 1000.0
+		if piped and elapsed >= 25.0:
+			piped = false
+			var before: int = m.dish.population()
+			var made: Dish = m.pipette(m.dish.global_position, 30000.0)
+			print("PIPETTE on %s: %d bups before, %d left, %d moved, new dish %s" % [m.dish.backend_running(), before, m.dish.population(), made.population() if made != null else -1, str(made != null)])
 		if elapsed >= next:
 			next += 10.0
 			var line := "t=%.0fs achieved x%.0f fps %.0f" % [elapsed, m.achieved_speed, Engine.get_frames_per_second()]

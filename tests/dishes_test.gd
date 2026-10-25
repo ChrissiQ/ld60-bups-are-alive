@@ -43,6 +43,19 @@ func _run() -> void:
 	m._restart()
 	await process_frame
 	check(m.dishes.size() == 1 and m.dish == first and not m.dish_strip.visible, "a restart lets the others go")
+	# The pipette: the bups in the circle move to a new dish, the rest stay.
+	first.clear_bups()
+	for i in 10:
+		first.add_bup(first.global_position + Vector2(i * 4.0, 0.0), Genome.founder(), 30.0)
+	for i in 5:
+		first.add_bup(first.global_position + Vector2(200.0 + i, 100.0), Genome.founder(), 30.0)
+	var before := first.population()
+	var made: Dish = m.pipette(first.global_position + Vector2(18.0, 0.0), 30.0)
+	check(made != null and m.dishes.size() == 2 and m.dish == first, "the pipette makes a second dish and leaves the main view where it is")
+	check(made.population() == 10 and first.population() == 5 and before == 15, "the bups in the circle moved (%d in the new dish, %d left)" % [made.population(), first.population()])
+	var moved_id: int = made.sim.alive_ids()[0]
+	check(made.line_from_dish(moved_id) == 1, "a moved bup's line says it came from dish 1")
+	check(m.pipette(first.global_position + Vector2(5000.0, 5000.0), 30.0) == null and m.dishes.size() == 2, "a circle with no bups makes no dish")
 	m.queue_free()
 	await process_frame
 	TestUtil.finish(self, "DISHES TESTS OK")

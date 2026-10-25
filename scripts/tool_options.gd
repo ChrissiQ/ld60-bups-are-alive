@@ -14,6 +14,8 @@ extends PanelContainer
 @onready var source_rate_box: SpinBox = $SourceOptions/SourceRate
 @onready var erase_options: Control = $EraseOptions
 @onready var brush_size_box: SpinBox = $EraseOptions/BrushSize
+@onready var pipette_options: Control = $PipetteOptions
+@onready var pipette_radius_box: SpinBox = $PipetteOptions/PipetteRadius
 
 signal pick_mode_selected(mode: Dish.PickMode)  ## the select tool's choice of what to look at changed
 
@@ -22,7 +24,7 @@ var _groups: Dictionary = {}  ## tool -> the group of option controls shown for 
 
 
 func _ready() -> void:
-	_groups = {Toolbar.Tool.SELECT: select_options, Toolbar.Tool.NUTRIENT: nutrient_options, Toolbar.Tool.SOURCE: source_options, Toolbar.Tool.ERASE: erase_options}
+	_groups = {Toolbar.Tool.SELECT: select_options, Toolbar.Tool.NUTRIENT: nutrient_options, Toolbar.Tool.SOURCE: source_options, Toolbar.Tool.ERASE: erase_options, Toolbar.Tool.PIPETTE: pipette_options}
 	var picks := ButtonGroup.new()
 	_setup_pick(picks, $SelectOptions/Modes/PickAllButton, Dish.PickMode.ALL, Strings.t("tray.pick_all"))
 	_setup_pick(picks, $SelectOptions/Modes/PickBackgroundButton, Dish.PickMode.BACKGROUND, Strings.t("tray.pick_background"))
@@ -32,6 +34,7 @@ func _ready() -> void:
 	_compact(nutrient_count_box, Strings.t("tray.nutrients_per_click"))
 	_compact(source_rate_box, Strings.t("tray.nutrients_per_minute"))
 	_compact(brush_size_box, Strings.t("tray.brush_radius"))
+	_compact(pipette_radius_box, Strings.t("tray.pipette_radius"))
 	resized.connect(_align)
 	toolbar.resized.connect(_align)
 	visibility_changed.connect(_align)
@@ -65,6 +68,10 @@ func source_rate() -> float:
 
 func brush_radius() -> float:
 	return brush_size_box.value
+
+
+func pipette_radius() -> float:
+	return pipette_radius_box.value
 
 
 ## A number box in the tray: small, with its hover text on the field as well, since the field takes the hover itself.

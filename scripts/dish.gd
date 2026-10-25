@@ -307,6 +307,8 @@ func _process(delta: float) -> void:
 
 ## Everything that belongs to one run of a dish and must start fresh with a new or loaded dish.
 func _reset_runtime_state() -> void:
+	moved_out.clear()
+	founded_from.clear()
 	watched.clear()  # (the simulation was reset, so its records, and the pins on them, are gone)
 	watch_version += 1
 	clear_selection()
@@ -654,7 +656,38 @@ func rename_bup(id: int, text: String) -> void:
 ## Everything known about a bup, alive or dead, as BupSim.lineage_info (empty once its record is dropped).
 ## Dead bups keep a record while a living bup descends from them or something is pinning them.
 func lineage_info(id: int) -> Dictionary:
-	return sim.lineage_info(id)
+	var info := sim.lineage_info(id)
+	if moved_out.has(id):
+		info["moved_to"] = moved_out[id]
+	return info
+
+
+## The pipette's taking half: every bup whose centre is within `disc_radius` of the world point leaves this dish and comes back as records (relative to the
+## point, to be dropped into another dish with `add_transferred`). The dish is brought to the CPU for it.
+func take_in_disc(world_pos: Vector2, disc_radius: float) -> PackedByteArray:
+	_to_cpu_for_edit()
+	edit_count += 1
+	_render_stale = true
+	return sim.take_disc(world_pos - global_position, disc_radius)
+
+
+## The pipette's giving half: the records `take_in_disc` made come in as new bups at the middle of the dish (a droplet), founders here; `from_dish` is the number of the
+## dish they came from, so that their line can say where it began.
+func add_transferred(records: PackedByteArray, from_dish: int) -> void:
+	_to_cpu_for_edit()
+	var ids := sim.add_state_bytes(records, Vector2.ZERO)
+	for i in ids.size():
+		founded_from[ids[i]] = from_dish
+	edit_count += 1
+	_render_stale = true
+
+
+## The number of the dish this bup's line began in, when it began in another (a bup founded by the pipette, or the descendant of one), else 0.
+func line_from_dish(id: int) -> int:
+	for ancestor in sim.lineage_chain(id):
+		if founded_from.has(ancestor):
+			return founded_from[ancestor]
+	return 0
 
 
 ## The family line that led to a bup: its oldest known ancestor first, the bup itself last.
@@ -674,6 +707,8 @@ func pin_bup(id: int) -> void:
 ## The bups the player is watching, newest first (see watch_bup). Their records, and their ancestors', are kept.
 var patch_seed := 0  ## which landscape of richer and poorer patches the nutrient follows (see NUTRIENT_PATCHINESS)
 var watched: Array[int] = []
+var moved_out := {}  ## the ids of bups the pipette took out of this dish -> the number of the dish they went to (kept for the records that outlast them)
+var founded_from := {}  ## the ids of bups the pipette put into this dish -> the number of the dish they came from
 var watch_version := 0  ## bumped whenever the list changes, so its panel can rebuild only then
 
 

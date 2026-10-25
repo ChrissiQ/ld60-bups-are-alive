@@ -3,7 +3,7 @@ extends PanelContainer
 ## Top-of-screen toolbar: click tools, zoom, and simulation speed.
 ## Plain Buttons with Shortcuts and tooltips; the screen that owns it reacts to the signals.
 
-enum Tool { SELECT, PAN, NUTRIENT, SOURCE, ERASE, PLANKTON }
+enum Tool { SELECT, PAN, NUTRIENT, SOURCE, ERASE, PLANKTON, PIPETTE }
 
 signal tool_selected(tool: Tool)
 signal zoom_in_requested
@@ -17,6 +17,7 @@ signal pause_toggled(paused: bool)
 @onready var source_button: Button = $Row/SourceButton
 @onready var erase_button: Button = $Row/EraseButton
 @onready var plankton_button: Button = $Row/PlanktonButton
+@onready var pipette_button: Button = $Row/PipetteButton
 @onready var zoom_out_button: Button = $Row/ZoomOutButton
 @onready var zoom_in_button: Button = $Row/ZoomInButton
 @onready var pause_button: Button = $Row/PauseButton
@@ -37,6 +38,7 @@ func _ready() -> void:
 	_setup_tool(source_button, Tool.SOURCE, tools, Strings.t("toolbar.source"), "F", [KEY_F])
 	_setup_tool(erase_button, Tool.ERASE, tools, Strings.t("toolbar.erase"), "E", [KEY_E])
 	_setup_tool(plankton_button, Tool.PLANKTON, tools, Strings.t("toolbar.plankton"), "P", [KEY_P])
+	_setup_tool(pipette_button, Tool.PIPETTE, tools, Strings.t("toolbar.pipette"), "Q", [KEY_Q])
 
 	_setup(zoom_out_button, Strings.t("toolbar.zoom_out"), "-", [KEY_MINUS, KEY_KP_SUBTRACT])
 	zoom_out_button.pressed.connect(zoom_out_requested.emit)

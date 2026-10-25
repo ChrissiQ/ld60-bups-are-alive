@@ -21,7 +21,7 @@ const SCRIPT_DIRS := ["res://scripts", "res://ui"]
 const SETTING_ROW := "res://ui/setting_row.tscn"
 ## Widgets that stand in for SettingRow, and the few places allowed to use them.
 const BANNED_WIDGETS := ["HSlider", "VSlider", "SpinBox", "HScrollBar", "VScrollBar"]
-const WIDGET_ALLOWED := ["res://ui/setting_row.tscn", "res://scenes/main.tscn:NutrientCount", "res://scenes/main.tscn:SourceRate", "res://scenes/main.tscn:BrushSize"]  ## (the tool tray's number boxes)
+const WIDGET_ALLOWED := ["res://ui/setting_row.tscn", "res://scenes/main.tscn:NutrientCount", "res://scenes/main.tscn:SourceRate", "res://scenes/main.tscn:BrushSize", "res://scenes/main.tscn:PipetteRadius"]  ## (the tool tray's number boxes)
 ## World rendering (the dish, bups, nutrient) is art, not UI chrome, so it keeps its own colours.
 const COLOR_ALLOWED := ["res://scripts/dish.gd", "res://scripts/genome.gd"]  ## (the bups' own colours are world data too)
 ## A bup's name has exactly one source (see BupNames): panels must not build one themselves.

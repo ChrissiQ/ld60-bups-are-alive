@@ -21,6 +21,7 @@ const FIT_MARGIN := 40.0  ## screen pixels kept clear at the sides when framing 
 const TOOLBAR_CLEARANCE := 120.0  ## screen pixels kept clear above the dish for the toolbars
 const TUTORIAL_ZOOM := 6.0  ## how close the tutorial brings the camera to a bup it asks the player to click
 const TUTORIAL_BUP_PIXELS := 18.0  ## the lit square round that bup is this far out on each side
+const MAX_DISHES := 20  ## the most dishes at once (the strip holds that many)
 const DISH_SPACING := 1.0e6  ## µm between the centres of the dishes in the shared world (past the farthest the camera can see of one)
 const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) still counts as pointing at it
 
@@ -175,6 +176,7 @@ func _sync_tool_locks() -> void:
 	var locked := not _tools_unlocked()
 	for locked_tool in [Toolbar.Tool.NUTRIENT, Toolbar.Tool.SOURCE, Toolbar.Tool.ERASE, Toolbar.Tool.PLANKTON]:
 		toolbar.set_tool_locked(locked_tool, locked, Strings.t("toolbar.locked_reason"))
+	toolbar.set_tool_locked(Toolbar.Tool.PIPETTE, not free_mode, Strings.t("toolbar.locked_reason"))  # (goal mode keeps its one dish)
 
 
 ## A red ring around the window while paused, so it's never unclear why nothing is moving.
@@ -278,6 +280,9 @@ func _update_pointer() -> void:
 			dish.place_preview_pos = world
 			dish.place_preview_radius = tool_options.brush_radius()
 			dish.place_preview_erases = true
+		Toolbar.Tool.PIPETTE:
+			dish.place_preview_pos = world
+			dish.place_preview_radius = tool_options.pipette_radius()
 
 
 func _pick_slack() -> float:
@@ -318,7 +323,7 @@ func _update_info_panel() -> void:
 	if bup_id >= 0:
 		_point_stamp = []
 		name_row.show_bup(dish, bup_id, dish.selected_id == bup_id)  # a bup can be renamed once it is clicked, not just hovered
-		_set_rich(info_text, _deceased_text(dish.lineage_info(bup_id)) if dead else _info_text(alive_info), "bup %d" % bup_id)
+		_set_rich(info_text, _deceased_text(dish.lineage_info(bup_id)) if dead else _info_text(alive_info, bup_id), "bup %d" % bup_id)
 	elif source != null:
 		_point_stamp = []
 		if editing:
@@ -443,9 +448,12 @@ func _away_text(distance: float) -> String:
 	return Strings.t("panel.away", [distance]) if distance >= 0.0 else Strings.t("panel.none")
 
 
-func _info_text(b: Dictionary) -> String:
+func _info_text(b: Dictionary, id: int) -> String:
 	var text := Strings.t("panel.bup", [b["generation"], SimClock.format_minutes(b["born"]), maxi(1, roundi(b["energy"])), b["max_energy"]])  # (a living bup never reads 0)
 	text += Strings.t("panel.steering", [_steering_word(b["steering"])])
+	var from_dish := dish.line_from_dish(id)
+	if from_dish > 0:
+		text += Strings.t("panel.from_dish_line", [from_dish])
 	return text + _traits_text(b)
 
 
@@ -463,6 +471,8 @@ func _traits_text(b: Dictionary) -> String:
 
 func _deceased_text(b: Dictionary) -> String:
 	var text := Strings.t("panel.deceased", [SimClock.format_minutes(b["born"]), SimClock.format_minutes(b["died"]), b["generation"], b["max_energy"]])
+	if b.has("moved_to"):
+		text += Strings.t("panel.moved_line", [b["moved_to"]]).substr(1) + "\n"
 	return text + _traits_text(b)
 
 
@@ -480,7 +490,7 @@ func _on_tool_selected(new_tool: Toolbar.Tool) -> void:
 	match tool:
 		Toolbar.Tool.PAN:
 			Input.set_default_cursor_shape(Input.CURSOR_DRAG)
-		Toolbar.Tool.NUTRIENT, Toolbar.Tool.SOURCE, Toolbar.Tool.ERASE, Toolbar.Tool.PLANKTON:
+		Toolbar.Tool.NUTRIENT, Toolbar.Tool.SOURCE, Toolbar.Tool.ERASE, Toolbar.Tool.PLANKTON, Toolbar.Tool.PIPETTE:
 			Input.set_default_cursor_shape(Input.CURSOR_CROSS)
 		_:
 			Input.set_default_cursor_shape(Input.CURSOR_ARROW)
@@ -653,6 +663,29 @@ func _close_menu() -> void:
 
 
 ## The player chose another size for the dish (in the pause menu): the view stays inside it.
+## The pipette: every bup in the circle moves to a new dish (a droplet in the middle of a fresh dish like this one, as the player started it), and the old dish
+## goes on without them. The new dish takes its place in the strip; the main view stays. Returns the new dish, or null if there was nothing to move or no room.
+func pipette(world: Vector2, circle_radius: float) -> Dish:
+	if dishes.size() >= MAX_DISHES:
+		_show_banner(Strings.t("hud.banner_pipette_limit"), 1.5)
+		return null
+	var source := dish
+	var taken := source.take_in_disc(world, circle_radius)
+	var count := taken.size() / GpuSim.RECORD_BYTES
+	if count == 0:
+		_show_banner(Strings.t("hud.banner_pipette_empty"), 1.5)
+		return null
+	var start: StartConditions = Session.free_start.copy() if Session.free_start != null else StartConditions.new()
+	start.dish_radius = source.radius
+	start.bup_limit = source.bup_limit
+	var receiver := add_dish(start)
+	receiver.clear_bups()
+	for i in count:
+		source.moved_out[GpuSim.id_of(taken, i)] = _dish_numbers[receiver]
+	receiver.add_transferred(taken, _dish_numbers[source])
+	return receiver
+
+
 ## Takes a dish into the set: the screen hears when it dies out or its selection changes (when it is the one in the main view), and the strip gets its thumbnail.
 func _register_dish(d: Dish) -> void:
 	dishes.append(d)
@@ -848,6 +881,9 @@ func _click(world: Vector2) -> void:
 		Toolbar.Tool.ERASE:
 			if world.distance_to(dish.global_position) <= dish.radius:
 				dish.erase_nutrient(world, tool_options.brush_radius())
+		Toolbar.Tool.PIPETTE:
+			if world.distance_to(dish.global_position) <= dish.radius:
+				pipette(world, tool_options.pipette_radius())
 
 
 ## Zooms about the selected bup or source, so it stays where it is on the screen. With nothing selected, or the
