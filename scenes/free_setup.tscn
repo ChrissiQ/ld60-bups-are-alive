@@ -3,6 +3,7 @@
 [ext_resource type="Script" path="res://scripts/free_setup.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/dish.gd" id="2"]
 [ext_resource type="Texture2D" path="res://icons/reset.svg" id="4"]
+[ext_resource type="PackedScene" path="res://ui/toggle_row.tscn" id="toggle_row"]
 [ext_resource type="PackedScene" path="res://ui/setting_row.tscn" id="5"]
 
 [node name="FreeSetup" type="Control"]
@@ -93,12 +94,10 @@ label_text = "@free_setup.dish_radius"
 layout_mode = 2
 label_text = "@free_setup.bup_limit"
 
-[node name="TutorialToggle" type="Button" parent="Panel/Box/Scroll/Rows"]
+[node name="TutorialToggle" parent="Panel/Box/Scroll/Rows" instance=ExtResource("toggle_row")]
 layout_mode = 2
-theme_type_variation = &"ListButton"
-toggle_mode = true
-alignment = 0
-text = "@free_setup.tutorial_off"
+label_text = "@free_setup.tutorial_name"
+hint_text = "@free_setup.tutorial_hint"
 
 [node name="AdvancedToggle" type="Button" parent="Panel/Box/Scroll/Rows"]
 layout_mode = 2
@@ -131,12 +130,22 @@ icon_alignment = 1
 [node name="DetailRow" parent="Panel/Box/Scroll/Rows/Advanced" instance=ExtResource("5")]
 layout_mode = 2
 label_text = "@free_setup.nutrient_detail"
-label_tip = "@free_setup.detail_tip"
+
+[node name="DetailHint" type="Label" parent="Panel/Box/Scroll/Rows/Advanced"]
+layout_mode = 2
+theme_type_variation = &"Hint"
+text = "@free_setup.detail_tip"
+autowrap_mode = 3
 
 [node name="ThicknessRow" parent="Panel/Box/Scroll/Rows/Advanced" instance=ExtResource("5")]
 layout_mode = 2
 label_text = "@free_setup.medium_thickness"
-label_tip = "@free_setup.thickness_tip"
+
+[node name="ThicknessHint" type="Label" parent="Panel/Box/Scroll/Rows/Advanced"]
+layout_mode = 2
+theme_type_variation = &"Hint"
+text = "@free_setup.thickness_tip"
+autowrap_mode = 3
 
 [node name="BackendBox" type="VBoxContainer" parent="Panel/Box/Scroll/Rows/Advanced"]
 layout_mode = 2
@@ -183,27 +192,20 @@ theme_type_variation = &"Notice"
 text = "@free_setup.backend_unavailable"
 autowrap_mode = 3
 
-[node name="StationaryToggle" type="Button" parent="Panel/Box/Scroll/Rows/Advanced"]
+[node name="StationaryToggle" parent="Panel/Box/Scroll/Rows/Advanced" instance=ExtResource("toggle_row")]
 layout_mode = 2
-theme_type_variation = &"ListButton"
-toggle_mode = true
-button_pressed = true
-alignment = 0
-text = "@free_setup.stationary_on"
+label_text = "@free_setup.stationary_name"
+hint_text = "@free_setup.stationary_hint"
 
-[node name="HusksToggle" type="Button" parent="Panel/Box/Scroll/Rows/Advanced"]
+[node name="HusksToggle" parent="Panel/Box/Scroll/Rows/Advanced" instance=ExtResource("toggle_row")]
 layout_mode = 2
-theme_type_variation = &"ListButton"
-toggle_mode = true
-alignment = 0
-text = "@free_setup.husks_off"
+label_text = "@free_setup.husks_name"
+hint_text = "@free_setup.husks_hint"
 
-[node name="PlanktonHusksToggle" type="Button" parent="Panel/Box/Scroll/Rows/Advanced"]
+[node name="PlanktonHusksToggle" parent="Panel/Box/Scroll/Rows/Advanced" instance=ExtResource("toggle_row")]
 layout_mode = 2
-theme_type_variation = &"ListButton"
-toggle_mode = true
-alignment = 0
-text = "@free_setup.plankton_husks_off"
+label_text = "@free_setup.plankton_husks_name"
+hint_text = "@free_setup.plankton_husks_hint"
 
 [node name="Actions" type="HBoxContainer" parent="Panel/Box"]
 layout_mode = 2

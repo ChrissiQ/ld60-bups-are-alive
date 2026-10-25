@@ -60,7 +60,7 @@ static func raw(key: String) -> String:
 	return str(_file().get_value(section, name))
 
 
-const PROPERTIES := ["text", "tooltip_text", "placeholder_text", "title", "dialog_text", "ok_button_text", "cancel_button_text", "label_text", "label_tip"]  ## what a scene can give as "@section.name"
+const PROPERTIES := ["text", "tooltip_text", "placeholder_text", "title", "dialog_text", "ok_button_text", "cancel_button_text", "label_text", "label_tip", "hint_text"]  ## what a scene can give as "@section.name"
 
 
 ## Swaps "@section.name" for its text in `node` alone, if it is something a scene puts on screen.

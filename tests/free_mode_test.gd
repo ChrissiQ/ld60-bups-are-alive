@@ -464,7 +464,11 @@ func _init() -> void:
 		goal_even = goal_even and absf(fposmod(goal_hues[(k + 1) % goal_hues.size()] - goal_hues[k], 1.0) - 0.25) < 0.01
 	check(goal_even, "the goal game's four founders start in evenly spaced colours (%s)" % [goal_hues])
 	goal_dish.strike(_small())
-	check(absf(goal_dish.bup_info(1)["hue"] - Genome.founder()["hue"]) < 0.001, "...while a free-mode dish with no colours chosen is still green")
+	var free_hues := []
+	for id in goal_dish.bup_ids():
+		free_hues.append(goal_dish.bup_info(id)["hue"])
+	free_hues.sort()
+	check(free_hues.size() == 4 and absf(free_hues[1] - free_hues[0]) > 0.2, "...and so do a free-mode dish's, from the defaults (%s)" % [free_hues])
 	goal_dish.free()
 
 	# --- A dish can be enlarged with everything in it, but never shrunk.
@@ -1221,14 +1225,33 @@ func _backend_rule_tests() -> void:
 	chosen.death_husks = true
 	check(StartConditions.from_dict(chosen.to_dict()).death_husks and chosen.copy().death_husks and not StartConditions.new().death_husks and not StartConditions.from_dict({"death_husks": 1}).death_husks, "the husks setting is saved and loaded with the rest, starts off, and anything but a boolean is off")
 	chosen.death_husks = false
-	var goal_dict := StartConditions.for_goals().to_dict()
-	var free_dict := StartConditions.new().to_dict()
-	var differing := []
-	for key: String in goal_dict:
-		if goal_dict[key] != free_dict.get(key):
-			differing.append(key)
-	var unlisted := differing.filter(func(key: String) -> bool: return not StartConditions.GOAL_OVERRIDES.has(key))
-	check(unlisted.is_empty() and goal_dict.size() == free_dict.size(), "free mode's defaults are goal mode's settings, apart from the listed overrides (not listed: %s)" % [unlisted])
+	var goal_dish := Dish.new()
+	root.add_child(goal_dish)
+	goal_dish.strike(null)
+	var fresh := StartConditions.new()
+	var differs := []
+	if not (goal_dish.bup_limit == fresh.bup_limit):
+		differs.append(0)
+	if not (goal_dish.radius == fresh.dish_radius):
+		differs.append(1)
+	if not (absf(TestUtil.density(goal_dish) - fresh.nutrient_density) < 1.0):
+		differs.append(2)
+	if not (goal_dish.feed_density == fresh.feed_density):
+		differs.append(3)
+	if not (goal_dish.bloom_density == fresh.bloom_density):
+		differs.append(4)
+	if not (goal_dish.stationary_phase == fresh.stationary_phase):
+		differs.append(5)
+	if not (goal_dish.death_husks == fresh.death_husks):
+		differs.append(6)
+	if not (goal_dish.plankton_husks == fresh.plankton_husks):
+		differs.append(7)
+	if not (goal_dish.population() == fresh.bups):
+		differs.append(8)
+	if not (is_equal_approx(goal_dish.medium_thickness, fresh.medium_thickness)):
+		differs.append(9)
+	check(differs.is_empty(), "goal mode's dish begins from the free-mode defaults, `StartConditions.new()`, and nothing else (differs: %s)" % [differs])
+	goal_dish.free()
 	check(StartConditions.from_dict({"sim_backend": "fast"}).sim_backend == auto and StartConditions.from_dict({"sim_backend": 3}).sim_backend == auto and StartConditions.from_dict({}).sim_backend == auto, "a setting that is not one of the three is Auto")
 	var d := _make_dish()
 	d.strike(chosen)

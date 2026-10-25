@@ -185,11 +185,11 @@ func _init() -> void:
 	var setup: Node = load("res://scenes/free_setup.tscn").instantiate()
 	root.add_child(setup)
 	await process_frame
-	check(setup.tutorial_toggle.text == "Tutorial: on" and setup._start.tutorial, "free setup starts with the tutorial on")
+	check(setup.tutorial_toggle.button_pressed and setup._start.tutorial, "free setup starts with the tutorial on")
 	setup.tutorial_toggle.button_pressed = false
-	check(not setup._start.tutorial and setup.tutorial_toggle.text == "Tutorial: off", "its toggle turns the tutorial off")
+	check(not setup._start.tutorial and not setup.tutorial_toggle.button_pressed, "its toggle turns the tutorial off")
 	setup._reset_to_defaults()
-	check(setup._start.tutorial and setup.tutorial_toggle.text == "Tutorial: on", "and reset turns it back on")
+	check(setup._start.tutorial and setup.tutorial_toggle.button_pressed, "and reset turns it back on")
 	setup.queue_free()
 
 	Session.mode = Session.Mode.GOALS

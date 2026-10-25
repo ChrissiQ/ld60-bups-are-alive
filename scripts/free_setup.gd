@@ -16,7 +16,7 @@ const PLANKTON_SETTLE_SECONDS := 0.5  ## how long the settings are still before 
 @onready var rate_row: SettingRow = $Panel/Box/Scroll/Rows/RateRow
 @onready var bloom_row: SettingRow = $Panel/Box/Scroll/Rows/BloomRow
 @onready var dish_row: SettingRow = $Panel/Box/Scroll/Rows/DishRow
-@onready var tutorial_toggle: Button = $Panel/Box/Scroll/Rows/TutorialToggle  ## whether the guided tour runs when the dish starts
+@onready var tutorial_toggle: ToggleRow = $Panel/Box/Scroll/Rows/TutorialToggle  ## whether the guided tour runs when the dish starts
 @onready var advanced_toggle: Button = $Panel/Box/Scroll/Rows/AdvancedToggle
 @onready var advanced_reset: Button = $Panel/Box/Scroll/Rows/Advanced/NoteRow/AdvancedReset  ## inside the advanced options: puts them (only) back to their defaults
 @onready var advanced: VBoxContainer = $Panel/Box/Scroll/Rows/Advanced  ## options for testing the simulation itself, hidden until asked for
@@ -27,9 +27,9 @@ const PLANKTON_SETTLE_SECONDS := 0.5  ## how long the settings are still before 
 	StartConditions.BACKEND_GPU: $Panel/Box/Scroll/Rows/Advanced/BackendBox/BackendRow/OnButton,
 	StartConditions.BACKEND_CPU: $Panel/Box/Scroll/Rows/Advanced/BackendBox/BackendRow/OffButton,
 }
-@onready var stationary_toggle: Button = $Panel/Box/Scroll/Rows/Advanced/StationaryToggle  ## whether starving bups shrink and die slowly (on) or die as soon as the reserve is gone
-@onready var plankton_husks_toggle: Button = $Panel/Box/Scroll/Rows/Advanced/PlanktonHusksToggle  ## whether a plankton that dies leaves a husk that leaks its nutrient slowly
-@onready var husks_toggle: Button = $Panel/Box/Scroll/Rows/Advanced/HusksToggle  ## whether a dead bup leaves a husk that leaks its nutrient slowly
+@onready var stationary_toggle: ToggleRow = $Panel/Box/Scroll/Rows/Advanced/StationaryToggle  ## whether starving bups shrink and die slowly (on) or die as soon as the reserve is gone
+@onready var plankton_husks_toggle: ToggleRow = $Panel/Box/Scroll/Rows/Advanced/PlanktonHusksToggle  ## whether a plankton that dies leaves a husk that leaks its nutrient slowly
+@onready var husks_toggle: ToggleRow = $Panel/Box/Scroll/Rows/Advanced/HusksToggle  ## whether a dead bup leaves a husk that leaks its nutrient slowly
 @onready var backend_notice: Label = $Panel/Box/Scroll/Rows/Advanced/BackendBox/BackendNotice  ## says so when On is chosen and this machine has no GPU to use
 @onready var limit_row: SettingRow = $Panel/Box/Scroll/Rows/LimitRow
 @onready var back_button: Button = $Panel/Box/Actions/BackButton
@@ -84,22 +84,14 @@ func _ready() -> void:
 		button.set_pressed_no_signal(choice == _start.sim_backend)
 		button.pressed.connect(func() -> void: _choose_backend(choice))
 	_update_backend_notice()
-	stationary_toggle.tooltip_text = Strings.t("free_setup.stationary_tip")
 	stationary_toggle.set_pressed_no_signal(_start.stationary_phase)
-	_update_stationary_label()
-	stationary_toggle.toggled.connect(func(on: bool) -> void: _start.stationary_phase = on; _update_stationary_label(); _update_advanced_label())
-	husks_toggle.tooltip_text = Strings.t("free_setup.husks_tip")
+	stationary_toggle.toggled.connect(func(on: bool) -> void: _start.stationary_phase = on; _update_advanced_label())
 	husks_toggle.set_pressed_no_signal(_start.death_husks)
-	_update_husks_label()
-	husks_toggle.toggled.connect(func(on: bool) -> void: _start.death_husks = on; _update_husks_label(); _update_advanced_label())
-	plankton_husks_toggle.tooltip_text = Strings.t("free_setup.plankton_husks_tip")
+	husks_toggle.toggled.connect(func(on: bool) -> void: _start.death_husks = on; _update_advanced_label())
 	plankton_husks_toggle.set_pressed_no_signal(_start.plankton_husks)
-	_update_plankton_husks_label()
-	plankton_husks_toggle.toggled.connect(func(on: bool) -> void: _start.plankton_husks = on; _update_plankton_husks_label(); _update_advanced_label())
-	tutorial_toggle.tooltip_text = Strings.t("free_setup.tutorial_tip")
+	plankton_husks_toggle.toggled.connect(func(on: bool) -> void: _start.plankton_husks = on; _update_advanced_label())
 	tutorial_toggle.set_pressed_no_signal(_start.tutorial)
-	_update_tutorial_label()
-	tutorial_toggle.toggled.connect(func(on: bool) -> void: _start.tutorial = on; _update_tutorial_label())
+	tutorial_toggle.toggled.connect(func(on: bool) -> void: _start.tutorial = on)
 	advanced_toggle.pressed.connect(func() -> void:
 		advanced.visible = not advanced.visible
 		_update_advanced_label()
@@ -110,8 +102,8 @@ func _ready() -> void:
 	advanced_reset.pressed.connect(func() -> void:
 		for row: SettingRow in [detail_row, thickness_row]:
 			row.value = row.default_value
-		husks_toggle.button_pressed = false
-		plankton_husks_toggle.button_pressed = false
+		husks_toggle.button_pressed = StartConditions.new().death_husks
+		plankton_husks_toggle.button_pressed = StartConditions.new().death_husks
 		stationary_toggle.button_pressed = StartConditions.new().stationary_phase
 		_choose_backend(StartConditions.new().sim_backend))
 	limit_row.value_changed.connect(func(v: float) -> void: _start.bup_limit = int(v); _refresh())
@@ -173,22 +165,6 @@ func _update_backend_notice() -> void:
 	backend_notice.visible = _start.sim_backend == StartConditions.BACKEND_GPU and not GpuWorld.available()
 
 
-func _update_stationary_label() -> void:
-	stationary_toggle.text = Strings.t("free_setup.stationary_on" if _start.stationary_phase else "free_setup.stationary_off")
-
-
-func _update_plankton_husks_label() -> void:
-	plankton_husks_toggle.text = Strings.t("free_setup.plankton_husks_on" if _start.plankton_husks else "free_setup.plankton_husks_off")
-
-
-func _update_husks_label() -> void:
-	husks_toggle.text = Strings.t("free_setup.husks_on" if _start.death_husks else "free_setup.husks_off")
-
-
-func _update_tutorial_label() -> void:
-	tutorial_toggle.text = Strings.t("free_setup.tutorial_on" if _start.tutorial else "free_setup.tutorial_off")
-
-
 ## The advanced options' heading says whether they are open, and, so that a changed one is not forgotten while it is shut,
 ## whether any is not at its usual value.
 func _update_advanced_label() -> void:
@@ -234,8 +210,8 @@ func _reset_to_defaults() -> void:
 	for row: SettingRow in [bups_row, nutrients_row, rate_row, bloom_row, dish_row, detail_row, thickness_row, limit_row]:
 		row.value = row.default_value
 	tutorial_toggle.button_pressed = StartConditions.new().tutorial
-	husks_toggle.button_pressed = false
-	plankton_husks_toggle.button_pressed = false
+	husks_toggle.button_pressed = StartConditions.new().death_husks
+	plankton_husks_toggle.button_pressed = StartConditions.new().death_husks
 	stationary_toggle.button_pressed = StartConditions.new().stationary_phase
 	_choose_backend(StartConditions.new().sim_backend)
 

@@ -27,6 +27,7 @@ There are exactly **two clocks**: real time, and the simulation clock (playback 
 
 ## Repository conventions
 
+- **A yes/no setting is a `ToggleRow`** (`ui/toggle_row.tscn`: its name, On and Off buttons, and what it does written below, always in view), never a bare toggle button and never explanation that only a hover shows (tooltips do not wrap and run off the screen: keep them short, for names and icons). Render a new screen (a `SubViewport` holding it, saved as an image) and look at it before calling it done.
 - **Free-mode defaults are goal mode's settings.** `StartConditions.new()` holds the defaults, goal mode's dish is `StartConditions.for_goals()`, and the only differences are the listed `GOAL_OVERRIDES` (`tests/free_mode_test.gd` checks it). A feature that is on in goal mode and a toggle in free mode is on by default there, and "reset to defaults" restores `StartConditions.new()`'s value.
 - **Commit messages** are one short line in the present tense, third person ("Fixes source selection"), with no body and no attribution trailer.
 - **Secrets:** do not create, edit or delete `.env` files; reference their variables.

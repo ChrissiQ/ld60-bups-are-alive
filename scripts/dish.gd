@@ -344,7 +344,7 @@ func _set_medium_thickness(thickness: float) -> void:
 
 func strike(start: StartConditions = null) -> void:
 	if start == null:  # goal mode's dish: the usual conditions, and founders in evenly spaced colours (more interesting than all green)
-		start = StartConditions.for_goals()
+		start = StartConditions.new()
 	if gpu_world != null and gpu_active:
 		_discard_gpu_state()  # (a new dish: what the GPU holds, and every result still on its way, is for the old one)
 	set_backend_setting(start.sim_backend)

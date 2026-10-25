@@ -152,14 +152,14 @@ func _init() -> void:
 	check(adv.detail_row.slider.value == 100 and is_equal_approx(adv.thickness_row.slider.value, 25.0) and adv._start.nutrient_resolution == 100 and is_equal_approx(adv._start.medium_thickness, 25.0), "its reset puts the advanced options back to their defaults")
 	check(adv.bups_row.slider.value == 30 and adv._start.bups == 30, "...and leaves every other setting as it was")
 	check(not adv.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "...and 'changed' goes with them")
-	check(not adv.husks_toggle.button_pressed and not adv._start.death_husks and adv.husks_toggle.text == Strings.t("free_setup.husks_off"), "husks start off")
+	check(not adv.husks_toggle.button_pressed and not adv._start.death_husks, "husks start off")
 	adv.husks_toggle.button_pressed = true
-	check(adv._start.death_husks and adv.husks_toggle.text == Strings.t("free_setup.husks_on") and adv.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "turning husks on is kept, shown on the toggle and counted as a changed advanced option")
+	check(adv._start.death_husks and adv.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "turning husks on is kept, shown on the toggle and counted as a changed advanced option")
 	adv.advanced_reset.pressed.emit()
 	check(not adv._start.death_husks and not adv.husks_toggle.button_pressed, "the advanced reset turns husks off")
-	check(not adv.plankton_husks_toggle.button_pressed and not adv._start.plankton_husks and adv.plankton_husks_toggle.text == Strings.t("free_setup.plankton_husks_off"), "plankton husks start off")
+	check(not adv.plankton_husks_toggle.button_pressed and not adv._start.plankton_husks, "plankton husks start off")
 	adv.plankton_husks_toggle.button_pressed = true
-	check(adv._start.plankton_husks and adv.plankton_husks_toggle.text == Strings.t("free_setup.plankton_husks_on") and adv.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "turning plankton husks on is kept, shown and counted as a changed advanced option")
+	check(adv._start.plankton_husks and adv.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "turning plankton husks on is kept, shown and counted as a changed advanced option")
 	adv.advanced_reset.pressed.emit()
 	check(not adv._start.plankton_husks and not adv.plankton_husks_toggle.button_pressed, "the advanced reset turns them off")
 	adv.queue_free()
