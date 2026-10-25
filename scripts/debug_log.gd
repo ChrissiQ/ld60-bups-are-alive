@@ -43,6 +43,7 @@ static func report(dish: Dish, scene: Node, extra: Dictionary) -> String:
 			"medium_thickness": dish.medium_thickness,
 			"upkeep_factor": dish.upkeep_factor,
 			"death_husks": dish.death_husks,
+			"plankton_husks": dish.plankton_husks,
 			"stationary_phase": dish.stationary_phase,
 			"husks": dish.sim.husk_count(),
 			"patch_seed": dish.patch_seed,

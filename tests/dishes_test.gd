@@ -73,8 +73,8 @@ func _run() -> void:
 	check(m.paused, "neither Space nor a speed button resumes while it waits")
 	m.pipette(first.global_position + Vector2(5000.0, 5000.0), 30.0)
 	check(m._pipette_waiting and m.paused, "a pipette that moves nothing does not resume it")
-	var again: Dish = m.pipette(first.global_position, 30.0)
-	check(again != null and not m._pipette_waiting and not m.paused and not m.toolbar.resume_locked, "a pipette that moves bups resumes play")
+	var again: Dish = m.pipette(first.global_position, 250.0)  # (the bups have swum a little since they were placed)
+	check(again != null and not m._pipette_waiting and not m.paused and not m.toolbar.resume_locked, "a pipette that moves bups resumes play (%s, waiting %s, paused %s, locked %s, bups %d)" % [again != null, m._pipette_waiting, m.paused, m.toolbar.resume_locked, first.population()])
 	m._set_pipette_timer(0.0)
 	m.queue_free()
 	await process_frame

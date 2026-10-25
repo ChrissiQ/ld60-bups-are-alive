@@ -198,6 +198,13 @@ toggle_mode = true
 alignment = 0
 text = "@free_setup.husks_off"
 
+[node name="PlanktonHusksToggle" type="Button" parent="Panel/Box/Scroll/Rows/Advanced"]
+layout_mode = 2
+theme_type_variation = &"ListButton"
+toggle_mode = true
+alignment = 0
+text = "@free_setup.plankton_husks_off"
+
 [node name="Actions" type="HBoxContainer" parent="Panel/Box"]
 layout_mode = 2
 

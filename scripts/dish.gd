@@ -132,7 +132,8 @@ var _burst_clock := 0.0  ## sim seconds since the plankton were last looked over
 var death_husks := false:  ## a dead bup leaves a husk that leaks its nutrient back over Biology.HUSK_SECONDS instead of giving it back at once (see StartConditions.death_husks)
 	set(value):
 		death_husks = value
-		sim.set_husk_seconds(Biology.HUSK_SECONDS if value else 0.0)
+		sim.set_death_husks(value)
+var plankton_husks := false  ## a plankton that dies leaves a husk that leaks its nutrient back over Biology.HUSK_SECONDS instead of bursting into a cloud (see StartConditions.plankton_husks)
 var stationary_phase := false:  ## starving bups stop growing, shrink and die at a constant rate (Biology.STARVE_*) instead of dying when the reserve is gone: free mode's option, never on in goal mode (see StartConditions.stationary_phase)
 	set(value):
 		stationary_phase = value
@@ -209,6 +210,7 @@ var gpu_active := false
 
 func _init() -> void:
 	SimConstants.apply()
+	sim.set_husk_seconds(Biology.HUSK_SECONDS)
 	sim.set_limit(bup_limit)
 	sim.reset(DEFAULT_RADIUS, 1)
 
@@ -360,6 +362,7 @@ func strike(start: StartConditions = null) -> void:
 	_burst_clock = 0.0
 	upkeep_factor = 1.0
 	death_husks = start.death_husks
+	plankton_husks = start.plankton_husks
 	stationary_phase = start.stationary_phase
 	_reset_runtime_state()
 	radius = clampf(start.dish_radius, StartConditions.MIN_SIM_RADIUS, StartConditions.MAX_DISH_RADIUS)
@@ -1014,7 +1017,10 @@ func _step_plankton(delta: float) -> void:
 	for i in range(plankton.size() - 1, -1, -1):
 		var cell := plankton[i]
 		if cell.burst_at <= time:
-			field.add_cloud(cell.pos, PLANKTON_PATCH_RADIUS, cell.units * NUTRIENT_ENERGY)
+			if plankton_husks:
+				sim.add_plankton_husk(cell.pos - global_position, cell.units * NUTRIENT_ENERGY)
+			else:
+				field.add_cloud(cell.pos, PLANKTON_PATCH_RADIUS, cell.units * NUTRIENT_ENERGY)
 			plankton.remove_at(i)
 			if selected_plankton == cell:
 				selected_plankton = null
@@ -1106,6 +1112,7 @@ func to_dict() -> Dictionary:
 		"acetate": Array(acetate.values()),
 		"clouds": field.puffs_export(),
 		"death_husks": death_husks,
+		"plankton_husks": plankton_husks,
 		"stationary_phase": stationary_phase,
 		"husks": Array(sim.husks_export()),
 		"sources": saved_sources,
@@ -1248,6 +1255,7 @@ func from_dict(d: Dictionary) -> bool:
 	acetate.load_values(saved_acetate)
 	field.puffs_import(saved_clouds)
 	death_husks = d.get("death_husks") is bool and d["death_husks"]
+	plankton_husks = d.get("plankton_husks") is bool and d["plankton_husks"]
 	stationary_phase = d.get("stationary_phase") is bool and d["stationary_phase"]
 	var saved_husks := PackedFloat64Array()
 	if d.get("husks") is Array:

@@ -26,6 +26,7 @@ signal bup_limit_chosen(limit: int)
 @onready var initial_thickness: StatRow = $Initial/Box/ThicknessRow
 @onready var initial_backend: StatRow = $Initial/Box/BackendRow
 @onready var initial_stationary: StatRow = $Initial/Box/StationaryRow  ## shown when the dish was started with the usual starvation switched off
+@onready var initial_plankton_husks: StatRow = $Initial/Box/PlanktonHusksRow  ## shown when the dish was started with plankton husks
 @onready var initial_husks: StatRow = $Initial/Box/HusksRow  ## shown when the dish was started with husks
 @onready var initial_running: StatRow = $Initial/Box/RunningRow  ## where the bups are simulated right now (unlike the rest of the record, this follows the game)
 @onready var initial_limit: StatRow = $Initial/Box/LimitRow
@@ -83,6 +84,8 @@ func open(dish: Dish, free_mode: bool, started_as: StartConditions = null) -> vo
 		initial_stationary.value_text = Strings.t("pause.stationary_value")
 		initial_husks.visible = started_as.death_husks
 		initial_husks.value_text = Strings.t("pause.husks_value")
+		initial_plankton_husks.visible = started_as.plankton_husks
+		initial_plankton_husks.value_text = Strings.t("pause.husks_value")
 		initial_limit.value_text = UiText.thousands(started_as.bup_limit)
 	if _record_shown:
 		initial_running.value_text = Strings.t("pause.running_gpu" if dish.backend_running() == "gpu" else "pause.running_cpu") + (Strings.t("pause.running_auto") if dish.backend_setting == StartConditions.BACKEND_AUTO else "")

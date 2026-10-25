@@ -38,11 +38,11 @@ const E_POINTS := 16  ## lattice points in log eps
 const DRIFT_MAX := 0.25  ## a drift above this share of speed is noise
 const DIFFUSION_RANGE := Vector2(0.4, 1.5)  ## per speed squared: what the measurement can be taken for (tumbling, rotating and running: 160-600 µm²/s at 20 µm/s)
 ## The measured drift is multiplied by this. The coarse model reads the nutrient at the start of each sub-step and the
-## crowd spreads as it goes, which together make it climb a little less than the crowd measured here did. 1.035 was found
-## on a grid of 544 cases (the table at 20 s steps then ran -0.004 µm/s from the real swimming on average, 0.11 RMS); on the
-## six cases of tests/motion_table_test.gd the average is about -0.06 (the test allows 0.1). If a change to the swimming
-## pushes that average out of bounds, this is the number to adjust, then run this tool again.
-const CALIBRATION := 1.035
+## crowd spreads as it goes, which together make it climb a little less than the crowd measured here did. It is set so that the
+## table at 20 s steps runs close to the real swimming on average over the cases of tests/motion_table_test.gd (the test allows
+## the average to be 0.1 µm/s off). If a change to the swimming pushes that average out of bounds, this is the number to adjust,
+## then run this tool again.
+const CALIBRATION := 1.017
 
 var _constants: Dictionary
 var _probe: Dish

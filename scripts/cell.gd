@@ -40,7 +40,7 @@ const DETECTION_FLOOR := HALF_SATURATION / 20.0  ## concentrations below this ma
 # is changing (Berg & Purcell 1977; Mora & Wingreen 2010): the error in its estimate of the
 # change falls with the square root of the concentration and with the receptor array, which
 # grows with the sense gene. A bup with poor senses cannot resolve a shallow gradient.
-const GRADIENT_NOISE := 0.1  ## error of the estimated change at the reference concentration and range (a game choice: how noisy a founder's senses are, which is what makes the sense gene worth having; scaling it down with the stronger chemotaxis gain nearly stops sense from evolving, see memory/calibration-study)
+const GRADIENT_NOISE := 0.04  ## error of the estimated change at the reference concentration and range (a game choice: how noisy a founder's senses are, which is what makes the sense gene worth having; scaling it down with the stronger chemotaxis gain nearly stops sense from evolving, see memory/calibration-study)
 const NOISE_REFERENCE_CONC := HALF_SATURATION  ## where receptors are about half occupied, so the estimate is at its best
 
 # Chemotaxis, after Berg & Brown (1972) and Segall, Block & Berg (1986): it tumbles about once a

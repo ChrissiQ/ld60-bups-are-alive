@@ -60,6 +60,8 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_limit", "bup_limit"), &BupSim::set_limit);
 	ClassDB::bind_method(D_METHOD("set_upkeep_scale", "scale"), &BupSim::set_upkeep_scale);
 	ClassDB::bind_method(D_METHOD("set_husk_seconds", "seconds"), &BupSim::set_husk_seconds);
+	ClassDB::bind_method(D_METHOD("set_death_husks", "on"), &BupSim::set_death_husks);
+	ClassDB::bind_method(D_METHOD("add_plankton_husk", "pos", "energy"), &BupSim::add_plankton_husk);
 	ClassDB::bind_method(D_METHOD("set_stationary_phase", "on"), &BupSim::set_stationary_phase);
 	ClassDB::bind_method(D_METHOD("conjugate", "delta"), &BupSim::conjugate);
 	ClassDB::bind_method(D_METHOD("get_acetate"), &BupSim::get_acetate);
@@ -1326,7 +1328,7 @@ void BupSim::apply_events(const PackedByteArray &births, const PackedByteArray &
 			b.generation = (int)get_u32(e, 3);
 			b.mass = get_f32(e, 4);
 			record_death(b);
-			if (husk_seconds > 0.0 && get_f32(e, 7) > 0.0f) {
+			if (death_husks && get_f32(e, 7) > 0.0f) {
 				add_husk(get_f32(e, 5), get_f32(e, 6), get_f32(e, 7));
 			}
 		}
@@ -1923,7 +1925,7 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 	}
 	bups.resize(keep);
 	for (const DeathCloud &c : death_clouds) { // (after the loop: a cloud made in it would be found by the bups after it, and the clouds' lookup rebuilt for each)
-		if (husk_seconds > 0.0) {
+		if (death_husks) {
 			add_husk(c.x, c.y, c.energy);
 		} else {
 			field->add_cloud(Vector2(c.x, c.y), 0.0, c.energy);

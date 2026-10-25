@@ -37,6 +37,7 @@ func _init() -> void:
 	_check_sources()
 	_check_death_release()
 	_check_husks()
+	_check_plankton_husks()
 	_check_starvation()
 	_check_conjugation()
 	_check_reach()
@@ -204,6 +205,30 @@ func _check_acetate() -> void:
 		gone = start - d.acetate.total()
 		d.free()
 	check(gone > 0.0 and absf((bodies[1] - bodies[0]) / gone - 1.0) < 0.02, "a bup with room and no glucose takes acetate up at its yield (%.4f gone, bodies %.2f against %.2f without)" % [gone, bodies[1], bodies[0]])
+
+
+func _check_plankton_husks() -> void:
+	var d := _dish(90.0)
+	d.plankton_husks = true
+	d.bloom_density = 0.0
+	var energy := 40.0 * Dish.NUTRIENT_ENERGY
+	d.plankton.append(Plankton.new(d.global_position + Vector2(2000, 1000), 0.0, 100.0, 40.0, 0))
+	d.advance(200.0)
+	check(d.plankton.is_empty() and d.sim.husk_count() == 1 and d.field.puff_count() == 0, "a plankton that dies with husks on leaves a husk and no cloud")
+	d.advance(Biology.HUSK_SECONDS * 0.75)
+	var leaked: float = d.field.total()
+	check(leaked > 0.4 * energy and leaked < energy, "its nutrient leaks back over hours (%.0f of %.0f)" % [leaked, energy])
+	var copy := Dish.new()
+	root.add_child(copy)
+	check(copy.from_dict(TestUtil.saved(d)) and copy.plankton_husks, "the setting survives save and load")
+	var plain := _dish(90.0)
+	plain.bloom_density = 0.0
+	plain.plankton.append(Plankton.new(plain.global_position + Vector2(2000, 1000), 0.0, 100.0, 40.0, 0))
+	plain.advance(200.0)
+	check(plain.sim.husk_count() == 0 and plain.field.total() > 0.99 * energy, "with them off it bursts into a cloud at once")
+	d.free()
+	copy.free()
+	plain.free()
 
 
 func _check_conjugation() -> void:

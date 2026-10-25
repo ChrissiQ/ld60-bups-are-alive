@@ -120,7 +120,8 @@ class BupSim : public RefCounted {
 		int next;
 	};
 	std::vector<Husk> husks;
-	double husk_seconds = 0.0;
+	double husk_seconds = 0.0; // how long a husk lasts (the leak's lifetime), always set
+	bool death_husks = false; // a dead bup leaves a husk (else its nutrient is given back at once)
 	bool stationary_phase = false; // starving bups stop growing, shrink and die at a constant rate (see Biology.STARVE_*), instead of dying when the reserve is gone
 	void add_husk(float x, float y, float energy);
 	void advance_husks(double delta);
@@ -236,6 +237,8 @@ public:
 	void set_limit(int bup_limit) { limit = bup_limit; }
 	void set_upkeep_scale(double scale) { upkeep_scale = scale; }
 	void set_husk_seconds(double seconds) { husk_seconds = seconds; }
+	void set_death_husks(bool on) { death_husks = on; }
+	void add_plankton_husk(const Vector2 &pos, double energy) { add_husk((float)pos.x, (float)pos.y, (float)energy); } // a plankton that has died: its nutrient leaks like a dead bup's
 	void set_stationary_phase(bool on) { stationary_phase = on; }
 	bool starved_to_death(const Bup &b, double delta);
 	int64_t transfers = 0; // conjugation events so far (for the tools that measure how often they happen)
