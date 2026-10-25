@@ -143,7 +143,7 @@ func _run() -> void:
 	m.sim_speed = 100.0
 	for i in 20:
 		await process_frame
-	check(m._pipette_waiting and m.paused and m.toolbar.resume_locked and m.paused_label.text == "PIPETTE", "after the hours the game pauses and says PIPETTE")
+	check(m._pipette_waiting and m.paused and m.toolbar.resume_locked and m.paused_label.text == Strings.t("hud.pipette_paused"), "after the hours the game pauses and says so on the label")
 	var space := InputEventKey.new()
 	space.keycode = KEY_SPACE
 	space.pressed = true

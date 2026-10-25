@@ -233,7 +233,7 @@ func _init() -> void:
 	m.dish.remove_bup(bup)
 	await process_frame
 	await process_frame
-	check(m.dish.selected_id == bup and m.info_panel.visible and m.info_panel.theme_type_variation == &"DeceasedPanel" and m.info_text.get_parsed_text().contains("status: deceased") and m.info_text.get_parsed_text().contains("died") and not m.follow_button.visible, "when the selected bup dies its panel stays, as a deceased one (grey, status, time of death)")
+	check(m.dish.selected_id == bup and m.info_panel.visible and m.info_panel.theme_type_variation == &"DeceasedPanel" and m.info_text.get_parsed_text().contains("DECEASED") and m.info_text.get_parsed_text().contains("died") and not m.follow_button.visible, "when the selected bup dies its panel stays, as a deceased one (grey, status, time of death)")
 	check(m.name_row.swatch.visible and m.name_row.swatch.color.is_equal_approx(Genome.color_of(m.dish.lineage_info(bup))), "a deceased bup shows a small square in its colour by its name, since it can't be seen in the dish")
 	await _key(KEY_ESCAPE)
 	check(m.dish.selected_id == -1 and not m.info_panel.visible and not m.dish.has_record(bup), "Escape closes it, and the dead bup's record is dropped with nothing left to need it")
@@ -627,7 +627,7 @@ func _init() -> void:
 	check(m.dish.has_record(grandmother) and m.dish.has_record(mother), "the bups on the stack are kept when they die")
 	await _key(KEY_ESCAPE)
 	await process_frame
-	check(m.info_panel.visible and m.dish.selected_id == grandmother and m.info_text.get_parsed_text().contains("status: deceased") and m._stack.size() == 3, "Escape goes back one step: to her info, now showing she has died")
+	check(m.info_panel.visible and m.dish.selected_id == grandmother and m.info_text.get_parsed_text().contains("DECEASED") and m._stack.size() == 3, "Escape goes back one step: to her info, now showing she has died")
 	await _key(KEY_ESCAPE)
 	await process_frame
 	check(m.lineage_panel.visible and m.dish.selected_id == mother and m._stack.size() == 2, "...then to the first lineage")
