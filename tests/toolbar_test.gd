@@ -77,9 +77,17 @@ func _init() -> void:
 	var view: Vector2 = m.get_viewport_rect().size
 	var centre := view * 0.5
 
-	var dish_top: float = centre.y - m.dish.radius * m.camera.zoom.x
-	check(m.camera.zoom.x <= 1.0 and dish_top >= 80.0, "dish fits below the toolbar (top at y=%.0f, zoom %.2f)" % [dish_top, m.camera.zoom.x])
-	check(m.camera.position.is_equal_approx(m.dish.global_position), "camera starts on the dish")
+	var dish_at: Vector2 = m.get_viewport().get_canvas_transform() * m.dish.global_position
+	var dish_reach: float = m.dish.radius * m.camera.zoom.x
+	var dish_rect := Rect2(dish_at - Vector2.ONE * dish_reach, Vector2.ONE * dish_reach * 2.0)
+	var stage_rect: Rect2 = m.stage.get_global_rect()
+	check(m.camera.zoom.x <= 1.0 and stage_rect.grow(1.0).encloses(dish_rect), "the dish is framed inside the free stage (dish %s, stage %s, zoom %.2f)" % [dish_rect, stage_rect, m.camera.zoom.x])
+	for panel: Control in [m.side, m.get_node("%Rail"), m.get_node("%TopBar")]:
+		check(not panel.get_global_rect().intersects(dish_rect.grow(-1.0)), "%s does not overlap the dish" % panel.name)
+	for panel: Control in [m.side, m.get_node("%Rail"), m.get_node("%TopBar")]:
+		check(Rect2(Vector2.ZERO, view).grow(1.0).encloses(panel.get_global_rect()), "%s is inside the window (%s)" % [panel.name, panel.get_global_rect()])
+	m.camera.position = m.dish.global_position  # (the checks below click at the window's centre, at 1:1)
+	m.camera.zoom = Vector2.ONE
 	check(m.tool == Toolbar.Tool.SELECT, "default tool is select")
 	check(m.tool == m.toolbar.current_tool(), "the screen's tool and the toolbar's selection agree from the start")
 	for t in Toolbar.Tool.values():
@@ -88,17 +96,10 @@ func _init() -> void:
 	m.toolbar.select_tool(Toolbar.Tool.PAN)
 	check(m.toolbar.current_tool() == Toolbar.Tool.PAN and m.tool == Toolbar.Tool.PAN, "current_tool() follows the selection")
 	m.toolbar.select_tool(Toolbar.Tool.SELECT)
-	check(m.paused and m.pause_ring.visible and m.toolbar.pause_button.button_pressed, "free mode starts paused with the red ring")
-	var paused_label: Label = m.pause_ring.get_node("PausedLabel")
+	check(m.paused and m.pause_ring.visible and m.toolbar.pause_button.button_pressed, "free mode starts paused with the ring")
 	await process_frame
-	var win: Vector2 = m.get_viewport_rect().size
-	var label_rect: Rect2 = paused_label.get_global_rect()
-	check(paused_label.is_visible_in_tree() and paused_label.text == "PAUSED", "PAUSED shows while paused")
-	check(paused_label.get_theme_color("font_color").r > 0.8 and paused_label.get_theme_color("font_color").g < 0.3 and paused_label.get_theme_font_size("font_size") >= 40, "PAUSED is large and red")
-	check(absf(label_rect.get_center().x - win.x * 0.5) <= 1.0, "PAUSED is centred horizontally")
-	check(is_equal_approx(label_rect.end.y, win.y - 20.0), "PAUSED sits 14px inside the 6px border, like the rest of the HUD (bottom edge %.0f, window %.0f)" % [label_rect.end.y, win.y])
-	check(paused_label.mouse_filter == Control.MOUSE_FILTER_IGNORE, "PAUSED doesn't swallow clicks")
-	check(paused_label.get_theme_font("font").resource_path == "res://fonts/CommitMono-700.otf", "PAUSED is the bundled font in bold")
+	check(m.pause_ring.visible and m.pause_ring.mouse_filter == Control.MOUSE_FILTER_IGNORE, "a ring shows while paused and does not swallow clicks")
+	check(m.vitals.get_parsed_text().contains("paused"), "the top bar says paused ('%s')" % m.vitals.get_parsed_text())
 	check(_exclusive(m.toolbar) and not m.toolbar.speed_1_button.button_pressed, "free mode start: only Pause is lit")
 	var t0: float = m.dish.time
 	await create_timer(1.2).timeout
@@ -106,7 +107,6 @@ func _init() -> void:
 	check(m.dish.flash == 0.0, "paused: the opening lightning flash still fades (flash=%.2f)" % m.dish.flash)
 	m.toolbar.set_paused(false)
 	check(not m.paused and not m.pause_ring.visible, "resuming removes the ring")
-	check(not paused_label.is_visible_in_tree(), "resuming hides PAUSED too")
 	await create_timer(0.2).timeout
 	check(m.dish.time > t0, "resumed: the sim advances")
 	m.toolbar.set_paused(true)
@@ -119,21 +119,13 @@ func _init() -> void:
 	check(m.tool_options.visible and m.tool_options.nutrient_count_box.is_visible_in_tree(), "nutrient tool shows its options")
 	await process_frame
 	await process_frame
-	check(is_equal_approx(m.tool_options.size.x, m.toolbar.size.x) and is_equal_approx(m.tool_options.global_position.x, m.toolbar.global_position.x), "tray is exactly as wide as the toolbar (%.0f vs %.0f)" % [m.tool_options.size.x, m.toolbar.size.x])
-	check(is_equal_approx(m.tool_options.global_position.y, m.toolbar.global_position.y + m.toolbar.size.y), "tray touches the bottom of the toolbar, no gap")
-	var box_centre: float = m.tool_options.nutrient_count_box.global_position.x + m.tool_options.nutrient_count_box.size.x * 0.5
-	var button_centre: float = m.toolbar.nutrient_button.global_position.x + m.toolbar.nutrient_button.size.x * 0.5
-	check(absf(box_centre - button_centre) <= 1.0, "number box sits directly under the nutrient button (%.1f vs %.1f)" % [box_centre, button_centre])
+	check(stage_rect.grow(1.0).encloses(m.tool_options.get_global_rect()) and m.tool_options.get_global_rect().position.distance_to(stage_rect.position) < 1.0, "the options open at the top left of the stage, beside the tool rail")
+	check(m.tool_options.get_global_rect().end.y <= dish_rect.position.y + 1.0, "the dish clears the options (dish top %.0f, options bottom %.0f)" % [dish_rect.position.y, m.tool_options.get_global_rect().end.y])
 	check(m.tool_options.nutrient_count_box.value == 300.0, "count defaults to 300, about what a plankton releases")
 	var count_field: LineEdit = m.tool_options.nutrient_count_box.get_line_edit()
 	check(count_field.get_tooltip(Vector2.ZERO) == "Nutrients per click", "hovering the number says 'Nutrients per click' (got '%s')" % count_field.get_tooltip(Vector2.ZERO))
 	check(m.tool_options.nutrient_count_box.get_tooltip(Vector2.ZERO) == "Nutrients per click", "...and so does the box's arrow area")
-	check(m.toolbar.theme_type_variation == &"ToolbarPanelOpen", "toolbar squares its bottom corners while the tray is open")
 	check(m.tool_options.get_node_or_null("NutrientOptions/Label") == null, "no caption in the tray")
-	check(m.tool_options.global_position.y >= m.toolbar.global_position.y + m.toolbar.size.y, "options sit below the main toolbar")
-	var options_bottom: float = m.tool_options.global_position.y + m.tool_options.size.y
-	var dish_top_now: float = centre.y - m.dish.radius * m.camera.zoom.x
-	check(dish_top_now >= options_bottom, "the dish clears the options bar (dish top %.0f, bar bottom %.0f)" % [dish_top_now, options_bottom])
 	m.tool_options.nutrient_count_box.value = 99999
 	check(m.tool_options.nutrient_count() == 9999, "nutrient count caps at 9999, got %d" % m.tool_options.nutrient_count())
 	var box: SpinBox = m.tool_options.nutrient_count_box
@@ -156,9 +148,10 @@ func _init() -> void:
 	await process_frame
 	await process_frame
 	check(m.dish.nutrients_placed == 31, "dish counted 31 placed, got %d" % m.dish.nutrients_placed)
-	check(m.hud.get_parsed_text().contains("placed  31"), "the readout shows the placed count: '%s'" % m.hud.get_parsed_text().get_slice("\n", 3))
-	check(m.hud.get_theme_font("normal_font") is FontFile and m.hud.get_theme_font("normal_font").resource_path.begins_with("res://fonts/CommitMono"), "HUD text uses the bundled font")
-	for node in [m.hud, m.goal_panel, m.info_text]:
+	check(m.placed_row.value_label.text == "31" and m.placed_row.name_label.text == "Nutrient placed", "the dish card shows the placed count as a label and a value ('%s')" % m.placed_row.value_label.text)
+	check(m.colony.get_child_count() == Genome.LABELED.size() + 3, "what was placed and the colony's averages are rows of the dish card's details (%d)" % m.colony.get_child_count())
+	check(m.vitals.get_theme_font("normal_font") is FontFile and m.vitals.get_theme_font("normal_font").resource_path.begins_with("res://fonts/"), "HUD text uses the bundled font")
+	for node in [m.vitals, m.goal_text, m.info_text]:
 		check(node.mouse_filter == Control.MOUSE_FILTER_IGNORE, "%s doesn't swallow clicks" % node.name)
 
 	var before: float = TestUtil.units(m.dish)
@@ -183,7 +176,6 @@ func _init() -> void:
 	# --- Pan tool: dragging pans, clicking does nothing.
 	m.toolbar.select_tool(Toolbar.Tool.PAN)
 	check(not m.tool_options.visible and not m.tool_options.nutrient_count_box.is_visible_in_tree(), "pan tool has no options, so no number box")
-	check(m.toolbar.theme_type_variation == &"ToolbarPanel", "toolbar is a closed rounded bar again with no tray")
 	before = TestUtil.units(m.dish)
 	_click(m, centre)
 	check(is_equal_approx(TestUtil.units(m.dish), before), "click with pan tool does nothing")
@@ -252,21 +244,16 @@ func _init() -> void:
 	m.toolbar.speed_1_button.button_pressed = true
 	await process_frame
 	await process_frame
-	var readout: String = m.hud.get_parsed_text()
-	check(readout.contains("playback  x1") and not readout.contains("(x"), "readout shows 'playback  x1' on its own line and no '(x..)' after the time: '%s'" % readout.get_slice("\n", 1))
-	var time_line := ""
-	for line in readout.split("\n"):
-		if line.begins_with("time  "):
-			time_line = line
-	check(time_line != "" and not time_line.contains("x"), "the TIME line is just the time ('%s')" % time_line)
+	var readout: String = m.vitals.get_parsed_text()
+	check(readout.contains("x1") and not readout.contains("paused"), "the top bar shows the speed ('%s')" % readout)
 	m.toolbar.speed_1000_button.button_pressed = true
 	await process_frame
 	await process_frame
-	check(m.hud.get_parsed_text().contains("playback  x1,000"), "speed 1000 reads 'playback  x1,000'")
+	check(m.vitals.get_parsed_text().contains("x1,000"), "speed 1000 reads 'x1,000'")
 	m.toolbar.set_paused(true)
 	await process_frame
 	await process_frame
-	check(m.hud.get_parsed_text().contains("playback  paused") and not m.hud.get_parsed_text().contains("[PAUSED]"), "paused reads 'playback  paused'")
+	check(m.vitals.get_parsed_text().contains("paused"), "paused reads 'paused'")
 	m.toolbar.speed_1_button.button_pressed = true  # resume at normal speed
 
 	# --- Select tool: the panel follows the pointer until a bup or source is clicked.
@@ -280,37 +267,37 @@ func _init() -> void:
 	await process_frame
 	await process_frame
 	_hover_over(m, spot)
-	var point_text: String = m.info_text.get_parsed_text()
-	check(m.info_panel.visible and point_text.begins_with("NUTRIENT\nconcentration"), "hovering ground shows the nutrient there: '%s'" % point_text.replace("\n", " | "))
+	var point_text: String = m.hover_text.get_parsed_text()
+	check(m.hover_card.visible and point_text.begins_with("NUTRIENT\nconcentration"), "hovering ground shows the nutrient there: '%s'" % point_text.replace("\n", " | "))
 	check(point_text.contains("position  -70, 40") and point_text.contains("nearest bup  none") and point_text.contains("nearest source  none"), "...with its position and what is near: '%s'" % point_text.replace("\n", " | "))
 	check(not m.source_rate_row.visible and not m.delete_source_button.visible, "...and no source controls")
 	m.dish.field.reset(m.dish.radius)
 	m.dish.edit_count += 1  # (the dish is told when the medium is changed by hand, so the readout looks again)
 	_hover_over(m, spot)
-	check(m.info_text.get_parsed_text().contains("gradient  flat"), "an empty medium reads flat")
+	check(m.hover_text.get_parsed_text().contains("gradient  flat"), "an empty medium reads flat")
 	var rising := []
 	for k in m.dish.field.size * m.dish.field.size:
 		rising.append(0.02 * exp(m.dish.field.cell_centre(k).x / 100.0))
 	m.dish.field.load_values(rising)
 	m.dish.edit_count += 1
 	_hover_over(m, spot)
-	check(m.info_text.get_parsed_text().contains("rising to the E"), "a medium that rises to the right says so: '%s'" % m.info_text.get_parsed_text().replace("\n", " | "))
+	check(m.hover_text.get_parsed_text().contains("rising to the E"), "a medium that rises to the right says so: '%s'" % m.hover_text.get_parsed_text().replace("\n", " | "))
 	var near_pos := spot + Vector2(20, 0)
 	var near_bup: int = m.dish.add_bup(near_pos, Genome.founder(), 30.0)
 	m.dish.place_source(spot + Vector2(0, 60), 2.0)
 	_hover_over(m, spot)
-	check(m.info_text.get_parsed_text().contains("nearest bup  20 away") and m.info_text.get_parsed_text().contains("nearest source  60 away"), "the readout shows what is near: '%s'" % m.info_text.get_parsed_text().replace("\n", " | "))
+	check(m.hover_text.get_parsed_text().contains("nearest bup  20 away") and m.hover_text.get_parsed_text().contains("nearest source  60 away"), "the readout shows what is near: '%s'" % m.hover_text.get_parsed_text().replace("\n", " | "))
 	# Hovering a bup or a source shows that instead; clicking pins it.
 	_hover_over(m, near_pos)
-	check(m.name_row.visible and m.info_text.get_parsed_text().contains("divisions") and not m.name_row.rename_button.visible, "hovering a bup shows the bup, but can't rename it")
+	check(m.hover_card.visible and m.hover_text.get_parsed_text().contains("divisions") and not m.info_panel.visible, "hovering a bup shows the bup, but can't rename it")
 	_hover_over(m, m.dish.sources[0].pos)
-	check(m.info_text.get_parsed_text().begins_with("NUTRIENT SOURCE") and not m.source_rate_row.visible, "hovering a source shows it, read-only")
+	check(m.hover_text.get_parsed_text().begins_with("NUTRIENT SOURCE") and not m.source_rate_row.visible, "hovering a source shows it, read-only")
 	m.dish.select_at(near_pos)
 	_hover_over(m, spot)
 	check(m.name_row.visible and m.info_text.get_parsed_text().contains("divisions") and not m.info_text.get_parsed_text().contains("NUTRIENT") and m.name_row.rename_button.visible, "a clicked bup stays on the panel while the pointer moves away, and can be renamed")
 	m.dish.select_at(m.dish.global_position + Vector2(-200, -200))
 	_hover_over(m, spot)
-	check(m.dish.selected_id == -1 and m.info_text.get_parsed_text().begins_with("NUTRIENT\nconcentration"), "clicking empty ground lets go, and the panel follows the pointer again")
+	check(m.dish.selected_id == -1 and m.hover_text.get_parsed_text().begins_with("NUTRIENT\nconcentration"), "clicking empty ground lets go, and the panel follows the pointer again")
 	m.dish.remove_bup(near_bup)
 	m.dish.select_at(m.dish.global_position + Vector2(-200, -200))
 	m.dish.sources.clear()
@@ -486,19 +473,19 @@ func _init() -> void:
 	m.dish.place_source(mode_spot, 2.0)
 	await process_frame
 	await process_frame
-	var heading := func() -> String: return m.info_text.get_parsed_text().get_slice("\n", 0)
+	var heading := func() -> String: return m.hover_text.get_parsed_text().get_slice("\n", 0)
 	_hover_over(m, mode_spot)
 	check(heading.call() == "NUTRIENT SOURCE", "Select all: a source over a bup shows the source ('%s')" % heading.call())
 	picks[3].button_pressed = true
 	_hover_over(m, mode_spot)
 	check(m.dish.pick_mode == Dish.PickMode.SOURCES and heading.call() == "NUTRIENT SOURCE", "Nutrient sources: shows the source")
 	_hover_over(m, m.dish.global_position + Vector2(120, -90))
-	check(not m.info_panel.visible, "...and nothing over empty ground or a bup")
+	check(not m.hover_card.visible, "...and nothing over empty ground or a bup")
 	picks[2].button_pressed = true
 	_hover_over(m, mode_spot)
-	check(m.name_row.visible and m.info_text.get_parsed_text().contains("divisions") and m.dish.hovered_source == null, "Bups: shows the bup, not the source on top of it")
+	check(m.hover_card.visible and m.hover_text.get_parsed_text().contains("divisions") and m.dish.hovered_source == null, "Bups: shows the bup, not the source on top of it")
 	_hover_over(m, m.dish.global_position + Vector2(120, -90))
-	check(not m.info_panel.visible, "...and nothing over empty ground")
+	check(not m.hover_card.visible, "...and nothing over empty ground")
 	picks[1].button_pressed = true
 	_hover_over(m, mode_spot)
 	check(heading.call() == "NUTRIENT" and m.dish.hovered_id == -1 and m.dish.hovered_source == null, "Background: the medium's readout even over a bup and a source ('%s')" % heading.call())
@@ -528,17 +515,17 @@ func _init() -> void:
 	floater.burst_at = m.dish.time + 1.0e9  # (not within this test)
 	await process_frame
 	_hover_over(m, float_spot)
-	check(heading.call() == "PLANKTON" and m.info_text.get_parsed_text().contains("holds"), "Select all: hovering a plankton shows what it holds ('%s')" % heading.call())
-	check(not m.info_text.get_parsed_text().contains("burst"), "...and doesn't give away when it will burst")
+	check(heading.call() == "PLANKTON" and m.hover_text.get_parsed_text().contains("holds"), "Select all: hovering a plankton shows what it holds ('%s')" % heading.call())
+	check(not m.hover_text.get_parsed_text().contains("burst"), "...and doesn't give away when it will burst")
 	var over_floater: int = m.dish.add_bup(float_spot, Genome.founder(), 30.0)
 	_hover_over(m, float_spot)
-	check(m.name_row.visible and m.dish.hovered_plankton == null, "a bup over a plankton is picked first")
+	check(m.hover_text.get_parsed_text().contains("divisions") and m.dish.hovered_plankton == null, "a bup over a plankton is picked first")
 	m.dish.remove_bup(over_floater)
 	picks[Dish.PickMode.PLANKTON].button_pressed = true
 	_hover_over(m, float_spot)
 	check(m.dish.pick_mode == Dish.PickMode.PLANKTON and heading.call() == "PLANKTON", "Plankton mode: shows the plankton")
 	_hover_over(m, m.dish.global_position + Vector2(-150, 120))
-	check(not m.info_panel.visible, "...and nothing over empty ground")
+	check(not m.hover_card.visible, "...and nothing over empty ground")
 	m.dish.select_at(float_spot)
 	check(m.dish.selected_plankton == floater and m.dish.selected_id == -1 and m.dish.selected_source == null, "a click in Plankton mode picks it")
 	picks[Dish.PickMode.BUPS].button_pressed = true
@@ -566,16 +553,16 @@ func _init() -> void:
 	check(heading.call() == "NUTRIENT", "running at x1000, the medium's readout shows ('%s')" % heading.call())
 	_hover_over(m, live_source.pos)
 	check(heading.call() == "NUTRIENT SOURCE", "...and hovering a source switches the readout to it at once ('%s')" % heading.call())
-	m.info_text.set_meta("set_at", Time.get_ticks_msec())
-	var source_text: String = m.info_text.get_parsed_text()
+	m.hover_text.set_meta("set_at", Time.get_ticks_msec())
+	var source_text: String = m.hover_text.get_parsed_text()
 	live_source.emitted += 500.0
 	m._update_info_panel()
-	check(m.info_text.get_parsed_text() == source_text, "...but the same source's figures don't rewrite within the live interval")
-	m.info_text.set_meta("set_at", 0)
+	check(m.hover_text.get_parsed_text() == source_text, "...but the same source's figures don't rewrite within the live interval")
+	m.hover_text.set_meta("set_at", 0)
 	m._update_info_panel()
-	check(m.info_text.get_parsed_text() != source_text, "...and do once it has passed")
+	check(m.hover_text.get_parsed_text() != source_text, "...and do once it has passed")
 	_hover_over(m, mode_spot)
-	check(m.name_row.visible and m.info_text.get_parsed_text().contains("divisions"), "hovering a bup switches the readout to it at once")
+	check(m.hover_card.visible and m.hover_text.get_parsed_text().contains("divisions"), "hovering a bup switches the readout to it at once")
 	m.toolbar.set_paused(true)
 	m.dish.clear_bups()
 	m.dish.sources.clear()
@@ -593,7 +580,7 @@ func _init() -> void:
 	m.dish.selected_id = mother
 	await process_frame
 	await process_frame
-	check(m.lineage_button.visible and m.lineage_button.tooltip_text == "Lineage" and not m.lineage_panel.visible, "the info panel has a Lineage button; the lineage is not open yet")
+	check(m.lineage_button.visible and m.lineage_button.tooltip_text == "Lineage (L)" and not m.lineage_panel.visible, "the info panel has a Lineage button; the lineage is not open yet")
 	m.lineage_button.pressed.emit()
 	await process_frame
 	await process_frame
@@ -678,10 +665,10 @@ func _init() -> void:
 	m.dish.selected_id = watched_one
 	await process_frame
 	await process_frame
-	check(m.watch_button.visible and m.watch_button.tooltip_text == "Watch" and m.watch_button.icon == m.WATCH_ICON, "a selected bup has a Watch icon, an eye")
+	check(m.watch_button.visible and m.watch_button.tooltip_text == "Watch (O)" and m.watch_button.icon == m.WATCH_ICON, "a selected bup has a Watch icon, an eye")
 	m.watch_button.pressed.emit()
 	m._process(0.0)
-	check(m.dish.is_watched(watched_one) and m.watch_panel.visible and m.watch_button.tooltip_text == "Stop watching" and m.watch_panel.title.text == "WATCHING  1" and m.watch_button.icon == m.UNWATCH_ICON, "pressing it puts the bup on the list, which appears, and the eye is crossed out to offer taking it off again")
+	check(m.dish.is_watched(watched_one) and m.watch_panel.visible and m.watch_button.tooltip_text == "Stop watching (O)" and m.watch_panel.title.text == "Watching  1" and m.watch_button.icon == m.UNWATCH_ICON, "pressing it puts the bup on the list, which appears, and the eye is crossed out to offer taking it off again")
 	m.dish.selected_id = -1
 	m.dish.remove_bup(watched_one)
 	await process_frame
@@ -940,10 +927,8 @@ func _init() -> void:
 	g.tracker.index = 0
 	# The rate box: the feed is always there; the bloom comes with plankton, at experiment 2, and starts at none.
 	await process_frame
-	check(g.rate_panel.visible and g.feed_row.visible and g.bloom_row.visible and not g.bloom_row.slider.editable and g.bloom_row.label.tooltip_text == "Unlocks with experiment 2" and g.dish.bloom_density == 0.0, "goal 1 shows the feed control, and the bloom control faint with the reason")
-	check(g.rate_panel.position.y >= g.hud.position.y + g.hud.get_content_height(), "the rate box sits under the readout, not over it")
-	check(not g.hud.get_parsed_text().contains("UP/DOWN") and not g.hud.get_parsed_text().contains("ESC"), "the readout has no shortcut reminders")
-	check(absf(g.feed_row.label.global_position.x - g.hud.global_position.x) < 1.5 and g.rate_panel.global_position.x < g.hud.global_position.x, "the box's text lines up with the readout's, and the box itself starts further left")
+	check(g.dish_card.visible and g.feed_row.visible and g.bloom_row.visible and not g.bloom_row.slider.editable and g.bloom_row.label.tooltip_text == "Unlocks with experiment 2" and g.dish.bloom_density == 0.0, "goal 1 shows the feed control, and the bloom control faint with the reason")
+	check(not g.vitals.get_parsed_text().contains("UP/DOWN") and not g.vitals.get_parsed_text().contains("ESC"), "the top bar has no shortcut reminders")
 	g.feed_row.slider.value = 4.0
 	check(is_equal_approx(g.dish.feed_density, 4.0), "the feed control sets the dish's feed")
 	g.dish.feed_density = 0.0
@@ -982,6 +967,7 @@ func _init() -> void:
 	var layers: LayersPanel = g.layers_panel
 	check(layers.row.get_child_count() == 5 and layers.medium_button.button_pressed and layers.steering_button.button_pressed, "the layers panel has five toggles, all lit at first")
 	check(layers.bups_button.tooltip_text == "Bups (V)" and layers.medium_button.tooltip_text == "Nutrient haze (Z)", "each layer's tip names it and its key")
+	g.camera.zoom = Vector2.ONE  # (picking a plankton depends on how big it is on the screen)
 	g.dish.clear_selection()
 	g.dish.place_plankton(g.dish.global_position + Vector2(100, 100))
 	g.dish.plankton_draw_radius()

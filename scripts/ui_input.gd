@@ -8,6 +8,11 @@ static func is_escape_press(event: InputEvent) -> bool:
 	return event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE
 
 
+## Whether the event is Enter going down (a held key's repeats don't count). A box being typed in takes its own Enter first.
+static func is_accept_press(event: InputEvent) -> bool:
+	return event is InputEventKey and event.pressed and not event.echo and event.keycode in [KEY_ENTER, KEY_KP_ENTER]
+
+
 ## For a box that holds a number: focus that comes from the keyboard (Tab) selects the whole number, so typing replaces it;
 ## focus that comes from a click (the mouse button is down as the focus arrives) does not, so the click puts the caret
 ## where it landed and the mouse can select part of the number to replace only that part. (Godot's own

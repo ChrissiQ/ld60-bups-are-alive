@@ -13,19 +13,32 @@ layout_mode = 2
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="OnButton" type="Button" parent="Row"]
+[node name="AutoCheck" type="CheckBox" parent="Row"]
+visible = false
 layout_mode = 2
-theme_type_variation = &"ToolButton"
+
+[node name="Segments" type="PanelContainer" parent="Row"]
+layout_mode = 2
+theme_type_variation = &"SwitchSegments"
+
+[node name="Choices" type="HBoxContainer" parent="Row/Segments"]
+layout_mode = 2
+theme_type_variation = &"SegmentRow"
+
+[node name="OnButton" type="Button" parent="Row/Segments/Choices"]
+layout_mode = 2
+theme_type_variation = &"SwitchButton"
 toggle_mode = true
 text = "@ui.toggle_on"
 
-[node name="OffButton" type="Button" parent="Row"]
+[node name="OffButton" type="Button" parent="Row/Segments/Choices"]
 layout_mode = 2
-theme_type_variation = &"ToolButton"
+theme_type_variation = &"SwitchButton"
 toggle_mode = true
 text = "@ui.toggle_off"
 
 [node name="Hint" type="Label" parent="."]
+custom_minimum_size = Vector2(1, 0)
 layout_mode = 2
-theme_type_variation = &"Hint"
+theme_type_variation = &"Note"
 autowrap_mode = 3

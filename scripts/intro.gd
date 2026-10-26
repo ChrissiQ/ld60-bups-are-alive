@@ -16,6 +16,7 @@ const EDGE_SPACE := 0.05  ## the distance, as a share of the panel height, kept 
 @onready var body: Label = $Scroll/Page/Box/Body
 @onready var prompt: Label = $Scroll/Page/Box/Prompt
 @onready var flash: ColorRect = $Flash
+@onready var skip_button: Button = $BottomBar/SkipButton
 
 var _typed := 0.0
 var _delay := START_DELAY
@@ -32,10 +33,16 @@ var _user_scrolled := false
 
 
 func _ready() -> void:
+	UserSettings.ensure_applied()
+	UserSettings.load_once()
 	_reserve_layout()
 	scroll.gui_input.connect(_on_scroll_input)
 	prompt.modulate.a = 0.0
 	# Lightning: a hard flash, then a smaller flicker as it fades.
+	skip_button.pressed.connect(_begin)
+	if UserSettings.reduce_motion:
+		flash.modulate.a = 0.0  # (no flashes: the story just begins)
+		return
 	flash.modulate.a = 1.0
 	var tween := create_tween()
 	tween.tween_property(flash, "modulate:a", 0.0, 0.2)
@@ -47,7 +54,7 @@ func _process(delta: float) -> void:
 	if _done:
 		_rise(delta)
 		# Pulse the prompt so it reads as waiting for a key.
-		prompt.modulate.a = 0.6 + 0.4 * sin(Time.get_ticks_msec() / 350.0)
+		prompt.modulate.a = 1.0 if UserSettings.reduce_motion else 0.6 + 0.4 * sin(Time.get_ticks_msec() / 350.0)
 		return
 	if not _ready_to_type:
 		return

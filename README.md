@@ -48,7 +48,7 @@ Only the C++ needs compiling. GDScript changes take effect on the next run.
 ## Things to know
 
 - **Saves** are `save.json` (goal mode) and `free_settings.json` (free-mode setup) in Godot's user data folder; the format may change before release.
-- Font: Commit Mono (SIL Open Font License, `fonts/OFL.txt`).
+- Fonts: Inter and Commit Mono (SIL Open Font License, `fonts/OFL-Inter.txt`, `fonts/OFL.txt`).
 
 ## Contributing and license
 

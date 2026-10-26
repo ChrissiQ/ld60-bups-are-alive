@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cxeqcstefoewo"
-path="res://.godot/imported/pipette_timer.svg-7f3db15bebf08c3a43d589e503737cad.ctex"
+uid="uid://dmhy52mi6surd"
+path="res://.godot/imported/warning.svg-b033954d2064445c7f6c3060b1067f3b.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://icons/pipette_timer.svg"
-dest_files=["res://.godot/imported/pipette_timer.svg-7f3db15bebf08c3a43d589e503737cad.ctex"]
+source_file="res://icons/warning.svg"
+dest_files=["res://.godot/imported/warning.svg-b033954d2064445c7f6c3060b1067f3b.ctex"]
 
 [params]
 

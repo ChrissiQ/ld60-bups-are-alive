@@ -44,6 +44,6 @@ static func numbers(text: String) -> String:
 	var from := 0
 	for m in _number.search_all(safe):
 		out += safe.substr(from, m.get_start() - from)
-		out += "[color=#%s]%s%s%s[/color]" % [colour, group(m.get_string(1)), m.get_string(2), m.get_string(3)]
+		out += "[code][color=#%s]%s%s%s[/color][/code]" % [colour, group(m.get_string(1)), m.get_string(2), m.get_string(3)]
 		from = m.get_end()
 	return out + safe.substr(from)

@@ -1,19 +1,18 @@
 class_name ToolOptions
 extends PanelContainer
-## Options for the current click tool: a tray that opens out of the bottom of the main
-## toolbar, the same width as it. A tool without options keeps the tray closed.
-## To give another tool options: add a group under this panel and register it in `_groups`.
-## Its content lines up under that tool's toolbar button automatically.
+## Options for the current click tool: a small panel that opens at the top of the stage, beside the tool rail.
+## A tool without options keeps it closed. To give another tool options: add a group under this panel and register it in `_groups`.
 
 @export var toolbar: Toolbar  ## set in the scene; the toolbar this tray belongs to
 
 @onready var select_options: Control = $SelectOptions
+@onready var mode_name: Label = $SelectOptions/Modes/ModeName  ## says in words what a click picks (the icons are only named on hover)
 @onready var nutrient_options: Control = $NutrientOptions
-@onready var nutrient_count_box: SpinBox = $NutrientOptions/NutrientCount
+@onready var nutrient_count_box: SpinBox = $NutrientOptions/Row/NutrientCount
 @onready var source_options: Control = $SourceOptions
-@onready var source_rate_box: SpinBox = $SourceOptions/SourceRate
+@onready var source_rate_box: SpinBox = $SourceOptions/Row/SourceRate
 @onready var erase_options: Control = $EraseOptions
-@onready var brush_size_box: SpinBox = $EraseOptions/BrushSize
+@onready var brush_size_box: SpinBox = $EraseOptions/Row/BrushSize
 @onready var pipette_options: Control = $PipetteOptions
 @onready var pipette_radius_box: SpinBox = $PipetteOptions/Row/PipetteRadius
 @onready var pipette_timer_button: Button = $PipetteOptions/Row/TimerButton
@@ -27,6 +26,7 @@ var _groups: Dictionary = {}  ## tool -> the group of option controls shown for 
 
 
 func _ready() -> void:
+	minimum_size_changed.connect(reset_size.call_deferred)  # (a Control in a plain parent keeps the size it had: the panel follows its content, whichever tool's options are showing)
 	_groups = {Toolbar.Tool.SELECT: select_options, Toolbar.Tool.NUTRIENT: nutrient_options, Toolbar.Tool.SOURCE: source_options, Toolbar.Tool.ERASE: erase_options, Toolbar.Tool.PIPETTE: pipette_options}
 	var picks := ButtonGroup.new()
 	_setup_pick(picks, $SelectOptions/Modes/PickAllButton, Dish.PickMode.ALL, Strings.t("tray.pick_all"))
@@ -40,12 +40,8 @@ func _ready() -> void:
 	_compact(pipette_radius_box, Strings.t("tray.pipette_radius"))
 	_compact(pipette_hours_box, Strings.t("tray.pipette_hours"))
 	pipette_timer_button.tooltip_text = Strings.t("tray.pipette_timer")
-	pipette_timer_button.focus_mode = Control.FOCUS_NONE
 	pipette_timer_button.toggled.connect(func(_on: bool) -> void: pipette_timer_changed.emit(pipette_timer_hours()))
 	pipette_hours_box.value_changed.connect(func(_v: float) -> void: pipette_timer_changed.emit(pipette_timer_hours()))
-	resized.connect(_align)
-	toolbar.resized.connect(_align)
-	visibility_changed.connect(_align)
 
 
 func _setup_pick(group: ButtonGroup, button: Button, mode: Dish.PickMode, tip: String) -> void:
@@ -55,7 +51,10 @@ func _setup_pick(group: ButtonGroup, button: Button, mode: Dish.PickMode, tip: S
 	button.focus_mode = Control.FOCUS_NONE
 	button.toggled.connect(func(on: bool) -> void:
 		if on:
+			mode_name.text = tip
 			pick_mode_selected.emit(mode))
+	if button.button_pressed:
+		mode_name.text = tip
 
 
 ## The mode the tray starts in: whichever of its buttons the scene has pressed.
@@ -106,17 +105,4 @@ func show_for(tool: Toolbar.Tool) -> void:
 	var active: Control = _groups.get(tool)
 	if active != null:
 		active.visible = true
-		_align.call_deferred()
 	visible = active != null
-
-
-## Centres each group's content under the toolbar button of its tool.
-func _align() -> void:
-	for tool in _groups:
-		var group: Control = _groups[tool]
-		var anchor := toolbar.button_for(tool)
-		if anchor == null:
-			continue
-		var box := group.get_child(0) as Control
-		var centre_x := anchor.global_position.x + anchor.size.x * 0.5
-		box.position.x = clampf(centre_x - group.global_position.x - box.size.x * 0.5, 0.0, maxf(group.size.x - box.size.x, 0.0))  # (kept inside the tray)

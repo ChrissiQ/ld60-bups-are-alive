@@ -8,33 +8,37 @@ extends Control
 
 signal resume_requested
 signal quit_requested
+signal tour_requested  ## the guided tour was asked for again
 signal dish_radius_chosen(radius: float)
 signal bup_limit_chosen(limit: int)
 
-@onready var title: Label = $Title
-@onready var tagline: Label = $Tagline
-@onready var content: VBoxContainer = $Content
-@onready var settings: PanelContainer = $Content/Settings
+@onready var card: PanelContainer = %Card
+@onready var settings: Control = %Settings  ## the dish's size and limit (free mode)
+@onready var right: Control = %Right  ## the column of the dish: its settings and how it began (free mode)
+@onready var divider: Control = %Divider
 @onready var controls_panel: ControlsPanel = $ControlsPanel
-@onready var initial_panel: PanelContainer = $Initial  ## how the dish began, for the record (it doesn't follow later changes)
-@onready var initial_bups: StatRow = $Initial/Box/BupsRow
-@onready var initial_nutrients: StatRow = $Initial/Box/NutrientsRow
-@onready var initial_rate: StatRow = $Initial/Box/RateRow
-@onready var initial_bloom: StatRow = $Initial/Box/BloomRow
-@onready var initial_dish: StatRow = $Initial/Box/DishRow
-@onready var initial_detail: StatRow = $Initial/Box/DetailRow
-@onready var initial_thickness: StatRow = $Initial/Box/ThicknessRow
-@onready var initial_backend: StatRow = $Initial/Box/BackendRow
-@onready var initial_stationary: StatRow = $Initial/Box/StationaryRow  ## shown when the dish was started with starvation switched on
-@onready var initial_plankton_husks: StatRow = $Initial/Box/PlanktonHusksRow  ## shown when the dish was started with plankton husks
-@onready var initial_husks: StatRow = $Initial/Box/HusksRow  ## shown when the dish was started with husks
-@onready var initial_running: StatRow = $Initial/Box/RunningRow  ## where the bups are simulated right now (unlike the rest of the record, this follows the game)
-@onready var initial_limit: StatRow = $Initial/Box/LimitRow
-@onready var dish_row: SettingRow = $Content/Settings/Box/DishRow
-@onready var limit_row: SettingRow = $Content/Settings/Box/LimitRow
-@onready var resume_button: Button = $Content/Buttons/ResumeButton
-@onready var controls_button: Button = $Content/Buttons/ControlsButton
-@onready var quit_button: Button = $Content/Buttons/QuitButton
+@onready var options_panel: OptionsPanel = $OptionsPanel
+@onready var options_button: Button = %OptionsButton
+@onready var tour_button: Button = %TourButton
+@onready var initial_panel: Control = %Initial  ## how the dish began, for the record (it doesn't follow later changes)
+@onready var initial_bups: StatRow = %BupsRow
+@onready var initial_nutrients: StatRow = %NutrientsRow
+@onready var initial_rate: StatRow = %RateRow
+@onready var initial_bloom: StatRow = %BloomRow
+@onready var initial_dish: StatRow = %DishRow
+@onready var initial_detail: StatRow = %DetailRow
+@onready var initial_thickness: StatRow = %ThicknessRow
+@onready var initial_backend: StatRow = %BackendRow
+@onready var initial_stationary: StatRow = %StationaryRow  ## shown when the dish was started with starvation switched on
+@onready var initial_plankton_husks: StatRow = %PlanktonHusksRow  ## shown when the dish was started with plankton husks
+@onready var initial_husks: StatRow = %HusksRow  ## shown when the dish was started with husks
+@onready var initial_running: StatRow = %RunningRow  ## where the bups are simulated right now (unlike the rest of the record, this follows the game)
+@onready var initial_limit: StatRow = %LimitRow
+@onready var dish_row: SettingRow = %DishSettingRow
+@onready var limit_row: SettingRow = %LimitSettingRow
+@onready var resume_button: Button = %ResumeButton
+@onready var controls_button: Button = %ControlsButton
+@onready var quit_button: Button = %QuitButton
 @onready var confirm: ConfirmationDialog = $ConfirmDialog
 
 const DISH_SETTLE_SECONDS := 0.6  ## how long the dish-size slider is still before its size is taken
@@ -49,8 +53,12 @@ func _ready() -> void:
 	resume_button.pressed.connect(resume_requested.emit)
 	controls_button.pressed.connect(_show_controls.bind(true))
 	controls_panel.back_requested.connect(_show_controls.bind(false))
+	options_button.pressed.connect(_show_options.bind(true))
+	options_panel.back_requested.connect(_show_options.bind(false))
+	tour_button.pressed.connect(tour_requested.emit)
 	quit_button.pressed.connect(_on_quit_pressed)
 	confirm.confirmed.connect(quit_requested.emit)
+	confirm.about_to_popup.connect(func() -> void: confirm.get_cancel_button().grab_focus.call_deferred())  # (Stay is the default: Enter must not throw a dish away)
 	dish_row.value_changed.connect(_on_dish_row_changed)
 	limit_row.value_changed.connect(func(v: float) -> void:
 		if not _opening:
@@ -65,6 +73,8 @@ func _ready() -> void:
 func open(dish: Dish, free_mode: bool, started_as: StartConditions = null) -> void:
 	_free_mode = free_mode
 	settings.visible = free_mode
+	right.visible = free_mode
+	divider.visible = free_mode
 	_record_shown = free_mode and started_as != null
 	initial_panel.visible = _record_shown
 	if _record_shown:
@@ -124,22 +134,44 @@ func close() -> void:
 ## Shows the list of controls in place of the menu, or the menu again.
 func _show_controls(visible_now: bool) -> void:
 	controls_panel.visible = visible_now
-	content.visible = not visible_now
-	title.visible = not visible_now
-	tagline.visible = not visible_now
-	initial_panel.visible = _record_shown and not visible_now
+	options_panel.visible = false
+	_show_panel(visible_now)
 	if visible_now:
 		controls_panel.focus_back()
 	elif visible:
 		controls_button.grab_focus()
 
 
-## Escape while the controls are up goes back to the menu: true if it did that (so the menu itself stays open).
-func close_controls() -> bool:
-	if not controls_panel.visible:
-		return false
-	_show_controls(false)
-	return true
+## The controls list, straight away (the F1 key).
+func show_controls() -> void:
+	_show_controls(true)
+
+
+## Shows the options in place of the menu, or the menu again.
+func _show_options(visible_now: bool) -> void:
+	options_panel.visible = visible_now
+	controls_panel.visible = false
+	_show_panel(visible_now)
+	if visible_now:
+		options_panel.focus_back()
+	elif visible:
+		options_button.grab_focus()
+
+
+## A panel is up in place of the menu (or gone again).
+func _show_panel(up: bool) -> void:
+	card.visible = not up
+
+
+## Escape while the controls or the options are up goes back to the menu: true if it did that (so the menu itself stays open).
+func close_panel() -> bool:
+	if controls_panel.visible:
+		_show_controls(false)
+		return true
+	if options_panel.visible:
+		_show_options(false)
+		return true
+	return false
 
 
 ## Free mode is not saved, so leaving it asks first; a goal-mode experiment is saved on the way out.

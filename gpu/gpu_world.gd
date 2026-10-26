@@ -99,6 +99,8 @@ var _mirror_msec := -1000000
 var _mirror_parts := {}
 var _steps_cap := 1.0e9  ## the budget: the most steps a frame may take (see steps_for)
 var _slow_frames := 0
+var _wanted_ref := 1.0  ## the most steps a frame has asked for lately (decays slowly)
+const WANTED_REF_DECAY := 0.97  ## per call: about half a second at 60 frames a second
 var _last_advance_usec := 0
 var _last_advance_frame := -10  ## the process frame of the last steps_for
 
@@ -552,7 +554,8 @@ func steps_for(wanted: int) -> int:
 			_slow_frames = 0
 			if since < 1.05 * target:
 				_steps_cap = maxf(_steps_cap * 1.1, _steps_cap + 1.0)
-	_steps_cap = clampf(_steps_cap, 1.0, float(maxi(wanted, 1)))
+	_wanted_ref = maxf(float(wanted), _wanted_ref * WANTED_REF_DECAY)  # (the most asked for lately: with several dishes a dish is asked for a few seconds one frame and a whole frame's the next, and one small request must not take what the budget has learned down to it)
+	_steps_cap = clampf(_steps_cap, 1.0, maxf(_wanted_ref, 1.0))
 	_last_advance_usec = now
 	_last_advance_frame = frame
 	if gpu == null or not can_queue():

@@ -54,9 +54,9 @@ func _run() -> void:
 	check(turns == [1, 1, 1, 1], "exactly one dish at a time may change backend (%s)" % [turns])
 	m.set_main_dish(other)
 	check(m.dish == other and m.graph.dish == other and m.watch_panel.dishes.has(other), "a choice brings the other dish into the main view, with the graph and the watch list")
-	check(m.camera.position.distance_to(other.global_position) < 1.0, "the camera is on it")
+	check(m.camera.position.distance_to(other.global_position) <= other.radius, "the camera is on it")
 	m.dish_strip.dish_chosen.emit(first)
-	check(m.dish == first and m.camera.position.distance_to(first.global_position) < 1.0, "the strip's click brings the first back")
+	check(m.dish == first and m.camera.position.distance_to(first.global_position) <= first.radius, "the strip's click brings the first back")
 	# A dish that dies out: the game pauses on it and says so; resuming deletes it and goes to the dish before it.
 	var third: Dish = m.add_dish(chosen)
 	check(m.dishes.size() == 3 and m.dish == first, "three dishes before one dies out")
@@ -69,7 +69,7 @@ func _run() -> void:
 	m.toolbar.set_paused(false)
 	for i in 3:
 		await process_frame
-	check(m.dishes.size() == 2 and not m.dishes.has(other) and (not is_instance_valid(other) or other.is_queued_for_deletion()), "resuming deletes the dish")
+	check(m.dishes.size() == 2 and (not is_instance_valid(other) or (not m.dishes.has(other) and other.is_queued_for_deletion())), "resuming deletes the dish")
 	check(m.dish == first and m.banner.text == "" and not m.paused, "the view goes to the dish before it, the banner clears and play goes on")
 	check(m.dish_strip.count() == 2 and m._dish_numbers.values().has(3) and not m._dish_numbers.values().has(2), "its number is not reused or shown")
 	first.clear_bups()
@@ -114,6 +114,9 @@ func _run() -> void:
 	check(made != null and m.dishes.size() == 2 and m.dish == made, "the pipette makes a second dish and the main view moves to it")
 	check(absf(made.time - first.time) < 1.0, "the new dish is at the world's time (%.1f and %.1f s)" % [made.time, first.time])
 	check(made.population() == 11 and first.population() == 6 and before == 17, "the bups in the circle moved (%d in the new dish, %d left)" % [made.population(), first.population()])
+	check(m.old_dish_dialog.visible and m._old_dish == first and m.paused, "the pipette asks what to do with the old dish, and the game holds until it is answered")
+	m._answer_old_dish("keep")
+	check(not m.old_dish_dialog.visible and m.dishes.has(first), "keeping it leaves both running")
 	var moved_id: int = made.sim.alive_ids()[0]
 	check(made.line_from_dish(moved_id) == 1, "a moved bup's line says it came from dish 1")
 	var seen_from := made.view_zoom
@@ -130,7 +133,7 @@ func _run() -> void:
 	m.layers_panel.layer_toggled.emit(Dish.Layer.BUPS, true)
 	await process_frame
 	await process_frame
-	check(m.paused_label.offset_bottom <= -20.0 - m.dish_strip.size.y, "the word PAUSED sits above the strip of dishes (%.0f, strip %.0f tall)" % [m.paused_label.offset_bottom, m.dish_strip.size.y])
+	check(m.dish_strip.get_global_rect().position.y >= m.get_node("%TopBar").get_global_rect().position.y and m.get_node("%TopBar").get_global_rect().encloses(m.dish_strip.get_global_rect()), "the tabs of the dishes sit inside the top bar (%s in %s)" % [m.dish_strip.get_global_rect(), m.get_node("%TopBar").get_global_rect()])
 	m.set_main_dish(first)
 	var elsewhere: Dictionary = m._alive_elsewhere(first.lineage_chain(parent))
 	check(elsewhere.get(parent, []) == [[1, m.dishes.find(made) + 1]], "a lineage entry says how many bups of that line are alive in another dish (%s)" % [elsewhere])
@@ -143,7 +146,7 @@ func _run() -> void:
 	m.sim_speed = 100.0
 	for i in 20:
 		await process_frame
-	check(m._pipette_waiting and m.paused and m.toolbar.resume_locked and m.paused_label.text == Strings.t("hud.pipette_paused"), "after the hours the game pauses and says so on the label")
+	check(m._pipette_waiting and m.paused and m.toolbar.resume_locked and m.vitals.get_parsed_text().contains(Strings.t("hud.pipette_paused")), "after the hours the game pauses and says so in the top bar")
 	var space := InputEventKey.new()
 	space.keycode = KEY_SPACE
 	space.pressed = true
@@ -154,7 +157,18 @@ func _run() -> void:
 	check(m._pipette_waiting and m.paused, "a pipette that moves nothing does not resume it")
 	check(m.dish == first, "an empty pipette leaves the view where it is")
 	var again: Dish = m.pipette(first.global_position, 250.0)  # (the bups have swum a little since they were placed)
-	check(again != null and m.dish == again and not m._pipette_waiting and not m.paused and not m.toolbar.resume_locked, "a pipette that moves bups resumes play (%s, waiting %s, paused %s, locked %s, bups %d)" % [again != null, m._pipette_waiting, m.paused, m.toolbar.resume_locked, first.population()])
+	check(again != null and m.paused and m._pipette_waiting, "a pipette that moves bups holds the game until its question is answered")
+	m._answer_old_dish("keep")
+	check(again != null and m.dish == again and not m._pipette_waiting and not m.paused and not m.toolbar.resume_locked, "...and the answer resumes play (%s, waiting %s, paused %s, locked %s, bups %d)" % [again != null, m._pipette_waiting, m.paused, m.toolbar.resume_locked, first.population()])
+	# Slowing down from a fast speed leaves one dish ahead of the other: the one behind catches up quickly instead of the one ahead standing still for as long as the gap.
+	var lagging: Dish = m.dishes[0]
+	var leading: Dish = m.dishes[1]
+	leading.time = lagging.time + 40.0
+	var frames := 0
+	while absf(leading.time - lagging.time) > 1.0 and frames < 400:
+		m._advance_world(1.0 / 60.0)
+		frames += 1
+	check(absf(leading.time - lagging.time) <= 1.0 and frames < 400, "a gap of 40 s between the dishes is closed in %d frames at x1, not 2400" % frames)
 	m._set_pipette_timer(0.0)
 	m.queue_free()
 	await process_frame

@@ -8,9 +8,11 @@ extends Control
 @onready var random_button: Button = $Panel/Box/Tools/RandomButton
 @onready var spread_button: Button = $Panel/Box/Tools/SpreadButton
 @onready var names_button: Button = $Panel/Box/Tools/NamesButton
-@onready var reset_button: Button = $Panel/Box/Header/ResetButton
+@onready var reset_button: Button = $Panel/Box/Actions/ResetButton
 @onready var back_button: Button = $Panel/Box/Actions/BackButton
 @onready var start_button: Button = $Panel/Box/Actions/StartButton
+
+const BOTTOM_CLEARANCE := 24.0  ## screen pixels kept clear under the panel
 
 var _start: StartConditions  ## working copy; only committed on START
 var _names: Array[LineEdit] = []
@@ -18,6 +20,7 @@ var _colors: Array[ColorPickerButton] = []
 
 
 func _ready() -> void:
+	UserSettings.ensure_applied()
 	_start = Session.free_start.copy()
 	for i in _start.bups:
 		_add_row(i)
@@ -29,6 +32,22 @@ func _ready() -> void:
 	start_button.pressed.connect(_start_game)
 	if not _names.is_empty():
 		_names[0].grab_focus()
+	get_viewport().size_changed.connect(_fit_scroll)
+	_fit_scroll.call_deferred()
+
+
+## The panel starts a little under the title, and its list takes the height it needs, up to what is left of the screen.
+func _fit_scroll() -> void:
+	await get_tree().process_frame
+	if not is_inside_tree():
+		return
+	var panel: PanelContainer = $Panel
+	var scroll: ScrollContainer = $Panel/Box/Scroll
+	panel.offset_top = $Heading.position.y + $Heading.size.y + 14.0
+	scroll.custom_minimum_size.y = 0.0
+	var chrome := panel.get_combined_minimum_size().y
+	var room := get_viewport_rect().size.y - panel.offset_top - BOTTOM_CLEARANCE - chrome
+	scroll.custom_minimum_size.y = clampf(list.get_combined_minimum_size().y, 0.0, maxf(room, 120.0))
 
 
 func _add_row(index: int) -> void:
@@ -109,6 +128,8 @@ func _collect() -> Array:
 func _unhandled_input(event: InputEvent) -> void:
 	if UiInput.is_escape_press(event):
 		_back()
+	elif UiInput.is_accept_press(event):
+		_start_game()
 
 
 ## Keeps what the rows hold with the starting conditions (so it is there at the next launch).

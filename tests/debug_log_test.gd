@@ -62,7 +62,10 @@ func _init() -> void:
 	check(_logs().size() == 1, "F12 writes one log (%d)" % _logs().size())
 	check(hotkey.notice.visible and hotkey.notice.text == "Debug info logged", "and then says so")
 	check(not hotkey._logging, "and is ready for the next press")
-	hotkey._process(hotkey.NOTICE_SECONDS + 0.1)
+	hotkey._process(hotkey.NOTICE_SECONDS + 5.0)
+	check(hotkey.notice.visible, "a long frame does not use the notice up (the log of a big dish takes seconds to write)")
+	hotkey._notice_until = Time.get_ticks_msec() - 1  # (the few seconds are up)
+	hotkey._process(0.0)
 	check(not hotkey.notice.visible, "the notice goes after a few seconds")
 	var first: String = _logs()[0]
 	var kept: Variant = JSON.parse_string(FileAccess.get_file_as_string(DebugLog.directory.path_join(first)))

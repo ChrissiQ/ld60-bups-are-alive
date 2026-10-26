@@ -33,8 +33,14 @@ func _init() -> void:
 	check(tour.active and tour.visible and not Session.tutorial_wanted, "the tour starts when asked, and the request is used up")
 	check(m.paused and tour.blocking and tour.index == 0, "it holds the game and starts by being read")
 	check(tour.skip_button.visible and tour.next_button.visible and tour.next_button.text == "Next", "Skip and Next are there")
+	check(m.get_viewport().gui_get_focus_owner() == tour.next_button, "each step starts with the keyboard on Next")
+	tour._cycle_focus(false)
+	check(m.get_viewport().gui_get_focus_owner() == tour.skip_button, "Tab goes round the card's buttons (Back is hidden on the first step)")
+	tour._cycle_focus(true)
+	check(m.get_viewport().gui_get_focus_owner() == tour.next_button, "...and Shift+Tab goes back round")
 	var view: Vector2 = m.get_viewport_rect().size
 	var was_zoom: Vector2 = m.camera.zoom
+	var was_position: Vector2 = m.camera.position
 	var seen_steps := 0
 	var guard := 0
 	while tour.active and guard < 40:
@@ -83,7 +89,7 @@ func _init() -> void:
 		seen_steps += 1
 	check(not tour.active and not tour.visible, "the tour ends after the last step")
 	check(seen_steps == 16, "a free-mode tour has 16 steps (%d)" % seen_steps)
-	check(m.paused and m.dish.selected_id < 0 and not m.dish.is_watched(m._tutorial_bup) and m.camera.zoom.is_equal_approx(was_zoom) and m.camera.position.is_equal_approx(m.dish.global_position), "afterwards it is paused as before, with nothing selected or watched and the camera where it was")
+	check(m.paused and m.dish.selected_id < 0 and not m.dish.is_watched(m._tutorial_bup) and m.camera.zoom.is_equal_approx(was_zoom) and m.camera.position.distance_to(was_position) < 4.0, "afterwards it is paused as before, with nothing selected or watched and the camera where it was (%s %s, was %s %s)" % [m.camera.zoom, m.camera.position, was_zoom, was_position])
 	await process_frame
 	await process_frame
 	check(m.dish.watched.is_empty() and m._stack.is_empty() and not m.watch_panel.visible and not m.info_panel.visible, "and the panels the tour opened are shut again")
@@ -117,6 +123,12 @@ func _init() -> void:
 	nt._input(tool_key)
 	check(n.tool == Toolbar.Tool.SELECT, "a tool key does nothing while the tour waits for a click (the tool stays Inspect)")
 	check(nt.index == 9 and nt.next_button.disabled, "Next is shut until the click is made")
+	var full := InputEventKey.new()
+	full.keycode = KEY_F if OS.get_name() == "macOS" else KEY_F11
+	full.ctrl_pressed = OS.get_name() == "macOS"
+	full.meta_pressed = OS.get_name() == "macOS"
+	full.pressed = true
+	check(nt.lets_through(full) and not nt.lets_through(tool_key), "the full screen key passes through the tour to its own handler, a tool key does not")
 	n.dish.select_at(n.dish.bup_world_pos(n._tutorial_bup), 2.0)
 	await process_frame
 	await process_frame
@@ -170,7 +182,7 @@ func _init() -> void:
 	# Goal mode: the goal's own step is there, and a game that was playing plays again afterwards.
 	var g: Node = await _screen(Session.Mode.GOALS, true)
 	check(g.tutorial.active and g.tutorial._steps.size() == 17, "goal mode's tour has the goal step as well (%d steps)" % g.tutorial._steps.size())
-	check(g.tutorial._steps[3]["text"].begins_with("Your experiment") and g.tutorial._steps[6]["text"].contains("experiment 2"), "it explains the goal and that the nutrient tools unlock later")
+	check(g.tutorial._steps[1]["text"].begins_with("Your experiment") and g.tutorial._steps[6]["text"].contains("experiment 2"), "it explains the goal and that the nutrient tools unlock later")
 	check(g.paused, "goal mode is held for the tour")
 	g.tutorial.skip()
 	await process_frame

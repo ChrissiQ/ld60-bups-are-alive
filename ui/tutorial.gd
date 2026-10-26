@@ -47,9 +47,6 @@ func _ready() -> void:
 	skip_button.text = Strings.t("tutorial.skip")
 	back_button.text = Strings.t("tutorial.back")
 	waiting_label.text = Strings.t("tutorial.waiting")
-	skip_button.focus_mode = Control.FOCUS_NONE
-	next_button.focus_mode = Control.FOCUS_NONE
-	back_button.focus_mode = Control.FOCUS_NONE
 
 
 func start(steps: Array[Dictionary]) -> void:
@@ -91,6 +88,8 @@ func skip() -> void:
 
 
 func _close(completed: bool) -> void:
+	if get_viewport() != null:
+		get_viewport().gui_release_focus()
 	active = false
 	blocking = false
 	visible = false
@@ -121,6 +120,7 @@ func _show_step(i: int) -> void:
 	next_button.disabled = not _was_satisfied
 	next_button.text = Strings.t("tutorial.done" if i == _steps.size() - 1 else "tutorial.next")
 	_layout()
+	_focus_default()
 
 
 func _process(_delta: float) -> void:
@@ -135,11 +135,24 @@ func _process(_delta: float) -> void:
 	_layout()  # (what is lit can move: the window changes shape, a panel appears)
 
 
+## The keys the tour leaves to the rest of the game: the debug log and full screen are taken from the tour too.
+func lets_through(event: InputEventKey) -> bool:
+	return event.keycode == KEY_F12 or UserSettings.is_fullscreen_key(event)
+
+
 func _input(event: InputEvent) -> void:
 	if not active or not (event is InputEventKey) or not event.pressed or event.echo:
 		return
-	if event.keycode == KEY_F12:
-		return  # (the debug log is taken from the tour too)
+	if lets_through(event):
+		return
+	if event.keycode == KEY_TAB:
+		_cycle_focus(event.shift_pressed)
+		get_viewport().set_input_as_handled()
+		return
+	if event.keycode in [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE] and _card_button_focused():
+		(get_viewport().gui_get_focus_owner() as Button).pressed.emit()  # (the button that has the keyboard is the one pressed: Skip, Back or Next)
+		get_viewport().set_input_as_handled()
+		return
 	if event.keycode == KEY_ESCAPE and _steps[index].get("escape_passes", false):
 		return  # (the step asks for something Escape does in the game)
 	if event.keycode == KEY_ESCAPE:
@@ -149,6 +162,38 @@ func _input(event: InputEvent) -> void:
 	elif event.keycode == KEY_LEFT:
 		back()
 	get_viewport().set_input_as_handled()  # (none of the game's shortcuts act behind the tour: a tool key would spoil the step)
+
+
+## The card's buttons the keyboard can reach now (Back is hidden on the first step; Next is dimmed while the step still asks for something).
+func _focusable_buttons() -> Array[Button]:
+	var out: Array[Button] = []
+	for button: Button in [skip_button, back_button, next_button]:
+		if button.is_visible_in_tree() and not button.disabled:
+			out.append(button)
+	return out
+
+
+func _card_button_focused() -> bool:
+	var owner_control := get_viewport().gui_get_focus_owner()
+	return owner_control != null and owner_control in [skip_button, back_button, next_button]
+
+
+## Tab goes round the card's buttons and stays on the card (the tour is modal: nothing behind it can be reached).
+func _cycle_focus(backwards: bool) -> void:
+	var buttons := _focusable_buttons()
+	if buttons.is_empty():
+		return
+	var at := buttons.find(get_viewport().gui_get_focus_owner())
+	var to := (at + (-1 if backwards else 1) + buttons.size()) % buttons.size() if at >= 0 else (buttons.size() - 1 if backwards else 0)
+	buttons[to].grab_focus()
+
+
+## Each step starts with the keyboard on Next (or on Skip while the step is waiting for something).
+func _focus_default() -> void:
+	if not next_button.disabled and next_button.is_visible_in_tree():
+		next_button.grab_focus()
+	elif skip_button.is_visible_in_tree():
+		skip_button.grab_focus()
 
 
 ## The lit part of the screen for this step, or an empty Rect2 when the step lights nothing.

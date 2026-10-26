@@ -6,6 +6,8 @@ extends RefCounted
 ##     Strings.t("hud.paused")                     # "PAUSED"
 ##     Strings.t("goals.living_status", [412, 1000])  # a text with numbers in it: the file holds the %d / %s / %.0f
 ##
+## A {action} in a text (such as {pause} or {follow}) is filled with that action's key as the player has it (see KeyBindings).
+##
 ## In a scene, give a node's text (or tooltip, dialog title...) as "@section.name"; the TextSweep autoload swaps in the
 ## text as each node comes into the game, before its own `_ready`, so a script needs to do nothing.
 ##
@@ -37,14 +39,14 @@ static func _file() -> ConfigFile:
 static func t(key: String, args: Array = []) -> String:
 	var text := raw(key)
 	if args.is_empty():
-		return text.replace("%%", "%")  # (as in a text with numbers, where the % operator does it)
+		return KeyBindings.fill(text.replace("%%", "%"))  # (as in a text with numbers, where the % operator does it)
 	if not _places.has(text):
 		_places[text] = count_places(text)
 	var places: int = _places[text]
 	if places != args.size():
 		push_error("The text '%s' has %d places for numbers but was given %d" % [key, places, args.size()])
 		return text
-	return text % args
+	return KeyBindings.fill(text % args)
 
 
 ## The text as written in the file, places and all (the key itself if there is none).
@@ -60,7 +62,7 @@ static func raw(key: String) -> String:
 	return str(_file().get_value(section, name))
 
 
-const PROPERTIES := ["text", "tooltip_text", "placeholder_text", "title", "dialog_text", "ok_button_text", "cancel_button_text", "label_text", "label_tip", "hint_text"]  ## what a scene can give as "@section.name"
+const PROPERTIES := ["text", "tooltip_text", "placeholder_text", "title", "dialog_text", "ok_button_text", "cancel_button_text", "label_text", "label_tip", "hint_text", "auto_text"]  ## what a scene can give as "@section.name"
 
 
 ## Swaps "@section.name" for its text in `node` alone, if it is something a scene puts on screen.

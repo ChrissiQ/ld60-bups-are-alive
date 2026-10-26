@@ -1,137 +1,62 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene format=3]
 
 [ext_resource type="Script" path="res://ui/controls_panel.gd" id="1"]
 
 [node name="ControlsPanel" type="PanelContainer"]
-script = ExtResource("1")
 visible = false
 layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -330.0
-offset_top = -230.0
-offset_right = 330.0
-offset_bottom = 230.0
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 40.0
+offset_top = 24.0
+offset_right = -40.0
+offset_bottom = -24.0
 grow_horizontal = 2
 grow_vertical = 2
+script = ExtResource("1")
 
 [node name="Box" type="VBoxContainer" parent="."]
-theme_type_variation = &"RoomyStack"
 layout_mode = 2
+theme_type_variation = &"RoomyStack"
 
 [node name="Heading" type="Label" parent="Box"]
-theme_type_variation = &"Heading"
 layout_mode = 2
+theme_type_variation = &"Heading"
 text = "@menu.controls_title"
 horizontal_alignment = 1
 
-[node name="Keys" type="GridContainer" parent="Box"]
+[node name="Intro" type="Label" parent="Box"]
 layout_mode = 2
-columns = 2
+theme_type_variation = &"Note"
+text = "@keys.intro"
+horizontal_alignment = 1
 
-[node name="Key1" type="Label" parent="Box/Keys"]
+[node name="Scroll" type="ScrollContainer" parent="Box"]
 layout_mode = 2
-theme_type_variation = &"Bright"
-text = "@menu.controls_key_1"
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
 
-[node name="Desc1" type="Label" parent="Box/Keys"]
+[node name="Keys" type="GridContainer" parent="Box/Scroll"]
 layout_mode = 2
-text = "@menu.controls_text_1"
+size_flags_horizontal = 3
+columns = 4
 
-[node name="Key2" type="Label" parent="Box/Keys"]
+[node name="Message" type="Label" parent="Box"]
 layout_mode = 2
-theme_type_variation = &"Bright"
-text = "@menu.controls_key_2"
+theme_type_variation = &"Accent"
+horizontal_alignment = 1
 
-[node name="Desc2" type="Label" parent="Box/Keys"]
+[node name="Actions" type="HBoxContainer" parent="Box"]
 layout_mode = 2
-text = "@menu.controls_text_2"
 
-[node name="Key3" type="Label" parent="Box/Keys"]
+[node name="ResetButton" type="Button" parent="Box/Actions"]
 layout_mode = 2
-theme_type_variation = &"Bright"
-text = "@menu.controls_key_3"
+theme_type_variation = &"SmallButton"
+text = "@keys.reset"
 
-[node name="Desc3" type="Label" parent="Box/Keys"]
-layout_mode = 2
-text = "@menu.controls_text_3"
-
-[node name="Key4" type="Label" parent="Box/Keys"]
-layout_mode = 2
-theme_type_variation = &"Bright"
-text = "@menu.controls_key_4"
-
-[node name="Desc4" type="Label" parent="Box/Keys"]
-layout_mode = 2
-text = "@menu.controls_text_4"
-
-[node name="Key5" type="Label" parent="Box/Keys"]
-layout_mode = 2
-theme_type_variation = &"Bright"
-text = "@menu.controls_key_5"
-
-[node name="Desc5" type="Label" parent="Box/Keys"]
-layout_mode = 2
-text = "@menu.controls_text_5"
-
-[node name="Key6" type="Label" parent="Box/Keys"]
-layout_mode = 2
-theme_type_variation = &"Bright"
-text = "@menu.controls_key_6"
-
-[node name="Desc6" type="Label" parent="Box/Keys"]
-layout_mode = 2
-text = "@menu.controls_text_6"
-
-[node name="Key7" type="Label" parent="Box/Keys"]
-layout_mode = 2
-theme_type_variation = &"Bright"
-text = "@menu.controls_key_7"
-
-[node name="Desc7" type="Label" parent="Box/Keys"]
-layout_mode = 2
-text = "@menu.controls_text_7"
-
-[node name="Key8" type="Label" parent="Box/Keys"]
-layout_mode = 2
-theme_type_variation = &"Bright"
-text = "@menu.controls_key_8"
-
-[node name="Desc8" type="Label" parent="Box/Keys"]
-layout_mode = 2
-text = "@menu.controls_text_8"
-
-[node name="Key9" type="Label" parent="Box/Keys"]
-layout_mode = 2
-theme_type_variation = &"Bright"
-text = "@menu.controls_key_9"
-
-[node name="Desc9" type="Label" parent="Box/Keys"]
-layout_mode = 2
-text = "@menu.controls_text_9"
-
-[node name="Key10" type="Label" parent="Box/Keys"]
-layout_mode = 2
-theme_type_variation = &"Bright"
-text = "@menu.controls_key_10"
-
-[node name="Desc10" type="Label" parent="Box/Keys"]
-layout_mode = 2
-text = "@menu.controls_text_10"
-
-[node name="Key11" type="Label" parent="Box/Keys"]
-layout_mode = 2
-theme_type_variation = &"Bright"
-text = "@menu.controls_key_11"
-
-[node name="Desc11" type="Label" parent="Box/Keys"]
-layout_mode = 2
-text = "@menu.controls_text_11"
-
-[node name="BackButton" type="Button" parent="Box"]
+[node name="BackButton" type="Button" parent="Box/Actions"]
 custom_minimum_size = Vector2(0, 44)
 layout_mode = 2
+size_flags_horizontal = 3
 text = "@menu.back"

@@ -20,6 +20,35 @@ func _write_raw(text: String) -> void:
 
 
 func _init() -> void:
+
+	# Keyboard: the switch, its checkbox and the tabs can all be reached with Tab; a switch the machine is deciding is skipped.
+	var key_row: ToggleRow = load("res://ui/toggle_row.tscn").instantiate()
+	key_row.auto_text = "Auto"
+	root.add_child(key_row)
+	await process_frame
+	check(key_row.segments.focus_mode == Control.FOCUS_ALL and key_row.on_button.focus_mode == Control.FOCUS_NONE and key_row.off_button.focus_mode == Control.FOCUS_NONE and key_row.auto_check.focus_mode == Control.FOCUS_ALL, "the On / Off pair is one stop for the keyboard (not one for each half), and its checkbox is another")
+	key_row.automatic = true
+	check(key_row.segments.focus_mode == Control.FOCUS_NONE and key_row.auto_check.focus_mode == Control.FOCUS_ALL, "while the machine decides, Tab skips the switch but not its checkbox")
+	key_row.automatic = false
+	check(key_row.segments.focus_mode == Control.FOCUS_ALL, "...and gives it back")
+	key_row.segments.grab_focus()
+	key_row.button_pressed = false
+	var space := InputEventAction.new()
+	space.action = "ui_accept"
+	space.pressed = true
+	key_row.segments.gui_input.emit(space)
+	check(key_row.button_pressed, "Space or Enter flips the pair, whichever half is lit")
+	var left := InputEventAction.new()
+	left.action = "ui_right"
+	left.pressed = true
+	key_row.segments.gui_input.emit(left)
+	check(not key_row.button_pressed, "Right chooses Off")
+	key_row.queue_free()
+	var tabs_screen: Control = load("res://scenes/free_setup.tscn").instantiate()
+	root.add_child(tabs_screen)
+	await process_frame
+	check(tabs_screen.basic_tab.focus_mode == Control.FOCUS_ALL and tabs_screen.advanced_toggle.focus_mode == Control.FOCUS_ALL, "the Basics and Advanced tabs take keyboard focus")
+	tabs_screen.queue_free()
 	var real_path := StartConditions.settings_path
 	check(real_path != TEMP, "default settings path is not the test path")
 	StartConditions.settings_path = TEMP
@@ -140,28 +169,44 @@ func _init() -> void:
 	var adv: Control = load("res://scenes/free_setup.tscn").instantiate()
 	root.add_child(adv)
 	await process_frame
-	check(not adv.advanced_reset.is_visible_in_tree() and not adv.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "with the advanced options shut there is no reset showing, and with them as usual no 'changed'")
+	check(not adv.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "with the advanced options shut there is no reset showing, and with them as usual no 'changed'")
+	var _default_bups := StartConditions.new().bups
 	adv.bups_row.slider.value = 30
 	adv.detail_row.slider.value = 300
 	adv.thickness_row.slider.value = 3
-	check(not adv.advanced_reset.is_visible_in_tree() and adv.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "a changed advanced option shows 'changed' on the heading, and still no reset while they are shut")
+	check(adv.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "a changed advanced option shows 'changed' on the heading, and still no reset while they are shut")
+	for settle in 6:
+		await process_frame  # (the first layout pass of the rows, which sets the panel's width, takes a few frames)
+	var dish_before: Vector2 = adv.dish.position
 	adv.advanced_toggle.pressed.emit()
 	await process_frame
-	check(adv.advanced_reset.is_visible_in_tree() and adv.advanced_reset.tooltip_text == "Use defaults for the advanced options only", "the reset is inside, once they are opened")
-	adv.advanced_reset.pressed.emit()
-	check(adv.detail_row.slider.value == 100 and is_equal_approx(adv.thickness_row.slider.value, 25.0) and adv._start.nutrient_resolution == 100 and is_equal_approx(adv._start.medium_thickness, 25.0), "its reset puts the advanced options back to their defaults")
-	check(adv.bups_row.slider.value == 30 and adv._start.bups == 30, "...and leaves every other setting as it was")
+	await process_frame
+	check(adv.dish.position.is_equal_approx(dish_before), "opening the advanced options does not move the preview dish (%s, then %s)" % [dish_before, adv.dish.position])
+	check(adv.reset_button.is_visible_in_tree() and not adv.get_node("Panel/Box/Scroll/Rows/Advanced/NoteRow").get_children().any(func(n: Node) -> bool: return n is Button and not (n as Button).disabled), "the one reset at the top right stays in reach, and the advanced options have none of their own")
+	var widths_before := []
+	for row: SettingRow in [adv.bups_row, adv.nutrients_row, adv.rate_row, adv.limit_row]:
+		widths_before.append([row.value_field.size.x, row.slider.size.x])
+	var panel_width_before: float = adv.panel.size.x
+	adv.reset_button.pressed.emit()
+	for settle in 4:
+		await process_frame
+	var widths_after := []
+	for row: SettingRow in [adv.bups_row, adv.nutrients_row, adv.rate_row, adv.limit_row]:
+		widths_after.append([row.value_field.size.x, row.slider.size.x])
+	check(widths_after == widths_before and is_equal_approx(adv.panel.size.x, panel_width_before), "pressing reset leaves every box, slider and the panel the width it was (%s vs %s, panel %.0f vs %.0f)" % [widths_before, widths_after, panel_width_before, adv.panel.size.x])
+	check(adv.detail_row.slider.value == 100 and is_equal_approx(adv.thickness_row.slider.value, 25.0) and adv._start.nutrient_resolution == 100 and is_equal_approx(adv._start.medium_thickness, 25.0), "the reset puts the advanced options back to their defaults")
+	check(adv.bups_row.slider.value == _default_bups and adv._start.bups == _default_bups, "...and every other setting with them")
 	check(not adv.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "...and 'changed' goes with them")
 	check(not adv.husks_toggle.button_pressed and not adv._start.death_husks, "husks start off")
 	adv.husks_toggle.button_pressed = true
 	check(adv._start.death_husks and adv.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "turning husks on is kept, shown on the toggle and counted as a changed advanced option")
-	adv.advanced_reset.pressed.emit()
-	check(not adv._start.death_husks and not adv.husks_toggle.button_pressed, "the advanced reset turns husks off")
+	adv.reset_button.pressed.emit()
+	check(not adv._start.death_husks and not adv.husks_toggle.button_pressed, "the reset turns husks off")
 	check(not adv.plankton_husks_toggle.button_pressed and not adv._start.plankton_husks, "plankton husks start off")
 	adv.plankton_husks_toggle.button_pressed = true
 	check(adv._start.plankton_husks and adv.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "turning plankton husks on is kept, shown and counted as a changed advanced option")
-	adv.advanced_reset.pressed.emit()
-	check(not adv._start.plankton_husks and not adv.plankton_husks_toggle.button_pressed, "the advanced reset turns them off")
+	adv.reset_button.pressed.emit()
+	check(not adv._start.plankton_husks and not adv.plankton_husks_toggle.button_pressed, "the reset turns them off")
 	adv.queue_free()
 	await process_frame
 
@@ -174,19 +219,19 @@ func _init() -> void:
 	var auto := StartConditions.BACKEND_AUTO
 	var on := StartConditions.BACKEND_GPU
 	var off := StartConditions.BACKEND_CPU
-	var buttons: Dictionary = gs.backend_buttons
-	var texts := [buttons[auto].text, buttons[on].text, buttons[off].text]
-	check(texts == ["Auto", "On", "Off"], "the three choices read Auto, On, Off (%s)" % str(texts))
-	check(buttons[auto].button_pressed and not buttons[on].button_pressed and not buttons[off].button_pressed and gs._start.sim_backend == auto, "the setting starts on Auto")
-	check(buttons[auto].button_group == buttons[on].button_group and buttons[on].button_group == buttons[off].button_group and buttons[auto].toggle_mode, "the choices are toggle buttons of one group, like the speed buttons")
+	var bt: ToggleRow = gs.backend_toggle
+	check(bt.auto_check.text == "Automatic" and bt.on_button.text == "On" and bt.off_button.text == "Off", "the setting is a checkbox (Automatic) and an On / Off switch")
+	check(bt.automatic and gs._start.sim_backend == auto, "the setting starts on Automatic")
+	check(bt.on_button.mouse_filter == Control.MOUSE_FILTER_IGNORE and bt.segments.modulate.a < 1.0, "while Automatic is ticked the switch is dimmed and cannot be used")
 	check(not gs.backend_notice.visible and not gs.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "on Auto there is no notice and the advanced heading is as usual")
-	buttons[on].pressed.emit()
-	check(buttons[on].button_pressed and not buttons[auto].button_pressed and gs._start.sim_backend == on, "choosing On makes it the only one pressed and the setting")
+	bt.automatic = false
+	bt.button_pressed = true
+	check(bt.on_button.button_pressed and not bt.automatic and gs._start.sim_backend == on, "unticking Automatic and switching On makes On the setting")
 	check(gs.backend_notice.visible == not GpuWorld.available(), "On shows the one-line notice exactly where there is no GPU to use (here: %s)" % ("none" if not GpuWorld.available() else "one"))
 	check(gs.backend_notice.text == Strings.t("free_setup.backend_unavailable") and gs.backend_notice.text.length() < 100, "the notice is a line from strings.cfg")
 	check(gs.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "a setting that is not Auto shows 'changed' on the advanced heading")
 	check(Strings.t("free_setup.backend_hint").contains("x100 and faster") and Strings.t("free_setup.backend_hint").contains("processor"), "the hint says the GPU is used at x100 and faster and the processor runs the slow")
-	buttons[off].pressed.emit()
+	bt.button_pressed = false
 	check(not gs.backend_notice.visible and gs._start.sim_backend == off, "Off needs no notice")
 	gs._go()
 	check(StartConditions.load_saved().sim_backend == off, "GO saves the setting")
@@ -196,14 +241,15 @@ func _init() -> void:
 	var gs2: Control = load("res://scenes/free_setup.tscn").instantiate()
 	root.add_child(gs2)
 	await process_frame
-	check(gs2.backend_buttons[off].button_pressed and gs2._start.sim_backend == off, "the next launch shows the setting")
+	check(gs2.backend_toggle.off_button.button_pressed and not gs2.backend_toggle.automatic and gs2._start.sim_backend == off, "the next launch shows the setting")
 	gs2.advanced_toggle.pressed.emit()
 	await process_frame
-	gs2.advanced_reset.pressed.emit()
-	check(gs2.backend_buttons[auto].button_pressed and gs2._start.sim_backend == auto and not gs2.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "the advanced options' own reset puts it back to Auto")
-	gs2.backend_buttons[on].pressed.emit()
 	gs2.reset_button.pressed.emit()
-	check(gs2.backend_buttons[auto].button_pressed and gs2._start.sim_backend == auto, "the screen's Use defaults does too")
+	check(gs2.backend_toggle.automatic and gs2._start.sim_backend == auto and not gs2.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "the reset puts it back to Auto")
+	gs2.backend_toggle.automatic = false
+	gs2.backend_toggle.button_pressed = true
+	gs2.reset_button.pressed.emit()
+	check(gs2.backend_toggle.automatic and gs2._start.sim_backend == auto, "and again after choosing On")
 	gs2.queue_free()
 	await process_frame
 
@@ -269,42 +315,29 @@ func _init() -> void:
 	root.add_child(reopened)
 	await process_frame
 	check(reopened.bups_row.slider.value == 31 and reopened.nutrients_row.slider.value == 77, "reopening shows the previous preference")
-	# Per-row reset icons reset one setting only, and save nothing.
+	# The one reset at the top right puts every setting back (the rows have none of their own), and saves nothing.
 	var file_now := FileAccess.get_file_as_string(TEMP)
 	reopened.bups_row.slider.value = 90
 	reopened.nutrients_row.slider.value = 120
 	reopened.rate_row.slider.value = 20
 	reopened.dish_row.slider.value = 5.0
-	reopened.nutrients_row.reset_button.pressed.emit()
-	check(reopened.nutrients_row.slider.value == d.nutrient_density, "row reset puts that slider at its default")
-	check(reopened.bups_row.slider.value == 90 and reopened.rate_row.slider.value == 20 and is_equal_approx(reopened.dish_row.slider.value, 5.0), "...and leaves the other sliders alone")
-	reopened.rate_row.reset_button.pressed.emit()
-	reopened.dish_row.reset_button.pressed.emit()
-	reopened.bups_row.reset_button.pressed.emit()
-	check(reopened.bups_row.slider.value == d.bups and reopened.rate_row.slider.value == d.feed_density and is_equal_approx(reopened.dish_row.slider.value, d.dish_radius / 1000.0), "every row has a working reset")
-	check(FileAccess.get_file_as_string(TEMP) == file_now, "row resets save nothing")
-	check(reopened.reset_button.text == "" and reopened.reset_button.icon != null and reopened.reset_button.tooltip_text == "Use defaults", "top-right reset is icon-only with a 'Use defaults' tooltip")
-	check(reopened.bups_row.reset_button.tooltip_text == "Use default (4)", "row tooltip names the default: '%s'" % reopened.bups_row.reset_button.tooltip_text)
-	check(reopened.reset_button.focus_mode == Control.FOCUS_ALL and reopened.bups_row.reset_button.focus_mode == Control.FOCUS_ALL, "reset icons can be reached with Tab")
+	check(not reopened.bups_row.reset_button.visible and not reopened.dish_row.reset_button.visible, "the rows have no reset icons of their own")
+	reopened.reset_button.pressed.emit()
+	check(reopened.bups_row.slider.value == d.bups and reopened.nutrients_row.slider.value == d.nutrient_density and reopened.rate_row.slider.value == d.feed_density and is_equal_approx(reopened.dish_row.slider.value, d.dish_radius / 1000.0), "the reset puts every slider at its default")
+	check(FileAccess.get_file_as_string(TEMP) == file_now, "the reset saves nothing")
+	check(reopened.reset_button.text == "Reset" and reopened.reset_button.icon != null and reopened.reset_button.tooltip_text == "Use defaults", "the reset is a labelled quiet button with a 'Use defaults' tooltip")
+	check(reopened.reset_button.focus_mode == Control.FOCUS_ALL, "the reset can be reached with Tab")
 	reopened.bups_row.slider.value = 12
-	# Console-font white values; row resets sit left of their labels, away from the numbers.
+	# Console-font white values.
 	for v in [reopened.bups_row.value_field, reopened.nutrients_row.value_field, reopened.rate_row.value_field, reopened.dish_row.value_field]:
-		check(v.get_theme_font("font") is FontFile and v.get_theme_color("font_color") == Color.WHITE, "%s is white bundled-font text" % v.name)
-	await process_frame
-	var pairs := [[reopened.bups_row.reset_button, reopened.bups_row.value_field, "BupsRow/Label"], [reopened.nutrients_row.reset_button, reopened.nutrients_row.value_field, "NutrientsRow/Label"],
-		[reopened.rate_row.reset_button, reopened.rate_row.value_field, "RateRow/Label"], [reopened.dish_row.reset_button, reopened.dish_row.value_field, "DishRow/Label"]]
-	for pair in pairs:
-		var label: Control = reopened.get_node("Panel/Box/Scroll/Rows/" + pair[2])
-		check(pair[0].global_position.x < label.global_position.x, "%s is left of its label" % pair[0].name)
-		check(pair[0].global_position.x + pair[0].size.x < pair[1].global_position.x - 100.0, "%s is well away from the number" % pair[0].name)
-	check(reopened.get_node("Panel/Box/Header/SectionLabel").global_position.x <= reopened.bups_row.reset_button.global_position.x + 8.0, "caption lines up with the left column")
+		check(v.get_theme_font("font") is FontFile and v.get_theme_color("font_color") == UiText.number_color(), "%s is bundled-font text in the number colour" % v.name)
 	var column: Control = reopened.get_node("Panel")
 	check(column.global_position.x >= 0.0 and column.global_position.x + column.size.x <= reopened.get_viewport_rect().size.x, "the settings box is on the screen")
-	var box_inner_right: float = reopened.get_node("Panel").global_position.x + reopened.get_node("Panel").size.x - 24.0
-	var global_right: float = reopened.reset_button.global_position.x + reopened.reset_button.size.x
-	check(absf(global_right - box_inner_right) <= 1.0, "the global reset sits at the box's right edge, however wide the box is (%.0f vs %.0f)" % [global_right, box_inner_right])
+	var box_inner_left: float = reopened.get_node("Panel").global_position.x + (reopened.get_node("Panel") as PanelContainer).get_theme_stylebox("panel").get_margin(SIDE_LEFT)
+	check(absf(reopened.reset_button.global_position.x - box_inner_left) <= 1.0 and absf(reopened.reset_button.global_position.y - reopened.back_button.global_position.y) <= 12.0, "the reset sits at the left of the footer, in line with Back (%.0f vs %.0f)" % [reopened.reset_button.global_position.x, box_inner_left])
+	var box_right: float = reopened.get_node("Panel").global_position.x + reopened.get_node("Panel").size.x
 	for v in [reopened.bups_row.value_field, reopened.dish_row.value_field]:
-		check(v.global_position.x + v.size.x <= global_right + 1.0, "%s keeps to the right edge the global reset aligns to" % v.name)
+		check(v.global_position.x + v.size.x <= box_right, "%s stays inside the box" % v.name)
 	# A saved value off the slider's step grid: what is shown, previewed and played must agree.
 	_write_raw('{"bups": 7, "nutrient_density": 33, "feed_density": 6.5, "dish_radius": 3050}')
 	Session.free_start = StartConditions.load_saved()

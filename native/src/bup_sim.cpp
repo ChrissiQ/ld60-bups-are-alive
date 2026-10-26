@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <unordered_map>
 #include <unordered_set>
 
 using namespace godot;
@@ -1812,10 +1813,70 @@ void BupSim::conjugate(double delta) {
 	}
 	const double chance = 1.0 - std::exp(-G.conj_rate * delta);
 	std::vector<char> taken(bups.size(), 0);
+
+	// A donor can only touch what is within one body radius of it, a contact distance and another body radius: so the bups are looked up
+	// by the cell of a grid at least that wide, and only the cells round a donor are kept. (Checking every donor against every bup
+	// was 15 ms of a 29 ms step at 100,000 bups, 87 of them donors.) The draws of the random numbers are as they were: each donor, in
+	// order, then the bups it could touch, in order.
+	double widest = 0.0;
+	for (const Bup &b : bups) {
+		widest = std::max(widest, body_radius(b));
+	}
+	const double cell = 2.0 * widest + G.contact_um + 1.0e-6;
+	auto cell_key = [](double cx, double cy) -> uint64_t {
+		return ((uint64_t)(uint32_t)(int32_t)cx << 32) | (uint64_t)(uint32_t)(int32_t)cy;
+	};
+	std::unordered_map<uint64_t, std::vector<int>> near;
+	// A small table of bits says at a glance whether a cell can be one of those (a few thousand at most): most bups are nowhere near a donor, and one bit test
+	// per bup is far cheaper than a lookup in the map (which is what the pass over 100,000 bups cost).
+	const double per_cell = 1.0 / cell; // (every cell is worked out with this, donors and the rest alike, so that a bup on an edge is never in two different cells by rounding)
+	constexpr int HASH_BITS = 16;
+	std::vector<uint64_t> maybe((size_t)1 << (HASH_BITS - 6), 0);
+	auto bit_of = [](uint64_t key) -> uint32_t {
+		return (uint32_t)((key * 0x9E3779B97F4A7C15ull) >> (64 - HASH_BITS));
+	};
+	for (int d : donors) {
+		const double cx = std::floor((double)bups[d].x * per_cell), cy = std::floor((double)bups[d].y * per_cell);
+		for (int ox = -1; ox <= 1; ox++) {
+			for (int oy = -1; oy <= 1; oy++) {
+				const uint64_t key = cell_key(cx + ox, cy + oy);
+				near[key];
+				const uint32_t bit = bit_of(key);
+				maybe[bit >> 6] |= (uint64_t)1 << (bit & 63);
+			}
+		}
+	}
+	for (size_t r = 0; r < bups.size(); r++) {
+		const Bup &b = bups[r];
+		if (b.donor) {
+			continue;
+		}
+		const uint64_t key = cell_key(std::floor(b.x * per_cell), std::floor(b.y * per_cell));
+		const uint32_t bit = bit_of(key);
+		if (!((maybe[bit >> 6] >> (bit & 63)) & 1)) {
+			continue;
+		}
+		auto at = near.find(key);
+		if (at != near.end()) {
+			at->second.push_back((int)r); // (in order of r)
+		}
+	}
+	std::vector<int> candidates;
 	for (int d : donors) {
 		const Bup &from = bups[d];
 		const double reach = body_radius(from) + G.contact_um;
-		for (size_t r = 0; r < bups.size(); r++) {
+		candidates.clear();
+		const double cx = std::floor((double)from.x * per_cell), cy = std::floor((double)from.y * per_cell);
+		for (int ox = -1; ox <= 1; ox++) {
+			for (int oy = -1; oy <= 1; oy++) {
+				auto at = near.find(cell_key(cx + ox, cy + oy));
+				if (at != near.end()) {
+					candidates.insert(candidates.end(), at->second.begin(), at->second.end());
+				}
+			}
+		}
+		std::sort(candidates.begin(), candidates.end());
+		for (int r : candidates) {
 			Bup &to = bups[r];
 			if (to.donor || taken[r]) {
 				continue;
@@ -1877,7 +1938,7 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 	job.sub = delta / job.moves;
 	job.seed = rng.next_bits();
 	field->advance_puffs(delta);
-	field->snapshot();
+	field->snapshot(!bups.empty());
 	clouds_now = field->puff_count() > 0;
 	if (clouds_now) {
 		shares.resize(bups.size());

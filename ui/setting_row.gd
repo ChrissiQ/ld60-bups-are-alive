@@ -19,13 +19,15 @@ signal value_changed(value: float)
 
 ## Column widths. The defaults suit the setup and menu screens; a narrow panel sets smaller ones in its scene,
 ## so a row never makes its panel wider than the other things in it.
-@export var label_min_width := 148.0
-@export var slider_min_width := 156.0  ## (with the value's 112, a row is as wide as it was with 180 and 88: the setup screen's panel keeps clear of its preview)
+@export var label_min_width := 196.0
+@export var slider_min_width := 64.0  ## (with the value's 112, a row is as wide as it was with 180 and 88: the setup screen's panel keeps clear of its preview)
 @export var slider_min_height := 28.0
-@export var value_min_width := 112.0  ## (room for "1,000,000", the most bups a dish holds)
-@export var unit_min_width := 100.0
+@export var value_min_width := 104.0  ## (room for "1,000,000", the most bups a dish holds)
+@export var unit_min_width := 96.0
 ## A small row for a sidebar: the readout's text size, and no reset button.
 @export var compact := false
+## Whether the row has its own reset icon. Off by default: a panel has one reset for everything in it, at the top right.
+@export var show_reset := false
 ## What hovering the name says (blank: nothing).
 @export var label_tip := ""
 const DISABLED_ALPHA := 0.45  ## how faint a row is when it can't be changed
@@ -38,6 +40,7 @@ var disabled_reason := Strings.t("ui.fixed")  ## what hovering a row that can't 
 @onready var value_field: LineEdit = $Value  ## the number: click it to type an exact value
 @onready var unit_label: Label = $Unit  ## what the number counts, outside the box (e.g. "mm"); blank for plain counts
 
+var _dragging := false  ## the slider's handle is held
 var default_value := 0.0
 var suffix := ""  ## the unit, shown beside the number (not in it), e.g. "mm" or "/min"
 
@@ -51,12 +54,12 @@ var value: float:
 
 
 func _ready() -> void:
+	reset_button.visible = show_reset and not compact
 	if compact:
 		theme_type_variation = &"TightRow"  # (less space between the parts, notably between the number and its unit)
 		reset_button.visible = false
 		label.theme_type_variation = &"ReadoutLabel"
-		unit_label.theme_type_variation = &"ReadoutLabel"
-		value_field.theme_type_variation = &"ReadoutField"
+	value_field.theme_type_variation = &"ReadoutField"  # (the numbers are smaller than the names, so the sliders get the room)
 	label.custom_minimum_size.x = label_min_width
 	slider.custom_minimum_size = Vector2(slider_min_width, slider_min_height)
 	value_field.custom_minimum_size.x = value_min_width
@@ -64,8 +67,14 @@ func _ready() -> void:
 	label.text = label_text
 	_set_changeable(true)  # (sets the label's tooltip, which a label shows only if it is told to take the mouse)
 	slider.value_changed.connect(_on_slider_changed)
+	slider.drag_started.connect(func() -> void: _dragging = true)
+	slider.drag_ended.connect(_on_drag_ended)
 	reset_button.pressed.connect(func() -> void: slider.value = default_value)
 	value_field.text_submitted.connect(func(_text: String) -> void: value_field.release_focus())  # which commits (below)
+	slider.focus_entered.connect(_show_focus.bind(true))  # (a slider draws no focus ring: the name takes the accent colour while the row has the keyboard)
+	slider.focus_exited.connect(_show_focus.bind(false))
+	value_field.focus_entered.connect(_show_focus.bind(true))
+	value_field.focus_exited.connect(_show_focus.bind(false))
 	value_field.focus_entered.connect(_begin_typing)
 	UiInput.select_all_unless_clicked(value_field)
 	value_field.focus_exited.connect(_commit_typing)
@@ -85,8 +94,18 @@ func configure(lo: float, hi: float, step: float, default: float, p_suffix: Stri
 	_update_text()
 
 
+## While the handle is held the number follows it but nothing is reported: a setting that rebuilds or moves things (the
+## preview, the interface itself) would otherwise shift under the pointer mid-drag. A change without a drag (a click on the
+## track, the arrow keys, the number box, the reset icon) is reported at once.
 func _on_slider_changed(_v: float) -> void:
 	_update_text()
+	if _dragging:
+		return
+	value_changed.emit(slider.value)
+
+
+func _on_drag_ended(_changed: bool) -> void:
+	_dragging = false
 	value_changed.emit(slider.value)
 
 
@@ -109,7 +128,17 @@ func _format_with_unit(v: float) -> String:
 	return _format(v) if suffix == "" else "%s %s" % [_format(v), suffix]
 
 
+## The number's box is wide enough for the longest number the setting can show, in the text size there is now.
+func _fit_value_box() -> void:
+	var font := value_field.get_theme_font("font")
+	var size := value_field.get_theme_font_size("font_size")
+	var widest := font.get_string_size(_format(slider.max_value), HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	var pad := value_field.get_theme_stylebox("normal").get_minimum_size().x
+	value_field.custom_minimum_size.x = maxf(value_min_width, widest + pad + 8.0)
+
+
 func _update_text() -> void:
+	_fit_value_box()
 	if value_field.has_focus():
 		return  # the player is typing: leave their text alone until they commit it
 	value_field.text = _format(slider.value)
@@ -171,3 +200,8 @@ func _set_changeable(changeable: bool) -> void:
 	value_field.tooltip_text = hint
 	label.tooltip_text = hint if not changeable or label_tip == "" else label_tip
 	label.mouse_filter = Control.MOUSE_FILTER_PASS if (not changeable or label_tip != "") else Control.MOUSE_FILTER_IGNORE
+
+
+func _show_focus(on: bool) -> void:
+	if not compact:
+		label.theme_type_variation = &"FocusLabel" if on else &""

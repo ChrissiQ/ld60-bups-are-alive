@@ -2,13 +2,13 @@
 
 importer="font_data_dynamic"
 type="FontFile"
-uid="uid://cc5huqk4b34kx"
-path="res://.godot/imported/CommitMono-400.otf-12d9f2071cd97d8adccd75d7a9ba8f16.fontdata"
+uid="uid://46sbpple2w1v"
+path="res://.godot/imported/IBMPlexSans-500.ttf-5b7b1daac9a577731c07d05a75d443e5.fontdata"
 
 [deps]
 
-source_file="res://fonts/CommitMono-400.otf"
-dest_files=["res://.godot/imported/CommitMono-400.otf-12d9f2071cd97d8adccd75d7a9ba8f16.fontdata"]
+source_file="res://fonts/IBMPlexSans-500.ttf"
+dest_files=["res://.godot/imported/IBMPlexSans-500.ttf-5b7b1daac9a577731c07d05a75d443e5.fontdata"]
 
 [params]
 

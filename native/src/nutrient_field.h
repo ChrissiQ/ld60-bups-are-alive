@@ -59,6 +59,7 @@ class NutrientField : public RefCounted {
 	mutable int bins_across = 1;
 	mutable double bin_size = 1.0;
 	mutable std::vector<int> bin_start, bin_entries;
+	mutable std::vector<int> scratch_lo_x, scratch_hi_x, scratch_lo_y, scratch_hi_y, scratch_next; // (kept between rebuilds so that one does not allocate)
 	mutable std::vector<double> ha, hb, hreach2, hsigma; // a = 1 / (2 pi var), b = 1 / (2 var), reach2: how far (squared) it can be told from the medium
 	double puff_reach(const Puff &p) const; // how far (µm) from its centre a cloud is above cloud_cut of the detection floor: past that it is not looked for
 	void rebuild_hash() const;
@@ -180,7 +181,7 @@ public:
 	// `snapshot` copies the concentrations (each rim cell standing in the value of its nearest inside cell, as read_xy
 	// takes it) so that `read_snapshot_xy` gives exactly what read_xy would, without the per-cell checks, and safely from
 	// many threads at once while nothing changes the field.
-	void snapshot();
+	void snapshot(bool readers = true); // `readers` false: nothing will read the field this step (no bups), so nothing is made
 	inline void read_snapshot_xy(double x, double y, double &c, double &gx, double &gy) const {
 		double fx = std::clamp((x + origin) / spacing - 0.5, 0.0, n - 1.001);
 		double fy = std::clamp((y + origin) / spacing - 0.5, 0.0, n - 1.001);

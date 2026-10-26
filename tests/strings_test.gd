@@ -44,7 +44,7 @@ func _walk(node: Node, found: Array) -> void:
 
 
 func _init() -> void:
-	check(Strings.has_key("hud.paused") and Strings.t("hud.paused") == "PAUSED", "the file loads and gives a text")
+	check(Strings.has_key("hud.dish_title") and Strings.t("hud.dish_title") == "Dish", "the file loads and gives a text")
 	check(Strings.problems().is_empty(), "every text in the file loads: %s" % [Strings.problems()])
 	var asked := _asked_for()
 	check(asked.size() > 100, "the code and scenes ask for the texts (found %d)" % asked.size())
@@ -69,7 +69,7 @@ func _init() -> void:
 			var value: Variant = config.get_value(section, name)
 			check(value is String, "%s.%s is a text" % [section, name])
 	check(Strings.count_places("a %d and %s and %.1f and 5%%") == 3, "places for numbers are counted, not percent signs")
-	check(Strings.t("hud.readout_bups", [7]) == "bups  7", "a text with a place is filled in")
+	check(Strings.t("hud.readout_bups", [7]) == "7 bups", "a text with a place is filled in")
 	check(Strings.list("menu", "quip").size() >= 3, "the title screen has some lines to pick from")
 
 	# Nothing the scenes show is left as a raw "@key" (the TextSweep autoload does it); and TextSweep comes before

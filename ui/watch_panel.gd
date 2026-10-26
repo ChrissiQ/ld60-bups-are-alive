@@ -5,11 +5,15 @@ extends PanelContainer
 ## its end takes it off the list. Shown only while there is something on the list. The list is rebuilt when it changes, and
 ## otherwise only the names and who is alive are looked at again, twice a second.
 
+const CLOSE_ICON := preload("res://icons/close.svg")
+
 signal bup_chosen(dish: Dish, id: int)
 
 const LOOK_AGAIN_MSEC := 500
+const SCROLL_MAX_HEIGHT := 150.0  ## the most the list takes before it scrolls
 
 @onready var title: Label = $Box/Title
+@onready var scroll: ScrollContainer = $Box/Scroll
 @onready var entries: VBoxContainer = $Box/Scroll/Entries
 
 var numbers := {}  ## Dish -> its number (the screen's own record, shared)
@@ -73,14 +77,17 @@ func _rebuild(count: int) -> void:
 		entry.pressed.connect(bup_chosen.emit.bind(d, id))
 		row.add_child(entry)
 		var stop := Button.new()
-		stop.text = Strings.t("watch.stop")
+		stop.icon = CLOSE_ICON
+		stop.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		stop.tooltip_text = Strings.t("watch.stop_tip")
-		stop.theme_type_variation = &"CompactListButton"
+		stop.theme_type_variation = &"IconButton"
 		stop.focus_mode = Control.FOCUS_NONE
 		stop.pressed.connect(d.unwatch_bup.bind(id))
 		row.add_child(stop)
 		entries.add_child(row)
 		_buttons[[d, id]] = entry
+	scroll.custom_minimum_size.y = clampf(entries.get_combined_minimum_size().y + 4.0, 24.0, SCROLL_MAX_HEIGHT)  # (as tall as its entries, up to this)
+	reset_size.call_deferred()
 
 
 ## A bup that has died keeps its place on the list, with its name in grey. With several dishes each entry says which dish its bup is in.

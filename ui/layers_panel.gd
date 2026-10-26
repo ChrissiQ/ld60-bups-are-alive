@@ -16,11 +16,17 @@ var _buttons := {}  ## Dish.Layer -> its button
 
 
 func _ready() -> void:
-	_setup(medium_button, Dish.Layer.MEDIUM, "medium", "Z", KEY_Z)
-	_setup(sources_button, Dish.Layer.SOURCES, "sources", "X", KEY_X)
-	_setup(plankton_button, Dish.Layer.PLANKTON, "plankton", "C", KEY_C)
-	_setup(bups_button, Dish.Layer.BUPS, "bups", "V", KEY_V)
-	_setup(steering_button, Dish.Layer.STEERING, "steering", "B", KEY_B)
+	_setup(medium_button, Dish.Layer.MEDIUM, "medium")
+	_setup(sources_button, Dish.Layer.SOURCES, "sources")
+	_setup(plankton_button, Dish.Layer.PLANKTON, "plankton")
+	_setup(bups_button, Dish.Layer.BUPS, "bups")
+	_setup(steering_button, Dish.Layer.STEERING, "steering")
+	_apply_keys()
+	KeyBindings.listen(_apply_keys)
+
+
+func _exit_tree() -> void:
+	KeyBindings.unlisten(_apply_keys)
 
 
 ## Lights the buttons to match what the dish shows (without reporting it back).
@@ -29,16 +35,24 @@ func sync_from(dish: Dish) -> void:
 		_buttons[layer].set_pressed_no_signal(dish.layer_shown(layer))
 
 
-func _setup(button: Button, layer: Dish.Layer, key_name: String, key_label: String, key: Key) -> void:
+func _setup(button: Button, layer: Dish.Layer, key_name: String) -> void:
 	button.toggle_mode = true
 	button.button_pressed = true
 	button.focus_mode = Control.FOCUS_NONE
 	button.shortcut_in_tooltip = false
-	button.tooltip_text = Strings.t("toolbar.tip", [Strings.t("layers." + key_name), key_label])
-	var shortcut := Shortcut.new()
-	var event := InputEventKey.new()
-	event.keycode = key
-	shortcut.events.append(event)
-	button.shortcut = shortcut
+	button.set_meta("action", "layer_" + key_name)
+	button.set_meta("name", key_name)
 	button.toggled.connect(func(on: bool) -> void: layer_toggled.emit(layer, on))
 	_buttons[layer] = button
+
+
+## Each button's tooltip and shortcut from the keys as they are now (also after the player changes one).
+func _apply_keys() -> void:
+	for button: Button in _buttons.values():
+		var action: String = button.get_meta("action")
+		button.tooltip_text = Strings.t("toolbar.tip", [Strings.t("layers." + (button.get_meta("name") as String)), KeyBindings.label(action)])
+		var shortcut := Shortcut.new()
+		var event := InputEventKey.new()
+		event.keycode = KeyBindings.key(action)
+		shortcut.events.append(event)
+		button.shortcut = shortcut

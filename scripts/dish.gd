@@ -147,6 +147,7 @@ var time := 0.0:
 	set(value):
 		time = value
 		sim.set_time(value)  # births and deaths are stamped from the simulation's own copy
+var picture_scale := 0.0  ## above 0 (a dish that is not in the main view): the pixels one µm covers in its small picture in the strip, so its bups are drawn as big as that picture needs
 var flash := 0.0  ## lightning flash intensity, decays to 0
 var _layers_hidden := {}  ## Layer -> true for each one hidden
 
@@ -1497,6 +1498,8 @@ func _draw_steering() -> void:
 ## How many screen pixels one µm of this dish covers: the camera's zoom and the dish's own scale (a setup
 ## preview is a shrunken dish) together.
 func screen_scale() -> float:
+	if picture_scale > 0.0:
+		return picture_scale
 	return maxf(get_global_transform_with_canvas().get_scale().x, 0.0001)
 
 

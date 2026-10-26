@@ -21,7 +21,7 @@ func _init() -> void:
 		Strings.t("goals.living_text", [POP_TARGET]),
 		0.0,
 		func(d: Dish) -> float: return minf(d.population() / float(POP_TARGET), 1.0),
-		func(d: Dish) -> String: return Strings.t("goals.living_status", [d.population(), POP_TARGET]),
+		func(d: Dish) -> String: return Strings.t("goals.living_status", [UiText.thousands(d.population()), UiText.thousands(POP_TARGET)]),
 	))
 	goals.append(Goal.new(
 		Strings.t("goals.keen_title"),

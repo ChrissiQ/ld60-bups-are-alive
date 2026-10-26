@@ -1060,14 +1060,14 @@ func _init() -> void:
 	# --- Number styling helper.
 	var styled := UiText.numbers("BUPS  40  8/s  12%  10s  x3  1.5")
 	for token in ["40", "8/s", "12%", "10s", "3", "1.5"]:
-		check(styled.contains("[color=#ffffff]%s[/color]" % token), "'%s' is wrapped as a white number" % token)
+		check(styled.contains("[color=#%s]%s[/color]" % [UiText.number_color().to_html(false), token]), "'%s' is wrapped as a number" % token)
 	check(UiText.numbers("no digits here") == "no digits here", "text without numbers is unchanged")
 	# --- Big numbers get thousands separators, everywhere numbers are shown.
 	check(UiText.group("1") == "1" and UiText.group("999") == "999" and UiText.group("1000") == "1,000" and UiText.group("178335") == "178,335" and UiText.group("1234567") == "1,234,567", "digits are grouped in threes")
 	check(UiText.thousands(178335) == "178,335" and UiText.thousands(12000) == "12,000" and UiText.thousands(999) == "999" and UiText.thousands(0) == "0", "whole numbers are grouped")
 	check(UiText.thousands(1234.5, 1) == "1,234.5" and UiText.thousands(-5000) == "-5,000" and UiText.thousands(-0.2, 0) == "0" and UiText.thousands(0.25, 2) == "0.25", "decimals and signs survive")
 	var grouped := UiText.numbers("BUPS  178335  x10000  50%  1234.5  288:19:43")
-	check(grouped.contains("178,335") and grouped.contains("x[color=") and grouped.contains("10,000") and grouped.contains("1,234.5") and grouped.contains("50[color") == false and grouped.contains("288") and not grouped.contains("178335"), "numbers in a text are grouped as they are coloured: %s" % grouped)
+	check(grouped.contains("178,335") and grouped.contains("x[code][color=") and grouped.contains("10,000") and grouped.contains("1,234.5") and grouped.contains("50[code][color") == false and grouped.contains("288") and not grouped.contains("178335"), "numbers in a text are grouped as they are coloured: %s" % grouped)
 	check(UiText.numbers("12%").contains("12%[/color]") and UiText.numbers("8/s").contains("8/s[/color]"), "units stay with their number")
 	check(HistoryGraph.format_time(3600.0 * 1500) == "1,500h" and HistoryGraph.tick_text(5500.0, 6000.0) == "5,500", "graph labels are grouped too")
 	var rt := RichTextLabel.new()
@@ -1135,18 +1135,18 @@ func _init() -> void:
 	for i in 60:
 		await process_frame
 	check(m.tracker.index == 0, "no goal progress in free mode (pop %d >= 1,000 would complete goal 1)" % m.dish.population())
-	check(not m.goal_panel.visible, "free mode has no goal panel")
-	var hud_text: String = m.hud.get_parsed_text()
-	check(hud_text.contains("bups  150 / ") and hud_text.contains("dish  0.3 mm"), "the readout shows the current population against the limit, and the current dish size ('%s')" % hud_text.get_slice("\n", 1))
+	check(not m.goal_card.visible, "free mode has no goal card")
+	var hud_text: String = m.vitals.get_parsed_text()
+	check(hud_text.contains("150 / "), "the top bar shows the current population against the limit ('%s')" % hud_text)
 	m.dish.change_limit(2000)
 	m.dish.resize_to(1500.0)
 	await process_frame
 	await process_frame
-	hud_text = m.hud.get_parsed_text()
-	check(hud_text.contains("/ 2,000") and hud_text.contains("dish  1.5 mm"), "...and follows a change of limit or size ('%s')" % hud_text.get_slice("\n", 1))
+	hud_text = m.vitals.get_parsed_text()
+	check(hud_text.contains("/ 2,000"), "...and follows a change of limit ('%s')" % hud_text)
 	m._open_menu()
 	check(m.pause_menu.initial_panel.visible and m.pause_menu.initial_bups.value_label.text == "150" and m.pause_menu.initial_nutrients.value_label.text == "40/mm²" and m.pause_menu.initial_rate.value_label.text == "11.0 /mm²/h" and m.pause_menu.initial_dish.value_label.text == "0.3 mm" and m.pause_menu.initial_limit.value_label.text == UiText.thousands(chosen.bup_limit), "the Escape menu records how the dish started, unchanged by later changes (dish %s)" % m.pause_menu.initial_dish.value_label.text)
-	check(m.pause_menu.initial_bups.name_label.text == "Bups" and m.pause_menu.initial_rate.name_label.text == "Nutrient feed", "its rows carry their labels")
+	check(m.pause_menu.initial_bups.name_label.text == "Bups" and m.pause_menu.initial_rate.name_label.text == "Nutrient feed rate", "its rows carry their labels")
 	check(m.pause_menu.initial_running.visible and m.pause_menu.initial_running.name_label.text == "Simulating on" and m.pause_menu.initial_running.value_label.text == "CPU (auto)", "the record says where the bups are simulated now: the processor, chosen by the game")
 	check(not m.pause_menu.initial_backend.visible, "the record has no row for the GPU setting while it is Auto (like the other advanced settings at their defaults)")
 	var gpu_start := chosen.copy()
@@ -1193,8 +1193,8 @@ func _init() -> void:
 	# and eats nutrient, so the amounts would depend on how long the first frame took.
 	check(not m3.free_mode and m3.dish.population() == 4 and absf(TestUtil.density(m3.dish) - 32.0) < 0.5 and m3.dish.feed_density == 0.0, "goal mode default start: seeded with nutrient, no feed")
 	await process_frame
-	check(m3.goal_panel.visible and m3.goal_panel.get_parsed_text().begins_with("EXPERIMENT 1 / "), "goal mode shows the goal panel")
-	check(not m3.hud.get_parsed_text().contains("DISH"), "goal mode's readout has no dish line")
+	check(m3.goal_card.visible and m3.goal_kicker.text.begins_with("EXPERIMENT 1 / "), "goal mode shows the goal card")
+	check(not m3.vitals.get_parsed_text().contains("dish"), "goal mode's readout has no dish line")
 	m3.queue_free()
 	Session.mode = Session.Mode.GOALS
 

@@ -1,0 +1,77 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://ui/options_panel.gd" id="1"]
+[ext_resource type="PackedScene" path="res://ui/toggle_row.tscn" id="toggle_row"]
+[ext_resource type="PackedScene" path="res://ui/setting_row.tscn" id="setting_row"]
+[ext_resource type="Texture2D" path="res://icons/reset.svg" id="reset_icon"]
+
+[node name="OptionsPanel" type="PanelContainer"]
+visible = false
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -330.0
+offset_top = -250.0
+offset_right = 330.0
+offset_bottom = 250.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1")
+
+[node name="Box" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_type_variation = &"RoomyStack"
+
+[node name="Header" type="HBoxContainer" parent="Box"]
+layout_mode = 2
+
+[node name="Heading" type="Label" parent="Box/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"Heading"
+text = "@options.title"
+horizontal_alignment = 1
+
+[node name="Scroll" type="ScrollContainer" parent="Box"]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="Rows" type="VBoxContainer" parent="Box/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"RoomyStack"
+
+[node name="FullscreenToggle" parent="Box/Scroll/Rows" instance=ExtResource("toggle_row")]
+layout_mode = 2
+label_text = "@options.fullscreen"
+
+[node name="ScaleRow" parent="Box/Scroll/Rows" instance=ExtResource("setting_row")]
+layout_mode = 2
+label_text = "@options.scale"
+slider_min_width = 160.0
+
+
+[node name="MotionToggle" parent="Box/Scroll/Rows" instance=ExtResource("toggle_row")]
+layout_mode = 2
+label_text = "@options.motion"
+auto_text = "@options.motion_system"
+hint_text = "@options.motion_hint"
+
+[node name="Actions" type="HBoxContainer" parent="Box"]
+layout_mode = 2
+
+[node name="ResetButton" type="Button" parent="Box/Actions"]
+layout_mode = 2
+theme_type_variation = &"SmallButton"
+text = "@ui.reset"
+icon = ExtResource("reset_icon")
+
+[node name="BackButton" type="Button" parent="Box/Actions"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "@menu.back"

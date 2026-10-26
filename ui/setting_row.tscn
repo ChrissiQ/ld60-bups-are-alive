@@ -32,5 +32,6 @@ alignment = 2
 context_menu_enabled = false
 
 [node name="Unit" type="Label" parent="."]
+theme_type_variation = &"Unit"
 custom_minimum_size = Vector2(100, 0)
 layout_mode = 2

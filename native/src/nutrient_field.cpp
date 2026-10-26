@@ -202,7 +202,10 @@ void NutrientField::run_snapshot_block(void *job, uint32_t block) {
 	field->snapshot_rows(first, std::min(first + LINE_BLOCK, field->n));
 }
 
-void NutrientField::snapshot() {
+void NutrientField::snapshot(bool readers) {
+	if (!readers) { // (nobody will read the field this step: the copy and the clouds' lists are made, by whoever reads next, when it is wanted)
+		return;
+	}
 	eff.resize((size_t)n * n);
 	run_blocks(&NutrientField::run_snapshot_block, this, (n + LINE_BLOCK - 1) / LINE_BLOCK);
 	rebuild_hash();
@@ -220,6 +223,11 @@ double NutrientField::puff_reach(const Puff &p) const {
 	return peak > cut ? std::sqrt(2.0 * p.var * std::log(peak / cut)) : 0.0;
 }
 
+// The clouds' lists are cut into bins this many grid cells across. A read looks at the one bin its point is in and keeps the clouds that reach the point, so
+// the bins' size changes how much work a rebuild and a read each take but not what is found or the order it is summed in: bigger bins mean far fewer entries
+// to make for a cloud that reaches several cells (a cloud is listed in every bin its reach touches) and a few more clouds to look at per read.
+static const double BIN_CELLS = 2.0;
+
 void NutrientField::rebuild_hash() const {
 	if (!hash_dirty) {
 		return;
@@ -232,14 +240,18 @@ void NutrientField::rebuild_hash() const {
 		bins_across = 1;
 		return;
 	}
-	bin_size = 0.5 * spacing;
+	bin_size = BIN_CELLS * spacing;
 	bins_across = std::max(1, (int)std::ceil(2.0 * radius / bin_size) + 1);
 	size_t bins = (size_t)bins_across * bins_across;
 	ha.resize(count);
 	hb.resize(count);
 	hreach2.resize(count);
 	hsigma.resize(count);
-	std::vector<int> lo_x(count), hi_x(count), lo_y(count), hi_y(count);
+	std::vector<int> &lo_x = scratch_lo_x, &hi_x = scratch_hi_x, &lo_y = scratch_lo_y, &hi_y = scratch_hi_y;
+	lo_x.resize(count);
+	hi_x.resize(count);
+	lo_y.resize(count);
+	hi_y.resize(count);
 	bin_start.assign(bins + 1, 0);
 	for (size_t i = 0; i < count; i++) { // (first how many bins each puff touches, to size the lists)
 		const Puff &p = puffs[i];
@@ -262,7 +274,8 @@ void NutrientField::rebuild_hash() const {
 		bin_start[b + 1] += bin_start[b];
 	}
 	bin_entries.resize((size_t)bin_start[bins]);
-	std::vector<int> next(bin_start.begin(), bin_start.end() - 1);
+	std::vector<int> &next = scratch_next;
+	next.assign(bin_start.begin(), bin_start.end() - 1);
 	for (size_t i = 0; i < count; i++) { // (then who is in each, in the order the puffs were added: the same on any run)
 		for (int by = lo_y[i]; by <= hi_y[i]; by++) {
 			for (int bx = lo_x[i]; bx <= hi_x[i]; bx++) {
@@ -1010,6 +1023,16 @@ void NutrientField::sweep(bool along_rows, double k) {
 }
 
 void NutrientField::diffuse(double dt) {
+	bool any = false; // (a field with nothing in it stays empty: diffusing it would only write zeros, and the second food mostly is empty)
+	for (float c : conc) {
+		if (c != 0.0f) {
+			any = true;
+			break;
+		}
+	}
+	if (!any) {
+		return;
+	}
 	double k = get_diffusion() * dt / (spacing * spacing);
 	sweep(true, k);
 	sweep(false, k);

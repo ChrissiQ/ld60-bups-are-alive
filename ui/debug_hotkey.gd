@@ -8,7 +8,7 @@ const FREEZE_FRAMES := 3  ## frames the game stands still before the screenshot 
 
 @onready var notice: Label = $Layer/Notice
 
-var _notice_left := 0.0
+var _notice_until := 0  ## when the notice goes (Time.get_ticks_msec: the log takes a while to write on a big dish, so counting frames' time would use the notice up before it is drawn)
 var _logging := false  ## the log is being written (it waits a frame for the screenshot)
 
 
@@ -27,9 +27,8 @@ func _on_window_input(event: InputEvent) -> void:
 		write()
 
 
-func _process(delta: float) -> void:
-	_notice_left = maxf(0.0, _notice_left - delta)
-	notice.visible = _notice_left > 0.0
+func _process(_delta: float) -> void:
+	notice.visible = Time.get_ticks_msec() < _notice_until
 
 
 ## Before anything else sees the key, so that no screen (a menu, the tour) can take it.
@@ -46,7 +45,7 @@ func write() -> void:
 		return
 	_logging = true
 	notice.visible = false
-	_notice_left = 0.0
+	_notice_until = 0
 	var was_paused := get_tree().paused
 	get_tree().paused = true
 	for i in FREEZE_FRAMES:
@@ -62,6 +61,6 @@ func write() -> void:
 	var path := DebugLog.write(DebugLog.report(dish, scene, state), screenshot)
 	get_tree().paused = was_paused
 	notice.text = Strings.t("debug.logged" if path != "" else "debug.failed")
-	_notice_left = NOTICE_SECONDS
+	_notice_until = Time.get_ticks_msec() + int(NOTICE_SECONDS * 1000.0)
 	notice.visible = true
 	_logging = false

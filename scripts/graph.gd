@@ -2,7 +2,7 @@ class_name HistoryGraph
 extends Control
 ## Oscilloscope-style plot of a dish's history: population (left axis, amber) and one trait
 ## (right axis, green) against time (bottom axis), over a scrolling window. The window is the last 24 hours, 72 hours or
-## week, or the whole run: four modes, which the G key goes through. Until G is pressed the graph moves up a mode by
+## week, or the whole run: four modes, which the G key goes through (and the switch above the graph chooses). Until G is pressed the graph moves up a mode by
 ## itself, as the run reaches AUTO_BUMP times the window of the mode it is in (24 hours, then 72, then a week, then all).
 ## Colours and text sizes come from the theme type "HistoryGraph" (see scenes/menu_theme.tres),
 ## like any other widget; nothing about its look is decided here.
@@ -15,7 +15,7 @@ const AXIS_ALPHA := 0.7  ## axis lines and ticks are the series colour, a little
 
 const MARGIN_LEFT := 40.0  ## room for the population tick labels
 const MARGIN_RIGHT := 40.0  ## room for the trait tick labels
-const MARGIN_TOP := 28.0  ## legend
+const MARGIN_TOP := 26.0  ## the left axis title (the choices of span and trait are controls above the graph)
 const MARGIN_BOTTOM := 20.0  ## time tick labels
 const WEEK := 7.0 * 86400.0
 const MIN_ALL_WINDOW := 3600.0  ## the whole-run view is never narrower than this
@@ -25,9 +25,14 @@ const SPAN_SECONDS := {Span.LAST_24: 24.0 * 3600.0, Span.LAST_72: 72.0 * 3600.0,
 const SPAN_LEGENDS := {Span.LAST_24: "graph.time_24", Span.LAST_72: "graph.time_72", Span.LAST_WEEK: "graph.time_week", Span.ALL: "graph.time_all"}
 const TICK_HOURS := [1.0, 2.0, 4.0, 6.0, 12.0, 24.0, 48.0, 96.0, 168.0, 336.0, 720.0, 1440.0, 4320.0, 8760.0, 17520.0, 43800.0, 87600.0]  ## the gaps the time ticks can have, in hours
 const POP_STEPS := [10.0, 20.0, 25.0, 50.0, 100.0, 150.0, 200.0, 300.0, 500.0]
+
 const BIG_STEPS := [1.0, 1.2, 1.6, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0]  ## the leading digits of the axis maximums past POP_STEPS
 
-var dish: Dish
+signal choices_changed  ## the span or the trait was changed (the controls above the graph follow)
+
+var dish: Dish  ## the dish in the main view
+var dishes: Array = []  ## every dish that runs (the screen's own list)
+var all_dishes := false  ## show every dish together instead of the one in the main view (see `combined`)
 var trait_index := 1
 var span := Span.LAST_24  ## the mode the player has chosen with G (it counts once `chosen`)
 var chosen := false  ## whether G has been pressed: until then the graph moves up a mode by itself (see `shown_span`)
@@ -39,7 +44,13 @@ var _drawn_msec := 0  ## when it was
 ## simulation time, so at normal speed most frames have nothing new to draw. At top speed a sample arrives
 ## every frame, so a new sample alone waits for the next redraw tenth of a second.
 func refresh() -> void:
-	var key := [dish.history_version if dish != null else -1, trait_index, shown_span(), size]
+	var version := 0
+	if combined():
+		for d: Dish in dishes:
+			version += d.history_version
+	elif dish != null:
+		version = dish.history_version
+	var key := [version, trait_index, shown_span(), size, combined(), dishes.size()]
 	if key == _drawn_key:
 		return
 	var now := Time.get_ticks_msec()
@@ -50,8 +61,24 @@ func refresh() -> void:
 	queue_redraw()
 
 
+## Whether the graph shows every dish together: asked for, and there is more than one. The population is the sum, a trait the mean over every bup
+## of every dish (each dish counting by its bups).
+func combined() -> bool:
+	return all_dishes and dishes.size() > 1
+
+
+func set_all_dishes(value: bool) -> void:
+	all_dishes = value
+	choices_changed.emit()
+
+
 func cycle_trait() -> void:
-	trait_index = (trait_index + 1) % TRAITS.size()
+	set_trait((trait_index + 1) % TRAITS.size())
+
+
+func set_trait(index: int) -> void:
+	trait_index = index
+	choices_changed.emit()
 
 
 ## The mode being shown: the one chosen with G, or until it is pressed the one the run has grown into.
@@ -70,8 +97,13 @@ static func auto_span(sim_time: float) -> Span:
 
 ## G: the next mode after the one shown, and from now on the player's choice.
 func cycle_span() -> void:
-	span = ((shown_span() + 1) % Span.size()) as Span
+	set_span(((shown_span() + 1) % Span.size()) as Span)
+
+
+func set_span(mode: Span) -> void:
+	span = mode
 	chosen = true
+	choices_changed.emit()
 
 
 ## The top of the harm axis: the smallest of HARM_STEPS that holds every sample, so low harm is not squashed
@@ -179,7 +211,7 @@ func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), _color("border"), false, 1.0)
 	if dish == null:
 		return
-	var font := get_theme_default_font()
+	var font := get_theme_font("font", THEME_TYPE)  # (the numbers font: the theme sets it)
 	var tick_size := get_theme_font_size("tick", THEME_TYPE)
 	var legend_size := get_theme_font_size("legend", THEME_TYPE)
 	var population_color := _color("population")
@@ -190,8 +222,8 @@ func _draw() -> void:
 	var window := span_seconds(mode, dish.time)
 	var x_min := window_start_for(mode, dish.time)
 	var x_max := x_min + window
-	var pops := _points("pop", x_min, mode)
-	var vals := _points(trait_name, x_min, mode)
+	var pops := _series("pop", x_min, mode)
+	var vals := _series(trait_name, x_min, mode)
 	var spec: Array = Genome.GENES.get(trait_name, [1.0, mutator_axis_max(_values(vals))] if trait_name == "mutator" else [0.0, harm_axis_max(_values(vals))])
 	var lo: float = spec[0]
 	var hi: float = spec[1]
@@ -200,7 +232,10 @@ func _draw() -> void:
 	var peak := 10.0
 	for p in pops:
 		peak = maxf(peak, p.y)
-	var pop_max := pop_axis_max(peak, dish.bup_limit)
+	var limit := 0
+	for d: Dish in (dishes if combined() else [dish]):
+		limit += d.bup_limit
+	var pop_max := pop_axis_max(peak, limit)
 	var margin_left := maxf(MARGIN_LEFT, font.get_string_size(UiText.thousands(pop_max), HORIZONTAL_ALIGNMENT_LEFT, -1, tick_size).x + 10.0)  # (room for the widest population label)
 	var plot := Rect2(margin_left, MARGIN_TOP, size.x - margin_left - MARGIN_RIGHT, size.y - MARGIN_TOP - MARGIN_BOTTOM)
 	var in_days := ticks_in_days(mode, window)
@@ -236,9 +271,8 @@ func _draw() -> void:
 		draw_string(font, Vector2(x - 20.0, plot.end.y + 15.0), format_time(t, in_days), HORIZONTAL_ALIGNMENT_CENTER, 40.0, tick_size, muted)
 
 	# Legend doubles as the axis titles, coloured to match the axis each belongs to.
-	draw_string(font, Vector2(6.0, 16.0), Strings.t("graph.bups"), HORIZONTAL_ALIGNMENT_LEFT, -1, legend_size, population_color)
-	draw_string(font, Vector2(plot.position.x, 16.0), Strings.t(SPAN_LEGENDS[mode]), HORIZONTAL_ALIGNMENT_CENTER, plot.size.x, legend_size, muted)
-	draw_string(font, Vector2(0.0, 16.0), Strings.t("graph.trait", [Strings.t("genes.graph_" + trait_name)]), HORIZONTAL_ALIGNMENT_RIGHT, size.x - 6.0, legend_size, trait_color)
+	var title := Strings.t("graph.bups_all", [dishes.size()]) if combined() else Strings.t("graph.bups")
+	draw_string(font, Vector2(6.0, 14.0), title, HORIZONTAL_ALIGNMENT_LEFT, -1, legend_size, population_color)
 
 	_plot_line(vals, plot, lo, hi, x_min, window, trait_color)
 	_plot_line(pops, plot, 0.0, pop_max, x_min, window, population_color)  # (last: at the cap the population sits on the top edge and must not be hidden by the trait)
@@ -248,12 +282,16 @@ func _draw() -> void:
 ## Dish.history_all), each at the end of the stretch it is the mean of, with the newest sample of the fine history after them.
 ## Otherwise sample i was recorded at (newest sample time) - (samples after it) * interval.
 func _points(name: String, x_min: float, mode: Span) -> PackedVector2Array:
+	return _points_of(dish, name, x_min, mode)
+
+
+func _points_of(d: Dish, name: String, x_min: float, mode: Span) -> PackedVector2Array:
 	var out := PackedVector2Array()
-	var last_sample := last_sample_time(dish.time)
-	var fine: Array = dish.history[name]
+	var last_sample := last_sample_time(d.time)
+	var fine: Array = d.history[name]
 	if mode == Span.ALL:
-		var whole: Array = dish.history_all[name]
-		var step := dish.history_all_factor * Dish.HISTORY_INTERVAL
+		var whole: Array = d.history_all[name]
+		var step := d.history_all_factor * Dish.HISTORY_INTERVAL
 		for i in whole.size():
 			out.append(Vector2((i + 1) * step, whole[i]))
 		if not fine.is_empty() and (out.is_empty() or last_sample > out[-1].x):
@@ -264,6 +302,60 @@ func _points(name: String, x_min: float, mode: Span) -> PackedVector2Array:
 		if t >= x_min:
 			out.append(Vector2(t, fine[i]))
 	return out
+
+
+## The series as the graph draws it: the main dish's, or every dish's together. The dishes' samples are not at quite the same times (a dish that joined
+## later started its own sampling), so the sum goes along the times of the longest one, each dish read between its own samples (nothing before it
+## began, its last value after its history ends). A trait is the mean over the dishes, each counting by its bups.
+func _series(name: String, x_min: float, mode: Span) -> PackedVector2Array:
+	if not combined():
+		return _points(name, x_min, mode)
+	var pops: Array[PackedVector2Array] = []
+	var vals: Array[PackedVector2Array] = []
+	var grid := PackedVector2Array()
+	for d: Dish in dishes:
+		var pop := _points_of(d, "pop", x_min, mode)
+		pops.append(pop)
+		vals.append(pop if name == "pop" else _points_of(d, name, x_min, mode))
+		if pop.size() > grid.size():
+			grid = pop
+	var pop_cursor := []
+	pop_cursor.resize(dishes.size())
+	pop_cursor.fill(0)
+	var val_cursor := pop_cursor.duplicate()
+	var out := PackedVector2Array()
+	for g in grid:
+		var total := 0.0
+		var weighted := 0.0
+		for k in dishes.size():
+			var n := _value_at(pops[k], g.x, pop_cursor, k)
+			if is_nan(n):
+				continue
+			total += n
+			if name != "pop":
+				weighted += n * _value_at(vals[k], g.x, val_cursor, k)
+		if name == "pop":
+			out.append(Vector2(g.x, total))
+		elif total > 0.0:
+			out.append(Vector2(g.x, weighted / total))
+		elif not out.is_empty():
+			out.append(Vector2(g.x, out[-1].y))  # (nobody left to average: the trait stays as it last was)
+	return out
+
+
+## The series' value at time t, going along from the cursor's place (the times ask in order); NAN before the series begins.
+static func _value_at(points: PackedVector2Array, t: float, cursor: Array, k: int) -> float:
+	if points.is_empty() or t < points[0].x - 1.0:
+		return NAN
+	var i: int = cursor[k]
+	while i + 1 < points.size() and points[i + 1].x <= t:
+		i += 1
+	cursor[k] = i
+	if i + 1 >= points.size():
+		return points[i].y
+	var a := points[i]
+	var b := points[i + 1]
+	return lerpf(a.y, b.y, (t - a.x) / maxf(b.x - a.x, 0.000001))
 
 
 static func _values(points: PackedVector2Array) -> Array:

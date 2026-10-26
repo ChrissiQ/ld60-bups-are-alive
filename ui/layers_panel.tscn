@@ -8,41 +8,44 @@
 [ext_resource type="Texture2D" path="res://icons/layer_steering.svg" id="steering_icon"]
 
 [node name="LayersPanel" type="PanelContainer"]
-theme_type_variation = &"ToolbarPanel"
-offset_left = 20.0
-offset_top = 16.0
+theme_type_variation = &"Bare"
 script = ExtResource("1")
 
 [node name="Row" type="HBoxContainer" parent="."]
 layout_mode = 2
-theme_type_variation = &"TightRow"
+theme_type_variation = &"SegmentRow"
 
 [node name="MediumButton" type="Button" parent="Row"]
 layout_mode = 2
-theme_type_variation = &"ToolButton"
+custom_minimum_size = Vector2(36, 28)
+theme_type_variation = &"ToggleButton"
 icon = ExtResource("medium_icon")
 icon_alignment = 1
 
 [node name="SourcesButton" type="Button" parent="Row"]
 layout_mode = 2
-theme_type_variation = &"ToolButton"
+custom_minimum_size = Vector2(36, 28)
+theme_type_variation = &"ToggleButton"
 icon = ExtResource("sources_icon")
 icon_alignment = 1
 
 [node name="PlanktonButton" type="Button" parent="Row"]
 layout_mode = 2
-theme_type_variation = &"ToolButton"
+custom_minimum_size = Vector2(36, 28)
+theme_type_variation = &"ToggleButton"
 icon = ExtResource("plankton_icon")
 icon_alignment = 1
 
 [node name="BupsButton" type="Button" parent="Row"]
 layout_mode = 2
-theme_type_variation = &"ToolButton"
+custom_minimum_size = Vector2(36, 28)
+theme_type_variation = &"ToggleButton"
 icon = ExtResource("bups_icon")
 icon_alignment = 1
 
 [node name="SteeringButton" type="Button" parent="Row"]
 layout_mode = 2
-theme_type_variation = &"ToolButton"
+custom_minimum_size = Vector2(36, 28)
+theme_type_variation = &"ToggleButton"
 icon = ExtResource("steering_icon")
 icon_alignment = 1

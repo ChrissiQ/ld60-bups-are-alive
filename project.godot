@@ -20,18 +20,16 @@ config/icon="res://icon.svg"
 TextSweep="*res://scripts/text_sweep.gd"
 DialogStyle="*res://scripts/dialog_style.gd"
 DebugHotkey="*res://ui/debug_hotkey.tscn"
+PreferencesHook="*res://scripts/preferences_hook.gd"
 
 [display]
 
-window/size/viewport_width=1280
-window/size/viewport_height=720
-window/stretch/mode="canvas_items"
-window/stretch/aspect="expand"
+window/size/mode=2
 
 [gui]
 
 theme/custom="res://scenes/menu_theme.tres"
-theme/custom_font="res://fonts/CommitMono-500.otf"
+theme/custom_font="res://fonts/IBMPlexSans-400.ttf"
 
 [physics]
 
