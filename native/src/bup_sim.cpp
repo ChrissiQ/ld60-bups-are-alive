@@ -1830,7 +1830,7 @@ void BupSim::conjugate(double delta) {
 	// A small table of bits says at a glance whether a cell can be one of those (a few thousand at most): most bups are nowhere near a donor, and one bit test
 	// per bup is far cheaper than a lookup in the map (which is what the pass over 100,000 bups cost).
 	const double per_cell = 1.0 / cell; // (every cell is worked out with this, donors and the rest alike, so that a bup on an edge is never in two different cells by rounding)
-	constexpr int HASH_BITS = 16;
+	static constexpr int HASH_BITS = 16; // (static, so that MSVC lets the lambda below use it without capturing it)
 	std::vector<uint64_t> maybe((size_t)1 << (HASH_BITS - 6), 0);
 	auto bit_of = [](uint64_t key) -> uint32_t {
 		return (uint32_t)((key * 0x9E3779B97F4A7C15ull) >> (64 - HASH_BITS));
