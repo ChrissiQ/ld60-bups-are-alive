@@ -28,7 +28,8 @@ const LINEAGE_ELSEWHERE_MSEC := 30000  ## how often the lineage panel looks agai
 const LOCKSTEP_MIN_GAP := 1.0  ## a dish at least this many simulated seconds behind the world's target is advanced (a shorter step would be a fine one, which only the processor runs); nearer, it waits
 const CATCHUP_SECONDS := 5.0  ## when the dishes are further apart than a frame holds (after a fast speed, one dish can be a minute ahead), the ones behind are asked for this many simulated seconds a frame (what the frame's budget allows) until they have caught up
 const LOCKSTEP_MIN_SHARE := 0.25  ## at speeds where a frame holds less than four of those seconds, a quarter of the frame's step
-const DISH_SPACING := 1.0e6  ## µm between the centres of the dishes in the shared world (past the farthest the camera can see of one)
+const DISH_SPACING := 4.0e5  ## µm between the centres of the dishes in the shared world (clear of the largest dish, 90000 µm in radius, either side). They sit in a grid DISH_COLUMNS wide so no coordinate grows large: the renderer's single-precision positions would shake what is drawn far from the origin when zoomed in
+const DISH_COLUMNS := 5
 const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) still counts as pointing at it
 
 @onready var dish: Dish = $Dish
@@ -71,6 +72,10 @@ var _span_buttons := {}  ## HistoryGraph.Span -> its button
 @onready var info_panel: PanelContainer = %InfoPanel  ## what is picked (a bup, a source, a plankton)
 @onready var hover_card: PanelContainer = %HoverCard  ## what the pointer rests on, next to the pointer (it never moves the side column)
 @onready var hover_text: RichTextLabel = %HoverText
+@onready var info_genome: GenomeRibbon = %InfoGenome  ## the picked bup's genome as a chromosome map, and the lines that come after it
+@onready var info_tail: RichTextLabel = %InfoTail
+@onready var hover_genome: GenomeRibbon = %HoverGenome  ## the same on the card that follows the pointer
+@onready var hover_tail: RichTextLabel = %HoverTail
 @onready var info_text: RichTextLabel = %InfoText
 @onready var top_row: HBoxContainer = %InfoTopRow
 @onready var name_row: BupNameRow = %NameRow
@@ -167,6 +172,7 @@ func _ready() -> void:
 	pause_menu.resume_requested.connect(_close_menu)
 	pause_menu.quit_requested.connect(_quit_to_menu)
 	pause_menu.tour_requested.connect(_replay_tour)
+	info_genome.entry_requested.connect(_open_encyclopedia)
 	pause_menu.dish_radius_chosen.connect(_resize_dish)
 	pause_menu.bup_limit_chosen.connect(func(limit: int) -> void: dish.change_limit(limit))
 	graph.dish = dish
@@ -320,6 +326,8 @@ func _process(delta: float) -> void:
 	graph.refresh()
 	_show_graph_choices()
 	watch_panel.refresh()
+	dish_strip.main_dish = dish
+	dish_strip.main_zoomed_in = 2.0 * dish.radius * camera.zoom.x > minf(stage.size.x, stage.size.y) * 1.02
 	dish_strip.refresh(delta)
 	_update_hud()
 	_sync_bloom_panel()
@@ -389,11 +397,19 @@ func _update_info_panel() -> void:
 	var bup_id: int = dish.selected_id if pinned else dish.hovered_id
 	var source: NutrientSource = dish.selected_source if pinned else dish.hovered_source
 	var floating: Plankton = dish.selected_plankton if pinned else dish.hovered_plankton
+	var husk_place: Vector2 = dish.selected_husk if pinned else dish.hovered_husk
+	var husk := dish.husk_details(husk_place) if husk_place != Dish.NO_HUSK else {}
+	if husk_place != Dish.NO_HUSK and husk.is_empty():  # (it has leaked away)
+		if pinned:
+			dish.selected_husk = Dish.NO_HUSK
+		else:
+			dish.hovered_husk = Dish.NO_HUSK
+		husk_place = Dish.NO_HUSK
 	var editing := dish.selected_source != null and dish.selected_id < 0
 	var alive_info: Dictionary = dish.bup_info(bup_id) if bup_id >= 0 else {}  # (fetched once: the panels below are built from it)
 	var dead := bup_id >= 0 and alive_info.is_empty()  # a selected bup that has died stays up, as a record
 	var lineage_open: bool = bup_id >= 0 and bup_id == dish.selected_id and _stack.size() > 0 and _stack.back()["view"] == "lineage"
-	var something := bup_id >= 0 or source != null or floating != null
+	var something := bup_id >= 0 or source != null or floating != null or not husk.is_empty()
 	var target: RichTextLabel = info_text if pinned else hover_text
 	info_panel.visible = pinned and something and not lineage_open
 	hover_card.visible = not pinned and (something or _hovering_point)
@@ -413,13 +429,23 @@ func _update_info_panel() -> void:
 	top_row.visible = pinned and bup_id >= 0
 	lineage_button.visible = bup_id >= 0 and bup_id == dish.selected_id
 	watch_button.visible = lineage_button.visible  # (alive or dead: a record can be watched too)
+	var shows_bup := bup_id >= 0
+	info_genome.visible = shows_bup and pinned
+	info_tail.visible = info_genome.visible
+	hover_genome.visible = shows_bup and not pinned
+	hover_tail.visible = hover_genome.visible
 	if bup_id < 0:
 		name_row.cancel_editing()
 	if lineage_open:
 		_show_lineage(bup_id)
 	if bup_id >= 0:
 		_point_stamp = []
-		var body := _deceased_text(dish.lineage_info(bup_id)) if dead else _info_text(alive_info, bup_id)
+		var record := dish.lineage_info(bup_id) if dead else alive_info
+		var body := _deceased_text(record) if dead else _info_text(alive_info, bup_id)
+		var genome_map: GenomeRibbon = info_genome if pinned else hover_genome
+		var tail: RichTextLabel = info_tail if pinned else hover_tail
+		genome_map.show_bup(record, pinned)
+		_set_rich(tail, _tail_text(record), "tail %d" % bup_id)
 		if pinned:
 			name_row.show_bup(dish, bup_id, true)  # a bup can be renamed once it is clicked, not just hovered
 		else:
@@ -433,6 +459,9 @@ func _update_info_panel() -> void:
 	elif floating != null:
 		_point_stamp = []
 		_set_rich_when_due(target, "plankton %d" % floating.get_instance_id(), func() -> String: return _plankton_text(dish.plankton_details(floating)))
+	elif not husk.is_empty():
+		_point_stamp = []
+		_set_rich_when_due(target, "husk %s" % husk_place, func() -> String: return _husk_text(husk))
 	elif _hovering_point:
 		var point_stamp := [_hover_point, dish.time, dish.edit_count]
 		if point_stamp != _point_stamp:  # (the readout is worked out again only when the spot or the dish has changed)
@@ -513,6 +542,15 @@ func _plankton_text(d: Dictionary) -> String:
 	])
 
 
+func _husk_text(d: Dictionary) -> String:
+	var offset: Vector2 = d["offset"]
+	var nearest: float = d["nearest_bup"]
+	return Strings.t("panel.husk", [
+		SimClock.format_minutes(int(d["age"] / 60.0)), d["units"], d["left"] * 100.0, offset.x, offset.y, d["distance"], _concentration_text(d["concentration"]),
+		_away_text(nearest),
+	])
+
+
 func _source_text(d: Dictionary) -> String:
 	var offset: Vector2 = d["offset"]
 	var nearest: float = d["nearest_bup"]
@@ -570,31 +608,20 @@ func _info_text(b: Dictionary, id: int) -> String:
 	var from_dish := dish.line_from_dish(id)
 	if from_dish > 0:
 		text += Strings.t("panel.from_dish_line", [from_dish])
-	return text + _traits_text(b)
+	return text.rstrip("\n")
 
 
-## The genes, mutations and harm of a bup (alive or dead), the same lines in either panel.
-func _traits_text(b: Dictionary) -> String:
-	var text := ""
-	for gene: String in Genome.LABELED:
-		text += Strings.t("panel.gene_line", [Genome.label(gene).rpad(5), Genome.format(gene, b[Genome.INFO_KEYS[gene]])])
-	if (int(b.get("reach", 0)) & 255) > 0:
-		text += Strings.t("panel.reach_line", [Genome.reach_text(int(b["reach"]))])
-	match Genome.key_level(int(b.get("reach", 0))):
-		1:
-			text += Strings.t("panel.key_primed_line")
-		2:
-			text += Strings.t("panel.key_line")
-	if b.get("donor", false):
-		text += Strings.t("panel.donor_line")
-	return text + Strings.t("panel.bup_tail", [b["mutations"], Genome.harm_share(b["harm"]) * 100.0])
+## The lines under a bup's genome map (alive or dead): the mutations in its lineage, and its harm.
+func _tail_text(b: Dictionary) -> String:
+	var text := Strings.t("panel.bup_tail", [b["mutations"], Genome.harm_share(b["harm"]) * 100.0])
+	return text if b.has("reach") else text + "\n" + Strings.t("genome.dead_note")
 
 
 func _deceased_text(b: Dictionary) -> String:
 	var text := Strings.t("panel.deceased", [SimClock.format_minutes(b["born"]), SimClock.format_minutes(b["died"]), b["divisions"], b["max_energy"]])
 	if b.has("moved_to"):
 		text += Strings.t("panel.moved_line", [b["moved_to"]]).substr(1) + "\n"
-	return text + _traits_text(b)
+	return text.rstrip("\n")
 
 
 ## The select tool now looks at something else: a selection of a kind it no longer looks at is let go.
@@ -630,7 +657,23 @@ func debug_state() -> Dictionary:
 		"zoom": camera.zoom.x,
 		"following": following_id,
 		"views_open": _stack.size(),
-		"dishes": dishes.map(func(d: Dish) -> Dictionary: return {"number": _dish_numbers[d], "bups": d.population(), "time": d.time}),
+		"camera_position": [camera.position.x, camera.position.y],
+		"camera_follow_precision_um": absf(camera.position.x) * 6.0e-8,  # (the single-precision step of the renderer's coordinates at the camera: a zoomed-in view shakes by it times the zoom)
+		"stage_size": [stage.size.x, stage.size.y],
+		"ui_scale": UserSettings.ui_scale,
+		"graph": {
+			"scope_all": graph.all_dishes,
+			"combined": graph.combined(),
+			"span": HistoryGraph.Span.keys()[graph.shown_span()],
+			"span_chosen": graph.chosen,
+			"trait": HistoryGraph.TRAITS[graph.trait_index],
+			"shown_time_s": graph._now(),
+		},
+		"tray_open": {"graph": graph_section.open, "dish_details": dish_details.open, "all_details": all_details.open},
+		"dish_strip": {"visible": dish_strip.visible, "main_zoomed_in": dish_strip.main_zoomed_in},
+		"watched_total": dishes.reduce(func(n: int, d: Dish) -> int: return n + d.watched.size(), 0),
+		"world_time": world_time(),
+		"dishes": dishes.map(func(d: Dish) -> Dictionary: return {"number": _dish_numbers[d], "bups": d.population(), "time": d.time, "history_origin": d.history_origin, "position": [d.global_position.x, d.global_position.y], "backend": d.backend_running(), "husks": d.sim.husk_count()}),
 		"freezer": _freezer.map(func(entry: Dictionary) -> Dictionary: return {"number": entry["number"], "bups": entry["bups"], "frozen_at": entry["data"].get("time", 0.0)}),
 	}
 
@@ -655,6 +698,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			_zoom_by(pow(ZOOM_WHEEL_STEP, -event.delta.y * ZOOM_TRACKPAD_SCROLL))
 	elif event is InputEventKey and event.pressed and not event.echo:
 		_on_key(event)
+
+
+## A band of the genome map was clicked: the game holds and the encyclopedia opens on the entry of its gene.
+func _open_encyclopedia(entry: String) -> void:
+	_open_menu()
+	pause_menu.show_encyclopedia(entry)
 
 
 func _on_key(event: InputEventKey) -> void:
@@ -972,15 +1021,20 @@ func _register_dish(d: Dish, number := -1) -> void:
 	dish_strip.light(dish)
 
 
-## Another dish, run beside the main one in the same world, far enough away that the camera never sees two. It is started as `start` says (null: the usual
+## Where the dish in a place of the shared world has its centre.
+static func _slot_position(slot: int) -> Vector2:
+	return Vector2(DISH_SPACING * float(slot % DISH_COLUMNS), DISH_SPACING * float(slot / DISH_COLUMNS))
+
+
+## Another dish, run beside the main one in the same world, far enough away that the view of one is clear of the next (when zoomed in). It is started as `start` says (null: the usual
 ## dish) and takes its place in the strip; the main view stays where it is. Returns it.
 func add_dish(start: StartConditions, number := -1) -> Dish:
 	var d := Dish.new()
 	add_child(d)
 	var slot := 0  # (the first place no dish holds: a dish that went extinct leaves its place free)
-	while dishes.any(func(other: Dish) -> bool: return is_equal_approx(other.global_position.x, DISH_SPACING * float(slot))):
+	while dishes.any(func(other: Dish) -> bool: return other.global_position.is_equal_approx(_slot_position(slot))):
 		slot += 1
-	d.global_position = Vector2(DISH_SPACING * float(slot), 0.0)
+	d.global_position = _slot_position(slot)
 	d.strike(start)
 	d.begin_at(world_time())  # (a dish that joins is at the world's time: one clock for all)
 	for layer: int in Dish.Layer.values():
@@ -1183,6 +1237,7 @@ func _setup_graph_controls() -> void:
 	for trait_name: String in HistoryGraph.TRAITS:
 		trait_select.add_item(Strings.t("genes.graph_" + trait_name))
 	trait_select.item_selected.connect(graph.set_trait)
+	trait_select.item_selected.connect(func(_index: int) -> void: trait_select.release_focus.call_deferred())  # (a choice completes the interaction: Space goes back to the game)
 	span_switch.tooltip_text = Strings.t("graph.span_tip")
 	trait_select.tooltip_text = Strings.t("graph.trait_tip")
 
@@ -1393,6 +1448,8 @@ func _selected_world_pos() -> Variant:
 		return dish.selected_source.pos
 	if dish.selected_plankton != null:
 		return dish.global_position + dish.selected_plankton.pos
+	if dish.selected_husk != Dish.NO_HUSK:
+		return dish.global_position + dish.selected_husk
 	return null
 
 
@@ -1499,10 +1556,16 @@ func _update_hud() -> void:
 			_add_colony_row(gene, Genome.label(gene))
 		_add_colony_row("mutations", Strings.t("hud.colony_mutations"))
 		_add_colony_row("harm", Strings.t("hud.colony_harm"))
+		_add_colony_row("donor", Strings.t("hud.colony_donors"))
+		_add_colony_row("key", Strings.t("hud.colony_key"))
+		_add_colony_row("generation", Strings.t("hud.colony_generation"))
 	for gene: String in Genome.LABELED:
 		(_colony_rows[gene] as StatRow).value_text = Genome.format(gene, stats[gene])
 	(_colony_rows["mutations"] as StatRow).value_text = "%.1f" % stats["mutations"]
 	(_colony_rows["harm"] as StatRow).value_text = "%.1f%%" % (stats["harm"] * 100.0)
+	(_colony_rows["donor"] as StatRow).value_text = "%.1f%%" % (stats["donor"] * 100.0)
+	(_colony_rows["key"] as StatRow).value_text = "%.1f%%" % (stats["key"] * 100.0)
+	(_colony_rows["generation"] as StatRow).value_text = UiText.thousands(stats["generation"], 1)
 	_update_all_details()
 
 
@@ -1517,13 +1580,16 @@ func _update_all_details() -> void:
 			_add_all_row(gene, Genome.label(gene))
 		_add_all_row("mutations", Strings.t("hud.colony_mutations"))
 		_add_all_row("harm", Strings.t("hud.colony_harm"))
+		_add_all_row("donor", Strings.t("hud.colony_donors"))
+		_add_all_row("key", Strings.t("hud.colony_key"))
+		_add_all_row("generation", Strings.t("hud.colony_generation"))
 	var total := 0.0
 	var sums := {}
 	for d in dishes:
 		var stats := d.population_stats()
 		var count := float(stats["count"])
 		total += count
-		for key: String in Genome.LABELED + ["mutations", "harm"]:
+		for key: String in Genome.LABELED + ["mutations", "harm", "donor", "key", "generation"]:
 			sums[key] = float(sums.get(key, 0.0)) + float(stats[key]) * count
 	(_all_rows["dishes"] as StatRow).value_text = str(dishes.size())
 	(_all_rows["bups"] as StatRow).value_text = UiText.thousands(total)
@@ -1532,6 +1598,9 @@ func _update_all_details() -> void:
 		(_all_rows[gene] as StatRow).value_text = Genome.format(gene, mean.call(gene))
 	(_all_rows["mutations"] as StatRow).value_text = "%.1f" % mean.call("mutations")
 	(_all_rows["harm"] as StatRow).value_text = "%.1f%%" % (mean.call("harm") * 100.0)
+	(_all_rows["donor"] as StatRow).value_text = "%.1f%%" % (mean.call("donor") * 100.0)
+	(_all_rows["key"] as StatRow).value_text = "%.1f%%" % (mean.call("key") * 100.0)
+	(_all_rows["generation"] as StatRow).value_text = UiText.thousands(mean.call("generation"), 1)
 
 
 func _add_all_row(key: String, label: String) -> void:
@@ -1553,7 +1622,7 @@ func _add_colony_row(key: String, label: String) -> void:
 	_colony_rows[key] = row
 
 
-## The pause menu's "Replay tour": back to the game, and the tour begins.
+## The pause menu's "Replay tutorial": back to the game, and the tutorial begins.
 func _replay_tour() -> void:
 	_close_menu()
 	_start_tutorial.call_deferred()
@@ -1579,6 +1648,7 @@ func _start_tutorial() -> void:
 	steps.append(_tour("layers", func() -> Rect2: return layers_panel.get_global_rect().grow(4.0)))
 	steps.append(_tour("pick_bup", _tutorial_bup_rect, func() -> bool: return dish.selected_id >= 0, _tutorial_show_bup))
 	steps.append(_tour("info", func() -> Rect2: return _in_tray(info_panel)))
+	steps.append(_tour("genome", func() -> Rect2: return _in_tray(info_genome)))
 	steps.append(_tour("watch", func() -> Rect2: return _in_tray(watch_button), func() -> bool: return dish.is_watched(dish.selected_id)))
 	steps.append(_tour("watched", func() -> Rect2: return _in_tray(watch_panel)))
 	steps.append(_tour("lineage_open", func() -> Rect2: return _in_tray(lineage_button), _lineage_is_open, _tutorial_close_lineage))

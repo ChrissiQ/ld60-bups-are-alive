@@ -5,6 +5,7 @@ extends RefCounted
 ## (The whole game is set in one font, so numbers need no special typeface.)
 
 static var _number: RegEx = RegEx.create_from_string("(\\d+)(\\.\\d+)?(/s|%|s\\b)?")
+const TOOLTIP_WIDTH := 38  ## characters a tooltip line holds (see TooltipFit)
 
 
 ## The colour numbers are drawn in: whatever the theme says Bright text is.
@@ -47,3 +48,19 @@ static func numbers(text: String) -> String:
 		out += "[code][color=#%s]%s%s%s[/color][/code]" % [colour, group(m.get_string(1)), m.get_string(2), m.get_string(3)]
 		from = m.get_end()
 	return out + safe.substr(from)
+
+## The text with its lines broken at spaces so none is longer than `width` characters (a single longer word keeps its line).
+static func tooltip_lines(text: String, width := TOOLTIP_WIDTH) -> String:
+	var lines: PackedStringArray = []
+	for paragraph in text.split("\n"):
+		var line := ""
+		for word in paragraph.split(" ", false):
+			if line.is_empty():
+				line = word
+			elif line.length() + 1 + word.length() <= width:
+				line += " " + word
+			else:
+				lines.append(line)
+				line = word
+		lines.append(line)
+	return "\n".join(lines)

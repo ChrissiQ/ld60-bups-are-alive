@@ -88,7 +88,7 @@ func _init() -> void:
 			tour.next()
 		seen_steps += 1
 	check(not tour.active and not tour.visible, "the tour ends after the last step")
-	check(seen_steps == 16, "a free-mode tour has 16 steps (%d)" % seen_steps)
+	check(seen_steps == 17, "a free-mode tutorial has 17 steps (%d)" % seen_steps)
 	check(m.paused and m.dish.selected_id < 0 and not m.dish.is_watched(m._tutorial_bup) and m.camera.zoom.is_equal_approx(was_zoom) and m.camera.position.distance_to(was_position) < 4.0, "afterwards it is paused as before, with nothing selected or watched and the camera where it was (%s %s, was %s %s)" % [m.camera.zoom, m.camera.position, was_zoom, was_position])
 	await process_frame
 	await process_frame
@@ -134,14 +134,17 @@ func _init() -> void:
 	await process_frame
 	check(nt.index == 10, "making the click goes straight on")
 	nt.next()
-	check(nt.index == 11 and nt.next_button.disabled, "the watch step is shut until the eye is pressed")
+	check(nt.index == 11 and nt.text_label.text.begins_with("Its genome"), "after the inspect panel comes the genome step")
+	nt.next()
+	check(nt.index == 12 and nt.next_button.disabled, "the watch step is shut until the eye is pressed")
 	n._toggle_watch()
 	await process_frame
 	await process_frame
-	check(nt.index == 12, "pressing the eye goes straight on to the watch list")
+	check(nt.index == 13, "pressing the eye goes straight on to the watch list")
 	nt.back_button.pressed.emit()
 	await process_frame
-	check(nt.index == 11 and not nt.next_button.disabled and nt.text_label.text.contains("eye"), "Back shows the watch step again, with Next open because the bup is still watched")
+	check(nt.index == 12 and not nt.next_button.disabled and nt.text_label.text.contains("eye"), "Back shows the watch step again, with Next open because the bup is still watched")
+	nt.back_button.pressed.emit()
 	nt.back_button.pressed.emit()
 	nt.back_button.pressed.emit()
 	await process_frame
@@ -181,7 +184,7 @@ func _init() -> void:
 
 	# Goal mode: the goal's own step is there, and a game that was playing plays again afterwards.
 	var g: Node = await _screen(Session.Mode.GOALS, true)
-	check(g.tutorial.active and g.tutorial._steps.size() == 17, "goal mode's tour has the goal step as well (%d steps)" % g.tutorial._steps.size())
+	check(g.tutorial.active and g.tutorial._steps.size() == 18, "goal mode's tour has the goal step as well (%d steps)" % g.tutorial._steps.size())
 	check(g.tutorial._steps[1]["text"].begins_with("Your experiment") and g.tutorial._steps[6]["text"].contains("experiment 2"), "it explains the goal and that the nutrient tools unlock later")
 	check(g.paused, "goal mode is held for the tour")
 	g.tutorial.skip()

@@ -13,6 +13,8 @@ extends Control
 @onready var options_button: Button = $Column/Buttons/OptionsButton
 @onready var controls_panel: ControlsPanel = $ControlsPanel
 @onready var options_panel: OptionsPanel = $OptionsPanel
+@onready var encyclopedia_button: Button = $Column/Buttons/EncyclopediaButton
+@onready var encyclopedia_panel: EncyclopediaPanel = $EncyclopediaPanel
 @onready var confirm: ConfirmationDialog = $ConfirmDialog
 
 var _flicker_left := 0.0
@@ -34,6 +36,8 @@ func _ready() -> void:
 	free_button.pressed.connect(_on_free_pressed)
 	controls_button.pressed.connect(_show_controls.bind(true))
 	controls_panel.back_requested.connect(_show_controls.bind(false))
+	encyclopedia_button.pressed.connect(_show_encyclopedia.bind(true))
+	encyclopedia_panel.back_requested.connect(_show_encyclopedia.bind(false))
 	options_button.pressed.connect(_show_options.bind(true))
 	options_panel.back_requested.connect(_show_options.bind(false))
 	quit_button.pressed.connect(get_tree().quit)
@@ -78,6 +82,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_show_controls(false)
 	elif UiInput.is_escape_press(event) and options_panel.visible:
 		_show_options(false)
+	elif UiInput.is_escape_press(event) and encyclopedia_panel.visible:
+		_show_encyclopedia(false)
 
 
 func _show_controls(visible_now: bool) -> void:
@@ -87,6 +93,15 @@ func _show_controls(visible_now: bool) -> void:
 		controls_panel.focus_back()
 	else:
 		controls_button.grab_focus()
+
+
+func _show_encyclopedia(visible_now: bool) -> void:
+	encyclopedia_panel.visible = visible_now
+	_show_panel(visible_now)
+	if visible_now:
+		encyclopedia_panel.focus_back()
+	else:
+		encyclopedia_button.grab_focus()
 
 
 func _show_options(visible_now: bool) -> void:

@@ -70,6 +70,7 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("transfer_count"), &BupSim::transfer_count);
 	ClassDB::bind_method(D_METHOD("husk_count"), &BupSim::husk_count);
 	ClassDB::bind_method(D_METHOD("husks_export"), &BupSim::husks_export);
+	ClassDB::bind_method(D_METHOD("husk_near", "at", "radius"), &BupSim::husk_near);
 	ClassDB::bind_method(D_METHOD("husks_import", "saved"), &BupSim::husks_import);
 	ClassDB::bind_method(D_METHOD("grow", "new_radius"), &BupSim::grow);
 	ClassDB::bind_method(D_METHOD("shrink", "new_radius"), &BupSim::shrink);
@@ -1785,6 +1786,30 @@ PackedFloat64Array BupSim::husks_export() const {
 		w[i * 5 + 2] = h.energy;
 		w[i * 5 + 3] = h.age;
 		w[i * 5 + 4] = h.next;
+	}
+	return out;
+}
+
+PackedFloat64Array BupSim::husk_near(const Vector2 &at, double radius) const {
+	PackedFloat64Array out;
+	double best = radius * radius;
+	const Husk *found = nullptr;
+	for (const Husk &h : husks) {
+		const double dx = (double)h.x - at.x, dy = (double)h.y - at.y;
+		const double d2 = dx * dx + dy * dy;
+		if (d2 <= best) {
+			best = d2;
+			found = &h;
+		}
+	}
+	if (found != nullptr) {
+		out.resize(5);
+		double *w = out.ptrw();
+		w[0] = found->x;
+		w[1] = found->y;
+		w[2] = found->energy;
+		w[3] = found->age;
+		w[4] = found->next;
 	}
 	return out;
 }

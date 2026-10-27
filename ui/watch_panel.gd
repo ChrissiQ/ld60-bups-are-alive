@@ -41,18 +41,18 @@ func refresh() -> void:
 	_looked_msec = now
 	if version != _version:
 		_version = version
-		_rebuild(count)
+		_rebuild()
 	else:
 		for key: Array in _buttons:
 			_style_entry(_buttons[key], key[0], key[1])
 
 
-func _rebuild(count: int) -> void:
+func _rebuild() -> void:
 	for child in entries.get_children():
 		entries.remove_child(child)
 		child.queue_free()
 	_buttons.clear()
-	title.text = Strings.t("watch.title", [count])
+	title.text = Strings.t("watch.title")
 	_entries_list = []
 	for d in dishes:
 		for id in d.watched:

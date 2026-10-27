@@ -45,7 +45,9 @@ static func report(dish: Dish, scene: Node, extra: Dictionary) -> String:
 			"death_husks": dish.death_husks,
 			"plankton_husks": dish.plankton_husks,
 			"stationary_phase": dish.stationary_phase,
-			"husks": dish.sim.husk_count(),
+			"husks": _husks(dish),
+			"global_position": [dish.global_position.x, dish.global_position.y],
+			"history": _history(dish),
 			"patch_seed": dish.patch_seed,
 			"nutrients_placed": dish.nutrients_placed,
 			"sources": dish.sources.size(),
@@ -162,6 +164,32 @@ static func _constants() -> Dictionary:
 	return out
 
 
+## The husks: how many, the nutrient still in them (what they will leak back), and how many the layer draws.
+static func _husks(dish: Dish) -> Dictionary:
+	var count := dish.sim.husk_count()
+	var energy := 0.0
+	var saved := dish.sim.husks_export()
+	for i in count:
+		energy += saved[i * 5 + 2]
+	return {"count": count, "energy_held": energy, "drawn": mini(count, Dish.HUSK_DRAWN_MAX) if count <= Dish.HUSK_DRAWN_MAX else count / maxi(1, count / Dish.HUSK_DRAWN_MAX)}
+
+
+## The dish's graph history: where it began, how many samples each part holds, and the newest figures.
+static func _history(dish: Dish) -> Dictionary:
+	var newest := {}
+	for series: String in dish.history:
+		if not (dish.history[series] as Array).is_empty():
+			newest[series] = dish.history[series][-1]
+	return {
+		"origin_s": dish.history_origin,
+		"samples": dish.history["pop"].size(),
+		"whole_run_samples": dish.history_all["pop"].size(),
+		"whole_run_factor": dish.history_all_factor,
+		"version": dish.history_version,
+		"newest": newest,
+	}
+
+
 static func _layers_hidden(dish: Dish) -> Array:
 	var hidden := []
 	for layer: String in Dish.Layer.keys():
@@ -180,4 +208,6 @@ static func _selected(dish: Dish) -> Dictionary:
 		return {"source": dish.source_details(dish.selected_source)}
 	if dish.selected_plankton != null:
 		return {"plankton": dish.plankton_details(dish.selected_plankton)}
+	if dish.selected_husk != Dish.NO_HUSK:
+		return {"husk": dish.husk_details(dish.selected_husk)}
 	return {}

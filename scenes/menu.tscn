@@ -4,6 +4,7 @@
 [ext_resource type="Script" path="res://scripts/dish.gd" id="2"]
 [ext_resource type="PackedScene" path="res://ui/controls_panel.tscn" id="3"]
 [ext_resource type="PackedScene" path="res://ui/options_panel.tscn" id="4"]
+[ext_resource type="PackedScene" path="res://ui/encyclopedia_panel.tscn" id="5"]
 
 [node name="Menu" type="Control"]
 layout_mode = 3
@@ -70,6 +71,11 @@ custom_minimum_size = Vector2(320, 48)
 layout_mode = 2
 text = "@menu.controls"
 
+[node name="EncyclopediaButton" type="Button" parent="Column/Buttons"]
+custom_minimum_size = Vector2(320, 48)
+layout_mode = 2
+text = "@menu.encyclopedia"
+
 [node name="OptionsButton" type="Button" parent="Column/Buttons"]
 custom_minimum_size = Vector2(320, 48)
 layout_mode = 2
@@ -83,6 +89,8 @@ text = "@menu.quit"
 [node name="ControlsPanel" parent="." instance=ExtResource("3")]
 
 [node name="OptionsPanel" parent="." instance=ExtResource("4")]
+
+[node name="EncyclopediaPanel" parent="." instance=ExtResource("5")]
 
 [node name="ConfirmDialog" type="ConfirmationDialog" parent="."]
 title = "@menu.start_over_title"

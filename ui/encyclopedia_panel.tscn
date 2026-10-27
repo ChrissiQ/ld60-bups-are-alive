@@ -1,0 +1,102 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://ui/encyclopedia_panel.gd" id="1"]
+
+[node name="EncyclopediaPanel" type="PanelContainer"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 40.0
+offset_top = 24.0
+offset_right = -40.0
+offset_bottom = -24.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1")
+
+[node name="Box" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_type_variation = &"RoomyStack"
+
+[node name="Heading" type="Label" parent="Box"]
+layout_mode = 2
+theme_type_variation = &"Heading"
+text = "@encyclopedia.heading"
+horizontal_alignment = 1
+
+[node name="Columns" type="HBoxContainer" parent="Box"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"SpaciousRow"
+
+[node name="Index" type="VBoxContainer" parent="Box/Columns"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+theme_type_variation = &"TightStack"
+
+[node name="Search" type="LineEdit" parent="Box/Columns/Index"]
+layout_mode = 2
+
+[node name="Scroll" type="ScrollContainer" parent="Box/Columns/Index"]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="List" type="VBoxContainer" parent="Box/Columns/Index/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"SnugStack"
+
+[node name="NoneFound" type="Label" parent="Box/Columns/Index"]
+visible = false
+layout_mode = 2
+theme_type_variation = &"Note"
+
+[node name="ArticleScroll" type="ScrollContainer" parent="Box/Columns"]
+layout_mode = 2
+size_flags_horizontal = 3
+horizontal_scroll_mode = 0
+
+[node name="Page" type="VBoxContainer" parent="Box/Columns/ArticleScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"TightStack"
+
+[node name="Title" type="Label" parent="Box/Columns/ArticleScroll/Page"]
+layout_mode = 2
+theme_type_variation = &"Heading"
+
+[node name="AboutHeading" type="Label" parent="Box/Columns/ArticleScroll/Page"]
+layout_mode = 2
+theme_type_variation = &"Accent"
+
+[node name="AboutBody" type="RichTextLabel" parent="Box/Columns/ArticleScroll/Page"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"Article"
+bbcode_enabled = true
+fit_content = true
+scroll_active = false
+
+[node name="GameHeading" type="Label" parent="Box/Columns/ArticleScroll/Page"]
+layout_mode = 2
+theme_type_variation = &"Accent"
+
+[node name="GameBody" type="RichTextLabel" parent="Box/Columns/ArticleScroll/Page"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"Article"
+bbcode_enabled = true
+fit_content = true
+scroll_active = false
+
+[node name="Actions" type="HBoxContainer" parent="Box"]
+layout_mode = 2
+
+[node name="BackButton" type="Button" parent="Box/Actions"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "@menu.back"

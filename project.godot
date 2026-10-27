@@ -21,6 +21,7 @@ TextSweep="*res://scripts/text_sweep.gd"
 DialogStyle="*res://scripts/dialog_style.gd"
 DebugHotkey="*res://ui/debug_hotkey.tscn"
 PreferencesHook="*res://scripts/preferences_hook.gd"
+TooltipFit="*res://scripts/tooltip_fit.gd"
 
 [display]
 

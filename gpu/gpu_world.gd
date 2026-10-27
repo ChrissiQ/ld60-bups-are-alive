@@ -391,12 +391,12 @@ func count_known() -> bool:
 	return _count_known
 
 
-## (3B) The same keys as BupSim.population_stats (count, each gene's mean, harm, mutations), as last read back. Until the first
+## (3B) The same keys as BupSim.population_stats (count, each gene's mean, harm, mutations, mutator, donor, key, generation), as last read back. Until the first
 ## readback after a load: the count, and the means as last known (0 if never).
 func population_stats() -> Dictionary:
 	_touch()
 	if _stats.is_empty():
-		var empty := {"count": _count, "harm": 0.0, "mutations": 0.0, "generation": 0.0}
+		var empty := {"count": _count, "harm": 0.0, "mutations": 0.0, "generation": 0.0, "mutator": 1.0, "donor": 0.0, "key": 0.0}
 		for gene in GENE_NAMES:
 			empty[gene] = 0.0
 		return empty

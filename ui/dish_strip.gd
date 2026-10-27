@@ -24,6 +24,8 @@ var _since := REFRESH_SECONDS
 var _since_picture := 0.0
 var _next_picture := 0  ## the entry whose picture is redrawn next
 var _group := ButtonGroup.new()
+var main_zoomed_in := false  ## the main view shows only part of its dish: that dish's picture keeps its last one (it is drawn for the camera's zoom, not for the whole dish)
+var main_dish: Dish
 
 
 func add(dish: Dish, number: int, world: World2D) -> void:
@@ -114,6 +116,8 @@ func picture_of(dish: Dish) -> Image:
 ## Points the entry's camera at its dish and has the viewport draw one frame.
 func _redraw(entry: Dictionary) -> void:
 	var dish: Dish = entry["dish"]
+	if main_zoomed_in and dish == main_dish:
+		return
 	var camera: Camera2D = entry["camera"]
 	camera.global_position = dish.global_position
 	camera.zoom = Vector2.ONE * (THUMB / (2.0 * dish.radius * MARGIN))

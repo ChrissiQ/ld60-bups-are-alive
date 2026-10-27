@@ -34,6 +34,7 @@ func _ready() -> void:
 	_setup_pick(picks, $SelectOptions/Modes/PickBupsButton, Dish.PickMode.BUPS, Strings.t("tray.pick_bups"))
 	_setup_pick(picks, $SelectOptions/Modes/PickSourcesButton, Dish.PickMode.SOURCES, Strings.t("tray.pick_sources"))
 	_setup_pick(picks, $SelectOptions/Modes/PickPlanktonButton, Dish.PickMode.PLANKTON, Strings.t("tray.pick_plankton"))
+	_setup_pick(picks, $SelectOptions/Modes/PickHusksButton, Dish.PickMode.HUSKS, Strings.t("tray.pick_husks"))
 	_compact(nutrient_count_box, Strings.t("tray.nutrients_per_click"))
 	_compact(source_rate_box, Strings.t("tray.nutrients_per_minute"))
 	_compact(brush_size_box, Strings.t("tray.brush_radius"))

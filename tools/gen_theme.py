@@ -50,7 +50,8 @@ def flat(i,bg,m=(0,0,0,0),r=R_CTRL,bw=0,bc=None,center=True,expand=0,bw_sides=No
         L.append("border_color = "+rgba(bc))
     for k in ("top_left","top_right","bottom_right","bottom_left"): L.append("corner_radius_%s = %d"%(k,r))
     if expand:
-        for k in ("left","top","right","bottom"): L.append("expand_margin_%s = %g"%(k,expand))
+        for k,v in zip(("left","top","right","bottom"),expand if isinstance(expand,tuple) else (expand,)*4):
+            if v: L.append("expand_margin_%s = %g"%(k,v))
     L.append("")
     subs.append("\n".join(L))
 def empty(i,m=(0,0,0,0)):
@@ -119,7 +120,7 @@ flat("tab_hover",(1,1,1,0.07),(16,9,16,9),R_CTRL)
 flat("tab_pressed",ACCENT,(16,9,16,9),R_CTRL)
 flat("tab_hover_pressed",ACCENT_HI,(16,9,16,9),R_CTRL)
 flat("section_normal",(0,0,0,0),(0,4,0,4),R_CTRL)
-flat("section_hover",(1,1,1,0.05),(0,4,0,4),R_CTRL)
+flat("section_hover",(1,1,1,0.05),(0,4,0,4),R_CTRL,expand=(8,0,8,0))  # (the highlight reaches past the text and chevron, which stay where they are)
 # segmented choices
 flat("check_focus",(0,0,0,0),(0,4,0,4),R_CTRL,2,TEXT,center=False)
 # a dropdown that is a quiet outlined field (the graph's trait choice)
@@ -239,6 +240,7 @@ T("TooltipLabel",colors={"font_color":TEXT},sizes={"font_size":13})
 # rich text
 T("RichTextLabel",fonts={"bold_font":REG,"mono_font":"m500","normal_font":REG})
 T("Readout","RichTextLabel",colors={"default_color":TEXT},fonts={"normal_font":"m500","bold_font":"m700"},sizes={"bold_font_size":14,"mono_font_size":14,"normal_font_size":14})
+T("Article","RichTextLabel",colors={"default_color":TEXT},fonts={"normal_font":LIGHT,"bold_font":REG,"mono_font":"m500"},sizes={"bold_font_size":15,"mono_font_size":14,"normal_font_size":15})
 T("ReadoutMuted","RichTextLabel",colors={"default_color":MUTED},fonts={"normal_font":REG,"bold_font":REG},sizes={"bold_font_size":14,"mono_font_size":14,"normal_font_size":14})
 T("ReadoutAccent","RichTextLabel",colors={"default_color":WARM},fonts={"normal_font":LIGHT,"bold_font":REG},sizes={"bold_font_size":14,"mono_font_size":14,"normal_font_size":14})
 T("StoryHeading","RichTextLabel",colors={"default_color":WARM},fonts={"normal_font":LIGHT,"bold_font":REG},sizes={"bold_font_size":18,"mono_font_size":18,"normal_font_size":18})
@@ -324,8 +326,8 @@ T("CheckBox",colors={"font_color":TEXT,"font_hover_color":TEXT,"font_hover_press
  icons={"checked":'ExtResource("check_on")',"unchecked":'ExtResource("check_off")'},styles={k:"check_empty" for k in("disabled","hover","hover_pressed","normal","pressed")})
 # fields
 T("LineEdit",colors={"caret_color":ACCENT,"font_color":TEXT,"selection_color":(ACCENT[0],ACCENT[1],ACCENT[2],0.35)},styles={"focus":"edit_focus","normal":"edit_normal"})
-T("ReadoutField","LineEdit",consts={"minimum_character_width":1},sizes={"font_size":14},fonts={"font":"m500"},styles={"focus":"edit_tight_focus","normal":"edit_tight"})
-T("CompactField","LineEdit",consts={"minimum_character_width":1},sizes={"font_size":14},fonts={"font":"m500"})
+T("ReadoutField","LineEdit",consts={"minimum_character_width":1},sizes={"font_size":16},fonts={"font":"m500"},styles={"focus":"edit_tight_focus","normal":"edit_tight"})
+T("CompactField","LineEdit",consts={"minimum_character_width":1},sizes={"font_size":16},fonts={"font":"m500"})
 T("CompactSpinBox","SpinBox",consts={"buttons_width":12})
 T("HSlider",styles={"grabber_area":"slider_fill","grabber_area_highlight":"slider_fill_hi","slider":"slider_track","focus":"slider_focus"})
 T("VScrollBar",styles={"scroll":"scroll_track","scroll_focus":"scroll_track","grabber":"scroll_grabber","grabber_highlight":"scroll_grabber_hi","grabber_pressed":"scroll_grabber_hi"})
@@ -335,6 +337,8 @@ T("AcceptDialog",consts={"buttons_min_width":96,"buttons_separation":12},sizes={
 T("ConfirmationDialog",consts={"buttons_min_width":96,"buttons_separation":12},sizes={"title_font_size":20},styles={"panel":"dialog_panel"})
 T("Window",consts={"close_h_offset":24,"close_v_offset":34,"title_height":60},sizes={"title_font_size":20},styles={"embedded_border":"embedded_border","embedded_unfocused_border":"embedded_unfocused_border"})
 # graph
+T("GenomeSlot",colors={"track":(1,1,1,0.07),"unknown":(1,1,1,0.12),"symbol":(0.05,0.07,0.08,0.92),"symbol_dim":(1,1,1,0.4)},sizes={"font_size":12},fonts={"font":"m500"})  # the chromosome map's slots (ui/genome_slot.gd)
+T("GenomeGrid","GridContainer",consts={"h_separation":10,"v_separation":0})
 T("HistoryGraph",styles={"pill":"graph_pill","pill_hover":"graph_pill_hover"},fonts={"font":"m500"},colors={"background":(0.082,0.098,0.108,0.0),"border":(1,1,1,0.0),"grid":(1,1,1,0.07),"grid_faint":(1,1,1,0.04),"muted":MUTED,"population":WARM,"trait":ACCENT},sizes={"legend":13,"tick":12})
 
 open("scenes/menu_theme.tres","w").write(ext+"\n".join(subs)+"\n[resource]\n"+"\n".join(res)+"\n")

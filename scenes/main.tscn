@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://qfb8yuyqvo4w"]
 
 [ext_resource type="Script" uid="uid://bwiph5otaglgj" path="res://scripts/main.gd" id="1"]
+[ext_resource type="PackedScene" path="res://ui/genome_ribbon.tscn" id="genome_ribbon"]
 [ext_resource type="Script" uid="uid://fg5kxl7qvimr" path="res://scripts/dish.gd" id="2"]
 [ext_resource type="Script" uid="uid://cuvljn38b57td" path="res://scripts/graph.gd" id="3"]
 [ext_resource type="Script" path="res://scripts/toolbar.gd" id="4"]
@@ -39,6 +40,7 @@
 [ext_resource type="Texture2D" path="res://icons/pick_bup.svg" id="pick_bup_icon"]
 [ext_resource type="Texture2D" path="res://icons/pick_source.svg" id="pick_source_icon"]
 [ext_resource type="Texture2D" path="res://icons/pick_plankton.svg" id="pick_plankton_icon"]
+[ext_resource type="Texture2D" path="res://icons/pick_husks.svg" id="pick_husks_icon"]
 
 
 [node name="Main" type="Node2D" unique_id=510029721]
@@ -328,6 +330,13 @@ toggle_mode = true
 icon = ExtResource("pick_plankton_icon")
 icon_alignment = 1
 
+[node name="PickHusksButton" type="Button" parent="HUD/Frame/Layout/Middle/Main/Row/Stage/ToolOptions/SelectOptions/Modes"]
+layout_mode = 2
+theme_type_variation = &"ToolButton"
+toggle_mode = true
+icon = ExtResource("pick_husks_icon")
+icon_alignment = 1
+
 [node name="ModeName" type="Label" parent="HUD/Frame/Layout/Middle/Main/Row/Stage/ToolOptions/SelectOptions/Modes"]
 layout_mode = 2
 theme_type_variation = &"Hint"
@@ -346,7 +355,7 @@ text = "@tray.caption_nutrients"
 
 [node name="NutrientCount" type="SpinBox" parent="HUD/Frame/Layout/Middle/Main/Row/Stage/ToolOptions/NutrientOptions/Row"]
 theme_type_variation = &"CompactSpinBox"
-custom_minimum_size = Vector2(60, 30)
+custom_minimum_size = Vector2(66, 30)
 layout_mode = 2
 min_value = 1.0
 max_value = 9999.0
@@ -368,7 +377,7 @@ text = "@tray.caption_rate"
 
 [node name="SourceRate" type="SpinBox" parent="HUD/Frame/Layout/Middle/Main/Row/Stage/ToolOptions/SourceOptions/Row"]
 theme_type_variation = &"CompactSpinBox"
-custom_minimum_size = Vector2(72, 30)
+custom_minimum_size = Vector2(78, 30)
 layout_mode = 2
 min_value = 0.5
 max_value = 60.0
@@ -390,7 +399,7 @@ text = "@tray.caption_brush"
 
 [node name="BrushSize" type="SpinBox" parent="HUD/Frame/Layout/Middle/Main/Row/Stage/ToolOptions/EraseOptions/Row"]
 theme_type_variation = &"CompactSpinBox"
-custom_minimum_size = Vector2(60, 30)
+custom_minimum_size = Vector2(66, 30)
 layout_mode = 2
 min_value = 50.0
 max_value = 9999.0
@@ -413,7 +422,7 @@ text = "@tray.caption_pipette"
 
 [node name="PipetteRadius" type="SpinBox" parent="HUD/Frame/Layout/Middle/Main/Row/Stage/ToolOptions/PipetteOptions/Row"]
 theme_type_variation = &"CompactSpinBox"
-custom_minimum_size = Vector2(60, 30)
+custom_minimum_size = Vector2(66, 30)
 layout_mode = 2
 min_value = 50.0
 max_value = 9999.0
@@ -428,7 +437,7 @@ text = "@tray.caption_pipette_timer"
 
 [node name="TimerHours" type="SpinBox" parent="HUD/Frame/Layout/Middle/Main/Row/Stage/ToolOptions/PipetteOptions/Row"]
 theme_type_variation = &"CompactSpinBox"
-custom_minimum_size = Vector2(52, 30)
+custom_minimum_size = Vector2(58, 30)
 layout_mode = 2
 min_value = 1.0
 max_value = 999.0
@@ -544,6 +553,23 @@ fit_content = true
 scroll_active = false
 autowrap_mode = 3
 
+[node name="InfoGenome" parent="HUD/Frame/Layout/Middle/Side/Stack/InfoPanel/Box" instance=ExtResource("genome_ribbon")]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+
+[node name="InfoTail" type="RichTextLabel" parent="HUD/Frame/Layout/Middle/Side/Stack/InfoPanel/Box"]
+unique_name_in_owner = true
+visible = false
+theme_type_variation = &"ReadoutMuted"
+custom_minimum_size = Vector2(310, 0)
+layout_mode = 2
+mouse_filter = 2
+bbcode_enabled = true
+fit_content = true
+scroll_active = false
+autowrap_mode = 3
+
 [node name="InfoSourceRate" parent="HUD/Frame/Layout/Middle/Side/Stack/InfoPanel/Box" instance=ExtResource("setting_row")]
 unique_name_in_owner = true
 visible = false
@@ -644,6 +670,24 @@ slider_min_width = 80.0
 value_min_width = 52.0
 unit_min_width = 62.0
 
+[node name="DishDetails" type="PanelContainer" parent="HUD/Frame/Layout/Middle/Side/Stack"]
+unique_name_in_owner = true
+layout_mode = 2
+script = ExtResource("tray_section")
+title_key = "hud.colony_title"
+tip_key = "hud.colony_tip"
+open = false
+
+[node name="Colony" type="VBoxContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/DishDetails"]
+unique_name_in_owner = true
+theme_type_variation = &"SnugStack"
+layout_mode = 2
+
+[node name="PlacedRow" parent="HUD/Frame/Layout/Middle/Side/Stack/DishDetails/Colony" instance=ExtResource("stat_row")]
+unique_name_in_owner = true
+layout_mode = 2
+label_text = "@hud.placed"
+
 [node name="GraphSection" type="PanelContainer" parent="HUD/Frame/Layout/Middle/Side/Stack"]
 unique_name_in_owner = true
 layout_mode = 2
@@ -686,24 +730,6 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 190)
 layout_mode = 2
 script = ExtResource("3")
-
-[node name="DishDetails" type="PanelContainer" parent="HUD/Frame/Layout/Middle/Side/Stack"]
-unique_name_in_owner = true
-layout_mode = 2
-script = ExtResource("tray_section")
-title_key = "hud.colony_title"
-tip_key = "hud.colony_tip"
-open = false
-
-[node name="Colony" type="VBoxContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/DishDetails"]
-unique_name_in_owner = true
-theme_type_variation = &"SnugStack"
-layout_mode = 2
-
-[node name="PlacedRow" parent="HUD/Frame/Layout/Middle/Side/Stack/DishDetails/Colony" instance=ExtResource("stat_row")]
-unique_name_in_owner = true
-layout_mode = 2
-label_text = "@hud.placed"
 
 [node name="AllDetails" type="PanelContainer" parent="HUD/Frame/Layout/Middle/Side/Stack"]
 unique_name_in_owner = true
@@ -757,8 +783,30 @@ visible = false
 theme_type_variation = &"HudPanel"
 mouse_filter = 2
 
-[node name="HoverText" type="RichTextLabel" parent="HUD/HoverCard"]
+[node name="Box" type="VBoxContainer" parent="HUD/HoverCard"]
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"SnugStack"
+
+[node name="HoverText" type="RichTextLabel" parent="HUD/HoverCard/Box"]
 unique_name_in_owner = true
+theme_type_variation = &"ReadoutMuted"
+custom_minimum_size = Vector2(280, 0)
+layout_mode = 2
+mouse_filter = 2
+bbcode_enabled = true
+fit_content = true
+scroll_active = false
+autowrap_mode = 3
+
+[node name="HoverGenome" parent="HUD/HoverCard/Box" instance=ExtResource("genome_ribbon")]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+
+[node name="HoverTail" type="RichTextLabel" parent="HUD/HoverCard/Box"]
+unique_name_in_owner = true
+visible = false
 theme_type_variation = &"ReadoutMuted"
 custom_minimum_size = Vector2(280, 0)
 layout_mode = 2

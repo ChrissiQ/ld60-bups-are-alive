@@ -8,7 +8,7 @@ extends Node2D
 ## Bups are named by a stable id (an int), since the native arrays compact as bups die.
 
 signal extinct
-enum PickMode { ALL, BACKGROUND, BUPS, SOURCES, PLANKTON }  ## what the select tool looks at: everything (a source over a bup), only the medium, only bups, or only sources
+enum PickMode { ALL, BACKGROUND, BUPS, SOURCES, PLANKTON, HUSKS }  ## what the select tool looks at: everything (a source over a bup), only the medium, only bups, only sources, only plankton or only husks
 
 signal selection_changed  ## the selected bup is now another (or none)
 signal layers_changed  ## a layer was shown or hidden
@@ -50,6 +50,9 @@ const ERASE_STRENGTH := 0.9  ## the share of nutrient the eraser takes from the 
 const DIFFUSE_INTERVAL := 5.0  ## seconds between solves of the nutrient field's diffusion (implicit, so long steps are fine)
 const DIFFUSE_ACCURACY := 0.004  ## the most D dt / cell^2 one solve of the diffusion is allowed (how far the nutrient spreads in it, in cells): a longer stretch is solved in pieces, down to DIFFUSE_INTERVAL. See BupSim.diffuse_pieces
 const MAX_STEP := 20.0  ## the longest single step, in seconds: growth, uptake and division are slow (doubling takes 40 minutes), so they run once per step
+const HUSK_PIXELS := 3.0  ## a husk's dot on screen
+const HUSK_DRAWN_MAX := 5000  ## the most husks drawn at once
+const HUSK_COLOR := Color(0.85, 0.6, 0.3, 0.8)
 const RING_PIXELS := 12.0  ## the radius of a selection or hover ring, in screen pixels
 const RING_GROW_ABOVE := 0.5  ## the ring only grows once its subject is more than this share of the ring's diameter ...
 const RING_GROW_TO := 0.25  ## ... and then to the size where the subject is this share of it
@@ -77,7 +80,7 @@ const RENDER_MIN_CAPACITY := 256  ## the fewest bups the picture has room for
 const HISTORY_INTERVAL := 120.0  ## seconds between samples of the history graph
 const HISTORY_LEN := 5040  ## 168 hours (a week) of samples: the longest span of the fine history the graph shows
 const HISTORY_ALL_LEN := 1024  ## how many samples the whole-run history holds before its neighbours are merged in pairs (see `history_all`)
-const HISTORY_SERIES := ["pop", "speed", "sense", "metabolism", "size", "harm", "mutator", "donor", "key"]  ## population, each gene's mean, mean harm (%) and the mean mutation rate (a multiple of the usual)
+const HISTORY_SERIES := ["pop", "speed", "sense", "metabolism", "size", "harm", "mutator", "donor", "key", "generation"]  ## population, each gene's mean, mean harm (%) and the mean mutation rate (a multiple of the usual)
 
 const BUP_SHADER := """
 shader_type canvas_item;
@@ -161,6 +164,8 @@ var pick_mode := PickMode.ALL:  ## the select tool ignores whatever this leaves 
 			selected_source = null
 		if not looks_at_plankton():
 			selected_plankton = null
+		if not looks_at_husks():
+			selected_husk = NO_HUSK
 var hovered_id := -1  ## the bup under the pointer, or -1
 var selected_id := -1:  ## the bup that was clicked, or -1
 	set(value):
@@ -171,6 +176,9 @@ var selected_source: NutrientSource = null
 var hovered_source: NutrientSource = null
 var selected_plankton: Plankton = null
 var hovered_plankton: Plankton = null
+const NO_HUSK := Vector2(INF, INF)
+var selected_husk := NO_HUSK  ## where the clicked husk lies (a husk has no identity: it is found by its place), or NO_HUSK
+var hovered_husk := NO_HUSK
 var place_preview_pos := Vector2.ZERO
 var place_preview_radius := -1.0  ## < 0 hides the placement preview
 var place_preview_erases := false  ## the preview is the eraser's brush
@@ -188,6 +196,8 @@ var _all_count := 0  ## how many samples of `history` are in them
 
 ## Bumped whenever the history gains or loses a sample, so views can redraw only on change.
 var history_version := 0
+## The world time this dish's history began at (a dish that joins a running world begins at its time): the graph shows a dish's own time from here.
+var history_origin := 0.0
 
 var edit_count := 0  ## bumped by every change made to the dish by hand (a bup or source added or removed, nutrient dropped or erased), so screens can tell when to look again
 var _draw_key := []  ## what the dish was last drawn from (see `refresh_drawing`)
@@ -342,6 +352,7 @@ func _reset_history() -> void:
 	history_all_factor = 1
 	_all_count = 0
 	_history_accum = 0.0
+	history_origin = 0.0
 	history_version += 1
 
 
@@ -518,6 +529,7 @@ func _record_history_from(stats: Dictionary) -> void:
 		history["mutator"].append(stats["mutator"])
 		history["donor"].append(stats["donor"] * 100.0)
 		history["key"].append(stats["key"] * 100.0)
+		history["generation"].append(stats["generation"])
 	if history["pop"].size() > HISTORY_LEN:
 		for series in history.values():
 			series.pop_front()
@@ -611,6 +623,7 @@ func nutrient_reading(local: Vector2) -> Vector3:
 ## A dish that joins a world already under way begins at the world's time, and its bloom begins then too (not catching up on the time before).
 func begin_at(world_time: float) -> void:
 	time = world_time
+	history_origin = world_time
 	_bloom_due = time
 
 
@@ -852,6 +865,7 @@ func select_at(world_pos: Vector2, slack: float = 0.0) -> void:
 	selected_source = picked["source"]
 	selected_id = picked["bup"]
 	selected_plankton = picked["plankton"]
+	selected_husk = picked["husk"]
 
 
 func hover_at(world_pos: Vector2, slack: float = 0.0) -> void:
@@ -859,25 +873,27 @@ func hover_at(world_pos: Vector2, slack: float = 0.0) -> void:
 	hovered_source = picked["source"]
 	hovered_id = picked["bup"]
 	hovered_plankton = picked["plankton"]
+	hovered_husk = picked["husk"]
 
 
-## What is under a world position, of the kinds the pick mode looks at: only the first of a source, a bup and a plankton
+## What is under a world position, of the kinds the pick mode looks at: only the first of a source, a bup, a plankton and a husk
 ## (in that order) that is there, the others being none.
 func _pick(world_pos: Vector2, slack: float) -> Dictionary:
 	var source: NutrientSource = source_at(world_pos, slack) if looks_at_sources() else null
 	var bup := cell_at(world_pos, slack) if source == null and looks_at_bups() else -1
 	var floating: Plankton = plankton_at(world_pos, slack) if source == null and bup < 0 and looks_at_plankton() else null
-	return {"source": source, "bup": bup, "plankton": floating}
+	var husk := husk_at(world_pos, slack) if source == null and bup < 0 and floating == null and looks_at_husks() else NO_HUSK
+	return {"source": source, "bup": bup, "plankton": floating, "husk": husk}
 
 
-## Whether a bup, a source or a plankton is selected.
+## Whether a bup, a source, a plankton or a husk is selected.
 func has_selection() -> bool:
 	return selected_id >= 0 or has_selected_thing()
 
 
 ## Whether a source or a plankton is selected (what is picked besides a bup).
 func has_selected_thing() -> bool:
-	return selected_source != null or selected_plankton != null
+	return selected_source != null or selected_plankton != null or selected_husk != NO_HUSK
 
 
 ## Lets go of everything selected.
@@ -885,6 +901,7 @@ func clear_selection() -> void:
 	selected_id = -1
 	selected_source = null
 	selected_plankton = null
+	selected_husk = NO_HUSK
 
 
 func looks_at_sources() -> bool:
@@ -893,6 +910,11 @@ func looks_at_sources() -> bool:
 
 func looks_at_plankton() -> bool:
 	return layer_shown(Layer.PLANKTON) and (pick_mode == PickMode.ALL or pick_mode == PickMode.PLANKTON)
+
+
+## Husks are part of the medium (they are drawn with the nutrient layer), so hiding that layer hides them from the pointer too.
+func looks_at_husks() -> bool:
+	return layer_shown(Layer.MEDIUM) and (pick_mode == PickMode.ALL or pick_mode == PickMode.HUSKS) and sim.husk_count() > 0
 
 
 func looks_at_bups() -> bool:
@@ -923,6 +945,9 @@ func show_layer(layer: Layer, shown: bool) -> void:
 		Layer.PLANKTON:
 			if not shown:
 				hovered_plankton = null
+		Layer.MEDIUM:
+			if not shown:
+				hovered_husk = NO_HUSK
 	layers_changed.emit()
 	queue_redraw()
 	_overlay.queue_redraw()
@@ -938,6 +963,7 @@ func clear_hover() -> void:
 	hovered_id = -1
 	hovered_source = null
 	hovered_plankton = null
+	hovered_husk = NO_HUSK
 	place_preview_erases = false
 	place_preview_marker = false
 
@@ -978,6 +1004,26 @@ func plankton_details(cell: Plankton) -> Dictionary:
 	var details := _spot_details(cell.pos)
 	details["age"] = time - cell.born_at
 	details["units"] = cell.units
+	return details
+
+
+## The husk under a world position (within its drawn size, plus `slack`): its place in the dish, or NO_HUSK.
+func husk_at(world_pos: Vector2, slack: float = 0.0) -> Vector2:
+	var found := sim.husk_near(world_pos - global_position, husk_draw_size() * 0.5 + slack)
+	return Vector2(found[0], found[1]) if found.size() == 5 else NO_HUSK
+
+
+## What there is to know about the husk at a place in the dish (empty once it has leaked away): how long it has lain, the nutrient it still holds, where it is,
+## and what is near.
+func husk_details(local: Vector2) -> Dictionary:
+	var found := sim.husk_near(local, 0.01)
+	if found.size() != 5:
+		return {}
+	var details := _spot_details(local)
+	var left := exp(-0.25 * found[4])  # (what is left after the pieces already let go: see husk_share in bup_sim.cpp)
+	details["age"] = found[3]
+	details["units"] = found[2] * left / NUTRIENT_ENERGY
+	details["left"] = left
 	return details
 
 
@@ -1154,6 +1200,7 @@ func to_dict() -> Dictionary:
 		"history_all": history_all,
 		"watched": watched,
 		"history_all_factor": history_all_factor,
+		"history_origin": history_origin,
 	}
 
 
@@ -1319,7 +1366,8 @@ func from_dict(d: Dictionary) -> bool:
 			watched.push_front(id)
 	watch_version += 1
 	# Samples are taken on multiples of the interval, so resume the timer part-way through one.
-	_history_accum = fposmod(time, HISTORY_INTERVAL)
+	history_origin = float(d["history_origin"]) if Validate.is_number(d.get("history_origin")) else 0.0
+	_history_accum = fposmod(time - history_origin, HISTORY_INTERVAL)
 	if gpu_world != null and gpu_active:
 		_mark_gpu_dirty()  # (a loaded dish: what the GPU held is gone)
 	return true
@@ -1525,11 +1573,34 @@ func _draw_pick_rings(canvas: CanvasItem, selected: Variant, hovered: Variant, o
 		draw_ring(canvas, hovered.pos - offset, radius, Color(1, 1, 1, 0.9))
 
 
+## How wide a husk is drawn, in µm: a few pixels, never smaller than a bup's body.
+func husk_draw_size() -> float:
+	return maxf(HUSK_PIXELS * pixel(), 2.0)
+
+
+## The husks (a dead bup's or plankton's body, leaking its nutrient back: see Biology.HUSK_SECONDS) as small warm dots, part of the nutrient layer. Drawn with the
+## rest of the dish, so they are looked at again only when it redraws; with very many only every few-th is drawn, so the cost stays small.
+func _draw_husks() -> void:
+	var count := sim.husk_count()
+	if count == 0:
+		return
+	var saved := sim.husks_export()  # (5 numbers each: x, y, energy, age, the next piece)
+	var stride := maxi(1, count / HUSK_DRAWN_MAX)
+	var size := husk_draw_size()
+	var half := Vector2(size * 0.5, 0.0)
+	var segments := PackedVector2Array()
+	for i in range(0, count, stride):
+		var at := Vector2(saved[i * 5], saved[i * 5 + 1])
+		segments.append(at - half)
+		segments.append(at + half)
+	draw_multiline(segments, HUSK_COLOR, size)
+
+
 ## A thin ring marking a bup or source: GUI, so the same size and line at every zoom (see
 ## ring_radius_pixels for the one case where it grows).
 func draw_ring(canvas: CanvasItem, center: Vector2, object_radius: float, color: Color) -> void:
 	var px := pixel()
-	canvas.draw_arc(center, ring_radius_pixels(object_radius / px) * px, 0.0, TAU, 48, color, px)
+	canvas.draw_arc(center, ring_radius_pixels(object_radius / px) * px, 0.0, TAU, 64, color, px, true)
 
 
 func _draw() -> void:
@@ -1540,6 +1611,7 @@ func _draw() -> void:
 
 	if layer_shown(Layer.MEDIUM):
 		_draw_medium()
+		_draw_husks()
 	if layer_shown(Layer.STEERING):
 		_draw_steering()
 	if layer_shown(Layer.SOURCES):
@@ -1559,7 +1631,7 @@ func _draw_steering_arc(canvas: CanvasItem, id: int) -> void:
 	var px := pixel()
 	var span := maxf(2.0 * (1.0 - steering.z) * TAU, MIN_STEER_ARC)
 	var heading := Vector2(steering.x, steering.y).angle()
-	canvas.draw_arc(_bup_pos(id), ring_radius_pixels(_bup_radius(id, px) / px) * px, heading - span / 2.0, heading + span / 2.0, 24, Color(1, 0.95, 0.7, 1.0), 3.0 * px)
+	canvas.draw_arc(_bup_pos(id), ring_radius_pixels(_bup_radius(id, px) / px) * px, heading - span / 2.0, heading + span / 2.0, 24, Color(1, 0.95, 0.7, 1.0), 3.0 * px, true)
 
 
 ## What goes above the bups (called by the overlay child): the selection and hover rings, the
@@ -1575,6 +1647,10 @@ func draw_overlay(canvas: CanvasItem) -> void:
 		draw_ring(canvas, _bup_pos(hovered_id), _bup_radius(hovered_id, px), Color(1, 1, 1, 0.9))
 	_draw_pick_rings(canvas, selected_source, hovered_source, global_position, source_draw_radius())
 	_draw_pick_rings(canvas, selected_plankton, hovered_plankton, Vector2.ZERO, plankton_draw_radius())
+	if selected_husk != NO_HUSK:
+		draw_ring(canvas, selected_husk, husk_draw_size(), Color(1, 0.75, 0.3, 0.95))
+	if hovered_husk != NO_HUSK and hovered_husk != selected_husk:
+		draw_ring(canvas, hovered_husk, husk_draw_size(), Color(1, 1, 1, 0.9))
 	if place_preview_radius >= 0.0:
 		var brush := Color(1, 0.3, 0.25, 0.9) if place_preview_erases else Color(1, 0.9, 0.5, 0.8)
 		if place_preview_marker:

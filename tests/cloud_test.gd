@@ -113,6 +113,15 @@ func _check_husks() -> void:
 	d.sim.step(20.0, PackedVector2Array(), PackedFloat32Array(), 0.0, 0.0)
 	var expected := Biology.DEATH_RELEASE * Cell.COST_PER_MASS * mass
 	check(d.population() == 0 and d.sim.husk_count() == 1 and d.field.puff_count() == 0 and d.field.total() == 0.0, "with husks on a dead bup leaves a husk and no cloud yet")
+	var lying := d.sim.husks_export()
+	var spot := Vector2(lying[0], lying[1])  # (where the bup died: it swam a little in its last seconds)
+	check(d.husk_at(d.global_position + spot) == spot and d.husk_at(d.global_position + spot + Vector2(500, 0)) == Dish.NO_HUSK, "a husk can be found where it lies, and not far from it")
+	var seen := d.husk_details(spot)
+	check(not seen.is_empty() and is_equal_approx(seen["left"], 1.0) and absf(seen["units"] - expected / Dish.NUTRIENT_ENERGY) < 1e-3 and seen["age"] < 60.0, "its details say what it holds (%s) and that it has leaked nothing yet" % [seen])
+	d.select_at(d.global_position + spot)
+	check(d.selected_husk == spot and d.has_selection(), "the select tool picks it")
+	d.pick_mode = Dish.PickMode.BUPS
+	check(d.selected_husk == Dish.NO_HUSK, "a pick mode that skips husks lets go of it")
 	var copy := Dish.new()
 	root.add_child(copy)
 	check(copy.from_dict(TestUtil.saved(d)) and copy.death_husks and copy.sim.husk_count() == 1, "a husk, and the setting, survive save and load")
@@ -125,6 +134,7 @@ func _check_husks() -> void:
 	check(absf(d.field.total() - first) < 1e-3 * first and d.sim.husk_count() == 1, "an hour on, the first piece has leaked (%.3f of %.3f)" % [d.field.total(), first])
 	for i in 1500:  # (to nine hours and a little over: every piece)
 		d.sim.step(20.0, none, rates, 0.0, 0.0)
+	check(d.husk_details(spot).is_empty(), "a husk that has leaked away has no details")
 	check(d.sim.husk_count() == 0 and absf(d.field.total() - expected) < 1e-3 * expected, "in the end the husk has given all of it back (%.3f of %.3f)" % [d.field.total(), expected])
 	d.free()
 

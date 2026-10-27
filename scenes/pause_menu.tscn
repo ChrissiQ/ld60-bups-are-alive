@@ -5,6 +5,7 @@
 [ext_resource type="PackedScene" path="res://ui/stat_row.tscn" id="3"]
 [ext_resource type="PackedScene" path="res://ui/controls_panel.tscn" id="4"]
 [ext_resource type="PackedScene" path="res://ui/options_panel.tscn" id="5"]
+[ext_resource type="PackedScene" path="res://ui/encyclopedia_panel.tscn" id="6"]
 
 [node name="PauseMenu" type="Control"]
 visible = false
@@ -75,6 +76,11 @@ text = "@pause.resume"
 unique_name_in_owner = true
 layout_mode = 2
 text = "@pause.controls"
+
+[node name="EncyclopediaButton" type="Button" parent="Scroll/Page/Card/Columns/Left/Buttons"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "@pause.encyclopedia"
 
 [node name="OptionsButton" type="Button" parent="Scroll/Page/Card/Columns/Left/Buttons"]
 unique_name_in_owner = true
@@ -203,6 +209,8 @@ label_text = "@pause.record_bup_limit"
 [node name="ControlsPanel" parent="." instance=ExtResource("4")]
 
 [node name="OptionsPanel" parent="." instance=ExtResource("5")]
+
+[node name="EncyclopediaPanel" parent="." instance=ExtResource("6")]
 
 [node name="ConfirmDialog" type="ConfirmationDialog" parent="."]
 metadata/destructive = true

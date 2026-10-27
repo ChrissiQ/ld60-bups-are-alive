@@ -7,7 +7,7 @@ extends Control
 ## Colours and text sizes come from the theme type "HistoryGraph" (see scenes/menu_theme.tres),
 ## like any other widget; nothing about its look is decided here.
 
-const TRAITS := ["speed", "sense", "metabolism", "size", "harm", "mutator", "donor", "key"]  ## harm is the average % of food yield lost to mutation; mutator the average mutation rate as a multiple of the usual
+const TRAITS := ["speed", "sense", "metabolism", "size", "harm", "mutator", "donor", "key", "generation"]  ## harm is the average % of food yield lost to mutation; mutator the average mutation rate as a multiple of the usual
 const MUTATOR_STEPS := [2.0, 5.0, 20.0, 150.0]  ## the mutator axis (from 1, the usual rate) tops out at the first of these that holds the data
 const HARM_STEPS := [10.0, 20.0, 50.0, 100.0]  ## the harm axis tops out at the first of these that holds the data (mean harm can reach about 99%)
 const THEME_TYPE := "HistoryGraph"
@@ -67,6 +67,19 @@ func combined() -> bool:
 	return all_dishes and dishes.size() > 1
 
 
+## How far the shown time has got: the main dish's own time (from the moment its history began, whatever the world's clock said then), or with every dish
+## together the world's (the longest-running dish's).
+func _now() -> float:
+	if dish == null:
+		return 0.0
+	if combined():
+		var latest := 0.0
+		for d: Dish in dishes:
+			latest = maxf(latest, d.time)
+		return latest
+	return dish.time - dish.history_origin
+
+
 func set_all_dishes(value: bool) -> void:
 	all_dishes = value
 	choices_changed.emit()
@@ -83,7 +96,7 @@ func set_trait(index: int) -> void:
 
 ## The mode being shown: the one chosen with G, or until it is pressed the one the run has grown into.
 func shown_span() -> Span:
-	return span if chosen else auto_span(dish.time if dish != null else 0.0)
+	return span if chosen else auto_span(_now())
 
 
 ## The mode a run of this length is in when G has not been pressed: each moves to the next once the run is AUTO_BUMP times
@@ -116,6 +129,14 @@ static func mutator_axis_max(samples: Array) -> float:
 		if peak <= step:
 			return step
 	return MUTATOR_STEPS[-1]
+
+
+## The top of the generation axis: a round maximum that holds every sample (it only grows, with no ceiling of its own).
+static func generation_axis_max(samples: Array) -> float:
+	var peak := 10.0
+	for v in samples:
+		peak = maxf(peak, v)
+	return nice_ceil(peak)
 
 
 static func harm_axis_max(samples: Array) -> float:
@@ -219,12 +240,13 @@ func _draw() -> void:
 	var muted := _color("muted")
 	var trait_name: String = TRAITS[trait_index]
 	var mode := shown_span()
-	var window := span_seconds(mode, dish.time)
-	var x_min := window_start_for(mode, dish.time)
+	var now := _now()
+	var window := span_seconds(mode, now)
+	var x_min := window_start_for(mode, now)
 	var x_max := x_min + window
 	var pops := _series("pop", x_min, mode)
 	var vals := _series(trait_name, x_min, mode)
-	var spec: Array = Genome.GENES.get(trait_name, [1.0, mutator_axis_max(_values(vals))] if trait_name == "mutator" else [0.0, harm_axis_max(_values(vals))])
+	var spec: Array = Genome.GENES.get(trait_name, [1.0, mutator_axis_max(_values(vals))] if trait_name == "mutator" else [0.0, generation_axis_max(_values(vals))] if trait_name == "generation" else [0.0, harm_axis_max(_values(vals))])
 	var lo: float = spec[0]
 	var hi: float = spec[1]
 	for v: float in _values(vals):  # (a gene whose ceiling was raised can pass its usual top)
@@ -271,7 +293,7 @@ func _draw() -> void:
 		draw_string(font, Vector2(x - 20.0, plot.end.y + 15.0), format_time(t, in_days), HORIZONTAL_ALIGNMENT_CENTER, 40.0, tick_size, muted)
 
 	# Legend doubles as the axis titles, coloured to match the axis each belongs to.
-	var title := Strings.t("graph.bups_all", [dishes.size()]) if combined() else Strings.t("graph.bups")
+	var title := Strings.t("graph.bups")
 	draw_string(font, Vector2(6.0, 14.0), title, HORIZONTAL_ALIGNMENT_LEFT, -1, legend_size, population_color)
 
 	_plot_line(vals, plot, lo, hi, x_min, window, trait_color)
@@ -282,23 +304,24 @@ func _draw() -> void:
 ## Dish.history_all), each at the end of the stretch it is the mean of, with the newest sample of the fine history after them.
 ## Otherwise sample i was recorded at (newest sample time) - (samples after it) * interval.
 func _points(name: String, x_min: float, mode: Span) -> PackedVector2Array:
-	return _points_of(dish, name, x_min, mode)
+	return _points_of(dish, name, x_min, mode, 0.0)
 
 
-func _points_of(d: Dish, name: String, x_min: float, mode: Span) -> PackedVector2Array:
+## `shift` moves the dish's own times (from the start of its history) on to the shown clock: its history's origin when every dish is shown together, nothing otherwise.
+func _points_of(d: Dish, name: String, x_min: float, mode: Span, shift: float) -> PackedVector2Array:
 	var out := PackedVector2Array()
-	var last_sample := last_sample_time(d.time)
+	var last_sample := last_sample_time(d.time - d.history_origin)
 	var fine: Array = d.history[name]
 	if mode == Span.ALL:
 		var whole: Array = d.history_all[name]
 		var step := d.history_all_factor * Dish.HISTORY_INTERVAL
 		for i in whole.size():
-			out.append(Vector2((i + 1) * step, whole[i]))
-		if not fine.is_empty() and (out.is_empty() or last_sample > out[-1].x):
-			out.append(Vector2(last_sample, fine[-1]))
+			out.append(Vector2((i + 1) * step + shift, whole[i]))
+		if not fine.is_empty() and (out.is_empty() or last_sample + shift > out[-1].x):
+			out.append(Vector2(last_sample + shift, fine[-1]))
 		return out
 	for i in fine.size():
-		var t := last_sample - (fine.size() - 1 - i) * Dish.HISTORY_INTERVAL
+		var t := last_sample - (fine.size() - 1 - i) * Dish.HISTORY_INTERVAL + shift
 		if t >= x_min:
 			out.append(Vector2(t, fine[i]))
 	return out
@@ -314,9 +337,9 @@ func _series(name: String, x_min: float, mode: Span) -> PackedVector2Array:
 	var vals: Array[PackedVector2Array] = []
 	var grid := PackedVector2Array()
 	for d: Dish in dishes:
-		var pop := _points_of(d, "pop", x_min, mode)
+		var pop := _points_of(d, "pop", x_min, mode, d.history_origin)
 		pops.append(pop)
-		vals.append(pop if name == "pop" else _points_of(d, name, x_min, mode))
+		vals.append(pop if name == "pop" else _points_of(d, name, x_min, mode, d.history_origin))
 		if pop.size() > grid.size():
 			grid = pop
 	var pop_cursor := []

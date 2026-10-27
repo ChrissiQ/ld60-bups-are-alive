@@ -250,6 +250,7 @@ public:
 	void conjugate(double delta); // donors that touch a bup that is not one pass on a run of genes (see Genome.DONOR_*) // a starving bup's chance of dying this step, drawn
 	int husk_count() const { return (int)husks.size(); }
 	PackedFloat64Array husks_export() const; // 5 numbers each: x, y, energy, age, the next piece
+	PackedFloat64Array husk_near(const Vector2 &at, double radius) const; // the nearest husk within radius of a point, as husks_export gives one (5 numbers); empty if none
 	void husks_import(const PackedFloat64Array &saved);
 	PackedFloat32Array export_state() const; // every bup, 24 floats each (see the order in the .cpp; the id as a float): for the GPU tools' comparisons
 	// The bups and the GPU simulation (gpu/gpu_world.gd), which keeps the bups on the GPU and the family records here:

@@ -113,6 +113,11 @@ func _run() -> void:
 	check(made.is_watched(child) and not first.is_watched(child) and m.watch_panel.dishes.has(made), "...and so does its place on the watch list")
 	check(made != null and m.dishes.size() == 2 and m.dish == made, "the pipette makes a second dish and the main view moves to it")
 	check(absf(made.time - first.time) < 1.0, "the new dish is at the world's time (%.1f and %.1f s)" % [made.time, first.time])
+	check(is_equal_approx(made.history_origin, first.time) or absf(made.history_origin - first.time) < 1.0, "the new dish's history begins at the world's time (%.1f s)" % made.history_origin)
+	m.graph.dish = made
+	m.graph.dishes = m.dishes
+	m.graph.all_dishes = false
+	check(m.graph._now() < 1.0 and m.graph._series("pop", 0.0, HistoryGraph.Span.ALL).size() <= 1, "the graph of the new dish counts its own time, not the world's (%.1f s)" % m.graph._now())
 	check(made.population() == 11 and first.population() == 6 and before == 17, "the bups in the circle moved (%d in the new dish, %d left)" % [made.population(), first.population()])
 	check(m.old_dish_dialog.visible and m._old_dish == first and m.paused, "the pipette asks what to do with the old dish, and the game holds until it is answered")
 	m._answer_old_dish("keep")

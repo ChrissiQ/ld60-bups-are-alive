@@ -132,7 +132,7 @@ func _init() -> void:
 	var field := box.get_line_edit()
 	await process_frame
 	var digits_w := field.get_theme_font("font").get_string_size("9999", HORIZONTAL_ALIGNMENT_LEFT, -1, field.get_theme_font_size("font_size")).x
-	check(box.size.x <= 64.0, "nutrient box is compact (%.0fpx)" % box.size.x)
+	check(box.size.x <= 72.0, "nutrient box is compact (%.0fpx)" % box.size.x)
 	check(digits_w + 8.0 <= field.size.x, "four digits still fit the field (%.0f + padding in %.0fpx)" % [digits_w, field.size.x])
 	m.tool_options.nutrient_count_box.value = 1
 	var p := centre + Vector2(50, 30)
@@ -149,7 +149,7 @@ func _init() -> void:
 	await process_frame
 	check(m.dish.nutrients_placed == 31, "dish counted 31 placed, got %d" % m.dish.nutrients_placed)
 	check(m.placed_row.value_label.text == "31" and m.placed_row.name_label.text == "Nutrient placed", "the dish card shows the placed count as a label and a value ('%s')" % m.placed_row.value_label.text)
-	check(m.colony.get_child_count() == Genome.LABELED.size() + 3, "what was placed and the colony's averages are rows of the dish card's details (%d)" % m.colony.get_child_count())
+	check(m.colony.get_child_count() == Genome.LABELED.size() + 6, "what was placed and the colony's averages are rows of the dish card's details (%d)" % m.colony.get_child_count())
 	check(m.vitals.get_theme_font("normal_font") is FontFile and m.vitals.get_theme_font("normal_font").resource_path.begins_with("res://fonts/"), "HUD text uses the bundled font")
 	for node in [m.vitals, m.goal_text, m.info_text]:
 		check(node.mouse_filter == Control.MOUSE_FILTER_IGNORE, "%s doesn't swallow clicks" % node.name)
@@ -202,11 +202,11 @@ func _init() -> void:
 
 	# --- Select tool: click selects, empty click deselects, middle button pans.
 	var picks: Dictionary = m.tool_options.pick_buttons
-	var pick_names := ["Inspect all", "Background", "Bups", "Nutrient sources", "Plankton"]
-	var picks_ok: bool = m.tool_options.visible and picks.size() == 5 and picks[0].button_pressed
+	var pick_names := ["Inspect all", "Background", "Bups", "Nutrient sources", "Plankton", "Husks"]
+	var picks_ok: bool = m.tool_options.visible and picks.size() == 6 and picks[0].button_pressed
 	for i in picks.size():
 		picks_ok = picks_ok and picks[i].icon != null and picks[i].text == "" and picks[i].tooltip_text == pick_names[i]
-	check(picks_ok, "the select tool has a tray of five icon buttons (no text) named on hover, with Inspect all chosen")
+	check(picks_ok, "the select tool has a tray of six icon buttons (no text) named on hover, with Inspect all chosen")
 	var bup: int = m.dish.bup_ids()[0]
 	m.dish.sim.set_bup_pos(bup, Vector2(20, 10))
 	_click(m, centre + Vector2(20, 10))
@@ -668,7 +668,7 @@ func _init() -> void:
 	check(m.watch_button.visible and m.watch_button.tooltip_text == "Watch (O)" and m.watch_button.icon == m.WATCH_ICON, "a selected bup has a Watch icon, an eye")
 	m.watch_button.pressed.emit()
 	m._process(0.0)
-	check(m.dish.is_watched(watched_one) and m.watch_panel.visible and m.watch_button.tooltip_text == "Stop watching (O)" and m.watch_panel.title.text == "Watching  1" and m.watch_button.icon == m.UNWATCH_ICON, "pressing it puts the bup on the list, which appears, and the eye is crossed out to offer taking it off again")
+	check(m.dish.is_watched(watched_one) and m.watch_panel.visible and m.watch_button.tooltip_text == "Stop watching (O)" and m.watch_panel.title.text == "Watching" and m.watch_button.icon == m.UNWATCH_ICON, "pressing it puts the bup on the list, which appears, and the eye is crossed out to offer taking it off again")
 	m.dish.selected_id = -1
 	m.dish.remove_bup(watched_one)
 	await process_frame

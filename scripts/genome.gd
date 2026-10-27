@@ -109,6 +109,52 @@ const KEY_COST := 0.03  ## the share of its growth a bup with the key gives up (
 static func key_level(reach: int) -> int:
 	return (reach >> 8) & 3
 
+## The genome as a chromosome map (see ui/genome_ribbon.gd): a bup is haploid with one chromosome, so its loci sit in a fixed order, as on a linkage map. The
+## order is the order a donor transfers them in from the origin of transfer (CONJ_CONTINUE: speed, sense, metabolism, size, from a fixed origin), the F factor
+## itself first (an Hfr cell carries it integrated at the origin); the mutator (a mut gene) and the key (an acs regulatory change) follow.
+const LOCI := ["donor", "speed", "sense", "metabolism", "size", "mutator", "key"]
+const LOCUS_COLORS := {  ## one colour a locus, the same on every bup, so a place on the map is always the same colour
+	"donor": Color(0.78, 0.8, 0.86),
+	"speed": Color(0.36, 0.66, 0.95),
+	"sense": Color(0.7, 0.56, 0.95),
+	"metabolism": Color(0.76, 0.86, 0.36),
+	"size": Color(0.3, 0.8, 0.8),
+	"mutator": Color(0.92, 0.45, 0.72),
+	"key": Color(0.95, 0.62, 0.4),
+}
+const MUTATOR_ALLELES := [[10.0, "genes.allele_muty"], [100.0, "genes.allele_muts"], [150.0, "genes.allele_mutt"]]  ## the folds the mutator alleles make, and their names (the mutY-, mutS/L- and mutT-like ones of MUTATOR_FOLD_*)
+
+
+static func locus_color(locus: String) -> Color:
+	return LOCUS_COLORS[locus]
+
+
+## The raised-ceiling level (0-3) of a quantitative gene in a `reach` word.
+static func reach_level(reach: int, gene: String) -> int:
+	var i := LABELED.find(gene)
+	return (reach >> (2 * i)) & 3 if i >= 0 and i < LABELED.size() - 1 else 0
+
+
+## Where a locus's allele sits in its range, 0 to 1, for a genome with these values (a bup's info, or a founder's genome): the bar of its slot.
+static func allele_fraction(locus: String, value: float) -> float:
+	match locus:
+		"mutator":
+			return clampf(log(maxf(value, 1.0)) / log(MUTATOR_FOLD_TOP), 0.0, 1.0)
+		"donor", "key":
+			return clampf(value, 0.0, 1.0)  # (the caller turns the flag or the level into 0, 0.5 or 1)
+	var spec: Array = GENES[locus]
+	return clampf((value - spec[0]) / (spec[1] - spec[0]), 0.0, 1.0)
+
+
+## The name of the mutator allele nearest a fold, for a bup that is a mutator at all (a fold of 1 is just the usual rate and has no name) (in the log scale the alleles are spread on).
+static func mutator_allele_name(fold: float) -> String:
+	var best: Array = MUTATOR_ALLELES[0]
+	for allele: Array in MUTATOR_ALLELES:
+		if absf(log(fold) - log(allele[0])) < absf(log(fold) - log(best[0])):
+			best = allele
+	return Strings.t(best[1])
+
+
 ## How each gene is shown: its short label and decimals, so every readout agrees.
 const LABELED := ["speed", "sense", "metabolism", "size", "mutator"]  ## the traits the readouts list, in order
 
