@@ -44,11 +44,13 @@ const TYPES := {
 # 90 donor_gain, 91 donor_cost, 92 donor_loss, 93 contact_um, 94 the chance that a touching donor and recipient transfer in a step, 95 conj_continue,
 # 85 the stationary phase (1: on; the batch's plan says), 86 starve_maintenance x cost_per_mass, 87 starve_death_rate, 88 starve_death_exponent, 89 starve_min_mass_share,
 # 101 acetate_slope, 102 acetate_threshold, 103 acetate_uptake, 104 key_potentiation_rate, 105 key_rate, 106 key_factor, 107 key_cost,
-# 79 upkeep_scale (the dish's upkeep factor: multiplies base_upkeep + maintenance_per_mass * mass).
+# 79 upkeep_scale (the dish's upkeep factor: multiplies base_upkeep + maintenance_per_mass * mass),
+# 108 fine_step (a step this short or shorter follows each run and tumble), 109 tumble_base, 110 chemotaxis_gain, 111 tumble_up_factor, 112 tumble_seconds, 113 tumble_turn_mean, 114 tumble_turn_spread, 115 rotational_diffusion, 116 memory_short, 117 memory_long.
 # The entries that depend on the step's length (5, 6, 7, 59, 61, 70, and the diffusion's k in the push constant) are set for every batch.
-# BUPS (the bup records): 24 words each: 0 id_lo (uint bits), 1 x, 2 y, 3 dx, 4 dy, 5 energy, 6 mass, 7 birth_mass, 8 speed, 9 sense,
+# BUPS (the bup records): 28 words each: 0 id_lo (uint bits), 1 x, 2 y, 3 dx, 4 dy, 5 energy, 6 mass, 7 birth_mass, 8 speed, 9 sense,
 #       10 metabolism, 11 size, 12 reach (the raised gene ceilings: two bits a gene, speed the lowest, as a float; the yield is exp(-harm) / sqrt(metabolism), worked out where it is read), 13 mutator (the mutation rate, a multiple of the usual; the building size is P[56] x size²), 14 donor (0 or 1: it carries the F factor; the drag cost is P[57] x speed²), 15 harm, 16 hue, 17 sat, 18 val, 19 mutations, 20 divisions
-#       (both whole numbers as floats), 21 id_hi (uint bits), 22 px, 23 py (where it was in the last picture; >= 1e30: none, newborns 3e38).
+#       (both whole numbers as floats), 21 id_hi (uint bits), 22 px, 23 py (where it was in the last picture; >= 1e30: none, newborns 3e38),
+#       24 fast, 25 slow (the signal it has read, short and long memory: the fine path's chemotaxis; fast < 0: none read yet), 26 noise (its receptor noise), 27 tumbling (seconds of tumble left).
 #       The same as BupSim.export_state_bytes().
 # PUFF: 8 floats each: x, y, mass, variance, cut, alive, reach^2, sigma;
 # PCNT (uint, 8): 0 slots in use, 1 slots after compaction, 2 clouds that found no slot and went onto the grid (since the load),
@@ -155,7 +157,7 @@ void main() {
 const K_SWIM := """
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
-	uint b = i * 24u;
+	uint b = i * 28u;
 	float x = BUPS[b + 1], y = BUPS[b + 2], dx = BUPS[b + 3], dy = BUPS[b + 4];
 	float energy = BUPS[b + 5], mass = BUPS[b + 6];
 	float speed = BUPS[b + 8], sense = BUPS[b + 9], metab = BUPS[b + 10], drag = P[57] * BUPS[b + 8] * BUPS[b + 8], donor = BUPS[b + 14];  // (the drag cost from the speed gene; word 14 is the donor flag)
@@ -174,7 +176,8 @@ void main() {
 	float pc, pgx, pgy, sig; puffs_at(x, y, pc, pgx, pgy, sig);
 	c0 += pc; gx0 += pgx; gy0 += pgy;
 	int moves = 0;
-	if (P[6] > 0.5) {
+	bool fine = P[6] > 0.5 && delta <= P[108];  // (a step as short as the fine step: it follows the individual run and tumble, as the CPU's swim_by_runs)
+	if (P[6] > 0.5 && !fine) {
 		float structure = min(P[2], 2.0 * sig);
 		float sc = max(1.0, structure / max(P[69], 1.0));
 		moves = max(1, int(ceil(delta / (P[68] * sc * sc))));
@@ -226,6 +229,50 @@ void main() {
 		}
 	}
 	if (pending) { dx = hx / hl; dy = hy / hl; }
+	if (fine) {
+		// It reads the nutrient where it is (on a log scale) and compares it with its own recent past, and tumbles less often while it improves; while
+		// it tumbles it does not swim; a run bends a little by rotational diffusion.
+		float memory = exp(-delta / P[116]);
+		float noise = BUPS[b + 26] * memory + sqrt(1.0 - memory * memory) * gauss(s);
+		float signal = log(1.0 + c0 / floor_c);
+		float fast = BUPS[b + 24], slow = BUPS[b + 25];
+		if (fast < 0.0) { fast = signal; slow = signal; }  // (none read yet)
+		fast += (signal - fast) * (1.0 - memory);
+		slow += (signal - slow) * (1.0 - exp(-delta / P[117]));
+		float err_now = min(sense_k * sqrt(noise_ref / max(c0, 1e-5)), 5.0);
+		float rate = P[109] * clamp(1.0 - P[110] * (fast - slow + err_now * noise), P[111], 1.0);
+		float tumbling = BUPS[b + 27];
+		if (tumbling > 0.0) {
+			tumbling -= delta;
+		} else {
+			float turn;
+			if (u01(s) < rate * delta) {
+				tumbling = P[112];
+				turn = gauss(s) * P[114] + P[113];
+				if (u01(s) >= 0.5) turn = -turn;
+			} else {
+				turn = gauss(s) * P[115] * sqrt(delta);
+			}
+			float cs = cos(turn), sn = sin(turn);
+			float ndx = dx * cs - dy * sn, ndy = dx * sn + dy * cs;
+			float nl = sqrt(ndx * ndx + ndy * ndy);
+			if (nl > 0.0) { dx = ndx / nl; dy = ndy / nl; } else { dx = ndx; dy = ndy; }
+			x += dx * speed * delta; y += dy * speed * delta;
+		}
+		float dist = sqrt(x * x + y * y);
+		if (dist > limit) {  // (the wall: it is turned along it, and slides until a tumble frees it)
+			float nx = x / dist, ny = y / dist;
+			x = nx * limit; y = ny * limit;
+			float dt = dx * nx + dy * ny;
+			float ax = dx - nx * dt, ay = dy - ny * dt;
+			float al = sqrt(ax * ax + ay * ay);
+			if (al < 0.1) { float sg = u01(s) < 0.5 ? 1.0 : -1.0; ax = -ny * sg; ay = nx * sg; al = 1.0; }
+			dx = ax / al; dy = ay / al;
+		}
+		BUPS[b + 24] = fast; BUPS[b + 25] = slow; BUPS[b + 26] = noise; BUPS[b + 27] = tumbling;
+	} else {
+		BUPS[b + 24] = -1.0;  // (the signal memory isn't kept up while drifting)
+	}
 	BUPS[b + 1] = x; BUPS[b + 2] = y; BUPS[b + 3] = dx; BUPS[b + 4] = dy;
 	// then it pays its upkeep and grows (with the stationary phase on, a bup at the growth floor pays only the starving maintenance, from the
 	// reserve and then from its body)
@@ -287,7 +334,7 @@ void add_puff_demand(uint k, float mass) { // 2^20 to the unit
 }
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
-	uint b = i * 24u;
+	uint b = i * 28u;
 	float x = BUPS[b + 1], y = BUPS[b + 2], energy = BUPS[b + 5], mass = BUPS[b + 6], metab = BUPS[b + 10], yld = exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]);  // (word 12 holds the raised ceilings now: the yield comes from harm and metabolism)
 	float max_e = P[22] * mass;
 	WANT[i] = -1.0; WANTC[i] = 0.0; CELLOF[i] = -1;
@@ -382,7 +429,7 @@ void add_fixed2(uint cell, float w, int which) { // 2^30 to the unit, in 64 bits
 }
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
-	uint b = i * 24u;
+	uint b = i * 28u;
 	float wg = WANT[i], wc = WANTC[i];
 	float mass = BUPS[b + 6], yld = exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]);
 	float max_e = P[22] * mass;
@@ -458,7 +505,7 @@ void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
 	float w = WANT2[i];
 	if (w <= 0.0) return;
-	uint b = i * 24u;
+	uint b = i * 28u;
 	BUPS[b + 5] = min(BUPS[b + 5] + w * SCALE2[CELL2[i]] * exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]), P[22] * BUPS[b + 6]);
 }
 """
@@ -525,7 +572,7 @@ void main() {
 	uint n_now = CNT[0];
 	SURV[i] = 0u; KID[i] = 0u;
 	if (i >= n_now) return;
-	uint b = i * 24u;
+	uint b = i * 28u;
 	uint s = hash(hash(CNT[7] ^ (CNT[5] * 0x85EBCA6BU) ^ 777U) + i * 0x9E3779B9U);  // (this dish's stream, this step, this bup)
 	float energy = BUPS[b + 5], mass = BUPS[b + 6], birth = BUPS[b + 7], add_mass = P[56] * BUPS[b + 11] * BUPS[b + 11], rate = BUPS[b + 13], donor = BUPS[b + 14];
 	int reach = int(BUPS[b + 12] + 0.5);  // (the building size from the size gene; the mutation rate of this bup, which its daughter is made at)
@@ -599,7 +646,7 @@ void main() {
 		if (!lethal) {
 			KID[i] = 1u;
 			float a = u01(s) * 6.2831853, off = 0.5 * mass * P[14];
-			uint c = i * 24u;
+			uint c = i * 28u;
 			CHILD[c + 0] = 0.0;  // (the id, words 0 and 21, is written by `compact` as integers)
 			CHILD[c + 1] = BUPS[b + 1] + cos(a) * off; CHILD[c + 2] = BUPS[b + 2] + sin(a) * off;
 			CHILD[c + 3] = 1.0; CHILD[c + 4] = 0.0;
@@ -611,6 +658,7 @@ void main() {
 			CHILD[c + 15] = harm;
 			CHILD[c + 16] = hue; CHILD[c + 17] = sat; CHILD[c + 18] = val; CHILD[c + 19] = muts; CHILD[c + 20] = BUPS[b + 20];
 			CHILD[c + 21] = 0.0; CHILD[c + 22] = 3e38; CHILD[c + 23] = 3e38;  // (no picture yet: no trail)
+			CHILD[c + 24] = -1.0; CHILD[c + 25] = 0.0; CHILD[c + 26] = 0.0; CHILD[c + 27] = 0.0;  // (no chemotaxis memory yet: a fast signal below 0 is none read)
 		}
 	}
 }
@@ -665,23 +713,23 @@ void main() {
 """
 
 const K_COMPACT := """
-// One thread per 16 bytes (a bup is six of them): a kept bup is copied to its new place, a newborn written after the kept ones, with
+// One thread per 16 bytes (a bup is seven of them): a kept bup is copied to its new place, a newborn written after the kept ones, with
 // its id (the next id plus the number of newborns before it: 64 bits in words 0 and 21, lo and hi, with the carry).
 void main() {
 	// (a dispatch of more groups than one dimension allows (65,535 on some drivers: Direct3D 12) is a grid: the thread's number counts rows too)
 	uint t = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * (gl_NumWorkGroups.x * 64u);
-	uint i = t / 6u, part = t % 6u;
+	uint i = t / 7u, part = t % 7u;
 	if (i >= CNT[0]) return;
 	uint c = uint(P[62]);
-	if (SURV[i] == 1u) BUPS2_V4U[EXCS[i] * 6u + part] = BUPS_V4U[i * 6u + part];
+	if (SURV[i] == 1u) BUPS2_V4U[EXCS[i] * 7u + part] = BUPS_V4U[i * 7u + part];
 	if (KID[i] == 1u) {
 		uint slot = CNT[1] + EXCK[i];
 		if (slot < c) {
-			uvec4 v = CHILD_V4U[i * 6u + part];
+			uvec4 v = CHILD_V4U[i * 7u + part];
 			uint lo = CNT[4] + EXCK[i];
 			if (part == 0u) v.x = lo;
 			if (part == 5u) v.y = CNT[6] + (lo < CNT[4] ? 1u : 0u);
-			BUPS2_V4U[slot * 6u + part] = v;
+			BUPS2_V4U[slot * 7u + part] = v;
 		}
 	}
 }
@@ -689,7 +737,7 @@ void main() {
 
 const K_COPY := """
 void main() {
-	uint t = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * (gl_NumWorkGroups.x * 64u); if (t >= CNT[3] * 6u) return;  // (a grid of groups when one row is not enough: see compact)
+	uint t = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * (gl_NumWorkGroups.x * 64u); if (t >= CNT[3] * 7u) return;  // (a grid of groups when one row is not enough: see compact)
 	BUPS_V4U[t] = BUPS2_V4U[t];
 }
 """
@@ -1028,7 +1076,7 @@ void main() {
 const K_CONJ_INSERT := """
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
-	uint b = i * 24u;
+	uint b = i * 28u;
 	if (BUPS[b + 14] < 0.5) return;
 	atomicAdd(CNT[15], 1u);
 	uint h = dhash(int(floor(BUPS[b + 1] / DCELL)), int(floor(BUPS[b + 2] / DCELL)));
@@ -1042,7 +1090,7 @@ void main() {
 const K_CONJ_APPLY := """
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0] || CNT[15] == 0u) return;
-	uint b = i * 24u;
+	uint b = i * 28u;
 	if (BUPS[b + 14] > 0.5) return;
 	float x = BUPS[b + 1], y = BUPS[b + 2];
 	float rr = 0.5 * BUPS[b + 6] * P[14];
@@ -1054,7 +1102,7 @@ void main() {
 		for (uint s = 0u; s < 4u; s++) {
 			uint d = DTAB[h * 4u + s];
 			if (d == 0xFFFFFFFFu || d >= best) continue;
-			uint db = d * 24u;
+			uint db = d * 28u;
 			float dx = BUPS[db + 1] - x, dy = BUPS[db + 2] - y;
 			float range = 0.5 * BUPS[db + 6] * P[14] + rr + P[93];
 			if (dx * dx + dy * dy > range * range) continue;
@@ -1066,7 +1114,7 @@ void main() {
 	for (int k = 0; k < 3; k++) {
 		if (keyed01(CNT[7] ^ CNT[5] ^ 0x5bd1e995u, i * 4u + uint(k), best) < P[95]) run++; else break;
 	}
-	uint db = best * 24u;
+	uint db = best * 28u;
 	for (int g = 0; g < run; g++) BUPS[b + 8u + uint(g)] = BUPS[db + 8u + uint(g)];
 	int mask = (1 << (2 * run)) - 1;  // (the raised ceilings of the genes that moved go with them)
 	BUPS[b + 12] = float((int(BUPS[b + 12] + 0.5) & ~mask) | (int(BUPS[db + 12] + 0.5) & mask));
@@ -1082,7 +1130,7 @@ const K_DEATH_CLOUDS := """
 void main() {
 	uint i = gl_GlobalInvocationID.x;
 	if (i >= CNT[0] || P[63] <= 0.0 || SURV[i] != 0u) return;
-	uint b = i * 24u;
+	uint b = i * 28u;
 	uint slot = PCNT[0] + (i - EXCS[i]);
 	if (slot < uint(P[71])) { uint o = slot * 8u; PUFF[o + 5] = 0.0; }  // (empty unless this one is a cloud below)
 	if (BUPS[b + 23] != -2.0) return;
@@ -1110,11 +1158,11 @@ const K_EVENTS := """
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
 	uint cap = uint(P[78]), base = uint(pcs.pb) * cap, st = uint(pcs.pa);
-	uint b = i * 24u;
+	uint b = i * 28u;
 	if (KID[i] == 1u && CNT[1] + EXCK[i] < uint(P[62])) {  // (a newborn `compact` will place)
 		uint slot = CNT[8] + EXCK[i];
 		if (slot < cap) {
-			uint o = (base + slot) * 16u, c = i * 24u;
+			uint o = (base + slot) * 16u, c = i * 28u;
 			uint lo = CNT[4] + EXCK[i];
 			EVB[o] = lo; EVB[o + 1u] = CNT[6] + (lo < CNT[4] ? 1u : 0u);
 			EVB[o + 2u] = BUPS_U[b]; EVB[o + 3u] = BUPS_U[b + 21u]; EVB[o + 4u] = st;
@@ -1156,7 +1204,7 @@ void main() {
 	uint i = gl_GlobalInvocationID.x, l = gl_LocalInvocationID.x;
 	float v[10] = float[10](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
 	if (i < CNT[0]) {
-		uint b = i * 24u;
+		uint b = i * 28u;
 		float h = BUPS[b + 15u];
 		v[0] = 1.0; v[1] = BUPS[b + 8u]; v[2] = BUPS[b + 9u]; v[3] = BUPS[b + 10u]; v[4] = BUPS[b + 11u];
 		v[5] = h < 0.1 ? h * (1.0 - h * (0.5 - h * (0.16666667 - h * 0.041666668))) : 1.0 - exp(-h);  // (1 - exp(-h) without the loss of a small h's digits)
@@ -1221,7 +1269,7 @@ void main() {
 const K_Q_PICK := """
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0] || QIN[0] == 0u) return;
-	uint b = i * 24u;
+	uint b = i * 28u;
 	float px = uintBitsToFloat(QIN[1]), py = uintBitsToFloat(QIN[2]), slack = uintBitsToFloat(QIN[3]), pixel = uintBitsToFloat(QIN[4]);
 	float reach = 0.5 * max(BUPS[b + 6u] * P[14], P[74] * pixel) + slack;
 	float dx = BUPS[b + 1u] - px, dy = BUPS[b + 2u] - py;
@@ -1244,7 +1292,7 @@ const K_Q_RECORD := """
 void main() {
 	uint t = gl_GlobalInvocationID.x; if (t >= 24u) return;
 	uint k = OUT[OUT_Q];
-	if (k != 0xFFFFFFFFu) OUT[OUT_Q + 2u + t] = BUPS_U[k * 24u + t];
+	if (k != 0xFFFFFFFFu) OUT[OUT_Q + 2u + t] = BUPS_U[k * 28u + t];
 }
 """
 
@@ -1252,7 +1300,7 @@ const K_Q_TRACK := """
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
 	uint n = QIN[27]; if (n == 0u) return;
-	uint b = i * 24u, lo = BUPS_U[b], hi = BUPS_U[b + 21u];
+	uint b = i * 28u, lo = BUPS_U[b], hi = BUPS_U[b + 21u];
 	for (uint t = 0u; t < n; t++) {
 		if (QIN[28u + 2u * t] == lo && QIN[29u + 2u * t] == hi) {
 			uint o = OUT_Q + 36u + t * 24u;
@@ -1271,7 +1319,7 @@ void main() {
 	uint i = gl_GlobalInvocationID.x, l = gl_LocalInvocationID.x;
 	uint nn = QIN[5], nf = QIN[18];
 	bool live = i < CNT[0];
-	uint b = i * 24u;
+	uint b = i * 28u;
 	float x = live ? BUPS[b + 1u] : 0.0, y = live ? BUPS[b + 2u] : 0.0;
 	for (uint s = 0u; s < 4u; s++) {
 		uint m = 0xFFFFFFFFu, c = 0u;

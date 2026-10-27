@@ -22,7 +22,7 @@ const MIN_SIM_RADIUS := 150.0  ## µm: the smallest dish the simulation itself w
 const MAX_DISH_RADIUS := 90000.0  ## µm: 90 mm in radius, 180 mm across; the nutrient grid has the same number of cells at any size, so a big dish has coarse ones (1.8 mm each here)
 const BACKEND_AUTO := "auto"  ## the simulation runs on the GPU or the processor, whichever is faster for the dish (see Dish.backend_wants_gpu)
 const BACKEND_CPU := "cpu"  ## always on the processor
-const BACKEND_GPU := "gpu"  ## on the GPU whenever the machine has one and playback is fast enough for it (see Dish.FINE_STEP)
+const BACKEND_GPU := "gpu"  ## on the GPU whenever the machine has one
 const BACKENDS := [BACKEND_AUTO, BACKEND_CPU, BACKEND_GPU]
 
 var bups := 4

@@ -20,7 +20,7 @@ void main() {
 	uint i = gl_GlobalInvocationID.x, l = gl_LocalInvocationID.x;
 	uint nn = QIN[5], nf = QIN[18];
 	bool live = i < CNT[0];
-	uint b = i * 24u;
+	uint b = i * 28u;
 	float x = live ? BUPS[b + 1u] : 0.0, y = live ? BUPS[b + 2u] : 0.0;
 	for (uint s = 0u; s < 4u; s++) {
 		uint m = 0xFFFFFFFFu, c = 0u;

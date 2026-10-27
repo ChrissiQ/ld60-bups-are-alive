@@ -46,7 +46,7 @@ void deposit_xy(float x, float y, float mass) {
 void main() {
 	uint i = gl_GlobalInvocationID.x;
 	if (i >= CNT[0] || P[63] <= 0.0 || SURV[i] != 0u) return;
-	uint b = i * 24u;
+	uint b = i * 28u;
 	uint slot = PCNT[0] + (i - EXCS[i]);
 	if (slot < uint(P[71])) { uint o = slot * 8u; PUFF[o + 5] = 0.0; }  // (empty unless this one is a cloud below)
 	if (BUPS[b + 23] != -2.0) return;

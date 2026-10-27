@@ -79,7 +79,7 @@ var _near_answers := []  ## [point, near, answer]
 var _fractions := {}  ## [gene index, threshold] -> frame asked
 var _fraction_answers := {}
 var _tracked := {}  ## id -> frame asked
-var _records := {}  ## id -> its last record (96 bytes)
+var _records := {}  ## id -> its last record (112 bytes)
 var _gone := {}  ## id -> the last record of a tracked bup the GPU no longer has (it died): its place, until its death reaches the records
 var _sent_questions := {}
 var _erase := PackedFloat32Array()
@@ -171,7 +171,7 @@ func _init(cpu_sim: BupSim, local_device := false) -> void:
 ##
 ## The GPU's random stream is seeded from the dish's seed and one number from the CPU's stream (so that each load, after a switch, draws
 ## fresh noise instead of the same noise again from step 0; the CPU's stream is the dish's, and carries on).
-## What does not cross, and why that is fine: the fine path's chemotaxis memory (the CPU re-primes in about `memory_long`: a known loss), and the CPU's diffusion and feed accumulators, which only the CPU's own step moves (sim.step_world does not),
+## What does not cross, and why that is fine: the CPU's diffusion and feed accumulators, which only the CPU's own step moves (sim.step_world does not),
 ## so what they hold when the GPU takes over is still there, and still owed to the CPU's field, when the CPU takes over again.
 ## Hooks of Step 3B, called when the world has them: `_pipeline_reset(bups: int)` (drop every result still in flight and every batch not yet
 ## recorded, start a new sequence, and take `bups` as the count until the next poll).
@@ -894,7 +894,7 @@ func _take_answers_from_out(rid: int, data: PackedByteArray, request: Dictionary
 		var index := data.decode_u32(o)
 		var id := -1
 		if index != 0xFFFFFFFF:
-			var record := data.slice(o + 8, o + 8 + GpuSim.RECORD_BYTES)
+			var record := GpuSim.whole_record(data.slice(o + 8, o + 8 + GpuSim.ANSWER_BYTES))
 			id = GpuSim.id_of(record, 0)
 			_records[id] = record
 		_pick_answer = {"local": q["pick"][0], "slack": q["pick"][1], "id": id}
@@ -916,14 +916,14 @@ func _take_answers_from_out(rid: int, data: PackedByteArray, request: Dictionary
 		_fraction_answers[fractions[f]] = float(data.decode_u32(o + (28 + f) * 4)) / count if count > 0 else 0.0
 	var tracked: Array = q["tracked"]
 	for t in tracked.size():
-		var w := o + (36 + 24 * t) * 4
+		var w := o + (36 + GpuSim.ANSWER_WORDS * t) * 4
 		var id: int = tracked[t]
 		if data.decode_u32(w) == 0xFFFFFFFF and data.decode_u32(w + 21 * 4) == 0xFFFFFFFF:
 			if _records.has(id):
 				_gone[id] = _records[id]  # (not found: no longer alive. Its place is kept: its record says it lives until its death is applied, a few frames on)
 			_records.erase(id)
 		else:
-			_records[id] = data.slice(w, w + GpuSim.RECORD_BYTES)
+			_records[id] = GpuSim.whole_record(data.slice(w, w + GpuSim.ANSWER_BYTES))
 
 ## The batch's history samples in an OUT (as _take_out or finish_pending read it).
 func _samples_from(data: PackedByteArray, batch: Dictionary) -> Array:

@@ -15,5 +15,5 @@ const uint OUT_Q = 32u; const uint OUT_STATS = 272u;
 void main() {
 	uint t = gl_GlobalInvocationID.x; if (t >= 24u) return;
 	uint k = OUT[OUT_Q];
-	if (k != 0xFFFFFFFFu) OUT[OUT_Q + 2u + t] = BUPS_U[k * 24u + t];
+	if (k != 0xFFFFFFFFu) OUT[OUT_Q + 2u + t] = BUPS_U[k * 28u + t];
 }

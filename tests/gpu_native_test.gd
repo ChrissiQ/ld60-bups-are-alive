@@ -6,7 +6,7 @@ extends SceneTree
 ## the CPU's own step, the living ids from the records (alive_ids), the sources' part of a step on its own (step_world), and the field
 ## as packed arrays (NutrientField.export_packed / import_packed). Headless: nothing here needs a GPU.
 
-const RECORD_BYTES := 96
+const RECORD_BYTES := 112
 
 
 func check(ok: bool, what: String) -> void:
@@ -58,7 +58,7 @@ func _records_round_trip() -> void:
 	sim.step(20.0, PackedVector2Array(), PackedFloat32Array(), 0.0, 40.0)
 	var ids := sim.bup_ids()
 	var state := sim.export_state_bytes()
-	check(ids.size() > 900 and state.size() == ids.size() * RECORD_BYTES, "export_state_bytes gives a 96-byte record per bup (%d bytes for %d bups)" % [state.size(), ids.size()])
+	check(ids.size() > 900 and state.size() == ids.size() * RECORD_BYTES, "export_state_bytes gives a 112-byte record per bup (%d bytes for %d bups)" % [state.size(), ids.size()])
 	var high := 0
 	var ids_ok := true
 	for i in ids.size():

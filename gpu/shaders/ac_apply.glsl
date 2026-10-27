@@ -18,6 +18,6 @@ void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
 	float w = WANT2[i];
 	if (w <= 0.0) return;
-	uint b = i * 24u;
+	uint b = i * 28u;
 	BUPS[b + 5] = min(BUPS[b + 5] + w * SCALE2[CELL2[i]] * exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]), P[22] * BUPS[b + 6]);
 }

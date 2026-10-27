@@ -79,7 +79,7 @@ static func backend(dish: Dish) -> Dictionary:
 		"running": dish.backend_running(),
 		"gpu_available": GpuWorld.available(),
 		"gpu_device": dish.gpu_world.device_name() if dish.gpu_world != null else "",
-		"coarse_frames": dish._coarse_frames,
+		"gpu_wanted_frames": dish._gpu_wanted_frames,
 		"state_on_cpu": dish._gpu_on_cpu,
 		"gpu_overflows": {},
 	}

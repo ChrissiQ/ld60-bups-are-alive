@@ -74,7 +74,7 @@ void puffs_at(float x, float y, out float c, out float gx, out float gy, out flo
 
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
-	uint b = i * 24u;
+	uint b = i * 28u;
 	float x = BUPS[b + 1], y = BUPS[b + 2], dx = BUPS[b + 3], dy = BUPS[b + 4];
 	float energy = BUPS[b + 5], mass = BUPS[b + 6];
 	float speed = BUPS[b + 8], sense = BUPS[b + 9], metab = BUPS[b + 10], drag = P[57] * BUPS[b + 8] * BUPS[b + 8], donor = BUPS[b + 14];  // (the drag cost from the speed gene; word 14 is the donor flag)
@@ -93,7 +93,8 @@ void main() {
 	float pc, pgx, pgy, sig; puffs_at(x, y, pc, pgx, pgy, sig);
 	c0 += pc; gx0 += pgx; gy0 += pgy;
 	int moves = 0;
-	if (P[6] > 0.5) {
+	bool fine = P[6] > 0.5 && delta <= P[108];  // (a step as short as the fine step: it follows the individual run and tumble, as the CPU's swim_by_runs)
+	if (P[6] > 0.5 && !fine) {
 		float structure = min(P[2], 2.0 * sig);
 		float sc = max(1.0, structure / max(P[69], 1.0));
 		moves = max(1, int(ceil(delta / (P[68] * sc * sc))));
@@ -145,6 +146,50 @@ void main() {
 		}
 	}
 	if (pending) { dx = hx / hl; dy = hy / hl; }
+	if (fine) {
+		// It reads the nutrient where it is (on a log scale) and compares it with its own recent past, and tumbles less often while it improves; while
+		// it tumbles it does not swim; a run bends a little by rotational diffusion.
+		float memory = exp(-delta / P[116]);
+		float noise = BUPS[b + 26] * memory + sqrt(1.0 - memory * memory) * gauss(s);
+		float signal = log(1.0 + c0 / floor_c);
+		float fast = BUPS[b + 24], slow = BUPS[b + 25];
+		if (fast < 0.0) { fast = signal; slow = signal; }  // (none read yet)
+		fast += (signal - fast) * (1.0 - memory);
+		slow += (signal - slow) * (1.0 - exp(-delta / P[117]));
+		float err_now = min(sense_k * sqrt(noise_ref / max(c0, 1e-5)), 5.0);
+		float rate = P[109] * clamp(1.0 - P[110] * (fast - slow + err_now * noise), P[111], 1.0);
+		float tumbling = BUPS[b + 27];
+		if (tumbling > 0.0) {
+			tumbling -= delta;
+		} else {
+			float turn;
+			if (u01(s) < rate * delta) {
+				tumbling = P[112];
+				turn = gauss(s) * P[114] + P[113];
+				if (u01(s) >= 0.5) turn = -turn;
+			} else {
+				turn = gauss(s) * P[115] * sqrt(delta);
+			}
+			float cs = cos(turn), sn = sin(turn);
+			float ndx = dx * cs - dy * sn, ndy = dx * sn + dy * cs;
+			float nl = sqrt(ndx * ndx + ndy * ndy);
+			if (nl > 0.0) { dx = ndx / nl; dy = ndy / nl; } else { dx = ndx; dy = ndy; }
+			x += dx * speed * delta; y += dy * speed * delta;
+		}
+		float dist = sqrt(x * x + y * y);
+		if (dist > limit) {  // (the wall: it is turned along it, and slides until a tumble frees it)
+			float nx = x / dist, ny = y / dist;
+			x = nx * limit; y = ny * limit;
+			float dt = dx * nx + dy * ny;
+			float ax = dx - nx * dt, ay = dy - ny * dt;
+			float al = sqrt(ax * ax + ay * ay);
+			if (al < 0.1) { float sg = u01(s) < 0.5 ? 1.0 : -1.0; ax = -ny * sg; ay = nx * sg; al = 1.0; }
+			dx = ax / al; dy = ay / al;
+		}
+		BUPS[b + 24] = fast; BUPS[b + 25] = slow; BUPS[b + 26] = noise; BUPS[b + 27] = tumbling;
+	} else {
+		BUPS[b + 24] = -1.0;  // (the signal memory isn't kept up while drifting)
+	}
 	BUPS[b + 1] = x; BUPS[b + 2] = y; BUPS[b + 3] = dx; BUPS[b + 4] = dy;
 	// then it pays its upkeep and grows (with the stationary phase on, a bup at the growth floor pays only the starving maintenance, from the
 	// reserve and then from its body)

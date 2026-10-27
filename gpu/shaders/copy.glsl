@@ -12,6 +12,6 @@ float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
 void main() {
-	uint t = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * (gl_NumWorkGroups.x * 64u); if (t >= CNT[3] * 6u) return;  // (a grid of groups when one row is not enough: see compact)
+	uint t = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * (gl_NumWorkGroups.x * 64u); if (t >= CNT[3] * 7u) return;  // (a grid of groups when one row is not enough: see compact)
 	BUPS_V4U[t] = BUPS2_V4U[t];
 }

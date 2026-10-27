@@ -17,7 +17,7 @@ const uint OUT_Q = 32u; const uint OUT_STATS = 272u;
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
 	uint n = QIN[27]; if (n == 0u) return;
-	uint b = i * 24u, lo = BUPS_U[b], hi = BUPS_U[b + 21u];
+	uint b = i * 28u, lo = BUPS_U[b], hi = BUPS_U[b + 21u];
 	for (uint t = 0u; t < n; t++) {
 		if (QIN[28u + 2u * t] == lo && QIN[29u + 2u * t] == hi) {
 			uint o = OUT_Q + 36u + t * 24u;

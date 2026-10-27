@@ -19,7 +19,7 @@ float keyed01(uint a, uint b, uint c) { uint h = hash(hash(hash(a ^ 0x9E3779B9u)
 
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
-	uint b = i * 24u;
+	uint b = i * 28u;
 	if (BUPS[b + 14] < 0.5) return;
 	atomicAdd(CNT[15], 1u);
 	uint h = dhash(int(floor(BUPS[b + 1] / DCELL)), int(floor(BUPS[b + 2] / DCELL)));

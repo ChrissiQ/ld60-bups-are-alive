@@ -879,7 +879,7 @@ PackedByteArray BupSim::take_disc(const Vector2 &center, double disc_radius) {
 
 PackedInt64Array BupSim::add_state_bytes(const PackedByteArray &state, const Vector2 &shift, bool keep_ids) {
 	PackedInt64Array ids;
-	ERR_FAIL_COND_V_MSG(state.size() % (STATE_WORDS * 4) != 0, ids, "BupSim.add_state_bytes: not a whole number of 96-byte records");
+	ERR_FAIL_COND_V_MSG(state.size() % (STATE_WORDS * 4) != 0, ids, "BupSim.add_state_bytes: not a whole number of 112-byte records");
 	const size_t count = (size_t)state.size() / (STATE_WORDS * 4);
 	const uint8_t *r = state.ptr();
 	for (size_t i = 0; i < count; i++) {
@@ -1260,15 +1260,15 @@ Vector2 BupSim::nearest_and_count(const Vector2 &local, double near) const {
 	return Vector2(nearest_sq < 0.0 ? -1.0f : (float)std::sqrt(nearest_sq), (float)count);
 }
 
-// Every bup as 24 floats: id, x, y, dx, dy, energy, mass, birth_mass, speed, sense, metabolism, size, reach, mutator, donor, harm,
-// hue, sat, val, mutations, divisions, parent id (0: not kept here), 2 spare.
+// Every bup as 28 floats: id, x, y, dx, dy, energy, mass, birth_mass, speed, sense, metabolism, size, reach, mutator, donor, harm,
+// hue, sat, val, mutations, divisions, parent id (0: not kept here), 2 spare, then its chemotaxis memory (see export_state_bytes).
 PackedFloat32Array BupSim::export_state() const {
 	PackedFloat32Array out;
-	out.resize((int64_t)bups.size() * 24);
+	out.resize((int64_t)bups.size() * STATE_WORDS);
 	float *w = out.ptrw();
 	for (size_t i = 0; i < bups.size(); i++) {
 		const Bup &b = bups[i];
-		float *p = w + i * 24;
+		float *p = w + i * STATE_WORDS;
 		p[0] = (float)b.id;
 		p[1] = b.x;
 		p[2] = b.y;
@@ -1293,15 +1293,20 @@ PackedFloat32Array BupSim::export_state() const {
 		p[21] = 0.0f;
 		p[22] = 0.0f;
 		p[23] = 0.0f;
+		p[24] = b.primed ? b.fast : -1.0f;
+		p[25] = b.slow;
+		p[26] = b.noise;
+		p[27] = b.tumbling;
 	}
 	return out;
 }
 
 // ---- the GPU simulation's records and events ------------------------------------------------
 
-// Every bup as the GPU simulation's record (gpu/kernels.gd): 24 32-bit words, 0 the id's low word, 1-20 x, y, dx, dy, energy, mass,
+// Every bup as the GPU simulation's record (gpu/kernels.gd): 28 32-bit words, 0 the id's low word, 1-20 x, y, dx, dy, energy, mass,
 // birth_mass, speed, sense, metabolism, size, reach, mutator, donor, harm, hue, sat, val, mutations, divisions (floats),
-// 21 the id's high word, 22-23 where it was in the last picture (NO_PICTURE if nowhere yet).
+// 21 the id's high word, 22-23 where it was in the last picture (NO_PICTURE if nowhere yet), 24-27 its chemotaxis memory (the fast and the
+// slow signal, the receptor noise, the seconds of tumble left; a fast signal below 0 means it has not read one yet).
 PackedByteArray BupSim::export_state_bytes() const {
 	PackedByteArray out;
 	out.resize((int64_t)bups.size() * STATE_WORDS * 4);
@@ -1318,6 +1323,10 @@ PackedByteArray BupSim::export_state_bytes() const {
 		put_u32(r, 21, (uint32_t)((uint64_t)b.id >> 32));
 		put_f32(r, 22, std::isnan(b.px) ? NO_PICTURE : b.px);
 		put_f32(r, 23, std::isnan(b.py) ? NO_PICTURE : b.py);
+		put_f32(r, 24, b.primed ? b.fast : -1.0f);
+		put_f32(r, 25, b.slow);
+		put_f32(r, 26, b.noise);
+		put_f32(r, 27, b.tumbling);
 	}
 	return out;
 }
@@ -1347,15 +1356,19 @@ BupSim::Bup BupSim::bup_from_record(const uint8_t *record) const {
 	float px = get_f32(record, 22), py = get_f32(record, 23);
 	b.px = px >= 1e30f ? std::numeric_limits<float>::quiet_NaN() : px;
 	b.py = py >= 1e30f ? std::numeric_limits<float>::quiet_NaN() : py;
+	b.fast = get_f32(record, 24);
+	b.primed = b.fast >= 0.0f;
+	b.slow = get_f32(record, 25);
+	b.noise = get_f32(record, 26);
+	b.tumbling = get_f32(record, 27);
 	derive(b); // (yield, add_mass and drag_upkeep, as the CPU works them out: the record keeps the mutator in word 13 where the GPU's building size was)
 	return b;
 }
 
 // The bups become those of the records (as export_state_bytes makes them); the family records are left as they are (on the GPU path
-// they are kept up by apply_events, which must have been given every birth and death up to this state first). The swimmers' memory
-// of the slow playback starts afresh. The next id never goes back past an id in the state.
+// they are kept up by apply_events, which must have been given every birth and death up to this state first). The next id never goes back past an id in the state.
 void BupSim::import_state_bytes(const PackedByteArray &state) {
-	ERR_FAIL_COND_MSG(state.size() % (STATE_WORDS * 4) != 0, "BupSim.import_state_bytes: not a whole number of 96-byte records");
+	ERR_FAIL_COND_MSG(state.size() % (STATE_WORDS * 4) != 0, "BupSim.import_state_bytes: not a whole number of 112-byte records");
 	size_t count = (size_t)state.size() / (STATE_WORDS * 4);
 	const uint8_t *r = state.ptr();
 	bups.clear();
@@ -1370,7 +1383,7 @@ void BupSim::import_state_bytes(const PackedByteArray &state) {
 
 // What bup_info would say of the bup in record `index` of `state` (its birth from the records, its steering from the field as it is).
 Dictionary BupSim::info_from_state(const PackedByteArray &state, int index) const {
-	ERR_FAIL_COND_V_MSG(state.size() % (STATE_WORDS * 4) != 0, Dictionary(), "BupSim.info_from_state: not a whole number of 96-byte records");
+	ERR_FAIL_COND_V_MSG(state.size() % (STATE_WORDS * 4) != 0, Dictionary(), "BupSim.info_from_state: not a whole number of 112-byte records");
 	if (index < 0 || (int64_t)index >= state.size() / (STATE_WORDS * 4)) {
 		return Dictionary();
 	}

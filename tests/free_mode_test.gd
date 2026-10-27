@@ -1255,10 +1255,10 @@ func _backend_rule_tests() -> void:
 	check(d.backend_setting == on and d.backend_running() == "cpu", "a dish takes the setting from its start (and runs on the processor where there is no GPU path: %s)" % d.backend_running())
 	d.strike()
 	check(d.backend_setting == auto, "goal mode's dish (no start given) is always Auto")
-	# Fine steps never run on the GPU, whatever the setting says (it has no fine path).
-	for setting: String in [auto, on, off]:
-		check(not Dish.backend_wants_gpu(setting, Dish.FINE_STEP, 1, 400, 1000000, false, true) and not Dish.backend_wants_gpu(setting, 0.1, 1, 400, 1000000, true, true), "'%s': a fine step (x1) is never the GPU's, even with a million bups" % setting)
-	# Fine or coarse is judged on the speed and the usual frame, not one frame's length: a stray short frame at x100 stays coarse, a real x1 is fine at once.
+	# Fine steps (x1) run on the GPU too: On wants it whatever the crowd, Off never, Auto when the processor could not keep up.
+	check(Dish.backend_wants_gpu(on, 0.0167, 1, 400, 100, false, true) and not Dish.backend_wants_gpu(off, 0.0167, 1, 400, 1000000, true, true), "a fine step (x1): On is the GPU's, Off never")
+	check(Dish.backend_wants_gpu(auto, 0.0167, 1, 400, 1000000, false, true) and not Dish.backend_wants_gpu(auto, 0.0167, 1, 400, 5000, false, true), "a fine step (x1): Auto gives a million bups to the GPU and keeps 5,000 on the processor")
+	# The rule is judged on the speed and the usual frame, not one frame's length: a stray short frame at x100 stays coarse, a real x1 is fine at once.
 	var usual := Dish.typical_frame(PackedFloat32Array([0.0167, 0.0166, 0.0168, 0.0167, 0.0165]))
 	check(is_equal_approx(usual, 0.0167), "the usual frame is the median of the recent ones: %f" % usual)
 	check(Dish.rule_step(0.18, 1, 0.0018, usual) > Dish.FINE_STEP, "x100 with one stray 1.8 ms frame (a 0.18 s step) is still a coarse step")
@@ -1294,7 +1294,7 @@ func _backend_rule_tests() -> void:
 	# Re-evaluated after anything that changes it, by the same call: speed down, a bigger grid, a new setting.
 	check(Dish.backend_wants_gpu(auto, 18.5, 7, 100, 5000, false, true), "5,000 bups at x10,000: the GPU")
 	check(not Dish.backend_wants_gpu(auto, 1.67, 1, 100, 5000, true, true), "...the speed drops to x100: the processor, at once")
-	check(not Dish.backend_wants_gpu(auto, 0.1, 1, 100, 5000, true, true), "...to x1: the processor")
+	check(not Dish.backend_wants_gpu(auto, 0.1, 1, 100, 5000, true, true), "...to x1: the processor (a small crowd is no work for either)")
 	check(Dish.backend_wants_gpu(auto, 18.5, 7, 400, 5000, false, true), "...a finer grid at x10,000: still the GPU")
 	check(not Dish.backend_wants_gpu(off, 18.5, 7, 400, 5000, true, true), "...the setting set to Off: the processor")
 	# A frame of several steps shorter than TOP_SPEED_STEP (x10,000 on a 120 Hz screen: 5 steps of 16.7 s): said by the caller, not guessed from the length.
@@ -1310,13 +1310,11 @@ func _backend_rule_tests() -> void:
 	var fine_grid := Dish.backend_frame_costs(18.5, 400, 7, 2000)
 	check(big.x > small.x and big.y > small.y and fine_grid.x > small.x and fine_grid.y > small.y, "both backends cost more with more bups and with a finer grid")
 	check((big.x - small.x) > 3.0 * (big.y - small.y), "...the processor's cost rises faster with the crowd")
-	# Without a GPU nothing is ever loaded, and the frames of coarse steps are counted (a fine step starts the count again).
+	# Without a GPU nothing is ever loaded, and no frame wants it.
 	var w := _make_dish()
 	w.strike(chosen)
 	for i in 29:
 		w._choose_backend(1.67)
-	check(w._coarse_frames == 29 and not w.gpu_active, "29 coarse frames are counted, and the processor still runs (the GPU takes over at %d)" % Dish.COARSE_FRAMES_TO_GPU)
-	w._choose_backend(0.1)
-	check(w._coarse_frames == 0, "a fine step starts the count again")
+	check(w._gpu_wanted_frames == 0 and not w.gpu_active, "no frame wants the GPU where there is none, and the processor runs (it would take over after %d frames)" % Dish.FRAMES_TO_GPU)
 	w.set_backend_setting("garbage")
 	check(w.backend_setting == auto, "a setting that is not one of the three is Auto, for the dish too")

@@ -44,7 +44,7 @@ void main() {
 	uint n_now = CNT[0];
 	SURV[i] = 0u; KID[i] = 0u;
 	if (i >= n_now) return;
-	uint b = i * 24u;
+	uint b = i * 28u;
 	uint s = hash(hash(CNT[7] ^ (CNT[5] * 0x85EBCA6BU) ^ 777U) + i * 0x9E3779B9U);  // (this dish's stream, this step, this bup)
 	float energy = BUPS[b + 5], mass = BUPS[b + 6], birth = BUPS[b + 7], add_mass = P[56] * BUPS[b + 11] * BUPS[b + 11], rate = BUPS[b + 13], donor = BUPS[b + 14];
 	int reach = int(BUPS[b + 12] + 0.5);  // (the building size from the size gene; the mutation rate of this bup, which its daughter is made at)
@@ -118,7 +118,7 @@ void main() {
 		if (!lethal) {
 			KID[i] = 1u;
 			float a = u01(s) * 6.2831853, off = 0.5 * mass * P[14];
-			uint c = i * 24u;
+			uint c = i * 28u;
 			CHILD[c + 0] = 0.0;  // (the id, words 0 and 21, is written by `compact` as integers)
 			CHILD[c + 1] = BUPS[b + 1] + cos(a) * off; CHILD[c + 2] = BUPS[b + 2] + sin(a) * off;
 			CHILD[c + 3] = 1.0; CHILD[c + 4] = 0.0;
@@ -130,6 +130,7 @@ void main() {
 			CHILD[c + 15] = harm;
 			CHILD[c + 16] = hue; CHILD[c + 17] = sat; CHILD[c + 18] = val; CHILD[c + 19] = muts; CHILD[c + 20] = BUPS[b + 20];
 			CHILD[c + 21] = 0.0; CHILD[c + 22] = 3e38; CHILD[c + 23] = 3e38;  // (no picture yet: no trail)
+			CHILD[c + 24] = -1.0; CHILD[c + 25] = 0.0; CHILD[c + 26] = 0.0; CHILD[c + 27] = 0.0;  // (no chemotaxis memory yet: a fast signal below 0 is none read)
 		}
 	}
 }

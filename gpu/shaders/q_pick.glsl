@@ -18,7 +18,7 @@ const uint OUT_Q = 32u; const uint OUT_STATS = 272u;
 
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0] || QIN[0] == 0u) return;
-	uint b = i * 24u;
+	uint b = i * 28u;
 	float px = uintBitsToFloat(QIN[1]), py = uintBitsToFloat(QIN[2]), slack = uintBitsToFloat(QIN[3]), pixel = uintBitsToFloat(QIN[4]);
 	float reach = 0.5 * max(BUPS[b + 6u] * P[14], P[74] * pixel) + slack;
 	float dx = BUPS[b + 1u] - px, dy = BUPS[b + 2u] - py;

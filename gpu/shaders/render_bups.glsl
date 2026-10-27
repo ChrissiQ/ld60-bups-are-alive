@@ -32,14 +32,14 @@ void main() {
 	uint slots = uint(pcs.pb);
 	uint live = CNT[0];
 	if (i >= slots) {
-		if (i < live) { BUPS[i * 24u + 22u] = 3e38; BUPS[i * 24u + 23u] = 3e38; }
+		if (i < live) { BUPS[i * 28u + 22u] = 3e38; BUPS[i * 28u + 23u] = 3e38; }
 		return;
 	}
 	if (i >= live) {
 		INST[i * 4u] = vec4(0.0); INST[i * 4u + 1u] = vec4(0.0); INST[i * 4u + 2u] = vec4(0.0); INST[i * 4u + 3u] = vec4(0.0);
 		return;
 	}
-	uint b = i * 24u;
+	uint b = i * 28u;
 	float pixel_um = pcs.pa;
 	float x = BUPS[b + 1u], y = BUPS[b + 2u];
 	float len = max(BUPS[b + 6u] * P[14], P[74] * pixel_um);

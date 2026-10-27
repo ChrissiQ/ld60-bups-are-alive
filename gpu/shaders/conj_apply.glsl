@@ -19,7 +19,7 @@ float keyed01(uint a, uint b, uint c) { uint h = hash(hash(hash(a ^ 0x9E3779B9u)
 
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0] || CNT[15] == 0u) return;
-	uint b = i * 24u;
+	uint b = i * 28u;
 	if (BUPS[b + 14] > 0.5) return;
 	float x = BUPS[b + 1], y = BUPS[b + 2];
 	float rr = 0.5 * BUPS[b + 6] * P[14];
@@ -31,7 +31,7 @@ void main() {
 		for (uint s = 0u; s < 4u; s++) {
 			uint d = DTAB[h * 4u + s];
 			if (d == 0xFFFFFFFFu || d >= best) continue;
-			uint db = d * 24u;
+			uint db = d * 28u;
 			float dx = BUPS[db + 1] - x, dy = BUPS[db + 2] - y;
 			float range = 0.5 * BUPS[db + 6] * P[14] + rr + P[93];
 			if (dx * dx + dy * dy > range * range) continue;
@@ -43,7 +43,7 @@ void main() {
 	for (int k = 0; k < 3; k++) {
 		if (keyed01(CNT[7] ^ CNT[5] ^ 0x5bd1e995u, i * 4u + uint(k), best) < P[95]) run++; else break;
 	}
-	uint db = best * 24u;
+	uint db = best * 28u;
 	for (int g = 0; g < run; g++) BUPS[b + 8u + uint(g)] = BUPS[db + 8u + uint(g)];
 	int mask = (1 << (2 * run)) - 1;  // (the raised ceilings of the genes that moved go with them)
 	BUPS[b + 12] = float((int(BUPS[b + 12] + 0.5) & ~mask) | (int(BUPS[db + 12] + 0.5) & mask));

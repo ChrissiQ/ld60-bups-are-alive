@@ -14,8 +14,18 @@ extends RefCounted
 
 signal buffers_rebuilt  ## load_state made new buffers: a kernel set up with make_external_kernel must be set up again
 
-const STRIDE := 24  ## words per bup record (the layout is at the top of gpu/kernels.gd; the same as BupSim.export_state_bytes)
+const STRIDE := 28  ## words per bup record (the layout is at the top of gpu/kernels.gd; the same as BupSim.export_state_bytes)
 const RECORD_BYTES := STRIDE * 4
+const ANSWER_WORDS := 24  ## the words of a record the GPU's answers to a pick or a tracked bup carry (all but the chemotaxis memory)
+const ANSWER_BYTES := ANSWER_WORDS * 4
+
+
+## A whole record from the first ANSWER_WORDS words of one (what a pick or a tracked bup's answer holds): its chemotaxis memory is none read yet.
+static func whole_record(answer: PackedByteArray) -> PackedByteArray:
+	var record := answer.duplicate()
+	record.resize(RECORD_BYTES)
+	record.encode_float(ANSWER_BYTES, -1.0)
+	return record
 const NO_PICTURE := 3e38  ## px, py (words 22, 23) of a bup with no last picture: no trail (any value >= 1e30 means the same)
 const CNT_WORDS := 16
 const PCNT_WORDS := 8
@@ -352,7 +362,9 @@ func _fill_params() -> void:
 		"donor_gain": 90, "donor_cost": 91, "donor_loss": 92, "contact_um": 93, "conj_continue": 95,
 		"reach_rate": 96, "reach_cost": 97, "reach_factor_1": 98, "reach_factor_2": 99, "reach_factor_3": 100,
 		"acetate_slope": 101, "acetate_threshold": 102, "acetate_uptake": 103,
-		"key_potentiation_rate": 104, "key_rate": 105, "key_factor": 106, "key_cost": 107}
+		"key_potentiation_rate": 104, "key_rate": 105, "key_factor": 106, "key_cost": 107,
+		"fine_step": 108, "tumble_base": 109, "chemotaxis_gain": 110, "tumble_up_factor": 111, "tumble_seconds": 112, "tumble_turn_mean": 113, "tumble_turn_spread": 114,
+		"rotational_diffusion": 115, "memory_short": 116, "memory_long": 117}
 	for key in names_to_index:
 		p[names_to_index[key]] = float(consts[key])
 	p[86] = float(consts["starve_maintenance"]) * float(consts["cost_per_mass"])
@@ -518,8 +530,8 @@ func _record_life(cl: int, step := 0, event_set := 0) -> void:
 		dispatch(cl, "death_clouds", capacity)
 		dispatch(cl, "death_count", 1)
 	dispatch(cl, "events", capacity, float(step), float(event_set))
-	dispatch(cl, "compact", capacity * 6)
-	dispatch(cl, "copy", capacity * 6)
+	dispatch(cl, "compact", capacity * 7)
+	dispatch(cl, "copy", capacity * 7)
 	dispatch(cl, "ev_count", 1, 0.0, float(event_set))
 	dispatch(cl, "setcount", 1)
 
@@ -668,7 +680,7 @@ func record_frame(cl: int, pick: bool, scan: bool, track: bool) -> void:
 	if pick:
 		dispatch(cl, "q_pick", capacity)
 		dispatch(cl, "q_pick2", capacity)
-		dispatch(cl, "q_record", 24)
+		dispatch(cl, "q_record", ANSWER_WORDS)
 	if scan:
 		dispatch(cl, "q_scan", capacity)
 	if track:
@@ -701,7 +713,7 @@ func profile(reps := 20) -> Dictionary:
 	var plan := {}
 	if has_clouds:
 		plan.merge({"puff_advance": puff_capacity, "dep_apply": n * n, "bin_clear": bins, "bin_count": puff_capacity, "bin_cursor": bins, "bin_scatter": puff_capacity, "bin_sort": bins, "puff_clear": puff_capacity, "puff_scale": puff_capacity, "puff_commit": puff_capacity})
-	plan.merge({"feed": n * n, "diffuse_a": n * n, "snapshot": n * n, "clear": n * n, "swim": capacity, "demand": capacity, "cells": n * n, "apply": capacity, "ac_cells": n * n, "ac_apply": capacity, "life": capacity, "scan0_s": capacity, "compact": capacity * 6, "copy": capacity * 6})
+	plan.merge({"feed": n * n, "diffuse_a": n * n, "snapshot": n * n, "clear": n * n, "swim": capacity, "demand": capacity, "cells": n * n, "apply": capacity, "ac_cells": n * n, "ac_apply": capacity, "life": capacity, "scan0_s": capacity, "compact": capacity * 7, "copy": capacity * 7})
 	for kname in plan:
 		var cl := rd.compute_list_begin()
 		var t0 := Time.get_ticks_usec()

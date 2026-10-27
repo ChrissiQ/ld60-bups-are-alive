@@ -21,11 +21,11 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
 	uint cap = uint(P[78]), base = uint(pcs.pb) * cap, st = uint(pcs.pa);
-	uint b = i * 24u;
+	uint b = i * 28u;
 	if (KID[i] == 1u && CNT[1] + EXCK[i] < uint(P[62])) {  // (a newborn `compact` will place)
 		uint slot = CNT[8] + EXCK[i];
 		if (slot < cap) {
-			uint o = (base + slot) * 16u, c = i * 24u;
+			uint o = (base + slot) * 16u, c = i * 28u;
 			uint lo = CNT[4] + EXCK[i];
 			EVB[o] = lo; EVB[o + 1u] = CNT[6] + (lo < CNT[4] ? 1u : 0u);
 			EVB[o + 2u] = BUPS_U[b]; EVB[o + 3u] = BUPS_U[b + 21u]; EVB[o + 4u] = st;

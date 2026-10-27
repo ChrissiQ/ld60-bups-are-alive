@@ -59,7 +59,7 @@ void add_fixed2(uint cell, float w, int which) { // 2^30 to the unit, in 64 bits
 }
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
-	uint b = i * 24u;
+	uint b = i * 28u;
 	float wg = WANT[i], wc = WANTC[i];
 	float mass = BUPS[b + 6], yld = exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]);
 	float max_e = P[22] * mass;

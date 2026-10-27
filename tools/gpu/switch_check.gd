@@ -45,7 +45,7 @@ class CheckWorld extends GpuWorld:
 		for id: int in known:
 			if not seen.has(id):
 				var e := PackedByteArray()
-				e.resize(32)
+				e.resize(40)
 				e.encode_u32(0, id & 0xFFFFFFFF); e.encode_u32(4, (id >> 32) & 0xFFFFFFFF)
 				e.encode_u32(12, known[id][1]); e.encode_float(16, known[id][0])
 				deaths.append_array(e)
@@ -343,16 +343,20 @@ func _dish_switching() -> void:
 	var world := CheckWorld.new(dish.sim)
 	dish.gpu_world = world
 	var pop := dish.sim.bup_count()
-	for i in Dish.COARSE_FRAMES_TO_GPU - 1:
+	for i in Dish.FRAMES_TO_GPU - 1:
 		dish._choose_backend(1.67)
-	_ok(not dish.gpu_active and dish.sim.bup_count() == pop, "main device, setting On: %d coarse frames in a row, still the processor" % (Dish.COARSE_FRAMES_TO_GPU - 1))
+	_ok(not dish.gpu_active and dish.sim.bup_count() == pop, "main device, setting On: %d frames in a row, still the processor" % (Dish.FRAMES_TO_GPU - 1))
 	dish._choose_backend(1.67)
 	_ok(dish.gpu_active and world.gpu != null and world.gpu.is_main and dish.sim.bup_count() == 0 and world.bup_count() == pop, "...the next one moves the %d bups to the GPU (main device: %s)" % [pop, world.device_name()])
 	dish._choose_backend(0.1)
-	_ok(not dish.gpu_active and dish.sim.bup_count() == pop and dish._coarse_frames == 0, "a fine step (x1) brings them back at once: %d bups on the CPU" % dish.sim.bup_count())
-	for i in Dish.COARSE_FRAMES_TO_GPU:
+	_ok(dish.gpu_active and world.bup_count() == pop, "a fine step (x1) stays on the GPU (it has a fine path)")
+	dish.set_backend_setting(StartConditions.BACKEND_CPU)
+	dish._choose_backend(1.67)
+	_ok(not dish.gpu_active and dish.sim.bup_count() == pop and dish._gpu_wanted_frames == 0, "the setting Off brings them back at once: %d bups on the CPU" % dish.sim.bup_count())
+	dish.set_backend_setting(StartConditions.BACKEND_GPU)
+	for i in Dish.FRAMES_TO_GPU:
 		dish._choose_backend(1.67)
-	_ok(dish.gpu_active, "...and coarse steps send them out again after %d frames" % Dish.COARSE_FRAMES_TO_GPU)
+	_ok(dish.gpu_active, "...and On sends them out again after %d frames" % Dish.FRAMES_TO_GPU)
 	# Edits while on the GPU.
 	var radius_before := dish.radius
 	dish.resize_to(radius_before * 1.5)
@@ -375,9 +379,9 @@ func _dish_switching() -> void:
 		dish._choose_backend(18.5)
 	_ok(not dish.gpu_active, "Auto with %d bups at x10,000: the processor (fewer than %d)" % [pop, Dish.AUTO_MIN_POPULATION])
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
-	for i in Dish.COARSE_FRAMES_TO_GPU:
+	for i in Dish.FRAMES_TO_GPU:
 		dish._choose_backend(1.67)
-	_ok(dish.gpu_active, "On again: the GPU after %d coarse frames" % Dish.COARSE_FRAMES_TO_GPU)
+	_ok(dish.gpu_active, "On again: the GPU after %d coarse frames" % Dish.FRAMES_TO_GPU)
 	dish.set_backend_setting(StartConditions.BACKEND_AUTO)
 	for i in Dish.AUTO_DOWN_FRAMES - 1:
 		dish._choose_backend(18.5)
@@ -385,7 +389,7 @@ func _dish_switching() -> void:
 	dish._choose_backend(18.5)
 	_ok(not dish.gpu_active and dish.sim.bup_count() == pop, "...the next one (%d in a row) brings them back" % Dish.AUTO_DOWN_FRAMES)
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
-	for i in Dish.COARSE_FRAMES_TO_GPU:
+	for i in Dish.FRAMES_TO_GPU:
 		dish._choose_backend(1.67)
 	dish.set_backend_setting(StartConditions.BACKEND_AUTO)
 	for i in 5:
@@ -394,13 +398,13 @@ func _dish_switching() -> void:
 	dish._choose_backend(18.5)
 	_ok(dish.gpu_active and dish._cpu_votes == 0, "...and the rule's wait starts again whenever it wants the GPU")
 	dish._choose_backend(0.1)
-	_ok(not dish.gpu_active, "...but a fine step does not wait")
+	_ok(dish.gpu_active, "...and a fine step keeps it there (setting On)")
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
-	for i in Dish.COARSE_FRAMES_TO_GPU:
+	for i in Dish.FRAMES_TO_GPU:
 		dish._choose_backend(1.67)
 	dish.strike(sc)
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
-	for i in Dish.COARSE_FRAMES_TO_GPU:
+	for i in Dish.FRAMES_TO_GPU:
 		dish._choose_backend(1.67)
 	var fresh_pop := dish.sim.bup_count()
 	_ok(dish.gpu_active and world.bup_count() == 40, "a new dish while on the GPU (strike): the GPU holds the new dish's %d bups" % world.bup_count())

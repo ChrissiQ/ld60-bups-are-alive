@@ -16,7 +16,7 @@ void main() {
 	uint i = gl_GlobalInvocationID.x, l = gl_LocalInvocationID.x;
 	float v[10] = float[10](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
 	if (i < CNT[0]) {
-		uint b = i * 24u;
+		uint b = i * 28u;
 		float h = BUPS[b + 15u];
 		v[0] = 1.0; v[1] = BUPS[b + 8u]; v[2] = BUPS[b + 9u]; v[3] = BUPS[b + 10u]; v[4] = BUPS[b + 11u];
 		v[5] = h < 0.1 ? h * (1.0 - h * (0.5 - h * (0.16666667 - h * 0.041666668))) : 1.0 - exp(-h);  // (1 - exp(-h) without the loss of a small h's digits)

@@ -152,7 +152,7 @@ class BupSim : public RefCounted {
 	Genome mutate(const Genome &parent);
 	void derive(Bup &b) const;
 	// The GPU simulation's bup record (gpu/kernels.gd): STATE_WORDS 32-bit words, see export_state_bytes.
-	static constexpr int STATE_WORDS = 24;
+	static constexpr int STATE_WORDS = 28;
 	Bup bup_from_record(const uint8_t *record) const; // a bup as the record has it (the derived figures worked out again, no chemotaxis memory)
 	Dictionary info_of(const Bup &b) const; // what bup_info says of a bup
 	Vector3 steering_of(double x, double y, double speed, double sense_range) const;
@@ -256,7 +256,7 @@ public:
 	PackedFloat64Array husk_near(const Vector2 &at, double radius) const; // the nearest husk within radius of a point, as husks_export gives one (5 numbers); empty if none
 	PackedFloat32Array husk_buffer(double size, int capacity) const; // every husk as one instance of a 2D multimesh, `size` µm square (8 floats each: the transform's two rows), padded with empty instances to `capacity`
 	void husks_import(const PackedFloat64Array &saved);
-	PackedFloat32Array export_state() const; // every bup, 24 floats each (see the order in the .cpp; the id as a float): for the GPU tools' comparisons
+	PackedFloat32Array export_state() const; // every bup, 28 floats each (see the order in the .cpp; the id as a float): for the GPU tools' comparisons
 	// The bups and the GPU simulation (gpu/gpu_world.gd), which keeps the bups on the GPU and the family records here:
 	// export_state_bytes / import_state_bytes move every bup as the GPU's record (see the .cpp) without touching the records;
 	// info_from_state is bup_info for one such record; apply_events builds the records from the GPU's births and deaths;

@@ -230,7 +230,7 @@ func _init() -> void:
 	check(gs.backend_notice.visible == not GpuWorld.available(), "On shows the one-line notice exactly where there is no GPU to use (here: %s)" % ("none" if not GpuWorld.available() else "one"))
 	check(gs.backend_notice.text == Strings.t("free_setup.backend_unavailable") and gs.backend_notice.text.length() < 100, "the notice is a line from strings.cfg")
 	check(gs.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "a setting that is not Auto shows 'changed' on the advanced heading")
-	check(Strings.t("free_setup.backend_hint").contains("x100 and faster") and Strings.t("free_setup.backend_hint").contains("processor"), "the hint says the GPU is used at x100 and faster and the processor runs the slow")
+	check(Strings.t("free_setup.backend_hint").contains("any speed") and Strings.t("free_setup.backend_hint").contains("processor"), "the hint says the GPU is used at any speed and does what the processor does")
 	bt.button_pressed = false
 	check(not gs.backend_notice.visible and gs._start.sim_backend == off, "Off needs no notice")
 	gs._go()

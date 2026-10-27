@@ -1383,8 +1383,8 @@ func from_dict(d: Dictionary) -> bool:
 	return true
 
 
-## A block of bytes as a save holds it: its size, and the bytes compressed (zstd) and as text. A bup's record is 96 bytes and a family
-## record 68, so a hundred thousand of each is about 14 MB raw and a few MB compressed.
+## A block of bytes as a save holds it: its size, and the bytes compressed (zstd) and as text. A bup's record is 112 bytes and a family
+## record 68, so a hundred thousand of each is about 18 MB raw and a few MB compressed.
 static func _pack_bytes(bytes: PackedByteArray) -> Dictionary:
 	return {"raw": bytes.size(), "z": "" if bytes.is_empty() else Marshalls.raw_to_base64(bytes.compress(FileAccess.COMPRESSION_ZSTD))}  # (nothing to compress: base64 of an empty array is an error)
 
@@ -1779,8 +1779,8 @@ var backend_setting := StartConditions.BACKEND_AUTO
 const AUTO_CPU_UP_USEC := 6000.0  ## Auto: the processor is left for the GPU once its steps for one frame are estimated to take more than this (two thirds of Main.FRAME_BUDGET_USEC: the picture and the rest of the frame need the remainder) ...
 const AUTO_CPU_DOWN_USEC := 3000.0  ## ... and taken back when they come below this (the gap is the hysteresis: a colony hovering about one threshold does not flip every few seconds)
 const AUTO_MIN_POPULATION := 1000  ## below this many bups Auto stays on the processor whatever the grid costs (the GPU would be moving nothing, and the colony is growing: it is asked again each frame)
-const COARSE_FRAMES_TO_GPU := 30  ## frames in a row of coarse steps (about half a second) before the GPU takes over: a speed button pressed in passing, or a hitch, does not move the whole state
-const AUTO_DOWN_FRAMES := 10  ## frames in a row that Auto's rule must want the processor before the GPU lets go (the GPU's count of bups arrives a few frames after a load; fine steps and the setting do not wait)
+const FRAMES_TO_GPU := 30  ## frames in a row that the rule wants the GPU (about half a second) before it takes over: a speed button pressed in passing, or a hitch, does not move the whole state
+const AUTO_DOWN_FRAMES := 10  ## frames in a row that Auto's rule must want the processor before the GPU lets go (the GPU's count of bups arrives a few frames after a load; the setting does not wait)
 const STEPS_AT_TOP_SPEED := 9  ## steps a frame takes at x10,000 at 60 frames a second (one frame is 167 s; the step is 18.5 s): what a step this long stands for when the caller does not say how many a frame holds
 const TOP_SPEED_STEP := 17.5  ## a step this long or longer is taken for a frame of several steps (x10,000 at 60 Hz: 18.5 s), shorter ones for a frame of one (x1,000: 16.7 s). A guess: `advance` knows, and passes `steps`
 const RULE_FRAME_SECONDS := 1.0 / 60.0  ## the frame Auto's costs are for: a frame's steps are scaled to one this long (the frame just past may be any length: a 120 Hz display's, or one a switch held up, whose many steps would otherwise make the processor look slower than it is and switch straight back)
@@ -1804,7 +1804,7 @@ const GPU_FRAME_USEC_PER_BUP := 0.005  ## ... and the part for each bup (every o
 const TYPICAL_FRAMES := 5  ## the recent frames whose median length is the usual frame (rule_step)
 
 var _recent_frames := PackedFloat32Array()  ## the lengths of the last TYPICAL_FRAMES frames `advance` was asked for (real seconds, capped)
-var _coarse_frames := 0  ## frames in a row whose steps were coarse
+var _gpu_wanted_frames := 0  ## frames in a row that the rule wanted the GPU
 var _cpu_votes := 0  ## frames in a row that Auto's rule wanted the processor while the GPU ran
 var _gpu_on_cpu := false  ## gpu_active, but the CPU's bups are the true ones just now (an edit or a save brought them over): the GPU reloads them before its next batch
 var _fractions_asked := {}  ## [gene, threshold] -> true for each share asked lately (fraction_with_gene_at_least): a load answers them from the CPU's bups
@@ -1830,11 +1830,11 @@ static func typical_frame(frames: PackedFloat32Array) -> float:
 	return sorted[sorted.size() / 2]
 
 
-## The step that fine-or-coarse is judged on. A step is the playback speed times the frame's length, and only the speed is the player's:
-## one short frame (a stray 1.8 ms one at x100 makes a 0.18 s step, under FINE_STEP) must not send the dish to the processor and
-## restart the takeover count. So a one-step frame is judged as the same speed over the usual frame (`typical`, from `typical_frame`);
-## pressing x1 is still fine at once, and a hitch (a long frame) does not make x1 coarse. Frames of several steps are coarse anyway, and
-## without the frame's length or its steps the step is taken as given.
+## The step the backend rule is judged on. A step is the playback speed times the frame's length, and only the speed is the player's:
+## one short frame (a stray 1.8 ms one at x100 makes a 0.18 s step) must not make the rule judge another speed and restart the takeover
+## count. So a one-step frame is judged as the same speed over the usual frame (`typical`, from `typical_frame`); pressing x1 is judged
+## at once, and a hitch (a long frame) does not make x1 faster. Frames of several steps are taken as they are, and without the frame's
+## length or its steps the step is taken as given.
 static func rule_step(step_delta: float, steps: int, real: float, typical: float) -> float:
 	if steps != 1 or real <= 0.0 or typical <= 0.0:
 		return step_delta
@@ -1845,14 +1845,13 @@ static func rule_step(step_delta: float, steps: int, real: float, typical: float
 ## GPU should run these steps. `setting` is a StartConditions.BACKEND_*; `step_delta` this frame's step; `moves` BupSim.moves_for of it;
 ## `frame_steps` how many steps the frame holds (0: guess), `clouds` the plankton clouds in the dish (NutrientField.puff_count());
 ## `running_gpu` where the bups are now (Auto keeps the GPU until the processor would manage with room to spare, which is
-## the hysteresis); `gpu_ok` whether the machine has a usable GPU and one that holds `limit` bups. It does not wait for COARSE_FRAMES_TO_GPU:
+## the hysteresis); `gpu_ok` whether the machine has a usable GPU and one that holds `limit` bups. It does not wait for FRAMES_TO_GPU:
 ## `_choose_backend` does.
-## - steps of FINE_STEP or shorter: never (the GPU has no fine path: it follows no individual runs and tumbles);
 ## - off: never; on: whenever it can; auto: when the processor's estimated time for the frame is above AUTO_CPU_UP_USEC (AUTO_CPU_DOWN_USEC
 ##   once the GPU is running) and the GPU's is less, with at least AUTO_MIN_POPULATION bups. The processor's time for the frame is this dish's plus
 ##   `other_cpu_usec`, what the other dishes still on the processor are estimated to take (several dishes share one frame: it is their total that must fit).
 static func backend_wants_gpu(setting: String, step_delta: float, moves: int, cells_across: int, population: int, running_gpu: bool, gpu_ok: bool, frame_steps := 0, clouds := 0, other_cpu_usec := 0.0) -> bool:
-	if not gpu_ok or step_delta <= FINE_STEP or setting == StartConditions.BACKEND_CPU:
+	if not gpu_ok or setting == StartConditions.BACKEND_CPU:
 		return false
 	if setting == StartConditions.BACKEND_GPU:
 		return true
@@ -1876,19 +1875,18 @@ func backend_running() -> String:
 ## Sets the setting (StartConditions.BACKEND_*; anything else is Auto) and has the next `advance` ask again.
 func set_backend_setting(value: String) -> void:
 	backend_setting = value if value in StartConditions.BACKENDS else StartConditions.BACKEND_AUTO
-	_coarse_frames = 0
+	_gpu_wanted_frames = 0
 
 
 ## (3C) Chooses where the bups run for this frame (the switch rule), from the setting (on, off, automatic),
-## `step_delta` (steps of FINE_STEP or shorter run on the CPU, so it switches back at once; judged by rule_step, so one stray short frame
-## does not count as a fine step, though a whole frame's steps run as asked), `steps` (how many of them the frame holds, if
+## `step_delta` (judged by rule_step, so one stray short frame does not count as a short step, though a whole frame's steps run as asked), `steps` (how many of them the frame holds, if
 ## the caller knows: `advance` does; 0 guesses from the length; Auto's costs take them scaled to a frame of RULE_FRAME_SECONDS by the length
 ## of the frame just past), the population, the dish and the limit:
 ## makes `gpu_world` when first needed (if GpuWorld.available()), moves the state (gpu_world.load_from_cpu / export_to_cpu) and sets
 ## `gpu_active`. Called at the top of every `advance`, before any step (never while paused). The processor takes over at once when the
-## step is fine, or the setting or the machine says so; when only Auto's rule says so, after AUTO_DOWN_FRAMES frames of it saying so
-## (the GPU's count of bups reaches the dish a few frames after a load). The GPU takes over only after COARSE_FRAMES_TO_GPU frames of
-## coarse steps in a row. Asked again on every frame, so a resize, a new limit, a new speed or a new setting (all of which `advance`
+## setting or the machine says so; when only Auto's rule says so, after AUTO_DOWN_FRAMES frames of it saying so
+## (the GPU's count of bups reaches the dish a few frames after a load). The GPU takes over only after FRAMES_TO_GPU frames in a row of the rule
+## wanting it. Asked again on every frame, so a resize, a new limit, a new speed or a new setting (all of which `advance`
 ## meets here) is re-evaluated at once.
 func _choose_backend(step_delta: float, steps := 0) -> void:
 	var real := minf(get_process_delta_time(), 0.1)  # (the frame the caller advances for: main.gd's, capped as it caps it, MAX_FRAME_SECONDS)
@@ -1898,8 +1896,7 @@ func _choose_backend(step_delta: float, steps := 0) -> void:
 		if _recent_frames.size() > TYPICAL_FRAMES:
 			_recent_frames = _recent_frames.slice(_recent_frames.size() - TYPICAL_FRAMES)
 		typical = typical_frame(_recent_frames)
-	var rule_delta := rule_step(step_delta, steps, real, typical)  # (fine or coarse is judged on this; the steps that run keep step_delta)
-	_coarse_frames = _coarse_frames + 1 if rule_delta > FINE_STEP else 0
+	var rule_delta := rule_step(step_delta, steps, real, typical)  # (the rule is judged on this; the steps that run keep step_delta)
 	var allowed := backend_setting != StartConditions.BACKEND_CPU
 	var available := backend_usable(GpuWorld.available(), bup_limit, GpuWorld.most_bups())
 	var rule_steps := steps
@@ -1907,10 +1904,11 @@ func _choose_backend(step_delta: float, steps := 0) -> void:
 		rule_steps = maxi(1, roundi(steps * RULE_FRAME_SECONDS / real))  # (the same work per real second, whichever backend ran the last frame and however long it took)
 	cpu_cost_estimate = backend_frame_costs(rule_delta, field.get_size(), sim.moves_for(step_delta), population(), rule_steps, field.puff_count()).x
 	var wants := backend_wants_gpu(backend_setting, rule_delta, sim.moves_for(step_delta), field.get_size(), population(), gpu_world != null and gpu_active, available, rule_steps, field.puff_count(), other_cpu_load)
+	_gpu_wanted_frames = _gpu_wanted_frames + 1 if wants else 0
 	switch_wanted = false
 	if gpu_world != null and gpu_active:
 		_cpu_votes = 0 if wants else _cpu_votes + 1
-		var rule_only := allowed and available and rule_delta > FINE_STEP  # (what is left to say 'no' is Auto's rule: it must say so for a while)
+		var rule_only := allowed and available  # (what is left to say 'no' is Auto's rule: it must say so for a while)
 		if not wants and (not rule_only or _cpu_votes >= AUTO_DOWN_FRAMES):
 			if rule_only and backend_setting == StartConditions.BACKEND_AUTO and not switch_allowed:
 				switch_wanted = true  # (Auto's rule wants the processor: it waits its turn)
@@ -1922,10 +1920,10 @@ func _choose_backend(step_delta: float, steps := 0) -> void:
 			_cpu_votes = 0
 			_render_stale = true
 			if rule_only:
-				_coarse_frames = 0  # (Auto's rule let go: it must want the GPU for as long again before the GPU takes over)
+				_gpu_wanted_frames = 0  # (Auto's rule let go: it must want the GPU for as long again before the GPU takes over)
 		elif wants and _gpu_on_cpu:
 			_load_gpu()  # (a save or an edit has brought the bups over; the GPU takes them back before it runs)
-	elif wants and _coarse_frames >= COARSE_FRAMES_TO_GPU:
+	elif wants and _gpu_wanted_frames >= FRAMES_TO_GPU:
 		if backend_setting == StartConditions.BACKEND_AUTO and not switch_allowed:
 			switch_wanted = true  # (Auto's rule wants the GPU: it waits its turn)
 			switch_wanted_gpu = true
