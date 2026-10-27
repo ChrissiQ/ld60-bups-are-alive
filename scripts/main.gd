@@ -701,7 +701,9 @@ func debug_state() -> Dictionary:
 		"dish_strip": {"visible": dish_strip.visible, "main_zoomed_in": dish_strip.main_zoomed_in},
 		"watched_total": dishes.reduce(func(n: int, d: Dish) -> int: return n + d.watched.size(), 0),
 		"world_time": world_time(),
-		"dishes": dishes.map(func(d: Dish) -> Dictionary: return {"number": _dish_numbers[d], "bups": d.population(), "time": d.time, "history_origin": d.history_origin, "position": [d.global_position.x, d.global_position.y], "backend": d.backend_running(), "husks": d.sim.husk_count()}),
+		"dishes": dishes.map(func(d: Dish) -> Dictionary: return {"number": _dish_numbers[d], "bups": d.population(), "time": d.time, "history_origin": d.history_origin, "position": [d.global_position.x, d.global_position.y], "backend": d.backend_running(), "husks": d.sim.husk_count(), "behind_s": maxf(dishes.reduce(func(m: float, o: Dish) -> float: return maxf(m, o.time), 0.0) - d.time, 0.0), "rule": DebugLog.rule(d)}),
+		"switch_turn": _switch_turn,
+		"frame_budget_usec": FRAME_BUDGET_USEC,
 		"freezer": _freezer.map(func(entry: Dictionary) -> Dictionary: return {"number": entry["number"], "bups": entry["bups"], "frozen_at": entry["data"].get("time", 0.0)}),
 	}
 
