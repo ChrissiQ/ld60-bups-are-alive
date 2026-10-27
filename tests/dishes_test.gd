@@ -62,6 +62,27 @@ func _run() -> void:
 	# A dish that dies out: the game pauses on it and says so; resuming deletes it and goes to the dish before it.
 	var third: Dish = m.add_dish(chosen)
 	check(m.dishes.size() == 3 and m.dish == first, "three dishes before one dies out")
+	# A processor that cannot afford every dish's step in a frame: the dishes take turns, the furthest behind first, and the world slows instead of the frame growing.
+	m.toolbar.set_paused(true)
+	var trio: Array[Dish] = [first, other, third]
+	for d in trio:
+		d.measured_usec = 8000.0  # (each costs most of the 9 ms the simulation may spend in a frame)
+	var before_turns := trio.map(func(d: Dish) -> float: return d.time)
+	var at_once := 0
+	var world_before: float = m.world_time()
+	for round in 3:
+		var times := trio.map(func(d: Dish) -> float: return d.time)
+		m._advance_world(1.0)
+		var moved := 0
+		for k in 3:
+			moved += 1 if trio[k].time > times[k] + 0.001 else 0
+		at_once = maxi(at_once, moved)
+	var every := trio.all(func(d: Dish) -> bool: return d.time > before_turns[trio.find(d)] + 0.001)
+	check(at_once == 1 and every, "when each dish costs most of the budget only one is advanced a frame, and in three frames every dish has had its turn (most in one frame: %d)" % at_once)
+	check(m.world_time() - world_before <= 1.0 + 0.001, "the world's clock moved by about the one step in those three frames (%.2f s), not three: it slows down together" % (m.world_time() - world_before))
+	for d in trio:
+		d.measured_usec = 0.0
+	m.toolbar.set_paused(false)
 	m.toolbar.set_paused(false)
 	other.clear_bups()
 	for i in 5:

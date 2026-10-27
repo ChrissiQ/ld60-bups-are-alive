@@ -221,6 +221,7 @@ var _overlay: Node2D = null  ## the selection and hover rings, drawn above the b
 ## `_choose_backend` makes `gpu_world` and switches (see the GPU path's functions at the end of this file).
 var gpu_world: GpuWorld = null
 var cpu_cost_estimate := 0.0  ## µs the processor is estimated to need for one frame of this dish (the cost model's, at the last `advance`)
+var measured_usec := 0.0  ## µs the processor really took the last frames this dish was advanced on it (a running average, set by the screen; 0 until it has been timed)
 var switch_allowed := true  ## whether Auto's rule may move this dish between the processor and the GPU this frame (the screen lets one dish at a time, so each choice sees the load the last left)
 var switch_wanted := false  ## Auto's rule wants this dish moved, and ...
 var switch_wanted_gpu := false  ## ... to the GPU (else to the processor)

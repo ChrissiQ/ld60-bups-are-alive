@@ -28,6 +28,7 @@ const MAX_DISHES := 20  ## the most dishes at once (the strip holds that many)
 const LINEAGE_ELSEWHERE_MSEC := 30000  ## how often the lineage panel looks again for a line's bups alive in other dishes
 const LOCKSTEP_MIN_GAP := 1.0  ## a dish at least this many simulated seconds behind the world's target is advanced (a shorter step would be a fine one, which only the processor runs); nearer, it waits
 const CATCHUP_SECONDS := 5.0  ## when the dishes are further apart than a frame holds (after a fast speed, one dish can be a minute ahead), the ones behind are asked for this many simulated seconds a frame (what the frame's budget allows) until they have caught up
+const COST_SMOOTHING := 0.4  ## how much of a dish's newest timing goes into its running average
 const LOCKSTEP_MIN_SHARE := 0.25  ## at speeds where a frame holds less than four of those seconds, a quarter of the frame's step
 const DISH_SPACING := 4.0e5  ## µm between the centres of the dishes in the shared world (clear of the largest dish, 90000 µm in radius, either side). They sit in a grid DISH_COLUMNS wide so no coordinate grows large: the renderer's single-precision positions would shake what is drawn far from the origin when zoomed in
 const DISH_COLUMNS := 5
@@ -990,19 +991,54 @@ func _advance_world(asked: float) -> float:
 		# The dishes are further apart than the world moves in a frame (slowing down from a fast speed leaves them so): waiting for the slowest at the speed asked would
 		# freeze the others for as long as the gap is, so the ones behind catch up first, as fast as the frame's budget lets them, and the ones ahead wait.
 		var behind: Array[Dish] = dishes.filter(func(d: Dish) -> bool: return latest - d.time > 0.0)
+		behind = _within_budget(behind, latest)
 		var catch_share := FRAME_BUDGET_USEC / maxi(behind.size(), 1)
 		for d in behind:
-			d.advance(minf(latest - d.time, maxf(asked, CATCHUP_SECONDS)), catch_share)
+			_advance_timed(d, minf(latest - d.time, maxf(asked, CATCHUP_SECONDS)), catch_share)
 		return minf(maxf(world_time() - before, 0.0), asked)  # (what the speed readout and the timers see is the pace asked for, not the catching up)
 	var target := before + asked
 	var due: Array[Dish] = []
 	for d in dishes:
 		if target - d.time >= minf(LOCKSTEP_MIN_GAP, asked * LOCKSTEP_MIN_SHARE):
 			due.append(d)
+	due = _within_budget(due, target)
 	var share := FRAME_BUDGET_USEC / maxi(due.size(), 1)
 	for d in due:
-		d.advance(target - d.time, share)
+		_advance_timed(d, target - d.time, share)
 	return maxf(world_time() - before, 0.0)
+
+
+## Which of the dishes that are due this frame the processor can afford. A dish on the processor costs what it was timed to take (or what the cost model says, until it has been
+## timed); the GPU's dishes cost the processor next to nothing and always go. The dishes furthest behind go first, and one dish on the processor always goes, however much it costs, so
+## the world never stops; the ones left out are further behind next frame, so they go first then: the dishes take turns, and when the processor cannot keep up with all of them the whole
+## world slows down together (its clock is the slowest dish's) instead of every frame costing the sum of every dish's step and the interface waiting for it.
+func _within_budget(due: Array[Dish], target: float) -> Array[Dish]:
+	var ordered := due.duplicate()
+	ordered.sort_custom(func(a: Dish, b: Dish) -> bool: return target - a.time > target - b.time)
+	var left := float(FRAME_BUDGET_USEC)
+	var chosen: Array[Dish] = []
+	var on_processor := 0
+	for d: Dish in ordered:
+		if d.gpu_active:
+			chosen.append(d)
+			continue
+		var cost := d.measured_usec if d.measured_usec > 0.0 else d.cpu_cost_estimate
+		if on_processor == 0 or cost <= left:
+			left -= cost
+			on_processor += 1
+			chosen.append(d)
+	return chosen
+
+
+## Advances a dish and, when it ran on the processor, notes how long that took (see Dish.measured_usec).
+func _advance_timed(d: Dish, seconds: float, budget_usec: int) -> void:
+	var started := Time.get_ticks_usec()
+	d.advance(seconds, budget_usec)
+	if d.gpu_active:
+		d.measured_usec = 0.0  # (the timing was of the processor; on the GPU it is timed afresh if the dish comes back)
+	else:
+		var took := float(Time.get_ticks_usec() - started)
+		d.measured_usec = took if d.measured_usec <= 0.0 else lerpf(d.measured_usec, took, COST_SMOOTHING)
 
 
 ## Auto moves one dish between the processor and the GPU at a time: dishes that all decide in the same frame would each see the others' load as it was, and all go (or all come
