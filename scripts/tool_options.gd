@@ -45,6 +45,14 @@ func _ready() -> void:
 	pipette_hours_box.value_changed.connect(func(_v: float) -> void: pipette_timer_changed.emit(pipette_timer_hours()))
 
 
+## The Husks mode is there only for a dish that can have husks; the mode in use falls back to All when it goes.
+func set_husks_available(available: bool) -> void:
+	var button: Button = pick_buttons[Dish.PickMode.HUSKS]
+	button.visible = available
+	if not available and button.button_pressed:
+		pick_buttons[Dish.PickMode.ALL].button_pressed = true
+
+
 func _setup_pick(group: ButtonGroup, button: Button, mode: Dish.PickMode, tip: String) -> void:
 	pick_buttons[mode] = button
 	button.button_group = group

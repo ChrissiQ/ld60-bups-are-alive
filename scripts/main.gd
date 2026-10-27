@@ -231,6 +231,8 @@ func _ready() -> void:
 		tracker.from_dict(data["goals"])
 		_fit_camera()
 	_sync_tool_locks()
+	layers_panel.sync_from(dish)
+	tool_options.set_husks_available(dish.has_husks())
 	_refit_when_laid_out.call_deferred()
 	tutorial.closed.connect(_on_tutorial_closed)
 	if Session.tutorial_wanted:
@@ -1349,6 +1351,7 @@ func set_main_dish(d: Dish) -> void:
 	d.pick_mode = tool_options.pick_mode()
 	graph.dish = d
 	layers_panel.sync_from(d)
+	tool_options.set_husks_available(d.has_husks())
 	dish_strip.light(d)
 	if d.view_zoom > 0.0:
 		camera.zoom = Vector2.ONE * d.view_zoom

@@ -486,7 +486,7 @@ func _auto(seed_value: int, setting: String) -> void:
 	var costs1 := Dish.backend_frame_costs(0.0167, dish.field.get_size(), dish.sim.moves_for(0.0167), dish.population(), 1, dish.field.puff_count())
 	print("     x1 with %d bups: the rule's costs CPU %.0f GPU %.0f us/frame; running %s" % [dish.population(), costs1.x, costs1.y, dish.backend_running()])
 	set_speed(10000.0)
-	await frames(Dish.FRAMES_TO_GPU + 2)
+	await frames(Dish.wait_frames(1.0 / 120.0) + 2)
 	_ok(dish.backend_running() == "gpu", "x10,000 again: the GPU")
 	await frames(60)
 	# x100: one step a frame: Auto's rule may hand back to the CPU (after AUTO_DOWN_FRAMES frames)
@@ -502,7 +502,7 @@ func _auto(seed_value: int, setting: String) -> void:
 	# On / Off at x100
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
 	var up_at := -1
-	for i in Dish.FRAMES_TO_GPU + 5:
+	for i in Dish.wait_frames(1.0 / 120.0) + 5:
 		await frame()
 		if up_at < 0 and dish.backend_running() == "gpu":
 			up_at = i + 1
@@ -630,11 +630,11 @@ func _edits() -> void:
 	await frame()
 	_ok(dish.backend_running() == "cpu", "setting Off while on the GPU: the CPU at the next frame")
 	dish.set_backend_setting(StartConditions.BACKEND_AUTO)
-	await frames(Dish.FRAMES_TO_GPU + 2)
+	await frames(Dish.wait_frames(1.0 / 120.0) + 2)
 	var costs := Dish.backend_frame_costs(83.3 / 5.0, dish.field.get_size(), dish.sim.moves_for(83.3 / 5.0), dish.population(), 5, dish.field.puff_count())
 	print("     Auto with %d bups, %d clouds: model CPU %.0f GPU %.0f us/frame; running %s" % [dish.population(), dish.field.puff_count(), costs.x, costs.y, dish.backend_running()])
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
-	await frames(Dish.FRAMES_TO_GPU + 2)
+	await frames(Dish.wait_frames(1.0 / 120.0) + 2)
 	_ok(dish.backend_running() == "gpu", "setting On again: the GPU")
 
 	# the speed across the fine threshold, again and again (the GPU has a fine path: setting On, it stays)
@@ -645,14 +645,14 @@ func _edits() -> void:
 		good = good and dish.backend_running() == "gpu"
 		await frames(4)
 		set_speed(10000.0)
-		await frames(Dish.FRAMES_TO_GPU)
+		await frames(Dish.wait_frames(1.0 / 120.0))
 		good = good and dish.backend_running() == "gpu"
 	_ok(good, "5 times x1 then x10,000: the GPU keeps the bups across the fine threshold")
 	for k in 10:
 		set_speed(1.0 if k % 2 == 0 else 10000.0)
 		await frames(3)
 	set_speed(10000.0)
-	await frames(Dish.FRAMES_TO_GPU + 5)
+	await frames(Dish.wait_frames(1.0 / 120.0) + 5)
 	consistent("after speed changes every 3 frames")
 
 	# pause with a selected bup; drops and the eraser while paused
@@ -873,13 +873,13 @@ func _perf(bups: int, radius: float, setting: String, run_speed: float, count: i
 	set_speed(run_speed)
 	var settled := -1
 	var calm := 0
-	for i in Dish.FRAMES_TO_GPU + 300:
+	for i in Dish.wait_frames(1.0 / 120.0) + 300:
 		await frame()
 		if dish.backend_running() == "gpu" and settled < 0:
 			calm = calm + 1 if frame_ms[-1] < 25.0 else 0
 			if calm >= 5:
-				settled = i - Dish.FRAMES_TO_GPU - 4
-		if i >= Dish.FRAMES_TO_GPU + 30 and (settled >= 0 or dish.backend_running() == "cpu"):
+				settled = i - Dish.wait_frames(1.0 / 120.0) - 4
+		if i >= Dish.wait_frames(1.0 / 120.0) + 30 and (settled >= 0 or dish.backend_running() == "cpu"):
 			break
 	if dish.backend_running() == "gpu":
 		print("     frames on the GPU before its frames settled under 25 ms: %d" % settled)
@@ -902,7 +902,7 @@ func _frame_cost(bups: int, radius: float, nutrient := 32.0, feed := 3.0) -> voi
 	filled_dish(bups, radius, StartConditions.BACKEND_GPU, bups, feed, nutrient)
 	hover_world = dish.global_position
 	set_speed(10000.0)
-	await frames(Dish.FRAMES_TO_GPU + 30)
+	await frames(Dish.wait_frames(1.0 / 120.0) + 30)
 	var xs := PackedFloat64Array()
 	var ys := PackedFloat64Array()
 	for k: int in [0, 1, 2, 4, 6, 8]:
@@ -982,7 +982,7 @@ func _edit_cost(bups: int, radius: float) -> void:
 	filled_dish(bups, radius, StartConditions.BACKEND_GPU, bups, 3.0, 32.0)
 	hover_world = dish.global_position
 	set_speed(10000.0)
-	await frames(Dish.FRAMES_TO_GPU + 20)
+	await frames(Dish.wait_frames(1.0 / 120.0) + 20)
 	var mb0 := buffer_mb()
 	var rss0 := OS.get_static_memory_usage() / 1048576.0
 	for rep in 3:

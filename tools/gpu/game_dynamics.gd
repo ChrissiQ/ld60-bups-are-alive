@@ -187,16 +187,16 @@ func _run() -> void:
 	var frame_sim := speed / 60.0
 	var next_hour := 1
 	var switched := mode != "gpu"
-	# The game puts the GPU on only after Dish.FRAMES_TO_GPU frames of coarse steps in a row (a speed pressed in passing does not
+	# The game puts the GPU on only after Dish.wait_frames(Dish.RULE_FRAME_SECONDS) frames of coarse steps in a row (a speed pressed in passing does not
 	# move the state), which at x10,000 is 5,000 sim seconds on the processor. So that the GPU runs from the start, both modes begin with
 	# that many frames of one coarse 1 s step (30 sim seconds, on the processor in both: 250 founders), then the speed.
-	for f in Dish.FRAMES_TO_GPU:
+	for f in Dish.wait_frames(Dish.RULE_FRAME_SECONDS):
 		dish.advance(1.0, budget)
 		if mode == "gpu":
 			await process_frame
 	if mode == "gpu" and dish.backend_running() == "gpu":
 		switched = true
-		print("SWITCH %s %s %d gpu_from_sim_s %.1f (warm-up of %d frames of 1 s)" % [mode, scenario, seed_value, dish.time, Dish.FRAMES_TO_GPU])
+		print("SWITCH %s %s %d gpu_from_sim_s %.1f (warm-up of %d frames of 1 s)" % [mode, scenario, seed_value, dish.time, Dish.wait_frames(Dish.RULE_FRAME_SECONDS)])
 	var frames := 0
 	var hour_frames := 0
 	var hour_asked := 0.0

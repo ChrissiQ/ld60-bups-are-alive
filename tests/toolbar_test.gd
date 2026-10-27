@@ -93,6 +93,16 @@ func _init() -> void:
 	for t in Toolbar.Tool.values():
 		check(m.toolbar.button_for(t) != null, "the toolbar has a button for tool %d" % t)
 	check(m.tool_options.toolbar == m.toolbar, "the options tray is wired to its toolbar by export, not by a hard-coded path")
+	var husk_pick: Button = m.tool_options.pick_buttons[Dish.PickMode.HUSKS]
+	check(not m.dish.has_husks() and not husk_pick.visible and not m.layers_panel.husks_button.visible, "a dish without husks has no Husks layer button and no Husks mode")
+	m.dish.death_husks = true
+	m.layers_panel.sync_from(m.dish)
+	m.tool_options.set_husks_available(m.dish.has_husks())
+	husk_pick.button_pressed = true
+	check(husk_pick.visible and m.layers_panel.husks_button.visible and m.dish.pick_mode == Dish.PickMode.HUSKS, "with husks on both are there, and the mode can be picked")
+	m.dish.death_husks = false
+	m.tool_options.set_husks_available(m.dish.has_husks())
+	check(not husk_pick.visible and m.tool_options.pick_mode() == Dish.PickMode.ALL and m.dish.pick_mode == Dish.PickMode.ALL, "when they go the mode falls back to All")
 	m.toolbar.select_tool(Toolbar.Tool.PAN)
 	check(m.toolbar.current_tool() == Toolbar.Tool.PAN and m.tool == Toolbar.Tool.PAN, "current_tool() follows the selection")
 	m.toolbar.select_tool(Toolbar.Tool.SELECT)

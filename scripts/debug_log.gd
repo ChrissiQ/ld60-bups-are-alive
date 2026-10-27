@@ -79,7 +79,7 @@ static func backend(dish: Dish) -> Dictionary:
 		"running": dish.backend_running(),
 		"gpu_available": GpuWorld.available(),
 		"gpu_device": dish.gpu_world.device_name() if dish.gpu_world != null else "",
-		"gpu_wanted_frames": dish._gpu_wanted_frames,
+		"gpu_wanted_seconds": dish._gpu_wanted_seconds,
 		"state_on_cpu": dish._gpu_on_cpu,
 		"gpu_overflows": {},
 	}
@@ -101,7 +101,7 @@ static func rule(dish: Dish) -> Dictionary:
 	return {
 		"setting": dish.backend_setting,
 		"running": dish.backend_running(),
-		"gpu_wanted_frames": dish._gpu_wanted_frames,
+		"gpu_wanted_seconds": dish._gpu_wanted_seconds,
 		"cpu_votes": dish._cpu_votes,
 		"switch_allowed": dish.switch_allowed,
 		"switch_wanted": dish.switch_wanted,

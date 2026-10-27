@@ -35,6 +35,7 @@ func _exit_tree() -> void:
 func sync_from(dish: Dish) -> void:
 	for layer: Dish.Layer in _buttons:
 		_buttons[layer].set_pressed_no_signal(dish.layer_shown(layer))
+	husks_button.visible = dish.has_husks()  # (a dish without husks has nothing for the layer to show)
 
 
 func _setup(button: Button, layer: Dish.Layer, key_name: String) -> void:

@@ -1315,6 +1315,6 @@ func _backend_rule_tests() -> void:
 	w.strike(chosen)
 	for i in 29:
 		w._choose_backend(1.67)
-	check(w._gpu_wanted_frames == 0 and not w.gpu_active, "no frame wants the GPU where there is none, and the processor runs (it would take over after %d frames)" % Dish.FRAMES_TO_GPU)
+	check(w._gpu_wanted_seconds == 0.0 and not w.gpu_active, "no frame wants the GPU where there is none, and the processor runs (it would take over after %.1f s)" % Dish.GPU_WAIT_SECONDS)
 	w.set_backend_setting("garbage")
 	check(w.backend_setting == auto, "a setting that is not one of the three is Auto, for the dish too")
