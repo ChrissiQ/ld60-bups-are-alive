@@ -3,7 +3,7 @@ extends RefCounted
 ## Heritable traits of one bup, as a plain dictionary (speed, sense, metabolism, size, hue, harm,
 ## mutations). Inherited clonally (no recombination) with mutation. The mutation itself runs in the
 ## native simulation (native/src/bup_sim.cpp); this file holds the numbers it uses and the helpers
-## that make, show, save and load genomes.
+## that make and show genomes.
 ##
 ## Mutation follows the shape of real distributions of fitness effects (Eyre-Walker & Keightley
 ## 2007): most mutations that matter are harmful, with many of small effect and a few lethal;
@@ -135,18 +135,16 @@ static func reach_level(reach: int, gene: String) -> int:
 	return (reach >> (2 * i)) & 3 if i >= 0 and i < LABELED.size() - 1 else 0
 
 
-## Where a locus's allele sits in its range, 0 to 1, for a genome with these values (a bup's info, or a founder's genome): the bar of its slot.
+## Where a gene's allele sits in its range, 0 to 1 (the mutator's on the log scale its alleles are spread on): the shade of its band.
 static func allele_fraction(locus: String, value: float) -> float:
 	match locus:
 		"mutator":
 			return clampf(log(maxf(value, 1.0)) / log(MUTATOR_FOLD_TOP), 0.0, 1.0)
-		"donor", "key":
-			return clampf(value, 0.0, 1.0)  # (the caller turns the flag or the level into 0, 0.5 or 1)
 	var spec: Array = GENES[locus]
 	return clampf((value - spec[0]) / (spec[1] - spec[0]), 0.0, 1.0)
 
 
-## The name of the mutator allele nearest a fold, for a bup that is a mutator at all (a fold of 1 is just the usual rate and has no name) (in the log scale the alleles are spread on).
+## The name of the mutator allele nearest a fold (on the log scale the alleles are spread on), for a bup that is a mutator at all: a fold of 1 is just the usual rate and has none.
 static func mutator_allele_name(fold: float) -> String:
 	var best: Array = MUTATOR_ALLELES[0]
 	for allele: Array in MUTATOR_ALLELES:
@@ -157,16 +155,6 @@ static func mutator_allele_name(fold: float) -> String:
 
 ## How each gene is shown: its short label and decimals, so every readout agrees.
 const LABELED := ["speed", "sense", "metabolism", "size", "mutator"]  ## the traits the readouts list, in order
-
-
-## The raised ceilings of a bup as text: "speed +2, sense +1" ("" for none). `reach` is two bits a gene, speed the lowest.
-static func reach_text(reach: int) -> String:
-	var parts := []
-	for i in LABELED.size() - 1:
-		var level := (reach >> (2 * i)) & 3
-		if level > 0:
-			parts.append("%s +%d" % [label(LABELED[i]), level])
-	return ", ".join(parts)
 
 
 ## A trait's name as the readouts show it (see text/strings.cfg).
@@ -241,47 +229,3 @@ static func is_hex_color(text: Variant) -> bool:
 ## The colour for a saved "#rrggbb" (the default green if it isn't one).
 static func color_from_hex(text: Variant) -> Color:
 	return Color.html(text) if is_hex_color(text) else color_of(founder())
-
-
-## The genome as it is stored in a save file.
-static func to_saved(genome: Dictionary) -> Dictionary:
-	var values := {}
-	for gene in GENES:
-		values[gene] = genome[gene]
-	return {"values": values, "hue": genome["hue"], "sat": genome["sat"], "val": genome["val"], "mutations": genome["mutations"], "harm": genome["harm"], "mutator": genome.get("mutator", 1.0), "donor": genome.get("donor", false), "reach": genome.get("reach", 0)}
-
-
-## A genome from a save file. Odd values are made safe instead of rejected: anything missing or
-## not a number falls back to the founder's, and every value is kept inside its range.
-static func from_saved(d: Dictionary) -> Dictionary:
-	var g := founder()
-	var raw: Variant = d.get("values", {})
-	var saved: Dictionary = raw if raw is Dictionary else {}
-	for gene in GENES:
-		var v: Variant = saved.get(gene)
-		if Validate.is_number(v):
-			var spec: Array = GENES[gene]
-			g[gene] = clampf(float(v), spec[0], spec[1])
-	var hue_saved: Variant = d.get("hue")
-	if Validate.is_number(hue_saved):
-		g["hue"] = fposmod(float(hue_saved), 1.0)
-	var sat_saved: Variant = d.get("sat")
-	if Validate.is_number(sat_saved):
-		g["sat"] = clampf(float(sat_saved), 0.0, 1.0)
-	var val_saved: Variant = d.get("val")
-	if Validate.is_number(val_saved):
-		g["val"] = clampf(float(val_saved), 0.0, 1.0)
-	var harm_saved: Variant = d.get("harm")
-	if Validate.is_number(harm_saved):
-		g["harm"] = clampf(float(harm_saved), 0.0, MAX_HARM)
-	var mutations_saved: Variant = d.get("mutations")
-	if Validate.is_number(mutations_saved):
-		g["mutations"] = maxi(0, int(mutations_saved))
-	var mutator_saved: Variant = d.get("mutator")
-	if Validate.is_number(mutator_saved):
-		g["mutator"] = clampf(float(mutator_saved), 1.0, MUTATOR_FOLD_TOP)
-	g["donor"] = d.get("donor") is bool and d["donor"]
-	var reach_saved: Variant = d.get("reach")
-	if Validate.is_number(reach_saved):
-		g["reach"] = clampi(int(reach_saved), 0, 255)
-	return g

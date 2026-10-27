@@ -71,6 +71,7 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("husk_count"), &BupSim::husk_count);
 	ClassDB::bind_method(D_METHOD("husks_export"), &BupSim::husks_export);
 	ClassDB::bind_method(D_METHOD("husk_near", "at", "radius"), &BupSim::husk_near);
+	ClassDB::bind_method(D_METHOD("husk_buffer", "size", "capacity"), &BupSim::husk_buffer);
 	ClassDB::bind_method(D_METHOD("husks_import", "saved"), &BupSim::husks_import);
 	ClassDB::bind_method(D_METHOD("grow", "new_radius"), &BupSim::grow);
 	ClassDB::bind_method(D_METHOD("shrink", "new_radius"), &BupSim::shrink);
@@ -451,6 +452,8 @@ void BupSim::make_record(const Bup &b, int64_t parent) {
 	r.val = b.val;
 	r.harm = b.harm;
 	r.mutator = b.mutator;
+	r.reach = b.reach;
+	r.donor = b.donor;
 	records[b.id] = r;
 }
 
@@ -465,6 +468,8 @@ void BupSim::record_death(const Bup &b) {
 	r.died = now_minutes();
 	r.divisions = b.divisions;
 	r.max_energy = (float)max_energy(b);
+	r.reach = b.reach; // (what it was when it died: a conjugation can have changed them since it was born)
+	r.donor = b.donor;
 	free_if_unused(b.id);
 }
 
@@ -521,6 +526,8 @@ Dictionary BupSim::record_info(int64_t id, const Record &r) const {
 	out["mutator"] = r.mutator;
 	out["mutations"] = r.mutations;
 	out["max_energy"] = r.max_energy;
+	out["reach"] = r.reach;
+	out["donor"] = r.donor;
 	out["name"] = r.name;
 	return out;
 }
@@ -597,6 +604,8 @@ void BupSim::lineage_import(const Array &saved, const PackedInt64Array &pinned) 
 		r.harm = (float)(double)d.get("harm", 0.0);
 		r.mutator = (float)(double)d.get("mutator", 1.0);
 		r.max_energy = (float)(double)d.get("max_energy", 0.0);
+		r.reach = (int)(double)d.get("reach", 0.0);
+		r.donor = (bool)d.get("donor", false);
 		r.name = d.get("name", String());
 		r.alive = living.count(id) > 0;
 		if (r.alive) {
@@ -681,6 +690,7 @@ PackedByteArray BupSim::lineage_export_bytes() const {
 		put<float>(at, r.harm);
 		put<float>(at, r.mutator);
 		put<float>(at, r.max_energy);
+		put<uint32_t>(at, (uint32_t)r.reach | (r.donor ? 1u << 31 : 0u));
 	}
 	put<uint32_t>(at, (uint32_t)names);
 	for (const auto &entry : records) {
@@ -726,6 +736,9 @@ void BupSim::lineage_import_bytes(const PackedByteArray &data, const PackedInt64
 		r.harm = take<float>(at);
 		r.mutator = take<float>(at);
 		r.max_energy = take<float>(at);
+		uint32_t traits = take<uint32_t>(at);
+		r.reach = (int)(traits & 0x7FFFFFFFu);
+		r.donor = (traits >> 31) != 0;
 		r.alive = living.count(id) > 0;
 		if (r.alive) {
 			r.died = -1;
@@ -1344,9 +1357,9 @@ Dictionary BupSim::info_from_state(const PackedByteArray &state, int index) cons
 }
 
 // The family records of a batch of GPU steps (little-endian 32-bit words):
-//   a birth, 16 words: id lo, id hi, parent lo, parent hi, step, divisions, mutations (uints), speed, sense, metabolism, size, hue, sat,
+//   a birth, 16 words: id lo, id hi, parent lo, parent hi, step, divisions, mutations (uints; the low 20 bits, with the bup's reach word in bits 20-29 and its F factor in bit 30), speed, sense, metabolism, size, hue, sat,
 //     val, harm, mutator (floats);
-//   a death, 8 words: id lo, id hi, step, divisions (uints), mass, x, y, the nutrient energy it gives back (floats; 0 for one that does not:
+//   a death, 8 words: id lo, id hi, step, divisions (uint: the low 20 bits, with the bup's reach word in bits 20-29 and its F factor in bit 30), mass, x, y, the nutrient energy it gives back (floats; 0 for one that does not:
 //     a trimmed one). With husks on, the last three make the husk.
 // `step` is the step's place in the batch (from 0), and step k ended at first_step_end_seconds + k * step_seconds, which is when its
 // records are stamped. Each list is in the order of its steps. Step by step, the births are recorded and then the deaths (a bup never
@@ -1377,7 +1390,10 @@ void BupSim::apply_events(const PackedByteArray &births, const PackedByteArray &
 				continue;
 			}
 			b.divisions = (int)get_u32(e, 5);
-			b.mutations = (int)get_u32(e, 6);
+			const uint32_t traits = get_u32(e, 6); // the mutations in the low 20 bits, the reach word above them (10 bits), the F factor at bit 30
+			b.mutations = (int)(traits & 0xFFFFFu);
+			b.reach = (int)((traits >> 20) & 0x3FFu);
+			b.donor = ((traits >> 30) & 1u) != 0;
 			for (int g = 0; g < 4; g++) {
 				b.genes[g] = get_f32(e, 7 + g);
 			}
@@ -1393,7 +1409,10 @@ void BupSim::apply_events(const PackedByteArray &births, const PackedByteArray &
 			const uint8_t *e = dp + di * DEATH_WORDS * 4;
 			Bup b;
 			b.id = get_id(e, 0, 1);
-			b.divisions = (int)get_u32(e, 3);
+			const uint32_t traits = get_u32(e, 3); // the divisions in the low 20 bits, the reach word above them, the F factor at bit 30 (as the bup was when it died)
+			b.divisions = (int)(traits & 0xFFFFFu);
+			b.reach = (int)((traits >> 20) & 0x3FFu);
+			b.donor = ((traits >> 30) & 1u) != 0;
 			b.mass = get_f32(e, 4);
 			record_death(b);
 			if (death_husks && get_f32(e, 7) > 0.0f) {
@@ -1786,6 +1805,24 @@ PackedFloat64Array BupSim::husks_export() const {
 		w[i * 5 + 2] = h.energy;
 		w[i * 5 + 3] = h.age;
 		w[i * 5 + 4] = h.next;
+	}
+	return out;
+}
+
+PackedFloat32Array BupSim::husk_buffer(double size, int capacity) const {
+	PackedFloat32Array out;
+	out.resize((int64_t)std::max((size_t)std::max(capacity, 0), husks.size()) * 8);
+	out.fill(0.0f);
+	float *w = out.ptrw();
+	const float s = (float)size;
+	size_t n = 0;
+	for (const Husk &h : husks) {
+		float *p = w + n * 8;
+		p[0] = s;
+		p[3] = h.x;
+		p[5] = s;
+		p[7] = h.y;
+		n++;
 	}
 	return out;
 }

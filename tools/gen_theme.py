@@ -217,7 +217,7 @@ T("CardText","Label",colors={"font_color":TEXT},sizes={"font_size":15},fonts={"f
 T("FocusLabel","Label",colors={"font_color":ACCENT})
 T("Hint","Label",colors={"font_color":MUTED},sizes={"font_size":13},fonts={"font":LIGHT})
 T("Note","Label",colors={"font_color":MUTED},sizes={"font_size":13},fonts={"font":LIGHT})
-T("Unit","Label",colors={"font_color":FAINT},sizes={"font_size":11},fonts={"font":"m500"})
+T("Unit","Label",colors={"font_color":FAINT},sizes={"font_size":13},fonts={"font":"m500"})
 T("StatValue","Label",colors={"font_color":TEXT},sizes={"font_size":13},fonts={"font":"m500"})
 T("Warning","Label",colors={"font_color":(1.0,0.78,0.70,1.0)},sizes={"font_size":14},fonts={"font":EMPH})
 T("WarningIcon","Button",colors={k:WARNING for k in ("icon_normal_color","icon_disabled_color","icon_hover_color","icon_pressed_color","icon_focus_color","icon_hover_pressed_color")},consts={"icon_max_width":24},styles={k:"warn_icon" for k in ("normal","disabled","hover","pressed","hover_pressed","focus")})
@@ -337,7 +337,8 @@ T("AcceptDialog",consts={"buttons_min_width":96,"buttons_separation":12},sizes={
 T("ConfirmationDialog",consts={"buttons_min_width":96,"buttons_separation":12},sizes={"title_font_size":20},styles={"panel":"dialog_panel"})
 T("Window",consts={"close_h_offset":24,"close_v_offset":34,"title_height":60},sizes={"title_font_size":20},styles={"embedded_border":"embedded_border","embedded_unfocused_border":"embedded_unfocused_border"})
 # graph
-T("GenomeSlot",colors={"track":(1,1,1,0.07),"unknown":(1,1,1,0.12),"symbol":(0.05,0.07,0.08,0.92),"symbol_dim":(1,1,1,0.4)},sizes={"font_size":12},fonts={"font":"m500"})  # the chromosome map's slots (ui/genome_slot.gd)
+T("StatLeader",colors={"line":(1,1,1,0.16)})  # the dotted line between a stat's name and its value (ui/stat_leader.gd)
+T("GenomeSlot",colors={"track":(1,1,1,0.07),"symbol":(0.05,0.07,0.08,0.92),"symbol_dim":(1,1,1,0.4)},sizes={"font_size":12},fonts={"font":"m500"})  # the chromosome map's slots (ui/genome_slot.gd)
 T("GenomeGrid","GridContainer",consts={"h_separation":10,"v_separation":0})
 T("HistoryGraph",styles={"pill":"graph_pill","pill_hover":"graph_pill_hover"},fonts={"font":"m500"},colors={"background":(0.082,0.098,0.108,0.0),"border":(1,1,1,0.0),"grid":(1,1,1,0.07),"grid_faint":(1,1,1,0.04),"muted":MUTED,"population":WARM,"trait":ACCENT},sizes={"legend":13,"tick":12})
 

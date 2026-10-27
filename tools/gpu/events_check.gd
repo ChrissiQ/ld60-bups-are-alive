@@ -4,7 +4,7 @@ extends SceneTree
 ## batches in flight are finished by stalling (GpuWorld.finish_pending, as a switch to the CPU does), at 2 h by waiting for the
 ## readbacks. Each time: every id in a full readback of the GPU's bups has a living record, and as many records are alive as there are
 ## bups; no event, cloud or list overflow; the history samples all arrived.
-## godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/events_check.gd [-- seconds_per_frame]
+## godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/events_check.gd [-- seconds_per_frame [traits]]  (`traits` starts 200 donors with raised ceilings and the key, to check that records of their daughters keep them)
 
 const Tools := preload("res://tools/gpu/world_tools.gd")
 
@@ -14,6 +14,7 @@ var phase := 0
 var waited := 0
 var wait_started := 0  ## when the wait for the last results began (msec)
 var failures := 0
+var traits_started := false  ## `traits` was asked for: some founders are donors with raised ceilings
 var frames := 0
 var started_usec := 0
 
@@ -24,6 +25,13 @@ func _initialize() -> void:
 		per_frame = float(a[0])
 	SimConstants.apply()
 	dish = Tools.make_dish(self, "B", 1)
+	traits_started = a.size() > 1 and a[1] == "traits"
+	if traits_started:  # (some donors with raised ceilings and the acetate key among the founders: their daughters carry them in the births' packed word)
+		var genome := Genome.founder()
+		genome["donor"] = true
+		genome["reach"] = 0x0D | (2 << 8)
+		for i in 200:
+			dish.add_bup(Vector2(randf_range(-1000.0, 1000.0), randf_range(-1000.0, 1000.0)), genome, 30.0)
 	Tools.load_onto_gpu(dish, 1)
 	started_usec = Time.get_ticks_usec()
 
@@ -42,6 +50,30 @@ func _compare(label: String) -> void:
 	for i in count:
 		if not dish.sim.has_bup(GpuSim.id_of(state, i)):
 			missing += 1
+	var wrong := 0  # (the F factor and the reach word a record was born with are the GPU bup's own)
+	var donors := 0
+	var stale := 0
+	var raised := 0
+	for i in count:
+		var info := dish.sim.lineage_info(GpuSim.id_of(state, i))
+		var donor := state.decode_float(i * GpuSim.RECORD_BYTES + 14 * 4) > 0.5
+		var reach := int(state.decode_float(i * GpuSim.RECORD_BYTES + 12 * 4) + 0.5)
+		if info.is_empty() or bool(info["donor"]) != donor:
+			wrong += 1
+		if not info.is_empty() and int(info["reach"]) != reach:
+			stale += 1  # (a record has the reach word of the bup's birth until it dies: a conjugation can change a living bup's)
+		donors += 1 if donor else 0
+		raised += 1 if reach > 0 else 0
+	_check(wrong == 0, "%s: every record has the F factor of its GPU bup (%d wrong; %d donors, %d with a raised ceiling or key; %d of them changed since birth)" % [label, wrong, donors, raised, stale])
+	var dead_donors := 0
+	var dead_raised := 0
+	var dead := 0
+	for record: Dictionary in dish.sim.lineage_export():
+		if not record["alive"]:
+			dead += 1
+			dead_donors += 1 if record["donor"] else 0
+			dead_raised += 1 if int(record["reach"]) > 0 else 0
+	print("%s: %d dead records, %d with the F factor, %d with a raised ceiling or key" % [label, dead, dead_donors, dead_raised])
 	var alive := dish.sim.alive_ids()
 	_check(missing == 0, "%s: every one of the GPU's %d bups has a living record (%d without)" % [label, count, missing])
 	_check(alive.size() == count, "%s: living records %d = GPU bups %d" % [label, alive.size(), count])

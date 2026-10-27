@@ -1,0 +1,23 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://ui/watch_list.gd" id="1"]
+
+[node name="WatchList" type="VBoxContainer"]
+theme_type_variation = &"SnugStack"
+script = ExtResource("1")
+
+[node name="Empty" type="Label" parent="."]
+layout_mode = 2
+theme_type_variation = &"Note"
+text = "@watch.empty"
+autowrap_mode = 3
+
+[node name="Scroll" type="ScrollContainer" parent="."]
+custom_minimum_size = Vector2(0, 80)
+layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="Entries" type="VBoxContainer" parent="Scroll"]
+layout_mode = 2
+theme_type_variation = &"FlushStack"
+size_flags_horizontal = 3

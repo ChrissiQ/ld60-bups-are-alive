@@ -30,6 +30,7 @@ const CATCHUP_SECONDS := 5.0  ## when the dishes are further apart than a frame 
 const LOCKSTEP_MIN_SHARE := 0.25  ## at speeds where a frame holds less than four of those seconds, a quarter of the frame's step
 const DISH_SPACING := 4.0e5  ## µm between the centres of the dishes in the shared world (clear of the largest dish, 90000 µm in radius, either side). They sit in a grid DISH_COLUMNS wide so no coordinate grows large: the renderer's single-precision positions would shake what is drawn far from the origin when zoomed in
 const DISH_COLUMNS := 5
+const VIEW_BITS := 19  ## render layers there are for dishes (the 2D world has twenty and the screen keeps the first): dishes this many places apart share one
 const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) still counts as pointing at it
 
 @onready var dish: Dish = $Dish
@@ -88,7 +89,8 @@ var _span_buttons := {}  ## HistoryGraph.Span -> its button
 @onready var delete_source_button: Button = %DeleteSource
 @onready var follow_button: Button = %FollowButton
 @onready var watch_button: Button = %WatchButton
-@onready var watch_panel: WatchPanel = %WatchPanel
+@onready var watch_section: TraySection = %WatchSection  ## the tray's "Watching" section: a plain tray section like the rest, holding the list
+@onready var watch_list: WatchList = %WatchList
 @onready var tutorial: Tutorial = $TutorialLayer/Tutorial  ## the guided tour, when it is wanted (see Session.tutorial_wanted)
 @onready var layers_panel: LayersPanel = %LayersPanel  ## what the dish shows: each kind of thing can be hidden
 @onready var dish_strip: DishStrip = %DishStrip  ## a thumbnail of every dish when there are several
@@ -102,6 +104,7 @@ var _span_buttons := {}  ## HistoryGraph.Span -> its button
 var free_mode := Session.mode == Session.Mode.FREE
 var tracker := GoalTracker.new()
 var dishes: Array[Dish] = []  ## every dish that runs; `dish` is the one in the main view (the others run beside it, see the strip)
+var _view_before_extinct: Dish = null  ## the dish that was in the main view when the first dish in `_extinct_queue` was brought into view: the view goes back to it afterwards
 var _extinct_queue: Array[Dish] = []  ## dishes that have died out and are not yet deleted (the first is the one the screen has said so about)
 var _game_over := false  ## the last dish died out: only starting again or quitting goes on
 var _dish_numbers := {}  ## Dish -> its number (a number is never reused: a bup's "line from dish 2" stays true)
@@ -191,12 +194,12 @@ func _ready() -> void:
 	watch_button.pressed.connect(_toggle_watch)
 	lineage_back_button.pressed.connect(_step_back)
 	watch_button.focus_mode = Control.FOCUS_NONE
-	watch_panel.dishes = dishes
-	watch_panel.numbers = _dish_numbers
+	watch_list.dishes = dishes
+	watch_list.numbers = _dish_numbers
 	layers_panel.layer_toggled.connect(func(layer: Dish.Layer, shown: bool) -> void:  # (what is shown is one choice for every dish)
 		for d in dishes:
 			d.show_layer(layer, shown))
-	watch_panel.bup_chosen.connect(_open_watched)
+	watch_list.bup_chosen.connect(_open_watched)
 	lineage_button.pressed.connect(_open_lineage)
 	follow_button.focus_mode = Control.FOCUS_NONE
 	stage.resized.connect(_on_stage_resized)
@@ -325,7 +328,7 @@ func _process(delta: float) -> void:
 	dish.refresh_drawing()
 	graph.refresh()
 	_show_graph_choices()
-	watch_panel.refresh()
+	watch_list.refresh()
 	dish_strip.main_dish = dish
 	dish_strip.main_zoomed_in = 2.0 * dish.radius * camera.zoom.x > minf(stage.size.x, stage.size.y) * 1.02
 	dish_strip.refresh(delta)
@@ -441,7 +444,7 @@ func _update_info_panel() -> void:
 	if bup_id >= 0:
 		_point_stamp = []
 		var record := dish.lineage_info(bup_id) if dead else alive_info
-		var body := _deceased_text(record) if dead else _info_text(alive_info, bup_id)
+		var body := _deceased_text(record) if dead else _info_text(alive_info)
 		var genome_map: GenomeRibbon = info_genome if pinned else hover_genome
 		var tail: RichTextLabel = info_tail if pinned else hover_tail
 		genome_map.show_bup(record, pinned)
@@ -602,25 +605,24 @@ func _away_text(distance: float) -> String:
 	return Strings.t("panel.away", [distance]) if distance >= 0.0 else Strings.t("panel.none")
 
 
-func _info_text(b: Dictionary, id: int) -> String:
+func _info_text(b: Dictionary) -> String:
 	var text := Strings.t("panel.bup", [b["divisions"], SimClock.format_minutes(b["born"]), maxi(1, roundi(b["energy"])), b["max_energy"]])  # (a living bup never reads 0)
 	text += Strings.t("panel.steering", [_steering_word(b["steering"])])
-	var from_dish := dish.line_from_dish(id)
-	if from_dish > 0:
-		text += Strings.t("panel.from_dish_line", [from_dish])
+	text += Strings.t("panel.dish_line", [_dish_numbers[dish]])  # (the dish it is in now)
 	return text.rstrip("\n")
 
 
 ## The lines under a bup's genome map (alive or dead): the mutations in its lineage, and its harm.
 func _tail_text(b: Dictionary) -> String:
-	var text := Strings.t("panel.bup_tail", [b["mutations"], Genome.harm_share(b["harm"]) * 100.0])
-	return text if b.has("reach") else text + "\n" + Strings.t("genome.dead_note")
+	return Strings.t("panel.bup_tail", [b["mutations"], Genome.harm_share(b["harm"]) * 100.0])
 
 
 func _deceased_text(b: Dictionary) -> String:
 	var text := Strings.t("panel.deceased", [SimClock.format_minutes(b["born"]), SimClock.format_minutes(b["died"]), b["divisions"], b["max_energy"]])
 	if b.has("moved_to"):
 		text += Strings.t("panel.moved_line", [b["moved_to"]]).substr(1) + "\n"
+	else:
+		text += Strings.t("panel.dish_line", [_dish_numbers[dish]]).substr(1) + "\n"  # (the dish it died in)
 	return text.rstrip("\n")
 
 
@@ -848,8 +850,8 @@ func _show_lineage(id: int) -> void:
 		for place: Array in elsewhere.get(ancestor, []):
 			line += Strings.t("panel.lineage_elsewhere", [place[0], place[1]])
 		var row := HBoxContainer.new()
-		var swatch := ColorRect.new()  # the bup's colour, so a clade can be followed by eye
-		swatch.color = Genome.color_of(info)
+		var swatch := BupPicture.new()  # the bup itself, in its colour, so a clade can be followed by eye
+		swatch.show_info(info)
 		swatch.custom_minimum_size = Vector2(14.0, 14.0)
 		swatch.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		row.add_child(swatch)
@@ -932,7 +934,7 @@ func pipette(world: Vector2, circle_radius: float) -> Dish:
 	receiver.clear_bups()
 	for i in count:
 		source.moved_out[GpuSim.id_of(taken, i)] = _dish_numbers[receiver]
-	var ids := receiver.add_transferred(taken, source.taken_lineage, _dish_numbers[source])
+	var ids := receiver.add_transferred(taken, source.taken_lineage)
 	source.taken_lineage = PackedByteArray()
 	for id in ids:  # (the same bup in its new dish: a watched one stays on the watch list, now as one of that dish's)
 		if source.is_watched(id):
@@ -1010,15 +1012,28 @@ func _register_dish(d: Dish, number := -1) -> void:
 		number = _next_dish_number
 	dishes.append(d)
 	_dish_numbers[d] = number
+	d.set_view_layer(_view_bit(d))
+	_apply_view_mask()
 	d.extinct.connect(_on_dish_extinct.bind(d))
 	d.selection_changed.connect(func() -> void:
 		if d == dish:
 			_on_selection_changed())
-	dish_strip.add(d, number, get_world_2d())
+	dish_strip.add(d, number, get_world_2d(), _view_bit(d))
 	if is_new:
 		_next_dish_number += 1
 	_set_picture_scales()
 	dish_strip.light(dish)
+
+
+## The render layer a dish is on (bits 1 to VIEW_BITS: a place far enough from another to share its layer is never in view with it).
+func _view_bit(d: Dish) -> int:
+	var slot := roundi(d.global_position.x / DISH_SPACING) + roundi(d.global_position.y / DISH_SPACING) * DISH_COLUMNS
+	return 1 + slot % VIEW_BITS
+
+
+## The main view shows the screen's own layer and the layer of the dish in the main view, and no other dish, however far it is zoomed out.
+func _apply_view_mask() -> void:
+	get_viewport().canvas_cull_mask = 1 | (1 << _view_bit(dish))
 
 
 ## Where the dish in a place of the shared world has its centre.
@@ -1265,6 +1280,7 @@ func set_main_dish(d: Dish) -> void:
 	dish.view_zoom = camera.zoom.x  # (where it was being looked at, for when the view comes back)
 	dish.view_position = camera.position
 	dish = d
+	_apply_view_mask()
 	d.clear_hover()  # (what it was hovering when last in view is stale)
 	_set_picture_scales()
 	d.pick_mode = tool_options.pick_mode()
@@ -1480,6 +1496,8 @@ func _on_dish_extinct(d: Dish) -> void:
 func _announce_extinct() -> void:
 	var d := _extinct_queue[0]
 	if d != dish:
+		if _view_before_extinct == null:
+			_view_before_extinct = dish
 		set_main_dish(d)
 	toolbar.set_paused(true)
 	if dishes.size() == 1 and not _freezer.is_empty():
@@ -1488,6 +1506,7 @@ func _announce_extinct() -> void:
 	if dishes.size() == 1:
 		_game_over = true
 		_extinct_queue.clear()
+		_view_before_extinct = null
 		toolbar.resume_locked = true
 		pause_ring.visible = false  # (the game is over, not paused: the dialog says what happened)
 		end_dialog.dialog_text = Strings.t("hud.end_text") + "\n" + Strings.t("hud.end_survived", [SimClock.format(dish.time)])
@@ -1502,9 +1521,14 @@ func _retire_extinct() -> void:
 		return
 	if dishes.size() < 2:  # (the last running dish died out while others are frozen: it stays, empty, until one is unfrozen)
 		_extinct_queue.clear()
+		_view_before_extinct = null
 		_show_banner("", 0.0)
 		return
 	var d: Dish = _extinct_queue.pop_front()
+	if d == dish and _view_before_extinct != null and dishes.has(_view_before_extinct) and _view_before_extinct != d and not _extinct_queue.has(_view_before_extinct):
+		set_main_dish(_view_before_extinct)  # (back to what was being looked at: the dish before this one only if this was the one being looked at)
+	if _extinct_queue.is_empty():
+		_view_before_extinct = null
 	_remove_dish(d)
 	_show_banner("", 0.0)
 	if not _extinct_queue.is_empty():
@@ -1650,7 +1674,7 @@ func _start_tutorial() -> void:
 	steps.append(_tour("info", func() -> Rect2: return _in_tray(info_panel)))
 	steps.append(_tour("genome", func() -> Rect2: return _in_tray(info_genome)))
 	steps.append(_tour("watch", func() -> Rect2: return _in_tray(watch_button), func() -> bool: return dish.is_watched(dish.selected_id)))
-	steps.append(_tour("watched", func() -> Rect2: return _in_tray(watch_panel)))
+	steps.append(_tour("watched", func() -> Rect2: return _in_tray(watch_section)))
 	steps.append(_tour("lineage_open", func() -> Rect2: return _in_tray(lineage_button), _lineage_is_open, _tutorial_close_lineage))
 	steps.append(_tour("lineage", func() -> Rect2: return lineage_panel.get_global_rect(), func() -> bool: return not _lineage_is_open(), _tutorial_open_lineage))
 	steps.back()["escape_passes"] = true  # (Escape closes a lineage, which is what that step asks for)

@@ -1,7 +1,7 @@
 class_name LayersPanel
 extends PanelContainer
 ## What the dish shows, a row of small toggles in the top left corner above the readout, buttons like the toolbar's: the nutrient haze, the sources, the plankton, the
-## bups, and the steering map and arc. Lit means shown. It only reports a choice (`layer_toggled`); the screen applies it to the dish.
+## husks, the bups, and the steering map and arc. Lit means shown. It only reports a choice (`layer_toggled`); the screen applies it to the dish.
 
 signal layer_toggled(layer: Dish.Layer, shown: bool)
 
@@ -9,6 +9,7 @@ signal layer_toggled(layer: Dish.Layer, shown: bool)
 @onready var medium_button: Button = $Row/MediumButton
 @onready var sources_button: Button = $Row/SourcesButton
 @onready var plankton_button: Button = $Row/PlanktonButton
+@onready var husks_button: Button = $Row/HusksButton
 @onready var bups_button: Button = $Row/BupsButton
 @onready var steering_button: Button = $Row/SteeringButton
 
@@ -19,6 +20,7 @@ func _ready() -> void:
 	_setup(medium_button, Dish.Layer.MEDIUM, "medium")
 	_setup(sources_button, Dish.Layer.SOURCES, "sources")
 	_setup(plankton_button, Dish.Layer.PLANKTON, "plankton")
+	_setup(husks_button, Dish.Layer.HUSKS, "husks")
 	_setup(bups_button, Dish.Layer.BUPS, "bups")
 	_setup(steering_button, Dish.Layer.STEERING, "steering")
 	_apply_keys()

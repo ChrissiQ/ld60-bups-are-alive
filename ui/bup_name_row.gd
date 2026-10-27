@@ -8,7 +8,7 @@ extends HBoxContainer
 ## made to look like a label: clicking it puts a caret in it, so a name too long for the row can be read with the arrow keys (or by
 ## dragging a selection), and nothing can be typed into it; leaving it puts the name back at its start.
 
-@onready var swatch: ColorRect = $Swatch  ## the bup's colour: shown for a dead bup, which can no longer be seen in the dish
+@onready var swatch: BupPicture = $Swatch  ## a picture of the bup, in its colour and the shape its size gene gives it (a dead bup can no longer be seen in the dish, and has the picture it had)
 @onready var name_label: LineEdit = $Name  ## the name, shown like a label but a field (see above): it has a caret, and `_on_name_input` lets no key change the text (a field that is not editable shows no caret)
 @onready var edit: LineEdit = $Edit
 @onready var rename_button: Button = $Rename
@@ -44,9 +44,7 @@ func show_bup(dish: Dish, id: int, can_rename: bool) -> void:
 	var shown_name: String = shown.get("name", "")
 	if name_label.text != shown_name:  # (a field's text is only set when it changes: setting it, even to the same text, puts the caret and the scroll back at the start)
 		name_label.text = shown_name
-	swatch.visible = not shown.get("alive", true)  # (a dead bup can't be seen in the dish, so its colour is shown here)
-	if swatch.visible:
-		swatch.color = shown["color"]
+	swatch.show_info(shown["info"])
 	rename_button.visible = can_rename and not editing
 
 

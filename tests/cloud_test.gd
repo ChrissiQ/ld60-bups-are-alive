@@ -37,6 +37,8 @@ func _init() -> void:
 	_check_sources()
 	_check_death_release()
 	_check_husks()
+	_check_husks_picture()
+	_check_record_traits()
 	_check_plankton_husks()
 	_check_starvation()
 	_check_conjugation()
@@ -102,6 +104,65 @@ func _check_death_release() -> void:
 	var expected := Biology.DEATH_RELEASE * Cell.COST_PER_MASS * mass
 	check(d.population() == 0, "a bup with no energy dies in its first step")
 	check(d.field.puff_count() == 1 and absf(d.field.total() - expected) < 1e-4 * expected, "a bup that starves gives back a share of its body as a cloud where it died (%.3f of %.3f)" % [d.field.total(), expected])
+	d.free()
+
+
+## A family record keeps what a bup was born with that the info panel shows: the F factor, the raised ceilings and the acetate key, for a bup that has died as for one that lives, through a save and the pipette's bytes.
+func _check_record_traits() -> void:
+	var d := _dish(90.0)
+	var genome := Genome.founder()
+	genome["donor"] = true
+	genome["reach"] = 0x0D | (2 << 8)  # (speed +1, sense +3, and the acetate key)
+	var id := d.add_bup(Vector2(100.0, 100.0), genome, 30.0)
+	var born := d.lineage_info(id)
+	check(born["donor"] == true and int(born["reach"]) == (0x0D | (2 << 8)), "a record has the F factor and the reach word its bup was born with")
+	d.watch_bup(id)  # (a watched record stays after its bup is gone)
+	d.remove_bup(id)
+	var dead := d.lineage_info(id)
+	check(not dead.is_empty() and not dead["alive"] and dead["donor"] == true and int(dead["reach"]) == (0x0D | (2 << 8)), "...and a dead bup's record keeps them")
+	var copy := Dish.new()
+	root.add_child(copy)
+	check(copy.from_dict(TestUtil.saved(d)) and copy.lineage_info(id).get("donor", false) == true and int(copy.lineage_info(id).get("reach", 0)) == (0x0D | (2 << 8)), "...through a save and a load")
+	var bytes := d.sim.lineage_export_bytes()
+	var other := _dish(90.0)
+	other.sim.lineage_import_bytes(bytes, PackedInt64Array([id]))
+	check(other.lineage_info(id).get("donor", false) == true and int(other.lineage_info(id).get("reach", 0)) == (0x0D | (2 << 8)), "...and through the pipette's bytes")
+	copy.free()
+	other.free()
+	# A death the GPU reports carries the bup's divisions, reach word and F factor in one word, as the bup was when it died.
+	var gpu_dead := _dish(90.0)
+	var living := gpu_dead.add_bup(Vector2(5.0, 5.0), Genome.founder(), 30.0)
+	gpu_dead.watch_bup(living)
+	var death := PackedByteArray()
+	death.resize(32)
+	death.encode_u32(0, living & 0xFFFFFFFF)
+	death.encode_u32(4, living >> 32)
+	death.encode_u32(8, 0)
+	death.encode_u32(12, 7 | (0x0D << 20) | (1 << 30))
+	death.encode_float(16, 8.0)
+	gpu_dead.sim.apply_events(PackedByteArray(), death, 100.0, 20.0)
+	var gone := gpu_dead.lineage_info(living)
+	check(not gone.is_empty() and not gone["alive"] and int(gone["divisions"]) == 7 and int(gone["reach"]) == 0x0D and gone["donor"] == true, "a death event gives the record the bup's divisions, reach word and F factor as it died")
+	gpu_dead.free()
+	d.free()
+
+
+## Every husk there is gets its place in the husk picture (no share of them is left out), and the rest of the room is empty.
+func _check_husks_picture() -> void:
+	var d := _dish(90.0)
+	for i in 400:
+		d.sim.add_plankton_husk(Vector2(-3000.0 + 15.0 * (i % 20) + 0.37 * i, -2000.0 + 17.0 * (i / 20) + 0.11 * i), 10.0)
+	var buffer := d.sim.husk_buffer(4.0, 1024)
+	var all := d.sim.husks_export()
+	var wrong := 0
+	for i in 400:
+		if absf(buffer[i * 8 + 3] - all[i * 5]) > 0.01 or absf(buffer[i * 8 + 7] - all[i * 5 + 1]) > 0.01 or buffer[i * 8] != 4.0 or buffer[i * 8 + 5] != 4.0:
+			wrong += 1
+	var spare := 0.0
+	for k in range(400 * 8, buffer.size()):
+		spare += absf(buffer[k])
+	check(buffer.size() == 1024 * 8 and wrong == 0 and spare == 0.0, "all 400 husks are in the picture, each 4 µm square at its place, and the spare room is empty (%d wrong)" % wrong)
+	check(d.sim.husk_buffer(4.0, 10).size() == 400 * 8, "a picture is never smaller than the husks there are")
 	d.free()
 
 
@@ -355,8 +416,6 @@ func _check_reach() -> void:
 		d.sim.bup_pay_upkeep_and_grow(id, 60.0)
 		gains.append(float(d.sim.bup_info(id)["mass"]) - mass)
 	check(absf(gains[1] / gains[0] - (1.0 - 3.0 * Genome.REACH_COST)) < 0.03, "each raise costs a share of growth: a bup raised three times grows %.2f of what the usual one does (expected %.2f)" % [gains[1] / gains[0], 1.0 - 3.0 * Genome.REACH_COST])
-	var text := Genome.reach_text(0x0D)  # (speed +1, sense +3: two bits a gene)
-	check(text == "%s +1, %s +3" % [Genome.label("speed"), Genome.label("sense")], "the panel's text of raised ceilings: %s" % text)
 	d.free()
 
 

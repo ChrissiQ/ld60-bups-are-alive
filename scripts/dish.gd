@@ -15,7 +15,7 @@ signal layers_changed  ## a layer was shown or hidden
 
 ## The kinds of thing the dish draws, each of which can be hidden (a view choice only: nothing here touches the simulation).
 ## A hidden layer cannot be hovered or picked, but what is already selected stays selected (hiding the bups to see the steering map of the selected one, say).
-enum Layer { MEDIUM, SOURCES, PLANKTON, BUPS, STEERING }  ## the nutrient haze, the feeders, the plankton, the bups, and the steering map and arc of the selected bup
+enum Layer { MEDIUM, SOURCES, PLANKTON, BUPS, STEERING, HUSKS }  ## the nutrient haze, the feeders, the plankton, the bups, the steering map and arc of the selected bup, and the husks
 
 const DEFAULT_RADIUS := 10000.0  ## µm: 10 mm, the dish before any start (the tests' dish too); goal mode and free mode start from StartConditions.DEFAULT_RADIUS
 const NUTRIENT_SCATTER := 5.0  ## radius a dose spreads over, per sqrt(nutrient) in it
@@ -51,7 +51,8 @@ const DIFFUSE_INTERVAL := 5.0  ## seconds between solves of the nutrient field's
 const DIFFUSE_ACCURACY := 0.004  ## the most D dt / cell^2 one solve of the diffusion is allowed (how far the nutrient spreads in it, in cells): a longer stretch is solved in pieces, down to DIFFUSE_INTERVAL. See BupSim.diffuse_pieces
 const MAX_STEP := 20.0  ## the longest single step, in seconds: growth, uptake and division are slow (doubling takes 40 minutes), so they run once per step
 const HUSK_PIXELS := 3.0  ## a husk's dot on screen
-const HUSK_DRAWN_MAX := 5000  ## the most husks drawn at once
+const HUSK_REFRESH_MSEC := 100  ## how often the husks' picture is rebuilt while time moves
+const HUSK_MIN_CAPACITY := 1024  ## the husk picture holds room for at least this many (it grows by doubling)
 const HUSK_COLOR := Color(0.85, 0.6, 0.3, 0.8)
 const RING_PIXELS := 12.0  ## the radius of a selection or hover ring, in screen pixels
 const RING_GROW_ABOVE := 0.5  ## the ring only grows once its subject is more than this share of the ring's diameter ...
@@ -211,6 +212,9 @@ var _steer_key := []
 var _extinct_signalled := false
 var _history_accum := 0.0
 var _bups_mesh: MultiMeshInstance2D = null  ## all the bups, drawn in one go
+var _husks_mesh: MultiMeshInstance2D = null  ## every husk, as one instance each
+var _husk_stamp := []  ## what the husk picture was last built for (the time, how many there were, the size of a husk)
+var _husk_built_msec := 0
 var _overlay: Node2D = null  ## the selection and hover rings, drawn above the bups
 ## The GPU path (gpu/gpu_world.gd): while `gpu_active`, the GPU runs the bups and answers for them; everything the dish asks the
 ## simulation about the bups goes to `gpu_world` (the branches below), and the CPU's BupSim keeps the records, names and pins.
@@ -261,6 +265,15 @@ func _build_children() -> void:
 	multimesh.use_colors = true
 	multimesh.use_custom_data = true
 	multimesh.mesh = mesh
+	var husk_mesh := QuadMesh.new()
+	husk_mesh.size = Vector2.ONE
+	var husks := MultiMesh.new()
+	husks.transform_format = MultiMesh.TRANSFORM_2D
+	husks.mesh = husk_mesh
+	_husks_mesh = MultiMeshInstance2D.new()  # (under the bups: one instance for every husk there is, drawn by the graphics card, so there is no limit on how many are shown)
+	_husks_mesh.multimesh = husks
+	_husks_mesh.self_modulate = HUSK_COLOR
+	add_child(_husks_mesh)
 	_bups_mesh = MultiMeshInstance2D.new()
 	_bups_mesh.multimesh = multimesh
 	_bups_mesh.material = material
@@ -307,6 +320,7 @@ func _sync_render_capacity() -> void:
 ## picture is refreshed here, once a frame, from the native simulation.
 func _process(delta: float) -> void:
 	flash = maxf(0.0, flash - delta * 1.5)
+	_refresh_husks()
 	if _bups_mesh != null and gpu_world != null and gpu_active:
 		for id in [selected_id, hovered_id]:  # (the bups the overlay shows: their records come back every frame)
 			if id >= 0:
@@ -332,7 +346,6 @@ func _process(delta: float) -> void:
 ## Everything that belongs to one run of a dish and must start fresh with a new or loaded dish.
 func _reset_runtime_state() -> void:
 	moved_out.clear()
-	founded_from.clear()
 	watched.clear()  # (the simulation was reset, so its records, and the pins on them, are gone)
 	watch_version += 1
 	clear_selection()
@@ -620,6 +633,13 @@ func nutrient_reading(local: Vector2) -> Vector3:
 	return field.read(local)
 
 
+## Puts the dish, and everything it draws, on one render layer of the 2D world (bit 0 is the default layer, which the rest of the screen is on). A camera that does not
+## look at that layer does not see the dish, so a dish never shows beside another however far the view is zoomed out.
+func set_view_layer(bit: int) -> void:
+	for node: Node in [self] + find_children("*", "CanvasItem", true, false):
+		(node as CanvasItem).visibility_layer = 1 << bit
+
+
 ## A dish that joins a world already under way begins at the world's time, and its bloom begins then too (not catching up on the time before).
 func begin_at(world_time: float) -> void:
 	time = world_time
@@ -657,7 +677,7 @@ static func cleaned_name(text: String) -> String:
 	return BupNames.clean(text)
 
 
-## What a panel shows for a bup, from one look-up: {"name", "color", "alive"} (empty if there is no record).
+## What a panel shows for a bup, from one look-up: {"name", "info"} (its info or family record; empty if there is no record).
 func bup_display(id: int) -> Dictionary:
 	var info := sim.lineage_info(id)
 	if info.is_empty():
@@ -665,8 +685,7 @@ func bup_display(id: int) -> Dictionary:
 	var custom := sim.custom_name(id)
 	return {
 		"name": custom if custom != "" else BupNames.default_name(info["size_gene"], id),
-		"color": Genome.color_of(info),
-		"alive": info["alive"],
+		"info": info,
 	}
 
 
@@ -707,14 +726,11 @@ func take_in_disc(world_pos: Vector2, disc_radius: float) -> PackedByteArray:
 
 
 ## The pipette's giving half: the records `take_in_disc` made come in as the same bups (same ids, so the same names, genes and colours) at the middle of the dish (a
-## droplet), with their whole family tree (`lineage`, from the dish they left: dead ancestors included, and the ones that stayed behind as dead here); `from_dish` is the
-## number of the dish they came from, so that their line can say where it was. Returns their ids.
-func add_transferred(records: PackedByteArray, lineage: PackedByteArray, from_dish: int) -> PackedInt64Array:
+## droplet), with their whole family tree (`lineage`, from the dish they left: dead ancestors included, and the ones that stayed behind as dead here). Returns their ids.
+func add_transferred(records: PackedByteArray, lineage: PackedByteArray) -> PackedInt64Array:
 	_to_cpu_for_edit()
 	var ids := sim.add_state_bytes(records, Vector2.ZERO, true)
 	sim.lineage_import_bytes(lineage, PackedInt64Array())
-	for id in ids:
-		founded_from[id] = from_dish
 	edit_count += 1
 	_render_stale = true
 	return ids
@@ -723,14 +739,6 @@ func add_transferred(records: PackedByteArray, lineage: PackedByteArray, from_di
 ## For each of these ids, how many bups alive in this dish have it in their family line (itself included).
 func living_descendants(ids: PackedInt64Array) -> PackedInt32Array:
 	return sim.living_descendants_of(ids)
-
-
-## The number of the dish this bup's line began in, when it began in another (a bup founded by the pipette, or the descendant of one), else 0.
-func line_from_dish(id: int) -> int:
-	for ancestor in sim.lineage_chain(id):
-		if founded_from.has(ancestor):
-			return founded_from[ancestor]
-	return 0
 
 
 ## The family line that led to a bup: its oldest known ancestor first, the bup itself last.
@@ -754,7 +762,6 @@ var taken_lineage := PackedByteArray()  ## the family records as they were when 
 var view_zoom := 0.0  ## where the screen was looking at this dish when it last looked away: the camera's zoom (0: never looked yet) ...
 var view_position := Vector2.ZERO  ## ... and its position
 var moved_out := {}  ## the ids of bups the pipette took out of this dish -> the number of the dish they went to (kept for the records that outlast them)
-var founded_from := {}  ## the ids of bups the pipette put into this dish -> the number of the dish they came from
 var watch_version := 0  ## bumped whenever the list changes, so its panel can rebuild only then
 
 
@@ -912,9 +919,8 @@ func looks_at_plankton() -> bool:
 	return layer_shown(Layer.PLANKTON) and (pick_mode == PickMode.ALL or pick_mode == PickMode.PLANKTON)
 
 
-## Husks are part of the medium (they are drawn with the nutrient layer), so hiding that layer hides them from the pointer too.
 func looks_at_husks() -> bool:
-	return layer_shown(Layer.MEDIUM) and (pick_mode == PickMode.ALL or pick_mode == PickMode.HUSKS) and sim.husk_count() > 0
+	return layer_shown(Layer.HUSKS) and (pick_mode == PickMode.ALL or pick_mode == PickMode.HUSKS) and sim.husk_count() > 0
 
 
 func looks_at_bups() -> bool:
@@ -945,7 +951,8 @@ func show_layer(layer: Layer, shown: bool) -> void:
 		Layer.PLANKTON:
 			if not shown:
 				hovered_plankton = null
-		Layer.MEDIUM:
+		Layer.HUSKS:
+			_husks_mesh.visible = shown
 			if not shown:
 				hovered_husk = NO_HUSK
 	layers_changed.emit()
@@ -1578,22 +1585,32 @@ func husk_draw_size() -> float:
 	return maxf(HUSK_PIXELS * pixel(), 2.0)
 
 
-## The husks (a dead bup's or plankton's body, leaking its nutrient back: see Biology.HUSK_SECONDS) as small warm dots, part of the nutrient layer. Drawn with the
-## rest of the dish, so they are looked at again only when it redraws; with very many only every few-th is drawn, so the cost stays small.
-func _draw_husks() -> void:
-	var count := sim.husk_count()
-	if count == 0:
+## Builds the husks' picture again when time has moved, the husks are different or the zoom has changed (and not oftener than HUSK_REFRESH_MSEC while only time moves).
+func _refresh_husks() -> void:
+	var shown := layer_shown(Layer.HUSKS)
+	_husks_mesh.visible = shown
+	if not shown:
+		_husk_stamp = []  # (built afresh when it is shown again)
 		return
-	var saved := sim.husks_export()  # (5 numbers each: x, y, energy, age, the next piece)
-	var stride := maxi(1, count / HUSK_DRAWN_MAX)
-	var size := husk_draw_size()
-	var half := Vector2(size * 0.5, 0.0)
-	var segments := PackedVector2Array()
-	for i in range(0, count, stride):
-		var at := Vector2(saved[i * 5], saved[i * 5 + 1])
-		segments.append(at - half)
-		segments.append(at + half)
-	draw_multiline(segments, HUSK_COLOR, size)
+	var count := sim.husk_count()
+	var size: float = snappedf(husk_draw_size(), 0.001)
+	var stamp := [time, count, size]
+	if stamp == _husk_stamp:
+		return
+	var now := Time.get_ticks_msec()
+	var changed_hard: bool = _husk_stamp.is_empty() or _husk_stamp[2] != size or (count == 0) != (_husk_stamp[1] == 0)
+	if not changed_hard and now - _husk_built_msec < HUSK_REFRESH_MSEC:
+		return
+	_husk_stamp = stamp
+	_husk_built_msec = now
+	var husks := _husks_mesh.multimesh
+	var capacity := maxi(HUSK_MIN_CAPACITY, nearest_po2(count))
+	if husks.instance_count != capacity:
+		husks.instance_count = capacity
+		husks.custom_aabb = AABB(Vector3(-radius, -radius, -1.0), Vector3(2.0 * radius, 2.0 * radius, 2.0))
+	husks.visible_instance_count = count
+	if count > 0:
+		husks.buffer = sim.husk_buffer(size, capacity)
 
 
 ## A thin ring marking a bup or source: GUI, so the same size and line at every zoom (see
@@ -1611,7 +1628,6 @@ func _draw() -> void:
 
 	if layer_shown(Layer.MEDIUM):
 		_draw_medium()
-		_draw_husks()
 	if layer_shown(Layer.STEERING):
 		_draw_steering()
 	if layer_shown(Layer.SOURCES):

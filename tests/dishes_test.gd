@@ -29,6 +29,8 @@ func _run() -> void:
 	var other: Dish = m.add_dish(chosen)
 	check(m.dishes.size() == 2 and m.dish == first and m.dish_strip.visible and m.dish_strip.count() == 2, "a second dish joins the set and shows in the strip; the main view stays")
 	check(other.global_position.distance_to(first.global_position) >= m.DISH_SPACING, "it is far from the first in the shared world")
+	check(first.visibility_layer != other.visibility_layer and (m.get_viewport().canvas_cull_mask & other.visibility_layer) == 0 and (m.get_viewport().canvas_cull_mask & first.visibility_layer) != 0 and (m.get_viewport().canvas_cull_mask & 1) != 0, "the main view shows its own dish and the screen, and no other dish, however far it is zoomed out")
+	check(first._overlay.visibility_layer == first.visibility_layer and first._bups_mesh.visibility_layer == first.visibility_layer, "everything a dish draws is on its layer")
 	var t0 := other.time
 	var t1 := first.time
 	for i in 30:
@@ -53,7 +55,7 @@ func _run() -> void:
 		turns.append(m.dishes.filter(func(d: Dish) -> bool: return d.switch_allowed).size())
 	check(turns == [1, 1, 1, 1], "exactly one dish at a time may change backend (%s)" % [turns])
 	m.set_main_dish(other)
-	check(m.dish == other and m.graph.dish == other and m.watch_panel.dishes.has(other), "a choice brings the other dish into the main view, with the graph and the watch list")
+	check(m.dish == other and m.graph.dish == other and m.watch_list.dishes.has(other), "a choice brings the other dish into the main view, with the graph and the watch list")
 	check(m.camera.position.distance_to(other.global_position) <= other.radius, "the camera is on it")
 	m.dish_strip.dish_chosen.emit(first)
 	check(m.dish == first and m.camera.position.distance_to(first.global_position) <= first.radius, "the strip's click brings the first back")
@@ -90,6 +92,29 @@ func _run() -> void:
 	m.end_dialog.confirmed.emit()
 	await process_frame
 	check(not m._game_over and not m.toolbar.resume_locked and m.dish.population() > 0 and m.dishes.size() == 1, "starting again begins the dish afresh")
+	# A dish that dies out while another is being looked at: afterwards the view goes back to what was being looked at, not to the dish before the dead one.
+	var base: Dish = m.dish
+	var dying: Dish = m.add_dish(chosen)
+	var watched: Dish = m.add_dish(chosen)
+	m.set_main_dish(watched)
+	m.toolbar.set_paused(false)
+	dying.clear_bups()
+	for i in 5:
+		await process_frame
+	check(m.paused and m.dish == dying, "a dish that dies out while another is in view is shown, as before")
+	m.toolbar.set_paused(false)
+	for i in 3:
+		await process_frame
+	check(m.dishes.size() == 3 - 1 and m.dish == watched and (not is_instance_valid(dying) or not m.dishes.has(dying)), "after it goes, the view is back on the dish that was being looked at, not the one before the dead dish")
+	dying = m.add_dish(chosen)
+	dying.clear_bups()
+	for i in 5:
+		await process_frame
+	m.set_main_dish(base)  # (the player looks at another dish while the news is up)
+	m.toolbar.set_paused(false)
+	for i in 3:
+		await process_frame
+	check(m.dish == base, "if the player moved to another dish while it was shown, they stay where they went")
 	m.queue_free()
 	await process_frame
 	m = load("res://scenes/main.tscn").instantiate()
@@ -110,7 +135,7 @@ func _run() -> void:
 	var before := first.population()
 	var made: Dish = m.pipette(first.global_position + Vector2(18.0, 0.0), 30.0)
 	check(made.has_bup(child) and made.bup_name(child) == "Zed" and made.lineage_chain(child).size() == 2 and made.lineage_chain(child)[0] == parent, "a moved bup is the same bup: its id, its name and its family line come with it")
-	check(made.is_watched(child) and not first.is_watched(child) and m.watch_panel.dishes.has(made), "...and so does its place on the watch list")
+	check(made.is_watched(child) and not first.is_watched(child) and m.watch_list.dishes.has(made), "...and so does its place on the watch list")
 	check(made != null and m.dishes.size() == 2 and m.dish == made, "the pipette makes a second dish and the main view moves to it")
 	check(absf(made.time - first.time) < 1.0, "the new dish is at the world's time (%.1f and %.1f s)" % [made.time, first.time])
 	check(is_equal_approx(made.history_origin, first.time) or absf(made.history_origin - first.time) < 1.0, "the new dish's history begins at the world's time (%.1f s)" % made.history_origin)
@@ -123,7 +148,7 @@ func _run() -> void:
 	m._answer_old_dish("keep")
 	check(not m.old_dish_dialog.visible and m.dishes.has(first), "keeping it leaves both running")
 	var moved_id: int = made.sim.alive_ids()[0]
-	check(made.line_from_dish(moved_id) == 1, "a moved bup's line says it came from dish 1")
+	check(m._info_text(made.bup_info(moved_id)).contains("dish %d" % m._dish_numbers[made]), "a bup's panel says which dish it is in now (dish %d)" % m._dish_numbers[made])
 	var seen_from := made.view_zoom
 	m.camera.zoom = Vector2.ONE * 0.37
 	m.camera.position = made.global_position + Vector2(40.0, -25.0)

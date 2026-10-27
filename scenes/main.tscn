@@ -26,7 +26,7 @@
 [ext_resource type="PackedScene" path="res://ui/setting_row.tscn" id="setting_row"]
 [ext_resource type="PackedScene" path="res://scenes/pause_menu.tscn" id="pause_menu"]
 [ext_resource type="PackedScene" path="res://ui/bup_name_row.tscn" id="bup_name_row"]
-[ext_resource type="PackedScene" path="res://ui/watch_panel.tscn" id="watch_panel"]
+[ext_resource type="PackedScene" path="res://ui/watch_list.tscn" id="watch_list"]
 [ext_resource type="PackedScene" path="res://ui/layers_panel.tscn" id="layers_panel"]
 [ext_resource type="PackedScene" path="res://ui/dish_strip.tscn" id="dish_strip"]
 [ext_resource type="Script" path="res://ui/tray_section.gd" id="tray_section"]
@@ -744,10 +744,16 @@ unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"SnugStack"
 
-[node name="WatchPanel" parent="HUD/Frame/Layout/Middle/Side/Stack" instance=ExtResource("watch_panel")]
+[node name="WatchSection" type="PanelContainer" parent="HUD/Frame/Layout/Middle/Side/Stack"]
 unique_name_in_owner = true
 layout_mode = 2
-size_flags_vertical = 3
+script = ExtResource("tray_section")
+title_key = "watch.title"
+tip_key = "watch.tip"
+
+[node name="WatchList" parent="HUD/Frame/Layout/Middle/Side/Stack/WatchSection" instance=ExtResource("watch_list")]
+unique_name_in_owner = true
+layout_mode = 2
 
 
 [node name="FreezerSection" type="PanelContainer" parent="HUD/Frame/Layout/Middle/Side/Stack"]

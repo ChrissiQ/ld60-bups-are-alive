@@ -92,7 +92,7 @@ func _init() -> void:
 	check(m.paused and m.dish.selected_id < 0 and not m.dish.is_watched(m._tutorial_bup) and m.camera.zoom.is_equal_approx(was_zoom) and m.camera.position.distance_to(was_position) < 4.0, "afterwards it is paused as before, with nothing selected or watched and the camera where it was (%s %s, was %s %s)" % [m.camera.zoom, m.camera.position, was_zoom, was_position])
 	await process_frame
 	await process_frame
-	check(m.dish.watched.is_empty() and m._stack.is_empty() and not m.watch_panel.visible and not m.info_panel.visible, "and the panels the tour opened are shut again")
+	check(m.dish.watched.is_empty() and m._stack.is_empty() and m.watch_list.empty_note.visible and not m.info_panel.visible, "and the panels the tour opened are shut again")
 	m.queue_free()
 
 	# Space, Enter and Back; and what a step asks for cannot be spoiled by clicks or keys elsewhere.

@@ -29,7 +29,7 @@ void main() {
 			uint lo = CNT[4] + EXCK[i];
 			EVB[o] = lo; EVB[o + 1u] = CNT[6] + (lo < CNT[4] ? 1u : 0u);
 			EVB[o + 2u] = BUPS_U[b]; EVB[o + 3u] = BUPS_U[b + 21u]; EVB[o + 4u] = st;
-			EVB[o + 5u] = uint(uintBitsToFloat(CHILD_U[c + 20u])); EVB[o + 6u] = uint(uintBitsToFloat(CHILD_U[c + 19u]));
+			EVB[o + 5u] = uint(uintBitsToFloat(CHILD_U[c + 20u])); EVB[o + 6u] = (uint(uintBitsToFloat(CHILD_U[c + 19u])) & 0xFFFFFu) | ((uint(uintBitsToFloat(CHILD_U[c + 12u]) + 0.5) & 0x3FFu) << 20u) | (uintBitsToFloat(CHILD_U[c + 14u]) > 0.5 ? (1u << 30u) : 0u);
 			EVB[o + 7u] = CHILD_U[c + 8u]; EVB[o + 8u] = CHILD_U[c + 9u]; EVB[o + 9u] = CHILD_U[c + 10u]; EVB[o + 10u] = CHILD_U[c + 11u];
 			EVB[o + 11u] = CHILD_U[c + 16u]; EVB[o + 12u] = CHILD_U[c + 17u]; EVB[o + 13u] = CHILD_U[c + 18u]; EVB[o + 14u] = CHILD_U[c + 15u];
 			EVB[o + 15u] = CHILD_U[c + 13u];
@@ -39,7 +39,7 @@ void main() {
 		uint slot = CNT[9] + (i - EXCS[i]);  // (the bups not kept before this one)
 		if (slot < cap) {
 			uint o = (base + slot) * 8u;
-			EVD[o] = BUPS_U[b]; EVD[o + 1u] = BUPS_U[b + 21u]; EVD[o + 2u] = st; EVD[o + 3u] = uint(uintBitsToFloat(BUPS_U[b + 20u]));
+			EVD[o] = BUPS_U[b]; EVD[o + 1u] = BUPS_U[b + 21u]; EVD[o + 2u] = st; EVD[o + 3u] = (uint(uintBitsToFloat(BUPS_U[b + 20u])) & 0xFFFFFu) | ((uint(uintBitsToFloat(BUPS_U[b + 12u]) + 0.5) & 0x3FFu) << 20u) | (uintBitsToFloat(BUPS_U[b + 14u]) > 0.5 ? (1u << 30u) : 0u);
 			EVD[o + 4u] = BUPS_U[b + 6u]; EVD[o + 5u] = BUPS_U[b + 1u]; EVD[o + 6u] = BUPS_U[b + 2u];
 			EVD[o + 7u] = uintBitsToFloat(BUPS_U[b + 23u]) == -2.0 ? floatBitsToUint(P[8] * uintBitsToFloat(BUPS_U[b + 6u])) : 0u;  // (where it died and what it gives back: 0 for a trimmed one)
 		} else atomicAdd(CNT[11], 1u);

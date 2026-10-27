@@ -22,6 +22,7 @@ DialogStyle="*res://scripts/dialog_style.gd"
 DebugHotkey="*res://ui/debug_hotkey.tscn"
 PreferencesHook="*res://scripts/preferences_hook.gd"
 TooltipFit="*res://scripts/tooltip_fit.gd"
+ScrollKeep="*res://scripts/scroll_keep.gd"
 
 [display]
 

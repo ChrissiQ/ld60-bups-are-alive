@@ -171,7 +171,7 @@ static func _husks(dish: Dish) -> Dictionary:
 	var saved := dish.sim.husks_export()
 	for i in count:
 		energy += saved[i * 5 + 2]
-	return {"count": count, "energy_held": energy, "drawn": mini(count, Dish.HUSK_DRAWN_MAX) if count <= Dish.HUSK_DRAWN_MAX else count / maxi(1, count / Dish.HUSK_DRAWN_MAX)}
+	return {"count": count, "energy_held": energy, "drawn": dish.sim.husk_count() if dish.layer_shown(Dish.Layer.HUSKS) else 0}
 
 
 ## The dish's graph history: where it began, how many samples each part holds, and the newest figures.

@@ -9,6 +9,8 @@ signal dish_chosen(dish: Dish)
 
 const REFRESH_SECONDS := 1.0  ## how often the counts are read, and each picture is redrawn
 const THUMB := 44  ## pixels across a picture (shown smaller, so it stays sharp on a dense display)
+const REPEAT_DELAY := 0.4  ## seconds an arrow is held before it goes on by itself
+const REPEAT_EVERY := 0.12  ## and then one tab every so many seconds
 const MARGIN := 1.05  ## the dish fills this share of the picture (its rim is not cut off)
 
 var max_width := 240.0:  ## the most width the tabs take; with more tabs than fit, they scroll
@@ -16,8 +18,10 @@ var max_width := 240.0:  ## the most width the tabs take; with more tabs than fi
 		max_width = value
 		_fit()
 
-@onready var scroll: ScrollContainer = $Scroll  ## the tabs scroll sideways inside a width the top bar can afford (see `max_width`)
-@onready var row: HBoxContainer = $Scroll/Row
+@onready var scroll: ScrollContainer = $Bar/Scroll  ## the tabs scroll sideways inside a width the top bar can afford (see `max_width`)
+@onready var row: HBoxContainer = $Bar/Scroll/Row
+@onready var previous_button: Button = $Bar/Previous  ## an arrow at each end, there while the tabs do not all fit: a click moves by one tab, and holding goes on
+@onready var next_button: Button = $Bar/Next
 
 var _entries: Array[Dictionary] = []  ## {dish, number, button, viewport, camera}
 var _since := REFRESH_SECONDS
@@ -26,9 +30,57 @@ var _next_picture := 0  ## the entry whose picture is redrawn next
 var _group := ButtonGroup.new()
 var main_zoomed_in := false  ## the main view shows only part of its dish: that dish's picture keeps its last one (it is drawn for the camera's zoom, not for the whole dish)
 var main_dish: Dish
+var _held := 0  ## the arrow held down: -1 the left one, 1 the right one, 0 none
+var _held_for := 0.0  ## how long it has been held, from minus the delay before it starts repeating
 
 
-func add(dish: Dish, number: int, world: World2D) -> void:
+func _ready() -> void:
+	previous_button.button_down.connect(_press.bind(-1))
+	next_button.button_down.connect(_press.bind(1))
+	for button: Button in [previous_button, next_button]:
+		button.button_up.connect(func() -> void: _held = 0)
+
+
+func _process(delta: float) -> void:
+	if not visible:
+		return
+	var most := scroll.get_h_scroll_bar().max_value - scroll.get_h_scroll_bar().page
+	previous_button.disabled = scroll.scroll_horizontal <= 0
+	next_button.disabled = scroll.scroll_horizontal >= most - 0.5
+	if _held != 0:
+		_held_for += delta
+		while _held_for >= REPEAT_EVERY:
+			_held_for -= REPEAT_EVERY
+			_step(_held)
+
+
+## An arrow went down: it moves by one tab now, and goes on moving while it is held (after a moment).
+func _press(direction: int) -> void:
+	_step(direction)
+	_held = direction
+	_held_for = -REPEAT_DELAY
+
+
+## Scrolls to the next tab's edge in that direction (-1 left, 1 right), or to the end.
+func _step(direction: int) -> void:
+	var here := float(scroll.scroll_horizontal)
+	var edges := row.get_children().map(func(tab: Node) -> float: return (tab as Control).position.x)
+	var end := scroll.get_h_scroll_bar().max_value - scroll.get_h_scroll_bar().page
+	var target := end if direction > 0 else 0.0
+	if direction > 0:
+		for edge: float in edges:
+			if edge > here + 1.0:
+				target = minf(edge, end)
+				break
+	else:
+		for i in range(edges.size() - 1, -1, -1):
+			if edges[i] < here - 1.0:
+				target = edges[i]
+				break
+	scroll.scroll_horizontal = int(target)
+
+
+func add(dish: Dish, number: int, world: World2D, dish_bit: int) -> void:
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(THUMB, THUMB)
 	viewport.world_2d = world
@@ -36,6 +88,7 @@ func add(dish: Dish, number: int, world: World2D) -> void:
 	viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	var camera := Camera2D.new()
 	viewport.add_child(camera)
+	viewport.canvas_cull_mask = (1 << dish_bit) | 1  # (its own dish, and layer 0 for the screen node the dish is a child of: an item that is culled takes its children with it)
 	add_child(viewport)
 	var button := Button.new()
 	button.icon = viewport.get_texture()
@@ -116,8 +169,9 @@ func picture_of(dish: Dish) -> Image:
 ## Points the entry's camera at its dish and has the viewport draw one frame.
 func _redraw(entry: Dictionary) -> void:
 	var dish: Dish = entry["dish"]
-	if main_zoomed_in and dish == main_dish:
-		return
+	if main_zoomed_in and dish == main_dish and entry.get("drawn", false):
+		return  # (it keeps the picture it has once it has one)
+	entry["drawn"] = true
 	var camera: Camera2D = entry["camera"]
 	camera.global_position = dish.global_position
 	camera.zoom = Vector2.ONE * (THUMB / (2.0 * dish.radius * MARGIN))
@@ -132,11 +186,18 @@ func _name(entry: Dictionary) -> void:
 	button.tooltip_text = Strings.t("dishes.tip", [entry["number"], bups])
 
 
-## The tabs take the width they need, up to `max_width`.
+## The tabs take the width they need, up to `max_width`; when they do not all fit the arrows come, out of that width.
 func _fit() -> void:
 	if not is_node_ready():
 		return
-	scroll.custom_minimum_size.x = minf(row.get_combined_minimum_size().x, max_width)
+	var needed := row.get_combined_minimum_size().x
+	var overflow := needed > max_width
+	previous_button.visible = overflow
+	next_button.visible = overflow
+	var arrows := 0.0
+	if overflow:
+		arrows = previous_button.get_combined_minimum_size().x + next_button.get_combined_minimum_size().x + 2.0 * float($Bar.get_theme_constant("separation"))
+	scroll.custom_minimum_size.x = maxf(minf(needed, max_width - arrows), 24.0)
 
 
 ## The width all the tabs together would need.

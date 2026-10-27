@@ -1,9 +1,10 @@
-class_name WatchPanel
-extends PanelContainer
+class_name WatchList
+extends VBoxContainer
 ## The bups the player is watching (see Dish.watch_bup), in a scrolling list, youngest bup first and oldest last: each with its colour and its name
 ## (grey once it has died). Clicking one asks for it to be opened in the inspect panel (`bup_chosen`); the cross at
-## its end takes it off the list. Shown only while there is something on the list. The list is rebuilt when it changes, and
-## otherwise only the names and who is alive are looked at again, twice a second.
+## its end takes it off the list. It says "nothing yet" while the list is empty. The list is rebuilt when it changes, and otherwise only the names and who is
+## alive are looked at again, twice a second. This is only what is inside the tray's "Watching" section: the section itself is a plain TraySection of the screen's scene,
+## the same as every other (it holds this as its content, so nothing here can make it differ from them).
 
 const CLOSE_ICON := preload("res://icons/close.svg")
 
@@ -12,9 +13,9 @@ signal bup_chosen(dish: Dish, id: int)
 const LOOK_AGAIN_MSEC := 500
 const SCROLL_MAX_HEIGHT := 150.0  ## the most the list takes before it scrolls
 
-@onready var title: Label = $Box/Title
-@onready var scroll: ScrollContainer = $Box/Scroll
-@onready var entries: VBoxContainer = $Box/Scroll/Entries
+@onready var scroll: ScrollContainer = $Scroll
+@onready var entries: VBoxContainer = $Scroll/Entries
+@onready var empty_note: Label = $Empty  ## what it says while nothing is watched
 
 var numbers := {}  ## Dish -> its number (the screen's own record, shared)
 var dishes: Array[Dish] = []  ## every dish: the list is one for all of them (a bup the pipette moved is followed to its new dish)
@@ -24,15 +25,16 @@ var _looked_msec := 0
 var _buttons := {}  ## [dish, bup id] -> its button, for the second look
 
 
-## Called every frame by the screen that shows the panel.
+## Called every frame by the screen that shows the list.
 func refresh() -> void:
 	var count := 0
 	var version := str(dishes.size())
 	for d in dishes:
 		count += d.watched.size()
 		version += ":%d" % d.watch_version
-	visible = count > 0
-	if not visible:
+	empty_note.visible = count == 0  # (it says so when there is nothing in it)
+	scroll.visible = count > 0
+	if count == 0:
 		_version = ""  # (so it is built afresh when it next has something)
 		return
 	var now := Time.get_ticks_msec()
@@ -52,7 +54,6 @@ func _rebuild() -> void:
 		entries.remove_child(child)
 		child.queue_free()
 	_buttons.clear()
-	title.text = Strings.t("watch.title")
 	_entries_list = []
 	for d in dishes:
 		for id in d.watched:
@@ -63,9 +64,9 @@ func _rebuild() -> void:
 		var id: int = pair[1]
 		var row := HBoxContainer.new()
 		row.theme_type_variation = &"TightRow"
-		var swatch := ColorRect.new()  # the bup's colour, so a clade can be followed by eye
-		swatch.color = Genome.color_of(d.lineage_info(id))
-		swatch.custom_minimum_size = Vector2(10.0, 10.0)
+		var swatch := BupPicture.new()  # the bup itself, in its colour, so a clade can be followed by eye
+		swatch.show_info(d.lineage_info(id))
+		swatch.custom_minimum_size = Vector2(12.0, 12.0)
 		swatch.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		row.add_child(swatch)
 		var entry := Button.new()
@@ -87,7 +88,6 @@ func _rebuild() -> void:
 		entries.add_child(row)
 		_buttons[[d, id]] = entry
 	scroll.custom_minimum_size.y = clampf(entries.get_combined_minimum_size().y + 4.0, 24.0, SCROLL_MAX_HEIGHT)  # (as tall as its entries, up to this)
-	reset_size.call_deferred()
 
 
 ## A bup that has died keeps its place on the list, with its name in grey. With several dishes each entry says which dish its bup is in.

@@ -5,6 +5,7 @@
 [ext_resource type="Texture2D" path="res://icons/pick_source.svg" id="sources_icon"]
 [ext_resource type="Texture2D" path="res://icons/pick_plankton.svg" id="plankton_icon"]
 [ext_resource type="Texture2D" path="res://icons/pick_bup.svg" id="bups_icon"]
+[ext_resource type="Texture2D" path="res://icons/pick_husks.svg" id="husks_icon"]
 [ext_resource type="Texture2D" path="res://icons/layer_steering.svg" id="steering_icon"]
 
 [node name="LayersPanel" type="PanelContainer"]
@@ -34,6 +35,13 @@ layout_mode = 2
 custom_minimum_size = Vector2(36, 28)
 theme_type_variation = &"ToggleButton"
 icon = ExtResource("plankton_icon")
+icon_alignment = 1
+
+[node name="HusksButton" type="Button" parent="Row"]
+layout_mode = 2
+custom_minimum_size = Vector2(36, 28)
+theme_type_variation = &"ToggleButton"
+icon = ExtResource("husks_icon")
 icon_alignment = 1
 
 [node name="BupsButton" type="Button" parent="Row"]

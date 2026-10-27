@@ -22,3 +22,19 @@ static func select_all_unless_clicked(edit: LineEdit) -> void:
 	edit.focus_entered.connect(func() -> void:
 		if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 			edit.select_all.call_deferred())  # (after anything else that changes the text as the focus arrives)
+
+
+## Whether the event is a turn of a wheel or a scroll of a trackpad.
+static func is_scroll(event: InputEvent) -> bool:
+	if event is InputEventPanGesture:
+		return true
+	return event is InputEventMouseButton and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN, MOUSE_BUTTON_WHEEL_LEFT, MOUSE_BUTTON_WHEEL_RIGHT]
+
+
+## Whether a scroll container inside `outer`, under the point, has more than it shows (one that fits everything has nothing to scroll, so the wheel may go on to `outer`).
+static func holds_scrollable_at(outer: ScrollContainer, point: Vector2) -> bool:
+	for inner: Node in outer.find_children("*", "ScrollContainer", true, false):
+		var scroll := inner as ScrollContainer
+		if scroll.is_visible_in_tree() and scroll.get_global_rect().has_point(point) and (scroll.get_v_scroll_bar().max_value > scroll.get_v_scroll_bar().page or scroll.get_h_scroll_bar().max_value > scroll.get_h_scroll_bar().page):
+			return true
+	return false

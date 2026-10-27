@@ -213,7 +213,7 @@ func _init() -> void:
 	check(m.dish.selected_id == bup, "info click selects the bup")
 	await process_frame
 	await process_frame  # process_frame fires before nodes' _process, so allow a full frame
-	check(not m.name_row.swatch.visible, "a living bup, which can be seen in the dish, has no colour square")
+	check(m.name_row.swatch.visible and m.name_row.swatch.color.is_equal_approx(Genome.color_of(m.dish.lineage_info(bup))), "a living bup has its picture, in its colour, by its name")
 	check(m.info_panel.visible and m.name_row.visible and m.name_row.name_label.text.contains("bup #") and m.info_text.get_parsed_text().contains("divisions"), "info panel shows the selected bup, named with its number ('%s')" % m.name_row.name_label.text)
 	_click(m, centre + Vector2(-250, -250))
 	check(m.dish.selected_id == -1, "clicking empty space deselects")
@@ -226,7 +226,7 @@ func _init() -> void:
 	await process_frame
 	await process_frame
 	check(m.dish.selected_id == bup and m.info_panel.visible and m.info_panel.theme_type_variation == &"DeceasedPanel" and m.info_text.get_parsed_text().contains("DECEASED") and m.info_text.get_parsed_text().contains("died") and not m.follow_button.visible, "when the selected bup dies its panel stays, as a deceased one (grey, status, time of death)")
-	check(m.name_row.swatch.visible and m.name_row.swatch.color.is_equal_approx(Genome.color_of(m.dish.lineage_info(bup))), "a deceased bup shows a small square in its colour by its name, since it can't be seen in the dish")
+	check(m.name_row.swatch.visible and m.name_row.swatch.color.is_equal_approx(Genome.color_of(m.dish.lineage_info(bup))) and is_equal_approx(m.name_row.swatch.length_um, BupPicture.body_length(m.dish.lineage_info(bup))), "a deceased bup keeps the picture it had in life, in its colour and its shape")
 	await _key(KEY_ESCAPE)
 	check(m.dish.selected_id == -1 and not m.info_panel.visible and not m.dish.has_record(bup), "Escape closes it, and the dead bup's record is dropped with nothing left to need it")
 	m.camera.position = m.dish.global_position
@@ -596,9 +596,19 @@ func _init() -> void:
 	m.lineage_button.pressed.emit()
 	await process_frame
 	await process_frame
-	var swatch_mother: ColorRect = m.lineage_entries.get_child(1).get_child(0)
-	var swatch_grandmother: ColorRect = m.lineage_entries.get_child(0).get_child(0)
+	var swatch_mother: BupPicture = m.lineage_entries.get_child(1).get_child(0)
+	var swatch_grandmother: BupPicture = m.lineage_entries.get_child(0).get_child(0)
 	check(swatch_mother.color.is_equal_approx(Genome.color_of(m.dish.lineage_info(mother))) and swatch_grandmother.color.is_equal_approx(Genome.color_of(m.dish.lineage_info(grandmother))), "each line of the lineage has a small square in that bup's colour")
+	var small := BupPicture.new()
+	small.size = Vector2(14.0, 14.0)
+	small.length_um = 2.0
+	var tall := BupPicture.new()
+	tall.size = Vector2(14.0, 14.0)
+	tall.length_um = 8.0
+	var take_up := func(shape: Vector2) -> float: return (shape.x - shape.y) / sqrt(2.0) + shape.y
+	check(absf(take_up.call(small.shape_pixels()) - 14.0) < 0.01 and absf(take_up.call(tall.shape_pixels()) - 14.0) < 0.01 and tall.shape_pixels().y < small.shape_pixels().y and tall.shape_pixels().y >= BupPicture.MIN_WIDTH_PIXELS, "a bup's picture lies on the diagonal and fills its square, and a longer bup is drawn thinner (%s and %s)" % [small.shape_pixels(), tall.shape_pixels()])
+	small.free()
+	tall.free()
 	check(m.lineage_entries.get_child(0).get_child(1).text.begins_with(m.dish.bup_name(grandmother)), "entries use the bups' names ('%s')" % m.lineage_entries.get_child(0).get_child(1).text)
 	await _drag(m, centre, Vector2(30, 0), MOUSE_BUTTON_MIDDLE)
 	check(m.lineage_panel.visible and m._stack.size() == 2, "panning leaves the lineage as it is")
@@ -661,34 +671,34 @@ func _init() -> void:
 
 	# --- Watching: a Watch button in the inspect panel, a list above the graph, a click on an entry opens the bup.
 	var watched_one: int = m.dish.add_bup(m.dish.global_position + Vector2(20, 20), Genome.founder(), 100.0)
-	check(not m.watch_panel.visible, "no watch list is shown while nothing is watched")
+	check(m.watch_section.visible and m.watch_list.empty_note.visible and m.watch_list.empty_note.text == "Nothing yet" and not m.watch_list.scroll.visible, "the watch list is always there, and says so while nothing is watched")
 	m.dish.selected_id = watched_one
 	await process_frame
 	await process_frame
 	check(m.watch_button.visible and m.watch_button.tooltip_text == "Watch (O)" and m.watch_button.icon == m.WATCH_ICON, "a selected bup has a Watch icon, an eye")
 	m.watch_button.pressed.emit()
 	m._process(0.0)
-	check(m.dish.is_watched(watched_one) and m.watch_panel.visible and m.watch_button.tooltip_text == "Stop watching (O)" and m.watch_panel.title.text == "Watching" and m.watch_button.icon == m.UNWATCH_ICON, "pressing it puts the bup on the list, which appears, and the eye is crossed out to offer taking it off again")
+	check(m.dish.is_watched(watched_one) and m.watch_list.scroll.visible and not m.watch_list.empty_note.visible and m.watch_button.tooltip_text == "Stop watching (O)" and m.watch_section.header.text == "Watching" and m.watch_button.icon == m.UNWATCH_ICON, "pressing it puts the bup on the list, which appears, and the eye is crossed out to offer taking it off again")
 	m.dish.selected_id = -1
 	m.dish.remove_bup(watched_one)
 	await process_frame
 	m._process(0.0)
 	await create_timer(0.6).timeout
 	m._process(0.0)
-	check(m.dish.has_record(watched_one) and m.watch_panel._buttons[[m.dish, watched_one]].theme_type_variation == &"DeceasedListButton" and m.watch_panel._buttons[[m.dish, watched_one]].text == m.dish.bup_name(watched_one), "a watched bup that dies stays on the list, its name in grey with no extra text ('%s')" % m.watch_panel._buttons[[m.dish, watched_one]].text)
-	m.watch_panel._buttons[[m.dish, watched_one]].pressed.emit()
+	check(m.dish.has_record(watched_one) and m.watch_list._buttons[[m.dish, watched_one]].theme_type_variation == &"DeceasedListButton" and m.watch_list._buttons[[m.dish, watched_one]].text == m.dish.bup_name(watched_one), "a watched bup that dies stays on the list, its name in grey with no extra text ('%s')" % m.watch_list._buttons[[m.dish, watched_one]].text)
+	m.watch_list._buttons[[m.dish, watched_one]].pressed.emit()
 	await process_frame
 	await process_frame
 	check(m.dish.selected_id == watched_one and m.info_panel.visible and m.info_panel.theme_type_variation == &"DeceasedPanel", "clicking its entry opens it in the inspect panel, as a deceased bup")
 	m.watch_button.pressed.emit()
 	m._process(0.0)
-	check(not m.dish.is_watched(watched_one) and not m.watch_panel.visible, "pressing the button again takes it off the list, which goes away when empty")
+	check(not m.dish.is_watched(watched_one) and m.watch_list.empty_note.visible, "pressing the button again takes it off the list, which goes away when empty")
 	var older: int = m.dish.add_bup(m.dish.global_position + Vector2(30, 20), Genome.founder(), 100.0)
 	var younger: int = m.dish.add_bup(m.dish.global_position + Vector2(40, 20), Genome.founder(), 100.0)
 	m.dish.watch_bup(younger)
 	m.dish.watch_bup(older)  # (watched last, so the newest on the list, but the older bup)
 	m._process(0.0)
-	var listed: Array = m.watch_panel.entries.get_children().map(func(row: Node) -> String: return row.get_child(1).text)
+	var listed: Array = m.watch_list.entries.get_children().map(func(row: Node) -> String: return row.get_child(1).text)
 	check(listed == [m.dish.bup_name(younger), m.dish.bup_name(older)], "the watch list runs from the youngest bup at the top to the oldest at the bottom, whatever order they were watched in (%s)" % [listed])
 	m.dish.unwatch_bup(older)
 	m.dish.unwatch_bup(younger)
@@ -963,10 +973,10 @@ func _init() -> void:
 	g.tracker.index = 0
 	g._sync_tool_locks()
 	check(g.tool == Toolbar.Tool.SELECT, "locking the selected tool falls back to select")
-	# The layers panel: five toggles, all lit at first; hiding a layer stops it being drawn and pointed at.
+	# The layers panel: six toggles, all lit at first; hiding a layer stops it being drawn and pointed at.
 	var layers: LayersPanel = g.layers_panel
-	check(layers.row.get_child_count() == 5 and layers.medium_button.button_pressed and layers.steering_button.button_pressed, "the layers panel has five toggles, all lit at first")
-	check(layers.bups_button.tooltip_text == "Bups (V)" and layers.medium_button.tooltip_text == "Nutrient haze (Z)", "each layer's tip names it and its key")
+	check(layers.row.get_child_count() == 6 and layers.medium_button.button_pressed and layers.husks_button.button_pressed and layers.steering_button.button_pressed, "the layers panel has six toggles, all lit at first")
+	check(layers.bups_button.tooltip_text == "Bups (V)" and layers.medium_button.tooltip_text == "Nutrient haze (Z)" and layers.husks_button.tooltip_text == "Husks (M)", "each layer's tip names it and its key")
 	g.camera.zoom = Vector2.ONE  # (picking a plankton depends on how big it is on the screen)
 	g.dish.clear_selection()
 	g.dish.place_plankton(g.dish.global_position + Vector2(100, 100))

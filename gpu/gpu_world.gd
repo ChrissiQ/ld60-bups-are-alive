@@ -20,8 +20,8 @@ extends RefCounted
 ## _take_unapplied_events). On a local device (tools) a request is submitted and waited for at once, and its results are read at once.
 ##
 ## Layouts (32-bit words; the GLSL is in gpu/kernels.gd, the constants GpuKernels.Q_*, OUT_*):
-## - Lineage events (BupSim.apply_events): a birth is 16 words: id lo, id hi, parent lo, parent hi, step, divisions, mutations (uints),
-##   speed, sense, metabolism, size_gene, hue, sat, val, harm (floats), 0; a death is 8 words: id lo, id hi, step, divisions (uints),
+## - Lineage events (BupSim.apply_events): a birth is 16 words: id lo, id hi, parent lo, parent hi, step, divisions, mutations (uints: the low 20 bits, with the reach word in bits 20-29 and the F factor in bit 30),
+##   speed, sense, metabolism, size_gene, hue, sat, val, harm (floats), 0; a death is 8 words: id lo, id hi, step, divisions (uints: the low 20 bits, with the reach word in bits 20-29 and the F factor in bit 30),
 ##   mass (float), 0, 0, 0. `step` is the step's place in the batch. Made by the `events` kernel after `finalize` and before `compact`,
 ##   in bup-index order, into event set seq % GpuSim.EVENT_SETS (buffers EVB, EVD: room for P[78] = GpuSim.event_capacity of each per
 ##   set); counters CNT[8..11] (gpu/kernels.gd).

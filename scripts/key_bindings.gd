@@ -14,7 +14,7 @@ const DEFAULTS := {
 	"tool_select": KEY_I, "tool_pan": KEY_H, "tool_nutrient": KEY_N, "tool_source": KEY_F, "tool_erase": KEY_E, "tool_plankton": KEY_P, "tool_pipette": KEY_Q,
 	"zoom_out": KEY_MINUS, "zoom_in": KEY_EQUAL, "frame": KEY_HOME,
 	"pan_up": KEY_W, "pan_left": KEY_A, "pan_down": KEY_S, "pan_right": KEY_D,
-	"layer_medium": KEY_Z, "layer_sources": KEY_X, "layer_plankton": KEY_C, "layer_bups": KEY_V, "layer_steering": KEY_B,
+	"layer_medium": KEY_Z, "layer_sources": KEY_X, "layer_plankton": KEY_C, "layer_husks": KEY_M, "layer_bups": KEY_V, "layer_steering": KEY_B,
 	"graph_trait": KEY_T, "graph_span": KEY_G, "graph_show": KEY_Y, "details": KEY_TAB,
 	"follow": KEY_R, "watch": KEY_O, "lineage": KEY_L,
 }

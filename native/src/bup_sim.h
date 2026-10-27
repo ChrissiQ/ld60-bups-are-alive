@@ -105,6 +105,8 @@ class BupSim : public RefCounted {
 		float hue = 0, sat = 0, val = 0, harm = 0;
 		float mutator = 1;
 		float max_energy = 0; // the reserve it could hold, as it was when it died
+		int reach = 0; // its raised ceilings and its acetate key (`Bup::reach`), as it was born, and as it was when it died (a conjugation can change them in between)
+		bool donor = false; // whether it carried the F factor, the same way
 		String name; // what the player called it, if anything: it lives and goes with the record
 		bool alive = true;
 	};
@@ -128,7 +130,7 @@ class BupSim : public RefCounted {
 	int now_minutes() const { return (int)(now_seconds / 60.0); }
 	void make_record(const Bup &b, int64_t parent);
 	void finish_lineage_import(const PackedInt64Array &pinned); // after the records of a save are in: counts, pins and pruning
-	static constexpr int LINEAGE_BYTES = 72;
+	static constexpr int LINEAGE_BYTES = 76;
 	void record_death(const Bup &b);
 	void free_if_unused(int64_t id);
 	Dictionary record_info(int64_t id, const Record &r) const;
@@ -251,6 +253,7 @@ public:
 	int husk_count() const { return (int)husks.size(); }
 	PackedFloat64Array husks_export() const; // 5 numbers each: x, y, energy, age, the next piece
 	PackedFloat64Array husk_near(const Vector2 &at, double radius) const; // the nearest husk within radius of a point, as husks_export gives one (5 numbers); empty if none
+	PackedFloat32Array husk_buffer(double size, int capacity) const; // every husk as one instance of a 2D multimesh, `size` µm square (8 floats each: the transform's two rows), padded with empty instances to `capacity`
 	void husks_import(const PackedFloat64Array &saved);
 	PackedFloat32Array export_state() const; // every bup, 24 floats each (see the order in the .cpp; the id as a float): for the GPU tools' comparisons
 	// The bups and the GPU simulation (gpu/gpu_world.gd), which keeps the bups on the GPU and the family records here:
