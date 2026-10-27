@@ -38,10 +38,11 @@ void main() {
 	if (SURV[i] == 0u) {
 		uint slot = CNT[9] + (i - EXCS[i]);  // (the bups not kept before this one)
 		if (slot < cap) {
-			uint o = (base + slot) * 8u;
+			uint o = (base + slot) * 10u;
 			EVD[o] = BUPS_U[b]; EVD[o + 1u] = BUPS_U[b + 21u]; EVD[o + 2u] = st; EVD[o + 3u] = (uint(uintBitsToFloat(BUPS_U[b + 20u])) & 0xFFFFFu) | ((uint(uintBitsToFloat(BUPS_U[b + 12u]) + 0.5) & 0x3FFu) << 20u) | (uintBitsToFloat(BUPS_U[b + 14u]) > 0.5 ? (1u << 30u) : 0u);
 			EVD[o + 4u] = BUPS_U[b + 6u]; EVD[o + 5u] = BUPS_U[b + 1u]; EVD[o + 6u] = BUPS_U[b + 2u];
 			EVD[o + 7u] = uintBitsToFloat(BUPS_U[b + 23u]) == -2.0 ? floatBitsToUint(P[8] * uintBitsToFloat(BUPS_U[b + 6u])) : 0u;  // (where it died and what it gives back: 0 for a trimmed one)
+			EVD[o + 8u] = BUPS_U[b + 5u]; EVD[o + 9u] = BUPS_U[b + 7u];  // (its own energy, and the mass it was born with)
 		} else atomicAdd(CNT[11], 1u);
 	}
 }

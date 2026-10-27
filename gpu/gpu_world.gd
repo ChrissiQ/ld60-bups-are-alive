@@ -21,8 +21,8 @@ extends RefCounted
 ##
 ## Layouts (32-bit words; the GLSL is in gpu/kernels.gd, the constants GpuKernels.Q_*, OUT_*):
 ## - Lineage events (BupSim.apply_events): a birth is 16 words: id lo, id hi, parent lo, parent hi, step, divisions, mutations (uints: the low 20 bits, with the reach word in bits 20-29 and the F factor in bit 30),
-##   speed, sense, metabolism, size_gene, hue, sat, val, harm (floats), 0; a death is 8 words: id lo, id hi, step, divisions (uints: the low 20 bits, with the reach word in bits 20-29 and the F factor in bit 30),
-##   mass (float), 0, 0, 0. `step` is the step's place in the batch. Made by the `events` kernel after `finalize` and before `compact`,
+##   speed, sense, metabolism, size_gene, hue, sat, val, harm (floats), 0; a death is 10 words: id lo, id hi, step, divisions (uints: the low 20 bits, with the reach word in bits 20-29 and the F factor in bit 30),
+##   mass (float), x, y, what it gives back, its energy and its birth mass (floats). `step` is the step's place in the batch. Made by the `events` kernel after `finalize` and before `compact`,
 ##   in bup-index order, into event set seq % GpuSim.EVENT_SETS (buffers EVB, EVD: room for P[78] = GpuSim.event_capacity of each per
 ##   set); counters CNT[8..11] (gpu/kernels.gd).
 ## - Questions QIN: 0 pick asked, 1-2 the point, 3 slack, 4 µm per pixel; 5 nearest points asked (up to 4), 6 + 3s: x, y, near;
@@ -785,7 +785,7 @@ func _record(request: Dictionary) -> void:
 		if read[2] > 0:
 			_read(gpu.buffer("EVB"), base * 64, read[2] * 64, ["births", rid, seq, epoch])
 		if read[3] > 0:
-			_read(gpu.buffer("EVD"), base * 32, read[3] * 32, ["deaths", rid, seq, epoch])
+			_read(gpu.buffer("EVD"), base * 40, read[3] * 40, ["deaths", rid, seq, epoch])
 	var plan: Dictionary = request.get("plan", {})
 	var steps: int = plan.get("steps", 0)
 	if steps > 0:
@@ -850,7 +850,7 @@ func _read_batches_now(sets: Dictionary, got: Dictionary) -> void:
 		got[seq] = {
 			"head": head,
 			"births": rd.buffer_get_data(gpu.buffer("EVB"), base * 64, births * 64) if births > 0 else PackedByteArray(),
-			"deaths": rd.buffer_get_data(gpu.buffer("EVD"), base * 32, deaths * 32) if deaths > 0 else PackedByteArray(),
+			"deaths": rd.buffer_get_data(gpu.buffer("EVD"), base * 40, deaths * 40) if deaths > 0 else PackedByteArray(),
 		}
 
 

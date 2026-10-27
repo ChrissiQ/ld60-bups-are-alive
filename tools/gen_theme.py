@@ -212,6 +212,7 @@ res.append('default_font_size = 15')
 # --- roles (type scale: 12 caption, 14 note/field, 15 body, 18 title, 22 heading, 56 display)
 T("Label",colors={"font_color":TEXT})
 T("Bright","Label",colors={"font_color":TEXT},fonts={"font":REG})
+T("BrightFlash","Label",colors={"font_color":ACCENT_HI},fonts={"font":REG})  # the first number of a readout while it has just changed (see UiText.numbers)
 T("CardTitle","Label",colors={"font_color":WARM},sizes={"font_size":20},fonts={"font":LIGHT})
 T("CardText","Label",colors={"font_color":TEXT},sizes={"font_size":15},fonts={"font":LIGHT},consts={"line_spacing":3})
 T("FocusLabel","Label",colors={"font_color":ACCENT})
@@ -337,6 +338,9 @@ T("AcceptDialog",consts={"buttons_min_width":96,"buttons_separation":12},sizes={
 T("ConfirmationDialog",consts={"buttons_min_width":96,"buttons_separation":12},sizes={"title_font_size":20},styles={"panel":"dialog_panel"})
 T("Window",consts={"close_h_offset":24,"close_v_offset":34,"title_height":60},sizes={"title_font_size":20},styles={"embedded_border":"embedded_border","embedded_unfocused_border":"embedded_unfocused_border"})
 # graph
+T("GaugeBar",colors={"track":(1,1,1,0.07),"band":(1,1,1,0.13),"tick":(1,1,1,0.9),"fill":ACCENT,"limited":WARM,"starving":DANGER,"dead":FAINT})  # the bars of a bup's panel (ui/gauge_bar.gd)
+T("StatLimited","Label",colors={"font_color":WARM},sizes={"font_size":13},fonts={"font":"m500"})  # a bup's reserve word while it is food-limited (ui/bup_gauges.gd)
+T("StatStarving","Label",colors={"font_color":DANGER},sizes={"font_size":13},fonts={"font":"m500"})  # ... and while it is starving
 T("StatLeader",colors={"line":(1,1,1,0.16)})  # the dotted line between a stat's name and its value (ui/stat_leader.gd)
 T("GenomeSlot",colors={"track":(1,1,1,0.07),"symbol":(0.05,0.07,0.08,0.92),"symbol_dim":(1,1,1,0.4)},sizes={"font_size":12},fonts={"font":"m500"})  # the chromosome map's slots (ui/genome_slot.gd)
 T("GenomeGrid","GridContainer",consts={"h_separation":10,"v_separation":0})

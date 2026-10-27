@@ -73,6 +73,11 @@ func _compare(label: String) -> void:
 			dead += 1
 			dead_donors += 1 if record["donor"] else 0
 			dead_raised += 1 if int(record["reach"]) > 0 else 0
+	var bad_dead := 0
+	for record: Dictionary in dish.sim.lineage_export():
+		if not record["alive"] and (float(record["mass"]) <= 0.0 or float(record["birth_mass"]) <= 0.0 or float(record["energy"]) < 0.0 or float(record["div_mass"]) <= float(record["birth_mass"])):
+			bad_dead += 1
+	_check(bad_dead == 0, "%s: every dead record has the mass, reserve and birth mass its death event carried (%d without, of %d)" % [label, bad_dead, dead])
 	print("%s: %d dead records, %d with the F factor, %d with a raised ceiling or key" % [label, dead, dead_donors, dead_raised])
 	var alive := dish.sim.alive_ids()
 	_check(missing == 0, "%s: every one of the GPU's %d bups has a living record (%d without)" % [label, count, missing])

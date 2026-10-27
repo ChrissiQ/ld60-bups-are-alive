@@ -2,6 +2,7 @@
 
 [ext_resource type="Script" uid="uid://bwiph5otaglgj" path="res://scripts/main.gd" id="1"]
 [ext_resource type="PackedScene" path="res://ui/genome_ribbon.tscn" id="genome_ribbon"]
+[ext_resource type="Script" path="res://ui/bup_gauges.gd" id="bup_gauges"]
 [ext_resource type="Script" uid="uid://fg5kxl7qvimr" path="res://scripts/dish.gd" id="2"]
 [ext_resource type="Script" uid="uid://cuvljn38b57td" path="res://scripts/graph.gd" id="3"]
 [ext_resource type="Script" path="res://scripts/toolbar.gd" id="4"]
@@ -542,6 +543,13 @@ tooltip_text = "@hud.lineage_tip"
 icon = ExtResource("lineage_icon")
 icon_alignment = 1
 
+[node name="InfoGauges" type="VBoxContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/InfoPanel/Box"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+mouse_filter = 2
+script = ExtResource("bup_gauges")
+
 [node name="InfoText" type="RichTextLabel" parent="HUD/Frame/Layout/Middle/Side/Stack/InfoPanel/Box"]
 unique_name_in_owner = true
 theme_type_variation = &"ReadoutMuted"
@@ -804,6 +812,13 @@ bbcode_enabled = true
 fit_content = true
 scroll_active = false
 autowrap_mode = 3
+
+[node name="HoverGauges" type="VBoxContainer" parent="HUD/HoverCard/Box"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+mouse_filter = 2
+script = ExtResource("bup_gauges")
 
 [node name="HoverGenome" parent="HUD/HoverCard/Box" instance=ExtResource("genome_ribbon")]
 unique_name_in_owner = true

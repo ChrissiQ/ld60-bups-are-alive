@@ -53,7 +53,7 @@ const MAX_STEP := 20.0  ## the longest single step, in seconds: growth, uptake a
 const HUSK_PIXELS := 3.0  ## a husk's dot on screen
 const HUSK_REFRESH_MSEC := 100  ## how often the husks' picture is rebuilt while time moves
 const HUSK_MIN_CAPACITY := 1024  ## the husk picture holds room for at least this many (it grows by doubling)
-const HUSK_COLOR := Color(0.85, 0.6, 0.3, 0.8)
+const HUSK_COLOR := Color(0.4, 0.29, 0.19, 0.75)
 const RING_PIXELS := 12.0  ## the radius of a selection or hover ring, in screen pixels
 const RING_GROW_ABOVE := 0.5  ## the ring only grows once its subject is more than this share of the ring's diameter ...
 const RING_GROW_TO := 0.25  ## ... and then to the size where the subject is this share of it
@@ -705,10 +705,12 @@ func rename_bup(id: int, text: String) -> void:
 	sim.set_custom_name(id, BupNames.clean(text))  # (an empty name takes the name away)
 
 
-## Everything known about a bup, alive or dead, as BupSim.lineage_info (empty once its record is dropped).
+## Everything known about a bup, alive or dead, as BupSim.lineage_info (empty once its record is dropped), with a living bup's present figures from the GPU when it runs there.
 ## Dead bups keep a record while a living bup descends from them or something is pinning them.
 func lineage_info(id: int) -> Dictionary:
 	var info := sim.lineage_info(id)
+	if not info.is_empty() and info["alive"] and gpu_world != null and gpu_active:
+		info.merge(gpu_world.bup_info(id), true)  # (a bup on the GPU: the simulation here has only its record, which does not hold its size and reserve now)
 	if moved_out.has(id):
 		info["moved_to"] = moved_out[id]
 	return info

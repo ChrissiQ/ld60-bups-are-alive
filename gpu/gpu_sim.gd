@@ -260,7 +260,7 @@ func load_state(cells_across: int, cell_spacing: float, dish_radius: float, conc
 	_buf("WANTC", _zeros(capacity * 4))
 	# the game's side (gpu/gpu_world.gd): events, the frame's questions and answers, stats, the eraser, the field's copy
 	_buf("EVB", _zeros(EVENT_SETS * event_capacity * 16 * 4))
-	_buf("EVD", _zeros(EVENT_SETS * event_capacity * 8 * 4))
+	_buf("EVD", _zeros(EVENT_SETS * event_capacity * 10 * 4))
 	_buf("EVN", _zeros(EVENT_SETS * 2 * 4))
 	_buf("QIN", _zeros(64 * 4))
 	_buf("OUT", _zeros(GpuKernels.OUT_WORDS * 4))

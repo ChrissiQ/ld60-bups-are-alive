@@ -10,7 +10,7 @@ extends RefCounted
 const CATEGORIES := [
 	["genome", ["chromosome", "allele", "speed", "sense", "metabolism", "size", "mutator", "donor", "key", "ceilings"]],
 	["evolution", ["mutation", "harm", "selection", "conjugation", "generation", "founders"]],
-	["bups", ["energy", "steering"]],
+	["bups", ["mass", "energy", "steering"]],
 	["dish", ["nutrient", "acetate", "sources", "plankton", "husks"]],
 ]
 

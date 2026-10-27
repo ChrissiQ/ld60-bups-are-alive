@@ -36,7 +36,7 @@ double fposmod1(double v) {
 
 // The words of the GPU's records and events (little-endian 32-bit words, as the GPU writes them).
 const float NO_PICTURE = 3e38f; // px, py of a record with no last picture (any value from 1e30 up means the same)
-const int BIRTH_WORDS = 16, DEATH_WORDS = 8;
+const int BIRTH_WORDS = 16, DEATH_WORDS = 10;
 void put_u32(uint8_t *record, int word, uint32_t v) { memcpy(record + word * 4, &v, 4); }
 void put_f32(uint8_t *record, int word, float v) { memcpy(record + word * 4, &v, 4); }
 uint32_t get_u32(const uint8_t *record, int word) {
@@ -470,6 +470,9 @@ void BupSim::record_death(const Bup &b) {
 	r.max_energy = (float)max_energy(b);
 	r.reach = b.reach; // (what it was when it died: a conjugation can have changed them since it was born)
 	r.donor = b.donor;
+	r.mass = b.mass;
+	r.energy = b.energy;
+	r.birth_mass = b.birth_mass;
 	free_if_unused(b.id);
 }
 
@@ -528,6 +531,10 @@ Dictionary BupSim::record_info(int64_t id, const Record &r) const {
 	out["max_energy"] = r.max_energy;
 	out["reach"] = r.reach;
 	out["donor"] = r.donor;
+	out["mass"] = r.mass;
+	out["energy"] = r.energy;
+	out["birth_mass"] = r.birth_mass;
+	out["div_mass"] = r.birth_mass + (float)(G.add_mass_factor * (double)r.genes[3] * (double)r.genes[3]);  // (the mass it divides at: what it was born with and what it adds)
 	out["name"] = r.name;
 	return out;
 }
@@ -543,6 +550,10 @@ Dictionary BupSim::lineage_info(int64_t id) const {
 	if (i >= 0) { // alive: the figures that change as it lives are the current ones
 		out["divisions"] = bups[i].divisions;
 		out["max_energy"] = max_energy(bups[i]);
+		out["mass"] = bups[i].mass;
+		out["energy"] = bups[i].energy;
+		out["birth_mass"] = bups[i].birth_mass;
+		out["div_mass"] = bups[i].birth_mass + bups[i].add_mass;
 	}
 	return out;
 }
@@ -606,6 +617,9 @@ void BupSim::lineage_import(const Array &saved, const PackedInt64Array &pinned) 
 		r.max_energy = (float)(double)d.get("max_energy", 0.0);
 		r.reach = (int)(double)d.get("reach", 0.0);
 		r.donor = (bool)d.get("donor", false);
+		r.mass = (float)(double)d.get("mass", 0.0);
+		r.energy = (float)(double)d.get("energy", 0.0);
+		r.birth_mass = (float)(double)d.get("birth_mass", 0.0);
 		r.name = d.get("name", String());
 		r.alive = living.count(id) > 0;
 		if (r.alive) {
@@ -691,6 +705,9 @@ PackedByteArray BupSim::lineage_export_bytes() const {
 		put<float>(at, r.mutator);
 		put<float>(at, r.max_energy);
 		put<uint32_t>(at, (uint32_t)r.reach | (r.donor ? 1u << 31 : 0u));
+		put<float>(at, r.mass);
+		put<float>(at, r.energy);
+		put<float>(at, r.birth_mass);
 	}
 	put<uint32_t>(at, (uint32_t)names);
 	for (const auto &entry : records) {
@@ -739,6 +756,9 @@ void BupSim::lineage_import_bytes(const PackedByteArray &data, const PackedInt64
 		uint32_t traits = take<uint32_t>(at);
 		r.reach = (int)(traits & 0x7FFFFFFFu);
 		r.donor = (traits >> 31) != 0;
+		r.mass = take<float>(at);
+		r.energy = take<float>(at);
+		r.birth_mass = take<float>(at);
 		r.alive = living.count(id) > 0;
 		if (r.alive) {
 			r.died = -1;
@@ -913,6 +933,7 @@ Dictionary BupSim::info_of(const Bup &b) const {
 	out["born"] = record == records.end() ? 0 : record->second.born;
 	out["mass"] = b.mass;
 	out["birth_mass"] = b.birth_mass;
+	out["div_mass"] = b.birth_mass + b.add_mass;  // (the mass it divides at)
 	out["size"] = size_of(b);
 	out["length"] = b.mass * G.mass_um;
 	out["divisions"] = b.divisions;
@@ -1359,8 +1380,8 @@ Dictionary BupSim::info_from_state(const PackedByteArray &state, int index) cons
 // The family records of a batch of GPU steps (little-endian 32-bit words):
 //   a birth, 16 words: id lo, id hi, parent lo, parent hi, step, divisions, mutations (uints; the low 20 bits, with the bup's reach word in bits 20-29 and its F factor in bit 30), speed, sense, metabolism, size, hue, sat,
 //     val, harm, mutator (floats);
-//   a death, 8 words: id lo, id hi, step, divisions (uint: the low 20 bits, with the bup's reach word in bits 20-29 and its F factor in bit 30), mass, x, y, the nutrient energy it gives back (floats; 0 for one that does not:
-//     a trimmed one). With husks on, the last three make the husk.
+//   a death, 10 words: id lo, id hi, step, divisions (uint: the low 20 bits, with the bup's reach word in bits 20-29 and its F factor in bit 30), mass, x, y, the nutrient energy it gives back (floats; 0 for one that does not:
+//     a trimmed one), then its own energy and the mass it was born with (floats). With husks on, words 5-7 make the husk.
 // `step` is the step's place in the batch (from 0), and step k ended at first_step_end_seconds + k * step_seconds, which is when its
 // records are stamped. Each list is in the order of its steps. Step by step, the births are recorded and then the deaths (a bup never
 // divides and dies in the same step, except one displaced at the limit after dividing, which is held by its daughter either way).
@@ -1368,7 +1389,7 @@ Dictionary BupSim::info_from_state(const PackedByteArray &state, int index) cons
 // kept past every id born.
 void BupSim::apply_events(const PackedByteArray &births, const PackedByteArray &deaths, double first_step_end_seconds, double step_seconds) {
 	ERR_FAIL_COND_MSG(births.size() % (BIRTH_WORDS * 4) != 0, "BupSim.apply_events: births are 64 bytes each");
-	ERR_FAIL_COND_MSG(deaths.size() % (DEATH_WORDS * 4) != 0, "BupSim.apply_events: deaths are 32 bytes each");
+	ERR_FAIL_COND_MSG(deaths.size() % (DEATH_WORDS * 4) != 0, "BupSim.apply_events: deaths are 40 bytes each");
 	const int64_t born_count = births.size() / (BIRTH_WORDS * 4), died_count = deaths.size() / (DEATH_WORDS * 4);
 	const uint8_t *bp = births.ptr(), *dp = deaths.ptr();
 	const double now_before = now_seconds; // (the dish's clock is ahead of the batch: it is put back afterwards)
@@ -1414,6 +1435,8 @@ void BupSim::apply_events(const PackedByteArray &births, const PackedByteArray &
 			b.reach = (int)((traits >> 20) & 0x3FFu);
 			b.donor = ((traits >> 30) & 1u) != 0;
 			b.mass = get_f32(e, 4);
+			b.energy = get_f32(e, 8);
+			b.birth_mass = get_f32(e, 9);
 			record_death(b);
 			if (death_husks && get_f32(e, 7) > 0.0f) {
 				add_husk(get_f32(e, 5), get_f32(e, 6), get_f32(e, 7));

@@ -48,7 +48,7 @@ func _run() -> void:
 	check(panel._buttons["plankton"].visible and not panel._buttons["speed"].visible, "a search hides the entries that do not match")
 	panel.show_entry("speed")
 	check(panel.search_field.text == "" and panel._buttons["speed"].visible, "opening an entry the search hides clears the search")
-	panel.show_entry("energy")
+	panel.show_entry("steering")
 	check(not panel.about_body.visible and panel.game_body.visible and not panel.game_heading.visible, "an entry that is only in the game shows just that part, unlabelled")
 	var how_to := RegEx.create_from_string("(?i)\\b(click|press|drag|scroll|hover|point at)\\b")
 	var mixed := []

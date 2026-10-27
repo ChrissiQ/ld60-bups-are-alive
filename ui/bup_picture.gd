@@ -22,9 +22,13 @@ func show_info(info: Dictionary) -> void:
 	queue_redraw()
 
 
-## How long the bup is, in µm: its reserve at the most it could hold, over what a µm of body holds (the dish draws it by its mass the same way).
+## How long the bup is, in µm: its reserve at the most it could hold, over what a µm of body holds (the dish draws it by its mass the same way). A record that holds no reserve (a
+## living bup that is on the GPU, not looked at) has the length its size gene divides at.
 static func body_length(info: Dictionary) -> float:
-	return maxf(float(info.get("max_energy", 0.0)) / Cell.RESERVE_PER_MASS * Cell.MASS_UM, Biology.WIDTH)
+	var reserve := float(info.get("max_energy", 0.0))
+	if reserve <= 0.0:
+		return maxf(float(info.get("size_gene", Biology.BIRTH_LENGTH)), Biology.WIDTH)
+	return maxf(reserve / Cell.RESERVE_PER_MASS * Cell.MASS_UM, Biology.WIDTH)
 
 
 ## The capsule's length and width on screen, in pixels, for the control's present size: it lies on the diagonal, as long as will fit in the square, and keeps the
@@ -44,10 +48,13 @@ func _draw() -> void:
 	var shape := shape_pixels()
 	var half := shape.y * 0.5
 	var reach := shape.x * 0.5
+	draw_set_transform(size * 0.5, -PI * 0.25)  # (rising to the right)
+	if reach - half < 0.5:
+		draw_circle(Vector2.ZERO, half, color)  # (as wide as it is long: a rod with no straight part is a circle, and a polygon of it would have its points on top of each other)
+		return
 	var points := PackedVector2Array()
 	for step in ARC_STEPS + 1:  # (the round end on the right, from the top down, then the left)
 		points.append(Vector2(reach - half, 0.0) + Vector2.from_angle(-PI * 0.5 + PI * step / ARC_STEPS) * half)
 	for step in ARC_STEPS + 1:
 		points.append(Vector2(half - reach, 0.0) + Vector2.from_angle(PI * 0.5 + PI * step / ARC_STEPS) * half)
-	draw_set_transform(size * 0.5, -PI * 0.25)  # (rising to the right)
 	draw_colored_polygon(points, color)

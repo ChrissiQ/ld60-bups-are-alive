@@ -13,6 +13,11 @@ static func number_color() -> Color:
 	return ThemeDB.get_project_theme().get_color("font_color", "Bright")
 
 
+## The colour the first number of a readout is drawn in for a moment after it changed.
+static func flash_color() -> Color:
+	return ThemeDB.get_project_theme().get_color("font_color", "BrightFlash")
+
+
 ## Whole-number digits with a comma between each group of three: "178335" -> "178,335".
 static func group(digits: String) -> String:
 	var out := ""
@@ -38,14 +43,21 @@ static func mm(radius_um: float) -> String:
 	return Strings.t("ui.mm", [String.num(radius_um / StartConditions.UM_PER_MM, 2)])
 
 
-static func numbers(text: String) -> String:
+## With `flash_after` (a word of the text) the first number after that word is in the flash colour instead (a figure that has just changed).
+static func numbers(text: String, flash_after := "") -> String:
 	var safe := text.replace("[", "[lb]")  # plain "[" in the text must not start a tag
 	var colour := number_color().to_html(false)
 	var out := ""
 	var from := 0
+	var flash_from := safe.find(flash_after) if flash_after != "" else -1
+	var flashed := false
 	for m in _number.search_all(safe):
 		out += safe.substr(from, m.get_start() - from)
-		out += "[code][color=#%s]%s%s%s[/color][/code]" % [colour, group(m.get_string(1)), m.get_string(2), m.get_string(3)]
+		var shown := colour
+		if flash_from >= 0 and not flashed and m.get_start() >= flash_from:
+			shown = flash_color().to_html(false)
+			flashed = true
+		out += "[code][color=#%s]%s%s%s[/color][/code]" % [shown, group(m.get_string(1)), m.get_string(2), m.get_string(3)]
 		from = m.get_end()
 	return out + safe.substr(from)
 

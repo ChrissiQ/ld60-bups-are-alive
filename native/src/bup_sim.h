@@ -107,6 +107,7 @@ class BupSim : public RefCounted {
 		float max_energy = 0; // the reserve it could hold, as it was when it died
 		int reach = 0; // its raised ceilings and its acetate key (`Bup::reach`), as it was born, and as it was when it died (a conjugation can change them in between)
 		bool donor = false; // whether it carried the F factor, the same way
+		float mass = 0, energy = 0, birth_mass = 0; // what it was when it died: its body, its reserve and the mass it was born with (a living bup's are its own)
 		String name; // what the player called it, if anything: it lives and goes with the record
 		bool alive = true;
 	};
@@ -130,7 +131,7 @@ class BupSim : public RefCounted {
 	int now_minutes() const { return (int)(now_seconds / 60.0); }
 	void make_record(const Bup &b, int64_t parent);
 	void finish_lineage_import(const PackedInt64Array &pinned); // after the records of a save are in: counts, pins and pruning
-	static constexpr int LINEAGE_BYTES = 76;
+	static constexpr int LINEAGE_BYTES = 88;
 	void record_death(const Bup &b);
 	void free_if_unused(int64_t id);
 	Dictionary record_info(int64_t id, const Record &r) const;

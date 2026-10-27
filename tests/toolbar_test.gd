@@ -214,6 +214,16 @@ func _init() -> void:
 	await process_frame
 	await process_frame  # process_frame fires before nodes' _process, so allow a full frame
 	check(m.name_row.swatch.visible and m.name_row.swatch.color.is_equal_approx(Genome.color_of(m.dish.lineage_info(bup))), "a living bup has its picture, in its colour, by its name")
+	var flash_hex := UiText.flash_color().to_html(false)
+	var plain_hex := UiText.number_color().to_html(false)
+	check(flash_hex != plain_hex and UiText.numbers("born 7\ndivisions 4", "divisions").contains("divisions [code][color=#%s]4" % flash_hex) and UiText.numbers("born 7\ndivisions 4", "divisions").contains("[color=#%s]7" % plain_hex), "a figure that has just changed is shown in the flash colour, and only the first number after its word")
+	m._divisions_of = -1
+	m._note_divisions(bup, {"divisions": 5})
+	check(not m._note_divisions(bup, {"divisions": 5}), "a bup that has not divided does not flash")
+	check(m._note_divisions(bup, {"divisions": 6}) and m._note_divisions(bup, {"divisions": 6}), "a bup that has just divided flashes, and goes on for a moment")
+	m._flash_until = 0
+	check(not m._note_divisions(bup, {"divisions": 6}), "...and the flash ends")
+	check(not m._note_divisions(bup + 1, {"divisions": 9}), "another bup shown does not flash")
 	check(m.info_panel.visible and m.name_row.visible and m.name_row.name_label.text.contains("bup #") and m.info_text.get_parsed_text().contains("divisions"), "info panel shows the selected bup, named with its number ('%s')" % m.name_row.name_label.text)
 	_click(m, centre + Vector2(-250, -250))
 	check(m.dish.selected_id == -1, "clicking empty space deselects")
@@ -609,6 +619,7 @@ func _init() -> void:
 	check(absf(take_up.call(small.shape_pixels()) - 14.0) < 0.01 and absf(take_up.call(tall.shape_pixels()) - 14.0) < 0.01 and tall.shape_pixels().y < small.shape_pixels().y and tall.shape_pixels().y >= BupPicture.MIN_WIDTH_PIXELS, "a bup's picture lies on the diagonal and fills its square, and a longer bup is drawn thinner (%s and %s)" % [small.shape_pixels(), tall.shape_pixels()])
 	small.free()
 	tall.free()
+	check(BupPicture.body_length({"max_energy": 0.0, "size_gene": 4.0}) == 4.0 and BupPicture.body_length({"max_energy": 80.0}) == 2.5, "a record without a reserve takes the length its size gene divides at; one with a reserve, its own")
 	check(m.lineage_entries.get_child(0).get_child(1).text.begins_with(m.dish.bup_name(grandmother)), "entries use the bups' names ('%s')" % m.lineage_entries.get_child(0).get_child(1).text)
 	await _drag(m, centre, Vector2(30, 0), MOUSE_BUTTON_MIDDLE)
 	check(m.lineage_panel.visible and m._stack.size() == 2, "panning leaves the lineage as it is")

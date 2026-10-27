@@ -2,6 +2,7 @@ extends Node2D
 
 const BANNER_SECONDS := 7.0
 const MAX_FRAME_SECONDS := 0.1  ## the longest frame the sim will catch up on, so a hitch can't snowball
+const FLASH_MSEC := 1500  ## how long the divisions number stays in the flash colour after the bup divides
 const LIVE_TEXT_MSEC := 100  ## at high playback speed the readouts are rewritten this often at most: faster is a flicker, not information
 const LIVE_TEXT_FROM_SPEED := 100.0  ## the playback speed from which that applies
 const FRAME_BUDGET_USEC := 9000  ## the most time the simulation may spend per frame; past it the sim falls behind its speed instead of the game stuttering
@@ -75,6 +76,8 @@ var _span_buttons := {}  ## HistoryGraph.Span -> its button
 @onready var hover_text: RichTextLabel = %HoverText
 @onready var info_genome: GenomeRibbon = %InfoGenome  ## the picked bup's genome as a chromosome map, and the lines that come after it
 @onready var info_tail: RichTextLabel = %InfoTail
+@onready var info_gauges: BupGauges = %InfoGauges  ## the bup's mass and reserve bars, under its name (on the hover card, under its text)
+@onready var hover_gauges: BupGauges = %HoverGauges
 @onready var hover_genome: GenomeRibbon = %HoverGenome  ## the same on the card that follows the pointer
 @onready var hover_tail: RichTextLabel = %HoverTail
 @onready var info_text: RichTextLabel = %InfoText
@@ -105,6 +108,9 @@ var free_mode := Session.mode == Session.Mode.FREE
 var tracker := GoalTracker.new()
 var dishes: Array[Dish] = []  ## every dish that runs; `dish` is the one in the main view (the others run beside it, see the strip)
 var _view_before_extinct: Dish = null  ## the dish that was in the main view when the first dish in `_extinct_queue` was brought into view: the view goes back to it afterwards
+var _divisions_of := -1  ## the bup whose divisions count the panel last saw ...
+var _divisions_seen := 0  ## ... and what it was
+var _flash_until := 0  ## when the divisions number stops flashing (Time.get_ticks_msec)
 var _extinct_queue: Array[Dish] = []  ## dishes that have died out and are not yet deleted (the first is the one the screen has said so about)
 var _game_over := false  ## the last dish died out: only starting again or quitting goes on
 var _dish_numbers := {}  ## Dish -> its number (a number is never reused: a bup's "line from dish 2" stays true)
@@ -435,6 +441,8 @@ func _update_info_panel() -> void:
 	var shows_bup := bup_id >= 0
 	info_genome.visible = shows_bup and pinned
 	info_tail.visible = info_genome.visible
+	info_gauges.visible = shows_bup and pinned
+	hover_gauges.visible = shows_bup and not pinned
 	hover_genome.visible = shows_bup and not pinned
 	hover_tail.visible = hover_genome.visible
 	if bup_id < 0:
@@ -449,11 +457,14 @@ func _update_info_panel() -> void:
 		var tail: RichTextLabel = info_tail if pinned else hover_tail
 		genome_map.show_bup(record, pinned)
 		_set_rich(tail, _tail_text(record), "tail %d" % bup_id)
+		var divided := _note_divisions(bup_id, record) and not dead and pinned  # (the hover card does not flash)
+		var gauges: BupGauges = info_gauges if pinned else hover_gauges
+		gauges.show_bup(record, dish.stationary_phase, not dead)
 		if pinned:
 			name_row.show_bup(dish, bup_id, true)  # a bup can be renamed once it is clicked, not just hovered
 		else:
 			body = "%s\n%s" % [dish.bup_display(bup_id).get("name", ""), body]  # (the hover card has no name row)
-		_set_rich(target, body, "bup %d" % bup_id)
+		_set_rich(target, body, "bup %d" % bup_id, divided)
 	elif source != null:
 		_point_stamp = []
 		if editing:
@@ -605,8 +616,22 @@ func _away_text(distance: float) -> String:
 	return Strings.t("panel.away", [distance]) if distance >= 0.0 else Strings.t("panel.none")
 
 
+## Whether the bup's divisions count went up just now: the number after "divisions" in the panel then shows in the flash colour for FLASH_MSEC, so that the drop in its mass and reserve
+## that comes with a division is seen to have a reason.
+func _note_divisions(id: int, info: Dictionary) -> bool:
+	var divisions := int(info["divisions"])
+	var now := Time.get_ticks_msec()
+	if id != _divisions_of or divisions < _divisions_seen:
+		_divisions_of = id  # (another bup is shown: nothing has just happened to it)
+		_flash_until = 0
+	elif divisions > _divisions_seen:
+		_flash_until = now + FLASH_MSEC
+	_divisions_seen = divisions
+	return now < _flash_until
+
+
 func _info_text(b: Dictionary) -> String:
-	var text := Strings.t("panel.bup", [b["divisions"], SimClock.format_minutes(b["born"]), maxi(1, roundi(b["energy"])), b["max_energy"]])  # (a living bup never reads 0)
+	var text := Strings.t("panel.bup", [SimClock.format_minutes(b["born"]), b["divisions"]])
 	text += Strings.t("panel.steering", [_steering_word(b["steering"])])
 	text += Strings.t("panel.dish_line", [_dish_numbers[dish]])  # (the dish it is in now)
 	return text.rstrip("\n")
@@ -618,7 +643,7 @@ func _tail_text(b: Dictionary) -> String:
 
 
 func _deceased_text(b: Dictionary) -> String:
-	var text := Strings.t("panel.deceased", [SimClock.format_minutes(b["born"]), SimClock.format_minutes(b["died"]), b["divisions"], b["max_energy"]])
+	var text := Strings.t("panel.deceased", [SimClock.format_minutes(b["born"]), SimClock.format_minutes(b["died"]), b["divisions"]])
 	if b.has("moved_to"):
 		text += Strings.t("panel.moved_line", [b["moved_to"]]).substr(1) + "\n"
 	else:
@@ -1813,13 +1838,14 @@ func _update_goal_card() -> void:
 ## Sets a readout's text. `about` says what the text is about (a bup, the medium at a point...): while the same thing
 ## stays shown at high playback speed, its figures change at most every LIVE_TEXT_MSEC, since they would only flicker.
 ## True when the text was changed.
-func _set_rich(label: RichTextLabel, text: String, about: String) -> bool:
-	if label.get_meta("raw", "") == text or not _readout_due(label, about):
+func _set_rich(label: RichTextLabel, text: String, about: String, flash := false) -> bool:
+	var shown := text + ("\u0001" if flash else "")  # (what is asked for: the text, and whether its first number is flashing)
+	if label.get_meta("raw", "") == shown or not _readout_due(label, about):
 		return false
 	label.set_meta("about", about)
 	label.set_meta("set_at", Time.get_ticks_msec())
-	label.set_meta("raw", text)
-	label.text = UiText.numbers(text)
+	label.set_meta("raw", shown)
+	label.text = UiText.numbers(text, "divisions" if flash else "")
 	return true
 
 

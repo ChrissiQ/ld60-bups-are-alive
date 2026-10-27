@@ -117,7 +117,6 @@ func _events_against_the_cpu() -> void:
 		if i % 9 == 0:  # (watched: their records stay after they die)
 			cpu.pin(id)
 			records.pin(id)
-	var reserve := float(SimConstants.build()["reserve_per_mass"])
 	var births := PackedByteArray()
 	var deaths := PackedByteArray()
 	var steps := 60
@@ -147,12 +146,15 @@ func _events_against_the_cpu() -> void:
 				continue
 			var kept := cpu.lineage_info(id)  # (the record, if it stayed: what the bup was when it died)
 			var e := PackedByteArray()
-			e.resize(32)
+			e.resize(40)
 			e.encode_u32(0, id & 0xFFFFFFFF); e.encode_u32(4, id >> 32); e.encode_u32(8, k)
 			e.encode_u32(12, kept["divisions"] if not kept.is_empty() else before[id]["divisions"])
-			e.encode_float(16, kept["max_energy"] / reserve if not kept.is_empty() else before[id]["mass"])
+			var gone: Dictionary = kept if not kept.is_empty() else before[id]
+			e.encode_float(16, gone["mass"])
+			e.encode_float(32, gone["energy"])
+			e.encode_float(36, gone["birth_mass"])
 			deaths.append_array(e)
-	check(births.size() / 64 > 20 and deaths.size() / 32 > 10, "the CPU run has births and deaths to compare (%d and %d)" % [births.size() / 64, deaths.size() / 32])
+	check(births.size() / 64 > 20 and deaths.size() / 40 > 10, "the CPU run has births and deaths to compare (%d and %d)" % [births.size() / 64, deaths.size() / 40])
 	records.set_time(12345.0)
 	records.apply_events(births, deaths, 20.0, 20.0)
 	var by_id_cpu := {}
