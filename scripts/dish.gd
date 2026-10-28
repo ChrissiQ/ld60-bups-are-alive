@@ -44,6 +44,8 @@ const MAX_SOURCE_RATE := 60.0
 const SOURCE_NEARBY := 60.0  ## how close counts as "near" a source in its details
 const SOURCE_DRAW_RADIUS := 3.0  ## the size a source is drawn at, in µm: about a bup's, so the same selection ring fits both
 const SOURCE_MIN_PIXELS := 3.0  ## a source is drawn at least this many screen pixels in radius
+const HOVER_CLICK_PIXELS := 3.0  ## a click this close to where the hover was picked selects what the hover outlines
+const DISC_SIDES := 720  ## sides of the dish's disc
 const SOURCE_PICK_PIXELS := 9.0  ## and can be picked from at least this many pixels away
 const SOURCE_PICK_RADIUS := 18.0  ## how close (in µm) a click must be to pick a source: generous, since it is small and often under bups
 const ERASE_STRENGTH := 0.9  ## the share of nutrient the eraser takes from the middle of its brush
@@ -167,6 +169,7 @@ var pick_mode := PickMode.ALL:  ## the select tool ignores whatever this leaves 
 			selected_plankton = null
 		if not looks_at_husks():
 			selected_husk = NO_HUSK
+var _hover_pos := Vector2.ZERO  ## where the pointer was when `hovered_id` and the other hovers were picked
 var hovered_id := -1  ## the bup under the pointer, or -1
 var selected_id := -1:  ## the bup that was clicked, or -1
 	set(value):
@@ -221,6 +224,8 @@ var _overlay: Node2D = null  ## the selection and hover rings, drawn above the b
 ## `_choose_backend` makes `gpu_world` and switches (see the GPU path's functions at the end of this file).
 var gpu_world: GpuWorld = null
 var cpu_cost_estimate := 0.0  ## µs the processor is estimated to need for one frame of this dish (the cost model's, at the last `advance`)
+var _cpu_ratio := 1.0  ## what this machine's processor really takes per frame, as a multiple of the cost model's estimate (the model was fitted on one machine): Auto's rule uses the estimate times this
+var _frame_estimate_usec := 0.0  ## the model's estimate for the frame `measured_usec` last timed
 var measured_usec := 0.0  ## µs the processor really took the last frames this dish was advanced on it (a running average, set by the screen; 0 until it has been timed)
 var switch_allowed := true  ## whether Auto's rule may move this dish between the processor and the GPU this frame (the screen lets one dish at a time, so each choice sees the load the last left)
 var switch_wanted := false  ## Auto's rule wants this dish moved, and ...
@@ -833,9 +838,9 @@ func fraction_with_gene_at_least(gene: String, threshold: float) -> float:
 
 
 ## The id of the bup under a world position, or -1. `slack` widens the target (e.g. for small bups).
-func cell_at(world_pos: Vector2, slack: float = 0.0) -> int:
+func cell_at(world_pos: Vector2, slack: float = 0.0, hover := false) -> int:
 	if gpu_world != null and gpu_active:
-		return gpu_world.pick_bup(world_pos - global_position, slack, pixel())
+		return gpu_world.pick_bup(world_pos - global_position, slack, pixel(), hover)
 	return sim.pick_bup(world_pos - global_position, slack, pixel())
 
 
@@ -872,6 +877,12 @@ func source_at(world_pos: Vector2, slack: float = 0.0) -> NutrientSource:
 ## usually crowded by bups, so if there is one under the pointer it is what is being aimed at);
 ## picking empty ground selects nothing, which is how a selection is let go.
 func select_at(world_pos: Vector2, slack: float = 0.0) -> void:
+	if _hover_is_at(world_pos):  # (a click where the pointer rests takes what is outlined: in a crowd that moves, a fresh pick would often be another bup)
+		selected_source = hovered_source
+		selected_id = hovered_id
+		selected_plankton = hovered_plankton
+		selected_husk = hovered_husk
+		return
 	var picked := _pick(world_pos, slack)
 	selected_source = picked["source"]
 	selected_id = picked["bup"]
@@ -879,8 +890,15 @@ func select_at(world_pos: Vector2, slack: float = 0.0) -> void:
 	selected_husk = picked["husk"]
 
 
+## Whether something is outlined by a hover made at (nearly) this point.
+func _hover_is_at(world_pos: Vector2) -> bool:
+	var something := hovered_id >= 0 or hovered_source != null or hovered_plankton != null or hovered_husk != NO_HUSK
+	return something and _hover_pos.distance_to(world_pos) <= HOVER_CLICK_PIXELS * pixel()
+
+
 func hover_at(world_pos: Vector2, slack: float = 0.0) -> void:
-	var picked := _pick(world_pos, slack)
+	_hover_pos = world_pos
+	var picked := _pick(world_pos, slack, true)
 	hovered_source = picked["source"]
 	hovered_id = picked["bup"]
 	hovered_plankton = picked["plankton"]
@@ -889,9 +907,9 @@ func hover_at(world_pos: Vector2, slack: float = 0.0) -> void:
 
 ## What is under a world position, of the kinds the pick mode looks at: only the first of a source, a bup, a plankton and a husk
 ## (in that order) that is there, the others being none.
-func _pick(world_pos: Vector2, slack: float) -> Dictionary:
+func _pick(world_pos: Vector2, slack: float, hover := false) -> Dictionary:
 	var source: NutrientSource = source_at(world_pos, slack) if looks_at_sources() else null
-	var bup := cell_at(world_pos, slack) if source == null and looks_at_bups() else -1
+	var bup := cell_at(world_pos, slack, hover) if source == null and looks_at_bups() else -1
 	var floating: Plankton = plankton_at(world_pos, slack) if source == null and bup < 0 and looks_at_plankton() else null
 	var husk := husk_at(world_pos, slack) if source == null and bup < 0 and floating == null and looks_at_husks() else NO_HUSK
 	return {"source": source, "bup": bup, "plankton": floating, "husk": husk}
@@ -1630,9 +1648,18 @@ func draw_ring(canvas: CanvasItem, center: Vector2, object_radius: float, color:
 	canvas.draw_arc(center, ring_radius_pixels(object_radius / px) * px, 0.0, TAU, 64, color, px, true)
 
 
+## A circle as a polygon with enough sides that its flats are under a pixel at the biggest the dish is drawn.
+static func _disc_outline(disc_radius: float) -> PackedVector2Array:
+	var points := PackedVector2Array()
+	points.resize(DISC_SIDES)
+	for i in DISC_SIDES:
+		points[i] = Vector2.from_angle(TAU * i / DISC_SIDES) * disc_radius
+	return points
+
+
 func _draw() -> void:
 	# Dish: dark agar, green-tinted glass rim.
-	draw_circle(Vector2.ZERO, radius, Color(0.03, 0.06, 0.04))
+	draw_colored_polygon(_disc_outline(radius), Color(0.03, 0.06, 0.04))  # (not draw_circle: it draws a big disc with few sides, and the flats show when the dish is bigger than the window)
 	draw_arc(Vector2.ZERO, radius, 0.0, TAU, 96, Color(0.45, 0.8, 0.6, 0.6), 3.0)
 	draw_arc(Vector2.ZERO, radius + 6.0, 0.0, TAU, 96, Color(0.45, 0.8, 0.6, 0.2), 2.0)
 
@@ -1684,7 +1711,7 @@ func draw_overlay(canvas: CanvasItem) -> void:
 		else:
 			canvas.draw_arc(place_preview_pos - global_position, maxf(place_preview_radius, 3.0 * px), 0.0, TAU, 32, brush, px)
 	if flash > 0.0:
-		canvas.draw_circle(Vector2.ZERO, radius, Color(0.85, 0.95, 1.0, flash))
+		canvas.draw_colored_polygon(_disc_outline(radius), Color(0.85, 0.95, 1.0, flash))
 
 
 # --- The GPU path ------------------------------------------------------------------------------
@@ -1785,7 +1812,10 @@ var backend_setting := StartConditions.BACKEND_AUTO
 ## The rule that picks the backend (the measurements are in tools/gpu/switch_check.gd's bench mode):
 const AUTO_CPU_UP_USEC := 6000.0  ## Auto: the processor is left for the GPU once its steps for one frame are estimated to take more than this (two thirds of Main.FRAME_BUDGET_USEC: the picture and the rest of the frame need the remainder) ...
 const AUTO_CPU_DOWN_USEC := 3000.0  ## ... and taken back when they come below this (the gap is the hysteresis: a colony hovering about one threshold does not flip every few seconds)
-const AUTO_MIN_POPULATION := 1000  ## below this many bups Auto stays on the processor whatever the grid costs (the GPU would be moving nothing, and the colony is growing: it is asked again each frame)
+const CPU_RATIO_MIN := 0.5  ## how far the cost model's estimate may be corrected by what the processor really took (below and above 1)
+const CPU_RATIO_MAX := 8.0
+const CPU_RATIO_SMOOTHING := 0.1  ## how much of each frame's measured-to-estimated ratio is taken in
+const AUTO_MIN_POPULATION := 1  ## below this many bups (none) Auto stays on the processor: there is nothing to move. A nearly empty dish can still cost the processor most of a frame (the grid, the clouds, the nine steps), and the rule's cost test is what decides, so a small colony at x10,000 goes to the GPU as soon as the processor could not hold the speed
 const GPU_WAIT_SECONDS := 0.5  ## real seconds in a row that the rule wants the GPU before it takes over: a speed button pressed in passing, or a hitch, does not move the whole state. Counted in time, not frames: a frame costs most where the dish is heaviest, so a count of frames would be longest exactly there (a frame counts at most the 0.1 s the frames are capped at)
 const AUTO_DOWN_FRAMES := 10  ## frames in a row that Auto's rule must want the processor before the GPU lets go (the GPU's count of bups arrives a few frames after a load; the setting does not wait)
 const STEPS_AT_TOP_SPEED := 9  ## steps a frame takes at x10,000 at 60 frames a second (one frame is 167 s; the step is 18.5 s): what a step this long stands for when the caller does not say how many a frame holds
@@ -1863,7 +1893,7 @@ static func rule_step(step_delta: float, steps: int, real: float, typical: float
 ## - off: never; on: whenever it can; auto: when the processor's estimated time for the frame is above AUTO_CPU_UP_USEC (AUTO_CPU_DOWN_USEC
 ##   once the GPU is running) and the GPU's is less, with at least AUTO_MIN_POPULATION bups. The processor's time for the frame is this dish's plus
 ##   `other_cpu_usec`, what the other dishes still on the processor are estimated to take (several dishes share one frame: it is their total that must fit).
-static func backend_wants_gpu(setting: String, step_delta: float, moves: int, cells_across: int, population: int, running_gpu: bool, gpu_ok: bool, frame_steps := 0, clouds := 0, other_cpu_usec := 0.0) -> bool:
+static func backend_wants_gpu(setting: String, step_delta: float, moves: int, cells_across: int, population: int, running_gpu: bool, gpu_ok: bool, frame_steps := 0, clouds := 0, other_cpu_usec := 0.0, cpu_ratio := 1.0) -> bool:
 	if not gpu_ok or setting == StartConditions.BACKEND_CPU:
 		return false
 	if setting == StartConditions.BACKEND_GPU:
@@ -1871,7 +1901,7 @@ static func backend_wants_gpu(setting: String, step_delta: float, moves: int, ce
 	if population < AUTO_MIN_POPULATION:
 		return false
 	var costs := backend_frame_costs(step_delta, cells_across, moves, population, frame_steps, clouds)
-	return costs.x + other_cpu_usec > (AUTO_CPU_DOWN_USEC if running_gpu else AUTO_CPU_UP_USEC) and costs.y < costs.x
+	return costs.x * cpu_ratio + other_cpu_usec > (AUTO_CPU_DOWN_USEC if running_gpu else AUTO_CPU_UP_USEC) and costs.y < costs.x
 
 
 ## Whether the GPU can run a dish at all: the machine has a usable one (GpuWorld.available()) and it holds `limit` bups (`most` is
@@ -1915,8 +1945,13 @@ func _choose_backend(step_delta: float, steps := 0) -> void:
 	var rule_steps := steps
 	if steps > 0 and real > 0.0:
 		rule_steps = maxi(1, roundi(steps * RULE_FRAME_SECONDS / real))  # (the same work per real second, whichever backend ran the last frame and however long it took)
-	cpu_cost_estimate = backend_frame_costs(rule_delta, field.get_size(), sim.moves_for(step_delta), population(), rule_steps, field.puff_count()).x
-	var wants := backend_wants_gpu(backend_setting, rule_delta, sim.moves_for(step_delta), field.get_size(), population(), gpu_world != null and gpu_active, available, rule_steps, field.puff_count(), other_cpu_load)
+	var on_gpu := gpu_world != null and gpu_active
+	var frame_estimate := backend_frame_costs(rule_delta, field.get_size(), sim.moves_for(step_delta), population(), steps, field.puff_count()).x  # (for the frame as it really was: what `measured_usec` measures)
+	if not on_gpu and measured_usec > 0.0 and _frame_estimate_usec > 0.0:
+		_cpu_ratio = lerpf(_cpu_ratio, clampf(measured_usec / _frame_estimate_usec, CPU_RATIO_MIN, CPU_RATIO_MAX), CPU_RATIO_SMOOTHING)
+	_frame_estimate_usec = frame_estimate
+	cpu_cost_estimate = backend_frame_costs(rule_delta, field.get_size(), sim.moves_for(step_delta), population(), rule_steps, field.puff_count()).x * _cpu_ratio
+	var wants := backend_wants_gpu(backend_setting, rule_delta, sim.moves_for(step_delta), field.get_size(), population(), on_gpu, available, rule_steps, field.puff_count(), other_cpu_load, _cpu_ratio)
 	_gpu_wanted_seconds = _gpu_wanted_seconds + (real if real > 0.0 else RULE_FRAME_SECONDS) if wants else 0.0  # (no frame length, as when a tool calls this directly: a frame of the rule's)
 	if not wants:
 		_fresh = false  # (a small dish: it waits like any other when it grows)

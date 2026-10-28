@@ -164,6 +164,11 @@ func _typed_value() -> float:
 	return typed.to_float() if typed.is_valid_float() else slider.value
 
 
+## Whether the slider's handle is held (a screen that follows a value from elsewhere leaves the row alone meanwhile).
+func is_dragging() -> bool:
+	return _dragging
+
+
 ## Sets the row without announcing a change: for a screen showing a value that came from elsewhere.
 func set_value_silently(v: float) -> void:
 	slider.set_value_no_signal(v)

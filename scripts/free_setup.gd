@@ -5,7 +5,7 @@ const PREVIEW_RADIUS := 260.0  ## on-screen size the preview dish is shrunk to f
 const PREVIEW_MARGIN := 40.0  ## the least space kept between the preview dish and the panel, the window's edge, its top and its bottom
 const PREVIEW_SEED := 1964  ## fixed so the preview doesn't reshuffle on every nudge
 const SLIDER_WIDTH := 300.0  ## how long every slider is, at the interface size there is
-const PREVIEW_MAX_SCALE := 1.9  ## from this interface size up the preview dish is left out: the settings need the room more
+const PREVIEW_MIN_RADIUS := 70.0  ## the preview dish is left out when the room beside the panel would make it smaller than this
 const BOTTOM_CLEARANCE := 24.0  ## and from the bottom
 const PLANKTON_SETTLE_SECONDS := 0.5  ## how long the settings are still before the preview fills with plankton (up to thousands, so not on every nudge of a slider)
 
@@ -103,7 +103,7 @@ func _ready() -> void:
 	reset_button.pressed.connect(_reset_to_defaults)
 	reset_button.tooltip_text = Strings.t("free_setup.defaults_tip")
 	go_button.pressed.connect(_go)
-	dish.visible = UserSettings.ui_scale < PREVIEW_MAX_SCALE
+	dish.visible = _preview_fits()
 	dish.position = _dish_center()
 	_refresh()
 	bups_row.slider.grab_focus()
@@ -233,9 +233,19 @@ func _preview_space() -> Rect2:
 	return Rect2(panel_edge, 0.0, size_now.x - panel_edge, size_now.y)
 
 
-func _preview_radius() -> float:
+## The radius the room beside the panel allows, before any limit.
+func _room_radius() -> float:
 	var height := get_viewport_rect().size.y - _panel_top() - BOTTOM_CLEARANCE
-	return clampf(minf(_preview_space().size.x - 2.0 * PREVIEW_MARGIN, height - 2.0 * PREVIEW_MARGIN) * 0.5, 40.0, PREVIEW_RADIUS)
+	return minf(_preview_space().size.x - 2.0 * PREVIEW_MARGIN, height - 2.0 * PREVIEW_MARGIN) * 0.5
+
+
+func _preview_radius() -> float:
+	return clampf(_room_radius(), PREVIEW_MIN_RADIUS, PREVIEW_RADIUS)
+
+
+## Whether there is room for the preview dish: it is shown whenever it can be a useful size, and left out only when it cannot.
+func _preview_fits() -> bool:
+	return _room_radius() >= PREVIEW_MIN_RADIUS
 
 
 func _dish_center() -> Vector2:
@@ -245,6 +255,7 @@ func _dish_center() -> Vector2:
 
 
 func _process(_delta: float) -> void:
+	dish.visible = _preview_fits()
 	var scale_now := Vector2.ONE * minf(1.0, _preview_radius() / _start.dish_radius)
 	if not dish.scale.is_equal_approx(scale_now):
 		dish.scale = scale_now

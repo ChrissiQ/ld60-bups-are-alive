@@ -54,6 +54,10 @@ layout_mode = 2
 label_text = "@options.scale"
 slider_min_width = 160.0
 
+[node name="ZoomRow" parent="Box/Scroll/Rows" instance=ExtResource("setting_row")]
+layout_mode = 2
+label_text = "@options.zoom_speed"
+slider_min_width = 160.0
 
 [node name="MotionToggle" parent="Box/Scroll/Rows" instance=ExtResource("toggle_row")]
 layout_mode = 2

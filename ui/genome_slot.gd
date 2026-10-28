@@ -11,6 +11,7 @@ const THEME_TYPE := "GenomeSlot"
 const DIM := 0.55  ## how much of the locus colour's brightness the dim end of a gene's range keeps
 const CORNER := 9.0  ## the radius of the chromosome's rounded ends
 const CORNER_STEPS := 6
+const BASE_SIZE := Vector2(46.0, 22.0)  ## the band's size at the designed text size: it is something to read, so it grows with the text (not with the room)
 
 var locus := ""
 var symbol := ""
@@ -22,6 +23,16 @@ var bottom := false  ## the last: its lower corners are round
 
 func _init() -> void:
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+
+
+func _get_minimum_size() -> Vector2:
+	return BASE_SIZE * UserSettings.text_factor()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_THEME_CHANGED:  # (a new interface size rewrites the theme's text sizes)
+		update_minimum_size()
+		queue_redraw()
 
 
 func _gui_input(event: InputEvent) -> void:

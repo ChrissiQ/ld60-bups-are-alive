@@ -42,6 +42,7 @@ static var _available := false
 
 const GENE_NAMES := ["speed", "sense", "metabolism", "size"]  ## BupSim's genes, in the record's order (words 8-11)
 const SAME_POINT_PIXELS := 2.0  ## an answer about a point serves a question about another this many pixels away
+const HOVER_POINT_PIXELS := 6.0  ## a hover takes the answer for a point this many pixels away: the pointer moves on while the answer comes back a few frames later
 const QUESTION_FRAMES := 2  ## a pick or nearest question is sent again for this many frames after it was last asked
 const TRACK_FRAMES := 10  ## a tracked bup not asked for in this many frames is dropped
 const FRACTION_FRAMES := 60  ## a fraction not asked for in this many frames is no longer asked
@@ -419,14 +420,15 @@ func fraction_with_gene_at_least(gene: String, threshold: float) -> float:
 
 ## (3B) The bup under a point of the dish (BupSim.pick_bup's rule): asks for it in this frame's questions and returns the last answer for a
 ## point within 2 pixels of this one (with the same slack), else -1. The answer carries the bup's whole record, so a picked bup is tracked
-## with no gap.
-func pick_bup(local: Vector2, slack: float, pixel_um: float) -> int:
+## with no gap. A `hover` (the pointer is moving, the answer is a few frames old) is answered from a point `HOVER_POINT_PIXELS` away and
+## whatever slack it was asked with (the slack changes with every step of a zoom); a click is exact.
+func pick_bup(local: Vector2, slack: float, pixel_um: float, hover := false) -> int:
 	_touch()
 	_pick = [local, slack, pixel_um, Engine.get_process_frames()]
 	_pixel_um = pixel_um
-	if _pick_answer.is_empty() or _pick_answer["slack"] != slack:
+	if _pick_answer.is_empty() or (not hover and _pick_answer["slack"] != slack):
 		return -1
-	if (_pick_answer["local"] as Vector2).distance_to(local) > SAME_POINT_PIXELS * pixel_um:
+	if (_pick_answer["local"] as Vector2).distance_to(local) > (HOVER_POINT_PIXELS if hover else SAME_POINT_PIXELS) * pixel_um:
 		return -1
 	return _pick_answer["id"]
 

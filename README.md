@@ -11,16 +11,16 @@ The game is Godot 4.7 (GDScript). The simulation itself is C++ (a GDExtension in
   - **Windows / Linux:** unzip and run.
 - **From inside Godot without compiling anything:** download `BupsAreAlive-<version>-godot-project.zip` from a release (source plus prebuilt libraries for Windows, Linux and macOS), unzip it, open the folder in Godot 4.7 or later and press play.
 
-In game, **Controls** on the title screen lists the keys. The main ones: Space pauses, `1`-`4` set the speed (x1 to x10,000), `I` inspects, `H` pans, scroll or `+`/`-` zoom, `W A S D` move the view, `Z X C V B` show or hide layers.
+In game, **Controls** on the title screen lists the keys. The main ones: Space pauses, `1`-`4` set the speed (x1 to x10,000), `I` inspects, `H` pans, scroll or `+`/`-` zoom, `W A S D` move the view, `Z X C M V B` show or hide layers.
 
 ## CPU and GPU simulation
 
-The simulation has two backends that implement the same model: C++ on the CPU (`native/`) and compute shaders on the GPU (`gpu/`, run through Godot's `RenderingDevice`). The GPU is much faster with large populations at high playback speeds. Slow playback always runs on the CPU.
+The simulation has two backends that implement the same model: C++ on the CPU (`native/`) and compute shaders on the GPU (`gpu/`, run through Godot's `RenderingDevice`). The GPU is much faster with large populations at high playback speeds, and runs at any speed, slow ones too.
 
 The **GPU simulation** setting has three values:
 
-- **Auto** (default): chooses the backend while the game runs, from the dish size, the population and the playback speed.
-- **On**: runs on the GPU, except at slow playback.
+- **Auto** (default): chooses the backend while the game runs, from how much work the processor would need for the frame: the dish's grid and population, the playback speed, and the other dishes sharing the processor (it learns how fast your processor really is as it runs).
+- **On**: runs on the GPU whenever the machine can.
 - **Off**: runs on the CPU only.
 
 Free mode offers the setting under the setup screen's Advanced options; goal mode always uses Auto. A machine with no usable GPU runs on the CPU.
@@ -48,8 +48,8 @@ Only the C++ needs compiling. GDScript changes take effect on the next run.
 ## Things to know
 
 - **Saves** are `save.json` (goal mode) and `free_settings.json` (free-mode setup) in Godot's user data folder; the format may change before release.
-- Fonts: Inter and Commit Mono (SIL Open Font License, `fonts/OFL-Inter.txt`, `fonts/OFL.txt`).
+- Fonts: IBM Plex Sans and Commit Mono (SIL Open Font License, `fonts/OFL-IBMPlex.txt`, `fonts/OFL.txt`).
 
 ## Contributing and license
 
-Tests, releases and how to change the project are in [CONTRIBUTING.md](CONTRIBUTING.md). The code is under the [MIT License](LICENSE); the bundled font keeps its own license (`fonts/OFL.txt`).
+Tests, releases and how to change the project are in [CONTRIBUTING.md](CONTRIBUTING.md). The code is under the [MIT License](LICENSE); the bundled fonts keep their own licenses (`fonts/OFL-IBMPlex.txt`, `fonts/OFL.txt`).

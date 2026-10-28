@@ -4,7 +4,6 @@ extends GridContainer
 ## loci run down a single bar in a fixed order (Genome.LOCI), each slot its own colour with the allele in it, and the locus name and the allele's value beside
 ## it, always in view. `show_bup` takes a bup's info (a living bup's, or the family record of a dead one: both have every gene).
 
-const SLOT_SIZE := Vector2(46.0, 22.0)
 const MUTATOR_NAMED_ABOVE := 1.05  ## a mutator gets its allele's name; the usual rate (1) has none to give
 
 signal entry_requested(id: String)  ## a band was clicked: the encyclopedia entry of its gene
@@ -22,7 +21,6 @@ func _ready() -> void:
 		slot.symbol = Strings.t("genome.symbol_" + locus)
 		slot.top = locus == Genome.LOCI[0]
 		slot.bottom = locus == Genome.LOCI[-1]
-		slot.custom_minimum_size = SLOT_SIZE
 		slot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		slot.chosen.connect(func(l: String) -> void: entry_requested.emit(Encyclopedia.entry_for_locus(l)))
 		_slots[locus] = slot

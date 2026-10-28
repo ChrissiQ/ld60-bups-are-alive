@@ -1275,7 +1275,8 @@ func _backend_rule_tests() -> void:
 	check(Dish.backend_wants_gpu(auto, 2.0, 1, 400, 40000, true, true, 1, 0, Dish.AUTO_CPU_DOWN_USEC), "Auto: and stays there while the processor's total would still be too much")
 	check(Dish.backend_wants_gpu(on, 1.67, 1, 100, 4, false, true) and Dish.backend_wants_gpu(on, 16.7, 1, 100, 4, false, true), "On: at x100 and up, whatever the crowd")
 	check(not Dish.backend_wants_gpu(on, 1.67, 1, 100, 4, false, false), "On, but no usable GPU: the processor")
-	check(not Dish.backend_wants_gpu(auto, 18.5, 7, 400, 999, false, true) and not Dish.backend_wants_gpu(auto, 18.5, 7, 400, 999, true, true), "Auto: under AUTO_MIN_POPULATION bups, the processor, whatever the grid costs")
+	check(not Dish.backend_wants_gpu(auto, 18.5, 7, 400, 0, false, true) and not Dish.backend_wants_gpu(auto, 18.5, 7, 400, 0, true, true), "Auto: an empty dish stays on the processor, whatever the grid costs")
+	check(Dish.backend_wants_gpu(auto, 18.5, 7, 400, 50, false, true), "Auto: a few bups on a grid that costs the processor most of a frame go to the GPU at x10,000")
 	# Auto at x10,000 on a 10 mm dish with the usual grid: the processor's nine steps are 6 ms at about 1,900 bups (the bench: 2,000 bups at m=6 took 622 µs a step, m=7 about 680 µs).
 	var up := 0
 	for n in range(1000, 20001, 100):

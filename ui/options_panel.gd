@@ -7,6 +7,7 @@ signal back_requested
 
 @onready var fullscreen_toggle: ToggleRow = $Box/Scroll/Rows/FullscreenToggle
 @onready var scale_row: SettingRow = $Box/Scroll/Rows/ScaleRow
+@onready var zoom_row: SettingRow = $Box/Scroll/Rows/ZoomRow
 @onready var motion_toggle: ToggleRow = $Box/Scroll/Rows/MotionToggle  ## ticked: the operating system decides, and the switch shows what it says
 @onready var back_button: Button = $Box/Actions/BackButton
 @onready var reset_button: Button = $Box/Actions/ResetButton  ## one reset for every setting on the panel
@@ -18,6 +19,10 @@ func _ready() -> void:
 	UserSettings.load_once()
 	fullscreen_toggle.hint_text = Strings.t("options.fullscreen_hint", [UserSettings.fullscreen_key_label()])
 	scale_row.configure(UserSettings.SCALE_MIN * 100.0, UserSettings.SCALE_MAX * 100.0, UserSettings.SCALE_STEP * 100.0, 100.0, "%")
+	zoom_row.configure(UserSettings.ZOOM_SPEED_MIN * 100.0, UserSettings.ZOOM_SPEED_MAX * 100.0, UserSettings.ZOOM_SPEED_STEP * 100.0, 100.0, "%")
+	zoom_row.value_changed.connect(func(v: float) -> void:
+		if not _syncing:
+			UserSettings.set_zoom_speed(v / 100.0))
 	fullscreen_toggle.toggled.connect(func(on: bool) -> void:
 		if not _syncing:
 			UserSettings.set_fullscreen(on))
@@ -41,6 +46,7 @@ func _sync() -> void:
 	fullscreen_toggle.set_pressed_no_signal(UserSettings.fullscreen)
 	_show_motion()
 	scale_row.set_value_silently(UserSettings.ui_scale * 100.0)
+	zoom_row.set_value_silently(UserSettings.zoom_speed * 100.0)
 	_syncing = false
 
 

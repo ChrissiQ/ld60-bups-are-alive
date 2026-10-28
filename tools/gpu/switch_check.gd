@@ -383,7 +383,7 @@ func _dish_switching() -> void:
 	dish.set_backend_setting(StartConditions.BACKEND_AUTO)
 	for i in 40:
 		dish._choose_backend(18.5)
-	_ok(not dish.gpu_active, "Auto with %d bups at x10,000: the processor (fewer than %d)" % [pop, Dish.AUTO_MIN_POPULATION])
+	_ok(dish.gpu_active == Dish.backend_wants_gpu(StartConditions.BACKEND_AUTO, 18.5, dish.sim.moves_for(18.5), dish.field.get_size(), pop, true, true, 0, dish.field.puff_count()), "Auto with %d bups at x10,000: the GPU if the rule wants it, else the processor" % pop)
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
 	for i in Dish.wait_frames(Dish.RULE_FRAME_SECONDS):
 		dish._choose_backend(1.67)

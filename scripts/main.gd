@@ -536,7 +536,7 @@ func _follow_selected() -> void:
 
 ## Puts the selected source's rate in the row, without that counting as the player changing it.
 func _show_source_rate(source: NutrientSource) -> void:
-	if not is_equal_approx(source_rate_row.value, snappedf(source.rate, 0.1)):
+	if not source_rate_row.is_dragging() and not is_equal_approx(source_rate_row.value, snappedf(source.rate, 0.1)):
 		source_rate_row.set_value_silently(source.rate)
 
 
@@ -727,7 +727,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_zoom_by(pow(event.factor, ZOOM_PINCH_GAIN))
 	elif event is InputEventPanGesture:  # a trackpad's two-finger scroll, which stands in for the mouse wheel (up zooms in)
 		if not _over_hud():
-			_zoom_by(pow(ZOOM_WHEEL_STEP, -event.delta.y * ZOOM_TRACKPAD_SCROLL))
+			_zoom_by(pow(ZOOM_WHEEL_STEP, -event.delta.y * ZOOM_TRACKPAD_SCROLL * UserSettings.zoom_speed))
 	elif event is InputEventKey and event.pressed and not event.echo:
 		_on_key(event)
 
@@ -1378,10 +1378,10 @@ func _on_mouse_button(event: InputEventMouseButton) -> void:
 	match event.button_index:
 		MOUSE_BUTTON_WHEEL_UP:
 			if event.pressed and not _over_hud():
-				_zoom_by(ZOOM_WHEEL_STEP)
+				_zoom_by(pow(ZOOM_WHEEL_STEP, UserSettings.zoom_speed))
 		MOUSE_BUTTON_WHEEL_DOWN:
 			if event.pressed and not _over_hud():
-				_zoom_by(1.0 / ZOOM_WHEEL_STEP)
+				_zoom_by(pow(ZOOM_WHEEL_STEP, -UserSettings.zoom_speed))
 		MOUSE_BUTTON_LEFT, MOUSE_BUTTON_MIDDLE:
 			if event.pressed:
 				get_viewport().gui_release_focus()  # so keys go to shortcuts, not the nutrient box
@@ -1619,9 +1619,9 @@ func _sync_bloom_panel() -> void:
 	var plankton_unlocked := _tools_unlocked()
 	if plankton_unlocked != bloom_row.slider.editable:  # (the bloom stays in the box, faint, until plankton unlock)
 		bloom_row.set_enabled(plankton_unlocked)
-	if not is_equal_approx(feed_row.value, snappedf(dish.feed_density, 0.1)):
+	if not feed_row.is_dragging() and not is_equal_approx(feed_row.value, snappedf(dish.feed_density, 0.1)):  # (a row being dragged reports nothing until it is let go: the dish's value would pull the handle back)
 		feed_row.set_value_silently(dish.feed_density)
-	if not is_equal_approx(bloom_row.value, snappedf(dish.bloom_density, Dish.BLOOM_DENSITY_STEP)):
+	if not bloom_row.is_dragging() and not is_equal_approx(bloom_row.value, snappedf(dish.bloom_density, Dish.BLOOM_DENSITY_STEP)):
 		bloom_row.set_value_silently(dish.bloom_density)
 
 
@@ -1840,9 +1840,12 @@ func _dish_lines() -> String:
 func _playback_text() -> String:
 	if _pipette_waiting:
 		return Strings.t("hud.pipette_paused")
+	var slow := sim_speed > 1.0 and achieved_speed < 0.85 * sim_speed  # (while paused the speed it reached stays what it was: nothing updates it)
 	if paused:
+		if slow:
+			return Strings.t("hud.playback_slow_paused", [int(sim_speed), int(achieved_speed)])
 		return Strings.t("hud.playback_speed_paused", [int(sim_speed)])
-	if sim_speed > 1.0 and achieved_speed < 0.85 * sim_speed:
+	if slow:
 		return Strings.t("hud.playback_slow", [int(sim_speed), int(achieved_speed)])
 	return Strings.t("hud.playback_speed", [int(sim_speed)])
 
