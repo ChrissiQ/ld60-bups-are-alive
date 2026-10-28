@@ -9,38 +9,29 @@ extends RefCounted
 ##
 ## The dish calls none of it while Dish.gpu_active is false (see the hooks in scripts/dish.gd).
 ##
-## How a frame goes (3B): the dish's _advance_gpu asks steps_for(), runs its world for those steps on the CPU (plankton, sources: what
+## How a frame goes: the dish's _advance_gpu asks steps_for(), runs its world for those steps on the CPU (plankton, sources: what
 ## they do to the field is recorded as events) and calls queue_batch, which records the batch at once (call_on_render_thread; the frame
 ## submits it: no submit or sync on the main device), with the frame's questions (pick, nearest, fractions, tracked bups), the reads of
 ## earlier batches' family events, and every HAZE_REFRESH_MSEC the field's copy. The getters ask their questions and answer from the
 ## last results; questions asked after the batch (or while paused) go out at the end of the frame. Every request's answers come back
 ## about two frames later through buffer_get_data_async into a queue that poll() empties on the main thread. A batch's births and
 ## deaths are read once its counts are known (two more frames) and applied to `sim` in batch order, each batch exactly once; a load
-## (GpuSim.loads), or _pipeline_reset, drops everything in flight (export_to_cpu takes the unapplied events first:
+## (GpuSim.loads), or reset_pipeline, drops everything in flight (export_to_cpu takes the unapplied events first:
 ## _take_unapplied_events). On a local device (tools) a request is submitted and waited for at once, and its results are read at once.
 ##
-## Layouts (32-bit words; the GLSL is in gpu/kernels.gd, the constants GpuKernels.Q_*, OUT_*):
-## - Lineage events (BupSim.apply_events): a birth is 16 words: id lo, id hi, parent lo, parent hi, step, divisions, mutations (uints: the low 20 bits, with the reach word in bits 20-29 and the F factor in bit 30),
-##   speed, sense, metabolism, size_gene, hue, sat, val, harm (floats), 0; a death is 10 words: id lo, id hi, step, divisions (uints: the low 20 bits, with the reach word in bits 20-29 and the F factor in bit 30),
-##   mass (float), x, y, what it gives back, its energy and its birth mass (floats). `step` is the step's place in the batch. Made by the `events` kernel after `finalize` and before `compact`,
-##   in bup-index order, into event set seq % GpuSim.EVENT_SETS (buffers EVB, EVD: room for P[78] = GpuSim.event_capacity of each per
-##   set); counters CNT[8..11] (gpu/kernels.gd).
-## - Questions QIN: 0 pick asked, 1-2 the point, 3 slack, 4 µm per pixel; 5 nearest points asked (up to 4), 6 + 3s: x, y, near;
-##   18 fractions asked (up to 4), 19 + 2f: gene index, threshold (the least float at or above it); 27 tracked (up to 8), 28 + 2t: id lo, hi.
-## - Answers OUT: 0-15 CNT, 16-23 PCNT; from 32 QOUT: 0 the picked bup's index or 0xFFFFFFFF, 1 its d² (float bits), 2-25 its record,
-##   26 the nearest d² (float bits) and 27 the count within `near` of point 0, 28-31 the counts for the 4 fractions, 36-227 the 8 tracked
-##   records (24 words each; ids 0xFFFFFFFF where not found), 228-233 the nearest d² and count of points 1-3. Picks and nearest by
-##   atomicMin on d² bits (they order like the floats, for d² >= 0), ties to the smaller index.
-## - Stats samples from OUT word 272: 16 floats each: count, Σspeed, Σsense, Σmetabolism, Σsize_gene, Σ(1 - exp(-harm)), Σmutations,
-##   step, 0...; sample 0 the state at the end of the frame's work, 1.. the batch's history samples. Reduced in groups of 256 and then in
-##   one pass of fixed order, so a sample is the same every run. OUTK keeps each event set's OUT for finish_pending.
+## Layouts: every word of the family events, the frame's questions (QIN) and answers (OUT) and the stats samples is named in
+## gpu/gpu_layout.gd (GpuLayout). The family events (BupSim.apply_events) are made by the `events` kernel after `finalize` and before
+## `compact`, in bup-index order, into event set seq % GpuSim.EVENT_SETS (buffers EVB, EVD: room for GpuSim.event_capacity of each per
+## set). Picks and nearest points are found by atomicMin on d² bits (they order like the floats, for d² >= 0), ties to the smaller index.
+## A stats sample is reduced in groups of 256 and then in one pass of fixed order, so it is the same every run. OUTK keeps each event
+## set's OUT for finish_pending.
 
 const SHADER_DIR := "res://gpu/shaders"
 
 static var _checked := false
 static var _available := false
 
-const GENE_NAMES := ["speed", "sense", "metabolism", "size"]  ## BupSim's genes, in the record's order (words 8-11)
+const GENE_NAMES := ["speed", "sense", "metabolism", "size"]  ## BupSim's genes, in the record's order (from GpuLayout.R_SPEED)
 const SAME_POINT_PIXELS := 2.0  ## an answer about a point serves a question about another this many pixels away
 const HOVER_POINT_PIXELS := 6.0  ## a hover takes the answer for a point this many pixels away: the pointer moves on while the answer comes back a few frames later
 const QUESTION_FRAMES := 2  ## a pick or nearest question is sent again for this many frames after it was last asked
@@ -48,9 +39,13 @@ const TRACK_FRAMES := 10  ## a tracked bup not asked for in this many frames is 
 const FRACTION_FRAMES := 60  ## a fraction not asked for in this many frames is no longer asked
 const MIRROR_ROOM := 64  ## the least a copy of the clouds asks for past the slots known to be in use
 const MIRROR_MSEC := 100  ## the field's copy is refreshed this often (Dish.HAZE_REFRESH_MSEC) while the GPU's field changes
+const BIRTH_BYTES := GpuLayout.BIRTH_WORDS * 4
+const DEATH_BYTES := GpuLayout.DEATH_WORDS * 4
+const OUT_BIRTHS := (GpuLayout.OUT_CNT + GpuLayout.CNT_BIRTHS) * 4  ## the byte in OUT of the batch's births (CNT_BIRTHS as it was at the end of its work)
+const OUT_DEATHS := (GpuLayout.OUT_CNT + GpuLayout.CNT_DEATHS) * 4
 
 var sim: BupSim  ## the dish's CPU simulation: records, names, pins, and the dish's own random numbers
-var gpu: GpuSim = null  ## (3B) the simulation on RenderingServer.get_rendering_device()
+var gpu: GpuSim = null  ## the simulation on RenderingServer.get_rendering_device()
 
 var record_usec := 0  ## how long the last request took to record (µs of CPU on the render thread): for timing
 var apply_usec := 0  ## the time spent in BupSim.apply_events so far (µs): for timing
@@ -84,9 +79,7 @@ var _records := {}  ## id -> its last record (112 bytes)
 var _gone := {}  ## id -> the last record of a tracked bup the GPU no longer has (it died): its place, until its death reaches the records
 var _sent_questions := {}
 var _erase := PackedFloat32Array()
-var _held_puffs := PackedFloat32Array()  ## the dish's own clouds and deposits made while no batch ran, sent on their own
-var _held_cells := PackedInt32Array()
-var _held_amounts := PackedFloat32Array()
+var _held := GpuSim.WorldEvents.new()  ## the dish's own clouds and deposits made while no batch ran, sent on their own
 var _touched_frame := -1
 var _flush_pending := false
 var _batch_frame := -1
@@ -108,7 +101,7 @@ var _last_advance_frame := -10  ## the process frame of the last steps_for
 
 ## Whether the GPU path can run here: a main RenderingDevice exists (not headless, not the Compatibility renderer, not the web), every
 ## kernel's imported shader loaded without an error, and the device takes as many storage buffers per kernel as the largest binds.
-## Worked out once. (3C may add to the checks; the most bups the device's dispatch limit allows is `most_bups()`.)
+## Worked out once. The most bups the device's dispatch limit allows is `most_bups()`.
 static func available() -> bool:
 	if _checked:
 		return _available
@@ -164,7 +157,7 @@ func _init(cpu_sim: BupSim, local_device := false) -> void:
 		gpu = GpuSim.new()
 
 
-## (3C) CPU -> GPU: makes `gpu` if there is none (GpuSim.new(RenderingServer.get_rendering_device())), and loads it from the CPU:
+## CPU -> GPU: makes `gpu` if there is none (GpuSim.new(RenderingServer.get_rendering_device())), and loads it from the CPU:
 ## the bups (sim.export_state_bytes(), next id sim.get_next_id()), the field (field.export_packed(), export_owner(),
 ## export_fill_weights(), get_diffusion()), and `dish_params`: "radius", "limit", "seed", "upkeep_scale", "feed_per_second",
 ## "step_seconds". Then the CPU field records instead of changing (field.set_recording(true)) and the CPU's bups are cleared
@@ -174,8 +167,7 @@ func _init(cpu_sim: BupSim, local_device := false) -> void:
 ## fresh noise instead of the same noise again from step 0; the CPU's stream is the dish's, and carries on).
 ## What does not cross, and why that is fine: the CPU's diffusion and feed accumulators, which only the CPU's own step moves (sim.step_world does not),
 ## so what they hold when the GPU takes over is still there, and still owed to the CPU's field, when the CPU takes over again.
-## Hooks of Step 3B, called when the world has them: `_pipeline_reset(bups: int)` (drop every result still in flight and every batch not yet
-## recorded, start a new sequence, and take `bups` as the count until the next poll).
+## Ends with `reset_pipeline(bups)`.
 func load_from_cpu(field: NutrientField, dish_params: Dictionary) -> void:
 	var records := sim.export_state_bytes()
 	var packed := field.export_packed()
@@ -196,42 +188,37 @@ func load_from_cpu(field: NutrientField, dish_params: Dictionary) -> void:
 	field.set_recording(true)
 	var answers := _answers_from_cpu(records, dish_params)  # (while the CPU still has the bups)
 	sim.import_state_bytes(PackedByteArray())  # (the bups are the GPU's now; the family records stay)
-	if has_method("_pipeline_reset"):
-		call("_pipeline_reset", records.size() / GpuSim.RECORD_BYTES)
+	reset_pipeline(records.size() / GpuSim.RECORD_BYTES)
 	_take_answers(answers)
 
 
-## (3C) GPU -> CPU, stalling: reads CNT, the bups, CONC and the live clouds (buffer_get_data), applies every batch's events not yet
+## GPU -> CPU, stalling: reads CNT, the bups, CONC and the live clouds (buffer_get_data), applies every batch's events not yet
 ## applied, in order (sim.apply_events), then sim.import_state_bytes(...), field.import_packed(...), sim.set_next_id(the GPU's next
 ## id), and turns the field's recording off. Results of those batches that arrive later are ignored (by their sequence number).
 ##
 ## What the field has recorded since the last batch was queued (a drop or a burst of the dish's own world, not yet sent) is added to
-## the grid and the clouds it reads back, so that nothing the player or the world did is lost.
-## Hooks of Step 3B, called when the world has them: `_take_unapplied_events() -> Array` (finish whatever is in flight or queued, so that
-## every batch has been recorded and has run, and return the event sets lineage has not seen yet, in batch order, as
-## {"births": PackedByteArray, "deaths": PackedByteArray, "first_step_end": float (s), "step_seconds": float}, each handed out once),
-## then `_pipeline_reset(bups)` as in load_from_cpu.
+## the grid and the clouds it reads back, so that nothing the player or the world did is lost; so is what the last step's deaths put
+## on the grid (their sum waits in DPLO/DPHI until the next step's `dep_apply`).
+## The events come from `_take_unapplied_events()` (see there), then `reset_pipeline(bups)` as in load_from_cpu.
 func export_to_cpu(field: NutrientField) -> void:
 	assert(gpu != null, "GpuWorld.export_to_cpu: nothing was loaded")
 	var read := {}
 	_transfer_call(func() -> void:
 		var rd := gpu.rd
 		var cnt := rd.buffer_get_data(gpu.buffer("CNT"))
-		var live := cnt.decode_u32(0)
-		read["next_id"] = cnt.decode_u32(4 * 4) | (cnt.decode_u32(6 * 4) << 32)
+		var live := cnt.decode_u32(GpuLayout.CNT_BUPS * 4)
+		read["next_id"] = cnt.decode_u32(GpuLayout.CNT_NEXT_ID_LO * 4) | (cnt.decode_u32(GpuLayout.CNT_NEXT_ID_HI * 4) << 32)
 		read["records"] = rd.buffer_get_data(gpu.buffer("BUPS"), 0, live * GpuSim.RECORD_BYTES) if live > 0 else PackedByteArray()  # (a size of 0 would read the whole buffer)
 		read["conc"] = rd.buffer_get_data(gpu.buffer("CONC")).to_float32_array()
+		read["dep_lo"] = rd.buffer_get_data(gpu.buffer("DPLO")).to_int32_array()
+		read["dep_hi"] = rd.buffer_get_data(gpu.buffer("DPHI")).to_int32_array()
 		read["acetate"] = rd.buffer_get_data(gpu.buffer("CONC2")).to_float32_array()
-		var slots := rd.buffer_get_data(gpu.buffer("PCNT")).decode_u32(0)
+		var slots := rd.buffer_get_data(gpu.buffer("PCNT")).decode_u32(GpuLayout.PCNT_SLOTS * 4)
 		read["slots"] = rd.buffer_get_data(gpu.buffer("PUFF"), 0, slots * 32).to_float32_array() if slots > 0 else PackedFloat32Array())
-	var sets: Array = []
-	if has_method("_take_unapplied_events"):
-		sets = call("_take_unapplied_events")
-	elif gpu.is_main:
-		push_error("GpuWorld.export_to_cpu: this world has no _take_unapplied_events (Step 3B): the lineage events of the batches not yet applied are lost")
-	for batch: Dictionary in sets:
+	for batch: Dictionary in _take_unapplied_events():
 		sim.apply_events(batch["births"], batch["deaths"], batch["first_step_end"], batch["step_seconds"])
 	var conc: PackedFloat32Array = read["conc"]
+	GpuSim.add_pending_deposits(conc, read["dep_lo"], read["dep_hi"], gpu.spacing)
 	var raw: PackedFloat32Array = read["slots"]
 	var clouds := PackedFloat32Array()
 	clouds.resize(raw.size() / 8 * 5)
@@ -254,8 +241,7 @@ func export_to_cpu(field: NutrientField) -> void:
 	sim.get_acetate().import_packed(read["acetate"], PackedFloat32Array())
 	sim.import_state_bytes(read["records"])
 	sim.set_next_id(maxi(int(read["next_id"]), sim.get_next_id()))
-	if has_method("_pipeline_reset"):
-		call("_pipeline_reset", read["records"].size() / GpuSim.RECORD_BYTES)
+	reset_pipeline(read["records"].size() / GpuSim.RECORD_BYTES)
 	_take_answers(_answers_from_cpu(read["records"]))  # (the dish may still ask here: a save leaves the GPU running, see Dish._gpu_on_cpu)
 
 
@@ -273,9 +259,9 @@ func _answers_from_cpu(records: PackedByteArray, dish_params := {}) -> Dictionar
 		var g := GENE_NAMES.find(pair[0])
 		if g >= 0:
 			_fractions[[g, pair[1]]] = frame
-	while _tracked.size() > GpuKernels.TRACKED:  # (the room QIN has, as track() and fraction_with_gene_at_least() keep it)
+	while _tracked.size() > GpuLayout.TRACKED:  # (the room QIN has, as track() and fraction_with_gene_at_least() keep it)
 		_tracked.erase(_oldest(_tracked))
-	while _fractions.size() > GpuKernels.FRACTIONS:
+	while _fractions.size() > GpuLayout.FRACTIONS:
 		_fractions.erase(_oldest(_fractions))
 	var out :={"stats": sim.population_stats(), "fractions": {}, "records": {}, "near": []}
 	for key: Array in _fractions:
@@ -296,7 +282,7 @@ func _answers_from_cpu(records: PackedByteArray, dish_params := {}) -> Dictionar
 	return out
 
 
-## Takes the answers of _answers_from_cpu as the last ones known (after _pipeline_reset).
+## Takes the answers of _answers_from_cpu as the last ones known (after reset_pipeline).
 func _take_answers(answers: Dictionary) -> void:
 	_stats = answers["stats"]
 	_fraction_answers.merge(answers["fractions"], true)
@@ -319,11 +305,11 @@ func _transfer_call(work: Callable) -> void:
 	finished.wait()  # (when the render thread is this one the callable has already run, and the wait is over at once)
 
 
-## (3B) Queues a batch of steps for this frame and records it at once (on the render thread), with the questions asked lately, the
+## Queues a batch of steps for this frame and records it at once (on the render thread), with the questions asked lately, the
 ## reads of earlier batches' family events, and the field's copy when due. `plan`: "steps" (int), "delta" (s per step), "start_time"
 ## (s, at the batch's start), "events" ({"ranges", "puffs", "cells", "amounts"}: the clouds and deposits the dish's world made, per step,
 ## as GpuSim._upload_events takes them), "feed_per_second", "upkeep_scale", "limit", "history_steps" (PackedInt32Array: the steps after
-## which a history sample is taken, ascending, at most GpuKernels.MAX_SAMPLES), "erase" (Array of [x, y, radius, strength]: discs to
+## which a history sample is taken, ascending, at most GpuLayout.MAX_SAMPLES), "erase" (Array of [x, y, radius, strength]: discs to
 ## erase before the batch, as well as those given to erase_disc). Ask `steps_for` first: it says how many steps may be queued (0: none
 ## this frame).
 func queue_batch(plan: Dictionary) -> void:
@@ -335,7 +321,7 @@ func queue_batch(plan: Dictionary) -> void:
 	_flush_now(plan)
 
 
-## (3B) On the main thread: applies the results that have arrived, in batch order: lineage events into `sim` (apply_events, each batch
+## On the main thread: applies the results that have arrived, in batch order: lineage events into `sim` (apply_events, each batch
 ## once), the counts, the stats, the history samples, the answers to the questions, the field's copy (field.import_packed). Cheap when
 ## nothing has arrived; every getter below calls it once a frame.
 func poll() -> void:
@@ -371,7 +357,7 @@ func poll() -> void:
 		_end_of_frame.call_deferred()
 
 
-## (3B) The history samples that have arrived since the last call, in order: [{"time": float (sim seconds), "stats": Dictionary with
+## The history samples that have arrived since the last call, in order: [{"time": float (sim seconds), "stats": Dictionary with
 ## BupSim.population_stats' keys}]. The dish records each with Dish._record_history_from.
 func take_history_samples() -> Array:
 	poll()
@@ -380,7 +366,7 @@ func take_history_samples() -> Array:
 	return out
 
 
-## (3B) The population, as last read back (a few frames behind the GPU); the count at the load until the first readback. 0 also when
+## The population, as last read back (a few frames behind the GPU); the count at the load until the first readback. 0 also when
 ## nothing is known yet (no GPU state).
 func bup_count() -> int:
 	_touch()
@@ -392,7 +378,7 @@ func count_known() -> bool:
 	return _count_known
 
 
-## (3B) The same keys as BupSim.population_stats (count, each gene's mean, harm, mutations, mutator, donor, key, generation), as last read back. Until the first
+## The same keys as BupSim.population_stats (count, each gene's mean, harm, mutations, mutator, donor, key, generation), as last read back. Until the first
 ## readback after a load: the count, and the means as last known (0 if never).
 func population_stats() -> Dictionary:
 	_touch()
@@ -404,7 +390,7 @@ func population_stats() -> Dictionary:
 	return _stats
 
 
-## (3B) The share of bups whose `gene` is at least `threshold` (BupSim.fraction_with_gene_at_least): registers the pair (up to 4, the
+## The share of bups whose `gene` is at least `threshold` (BupSim.fraction_with_gene_at_least): registers the pair (up to 4, the
 ## least recently asked dropped) for the frame's questions and returns the last answer, 0.0 until there is one.
 func fraction_with_gene_at_least(gene: String, threshold: float) -> float:
 	_touch()
@@ -413,12 +399,12 @@ func fraction_with_gene_at_least(gene: String, threshold: float) -> float:
 		return 0.0
 	var key := [g, threshold]
 	_fractions[key] = Engine.get_process_frames()
-	if _fractions.size() > GpuKernels.FRACTIONS:
+	if _fractions.size() > GpuLayout.FRACTIONS:
 		_fractions.erase(_oldest(_fractions))
 	return _fraction_answers.get(key, 0.0)
 
 
-## (3B) The bup under a point of the dish (BupSim.pick_bup's rule): asks for it in this frame's questions and returns the last answer for a
+## The bup under a point of the dish (BupSim.pick_bup's rule): asks for it in this frame's questions and returns the last answer for a
 ## point within 2 pixels of this one (with the same slack), else -1. The answer carries the bup's whole record, so a picked bup is tracked
 ## with no gap. A `hover` (the pointer is moving, the answer is a few frames old) is answered from a point `HOVER_POINT_PIXELS` away and
 ## whatever slack it was asked with (the slack changes with every step of a zoom); a click is exact.
@@ -433,7 +419,7 @@ func pick_bup(local: Vector2, slack: float, pixel_um: float, hover := false) -> 
 	return _pick_answer["id"]
 
 
-## (3B) BupSim.nearest_and_count (the distance to the nearest bup, -1 if none, and how many lie within `near`): asks for it (up to 4 points
+## BupSim.nearest_and_count (the distance to the nearest bup, -1 if none, and how many lie within `near`): asks for it (up to 4 points
 ## a frame) and returns the last answer for a point within 2 pixels of this one with the same `near`, else the last answer with the same
 ## `near`, else (-1, 0).
 func nearest_and_count(local: Vector2, near: float) -> Vector2:
@@ -448,7 +434,7 @@ func nearest_and_count(local: Vector2, near: float) -> Vector2:
 			break
 	if not found:
 		_near.append([local, near, frame])
-		if _near.size() > GpuKernels.NEAR_SLOTS:
+		if _near.size() > GpuLayout.NEAR_SLOTS:
 			_near.pop_front()
 	var fallback := Vector2(-1.0, 0.0)
 	for answer: Array in _near_answers:
@@ -460,50 +446,50 @@ func nearest_and_count(local: Vector2, near: float) -> Vector2:
 	return fallback
 
 
-## (3B) Keeps this bup's record coming back every frame (up to 8, the least recently asked dropped). The dish calls it every frame for each
+## Keeps this bup's record coming back every frame (up to 8, the least recently asked dropped). The dish calls it every frame for each
 ## bup it shows (the selected and the hovered one); an id not asked for again for TRACK_FRAMES frames is dropped.
 func track(id: int) -> void:
 	_touch()
 	if id < 0:
 		return
 	_tracked[id] = Engine.get_process_frames()
-	if _tracked.size() > GpuKernels.TRACKED:
+	if _tracked.size() > GpuLayout.TRACKED:
 		_tracked.erase(_oldest(_tracked))
 
 
-## (3B) BupSim.bup_info for a tracked (or picked) bup, from its last record (sim.info_from_state); {} if it is not known or no longer alive.
+## BupSim.bup_info for a tracked (or picked) bup, from its last record (sim.info_from_state); {} if it is not known or no longer alive.
 func bup_info(id: int) -> Dictionary:
 	_touch()
 	var record: PackedByteArray = _records.get(id, PackedByteArray())
 	return sim.info_from_state(record, 0) if not record.is_empty() else {}
 
 
-## (3B) Where a tracked bup is (dish coordinates), from its last record; (0, 0) if it is not known.
+## Where a tracked bup is (dish coordinates), from its last record; (0, 0) if it is not known.
 func bup_pos(id: int) -> Vector2:
 	_touch()
 	var record := _last_record(id)
-	return Vector2(record.decode_float(4), record.decode_float(8)) if not record.is_empty() else Vector2.ZERO
+	return Vector2(record.decode_float(GpuLayout.R_X * 4), record.decode_float(GpuLayout.R_Y * 4)) if not record.is_empty() else Vector2.ZERO
 
 
-## (3B) BupSim.bup_radius for a tracked bup: half the length it is drawn at, its own or the least that shows (0 if it is not known).
+## BupSim.bup_radius for a tracked bup: half the length it is drawn at, its own or the least that shows (0 if it is not known).
 func bup_radius(id: int, pixel_um: float) -> float:
 	_touch()
 	var record := _last_record(id)
 	if record.is_empty() or gpu == null:
 		return 0.0
-	return 0.5 * maxf(record.decode_float(6 * 4) * float(gpu.consts["mass_um"]), float(gpu.consts["min_length_px"]) * pixel_um)
+	return 0.5 * maxf(record.decode_float(GpuLayout.R_MASS * 4) * float(gpu.consts["mass_um"]), float(gpu.consts["min_length_px"]) * pixel_um)
 
 
-## (3B) BupSim.bup_steering for a tracked bup: sim.steering_at(its place, its speed, its sense range) on the field's copy.
+## BupSim.bup_steering for a tracked bup: sim.steering_at(its place, its speed, its sense range) on the field's copy.
 func bup_steering(id: int) -> Vector3:
 	_touch()
 	var record := _last_record(id)
 	if record.is_empty() or gpu == null:
 		return Vector3(0.0, 0.0, 0.5)
-	return sim.steering_at(Vector2(record.decode_float(4), record.decode_float(8)), record.decode_float(8 * 4), _sense_range(record))
+	return sim.steering_at(Vector2(record.decode_float(GpuLayout.R_X * 4), record.decode_float(GpuLayout.R_Y * 4)), record.decode_float(GpuLayout.R_SPEED * 4), _sense_range(record))
 
 
-## (3B) BupSim.bup_steer_bytes for a tracked bup: field.steer_bytes(its speed, its sense range, max_alpha) on the field's copy; while its
+## BupSim.bup_steer_bytes for a tracked bup: field.steer_bytes(its speed, its sense range, max_alpha) on the field's copy; while its
 ## record is not known, a clear picture of the field's size (nothing tinted), so the dish can always make an image of it.
 func bup_steer_bytes(id: int, max_alpha: float) -> PackedByteArray:
 	_touch()
@@ -513,7 +499,7 @@ func bup_steer_bytes(id: int, max_alpha: float) -> PackedByteArray:
 		var clear := PackedByteArray()
 		clear.resize(field.get_size() * field.get_size() * 4)
 		return clear
-	return field.steer_bytes(record.decode_float(8 * 4), _sense_range(record), max_alpha)
+	return field.steer_bytes(record.decode_float(GpuLayout.R_SPEED * 4), _sense_range(record), max_alpha)
 
 
 ## Whether a place is known for this bup (it is tracked or was picked, and its record has come back; or it died since and its last
@@ -526,7 +512,7 @@ func _last_record(id: int) -> PackedByteArray:
 	return _records.get(id, _gone.get(id, PackedByteArray()))
 
 
-## (3B) The eraser on the GPU path: erases the disc from the field's copy at once (what is seen, and the amount returned: energy taken, as
+## The eraser on the GPU path: erases the disc from the field's copy at once (what is seen, and the amount returned: energy taken, as
 ## NutrientField.erase_disc) and from the GPU's field before its next step (recorded this frame, also while paused).
 func erase_disc(local: Vector2, disc_radius: float, strength: float) -> float:
 	_touch()
@@ -534,7 +520,7 @@ func erase_disc(local: Vector2, disc_radius: float, strength: float) -> float:
 	return sim.get_field().erase_disc(local, disc_radius, strength)
 
 
-## (3B) How many of the `wanted` steps of this frame may be queued (the budget): the frame's length is
+## How many of the `wanted` steps of this frame may be queued (the budget): the frame's length is
 ## measured from one call to the next; three frames in a row longer than 1.15 times the display's frame cut the steps a frame may take by
 ## a fifth, a frame shorter than 1.05 times raises them by a tenth (at least one), up to `wanted`. And no more than half the batch's room
 ## for births and deaths (GpuSim.event_capacity) at the rate they came lately (1.5 times it; 2% of the bups a step until a batch has
@@ -579,11 +565,6 @@ func pending_batches() -> int:
 	return _batches.size()
 
 
-## (for the debug log) The same as overflows().
-func overflow_counts() -> Dictionary:
-	return _overflows
-
-
 ## What found no room on the GPU since the load, as last read back: clouds sent to the grid for want of a slot, entries cut from the
 ## lists of clouds by place, births and deaths that found no event slot (each of those leaves a hole in the family records).
 func overflows() -> Dictionary:
@@ -592,14 +573,14 @@ func overflows() -> Dictionary:
 
 ## Stalls until every batch queued so far is done, reads their family events and history samples straight from the GPU, and applies
 ## them in order (events into `sim`, samples to take_history_samples). Results of those batches that arrive later are ignored. For
-## tools; export_to_cpu (3C) takes the events instead with _take_unapplied_events. After it, `sim`'s records are those of the GPU's
+## tools; export_to_cpu takes the events instead with _take_unapplied_events. After it, `sim`'s records are those of the GPU's
 ## state.
 func finish_pending() -> void:
 	for events: Dictionary in _take_unapplied_events():
 		sim.apply_events(events["births"], events["deaths"], events["first_step_end"], events["step_seconds"])
 
 
-## (for 3C's export_to_cpu) Stalls until every batch queued so far is done and returns the family events of every batch not yet applied
+## (for export_to_cpu) Stalls until every batch queued so far is done and returns the family events of every batch not yet applied
 ## to `sim`, in batch order, each once: [{"births": PackedByteArray, "deaths": PackedByteArray, "first_step_end": float, "step_seconds":
 ## float}] (BupSim.apply_events' arguments). Their history samples go to take_history_samples: after a switch to the CPU, the dish must
 ## record those (take_history_samples -> _record_history_from) before its first CPU step, or they come out of order later. Results of
@@ -632,19 +613,6 @@ func _take_unapplied_events() -> Array:
 	return out
 
 
-## Drops every batch in flight without applying its events (their births and deaths are then missing from `sim`'s records): only for a
-## state about to be replaced whose records do not matter. A new load drops them by itself.
-func drop_pending() -> void:
-	_batches.clear()
-	_next_apply = _seq
-
-
-## Records a frame's work now, without waiting for the end of the frame: what queue_batch does, without a batch (tools).
-func flush() -> void:
-	_sync_epoch()
-	_flush_now({})
-
-
 # ---- inside --------------------------------------------------------------------------------------------------------------------
 
 ## Once a frame, from the getters: the results that have arrived, and a look at the end of the frame for questions to send.
@@ -669,11 +637,9 @@ func _end_of_frame() -> void:
 	var questions := _questions()
 	var work := questions != _sent_questions or not _erase.is_empty() or not _pending_reads.is_empty() or _mirror_due()
 	if not work and _batch_frame != Engine.get_process_frames():
-		var field := sim.get_field()
-		_held_puffs = field.take_recorded_puffs()
-		_held_cells = field.take_recorded_cells()
-		_held_amounts = field.take_recorded_amounts()
-		work = not _held_puffs.is_empty() or not _held_cells.is_empty()
+		_held = GpuSim.WorldEvents.new()
+		_held.add_step(sim.get_field())
+		work = not _held.is_empty()
 	if work:
 		_flush_now({})
 
@@ -724,7 +690,7 @@ func _flush_now(plan: Dictionary) -> void:
 		var seq := _seq
 		_seq += 1
 		var history: PackedInt32Array = plan.get("history_steps", PackedInt32Array())
-		assert(history.size() <= GpuKernels.MAX_SAMPLES)
+		assert(history.size() <= GpuLayout.MAX_SAMPLES)
 		var event_set := seq % GpuSim.EVENT_SETS
 		var delta: float = plan["delta"]
 		var start: float = plan.get("start_time", 0.0)
@@ -739,19 +705,14 @@ func _flush_now(plan: Dictionary) -> void:
 		request["plan"] = gpu_plan
 		request["samples"] = history.size()
 		var events: Dictionary = plan.get("events", {})
-		_clouds_sent += (events.get("puffs", PackedFloat32Array()) as PackedFloat32Array).size() / 6
+		_clouds_sent += (events.get("puffs", PackedFloat32Array()) as PackedFloat32Array).size() / GpuSim.EV_PUFF_FLOATS
 		_batch_frame = frame
 		_changed = true
-	elif not _held_puffs.is_empty() or not _held_cells.is_empty():
-		var puffs := PackedFloat32Array()
-		for j in _held_puffs.size() / 5:
-			puffs.append_array(PackedFloat32Array([_held_puffs[j * 5], _held_puffs[j * 5 + 1], _held_puffs[j * 5 + 2], _held_puffs[j * 5 + 3], _held_puffs[j * 5 + 4], 0.0]))
-		request["events"] = {"ranges": PackedInt32Array([0, puffs.size() / 6, 0, _held_cells.size()]), "puffs": puffs, "cells": _held_cells, "amounts": _held_amounts}
-		_clouds_sent += puffs.size() / 6
+	elif not _held.is_empty():
+		request["events"] = _held.as_dict()
+		_clouds_sent += _held.cloud_count()
 		_changed = true
-	_held_puffs = PackedFloat32Array()
-	_held_cells = PackedInt32Array()
-	_held_amounts = PackedFloat32Array()
+	_held = GpuSim.WorldEvents.new()
 	# the questions
 	var q := _questions()
 	_sent_questions = q
@@ -785,9 +746,9 @@ func _record(request: Dictionary) -> void:
 		var seq: int = read[0]
 		var base: int = read[1] * gpu.event_capacity
 		if read[2] > 0:
-			_read(gpu.buffer("EVB"), base * 64, read[2] * 64, ["births", rid, seq, epoch])
+			_read(gpu.buffer("EVB"), base * BIRTH_BYTES, read[2] * BIRTH_BYTES, ["births", rid, seq, epoch])
 		if read[3] > 0:
-			_read(gpu.buffer("EVD"), base * 40, read[3] * 40, ["deaths", rid, seq, epoch])
+			_read(gpu.buffer("EVD"), base * DEATH_BYTES, read[3] * DEATH_BYTES, ["deaths", rid, seq, epoch])
 	var plan: Dictionary = request.get("plan", {})
 	var steps: int = plan.get("steps", 0)
 	if steps > 0:
@@ -804,7 +765,7 @@ func _record(request: Dictionary) -> void:
 	elif request.has("events"):
 		gpu.record_events(cl)
 	gpu.record_frame(cl, not q["pick"].is_empty(), not q["near"].is_empty() or not q["fractions"].is_empty(), not q["tracked"].is_empty())
-	var words: int = GpuKernels.OUT_STATS + GpuKernels.STATS_WORDS * (1 + int(request["samples"]))
+	var words: int = GpuLayout.OUT_STATS + GpuLayout.STATS_WORDS * (1 + int(request["samples"]))
 	if steps > 0:
 		gpu.record_keep(cl, plan["event_set"], words)
 	var slots: int = request["mirror"]
@@ -842,17 +803,17 @@ func _read_batches_now(sets: Dictionary, got: Dictionary) -> void:
 	if gpu == null:
 		return
 	var rd := gpu.rd
-	var words := GpuKernels.OUT_WORDS
+	var words := GpuLayout.OUT_WORDS
 	for seq: int in sets:
 		var event_set: int = sets[seq]
 		var head := rd.buffer_get_data(gpu.buffer("OUTK"), event_set * words * 4, words * 4)
-		var births := mini(head.decode_u32(8 * 4), gpu.event_capacity)
-		var deaths := mini(head.decode_u32(9 * 4), gpu.event_capacity)
+		var births := mini(head.decode_u32(OUT_BIRTHS), gpu.event_capacity)
+		var deaths := mini(head.decode_u32(OUT_DEATHS), gpu.event_capacity)
 		var base: int = event_set * gpu.event_capacity
 		got[seq] = {
 			"head": head,
-			"births": rd.buffer_get_data(gpu.buffer("EVB"), base * 64, births * 64) if births > 0 else PackedByteArray(),
-			"deaths": rd.buffer_get_data(gpu.buffer("EVD"), base * 40, deaths * 40) if deaths > 0 else PackedByteArray(),
+			"births": rd.buffer_get_data(gpu.buffer("EVB"), base * BIRTH_BYTES, births * BIRTH_BYTES) if births > 0 else PackedByteArray(),
+			"deaths": rd.buffer_get_data(gpu.buffer("EVD"), base * DEATH_BYTES, deaths * DEATH_BYTES) if deaths > 0 else PackedByteArray(),
 		}
 
 
@@ -867,12 +828,12 @@ func _take_out(rid: int, data: PackedByteArray) -> void:
 	var seq: int = request["seq"]
 	if seq >= 0 and _batches.has(seq):
 		var batch: Dictionary = _batches[seq]
-		batch["births"] = mini(data.decode_u32(8 * 4), gpu.event_capacity)
-		batch["deaths"] = mini(data.decode_u32(9 * 4), gpu.event_capacity)
+		batch["births"] = mini(data.decode_u32(OUT_BIRTHS), gpu.event_capacity)
+		batch["deaths"] = mini(data.decode_u32(OUT_DEATHS), gpu.event_capacity)
 		batch["samples"] = _samples_from(data, batch)
 		batch["head"] = true
-		_last_births = data.decode_u32(8 * 4)
-		var per_step := maxf(data.decode_u32(8 * 4), data.decode_u32(9 * 4)) / maxf(batch["steps"], 1)
+		_last_births = data.decode_u32(OUT_BIRTHS)
+		var per_step := maxf(data.decode_u32(OUT_BIRTHS), data.decode_u32(OUT_DEATHS)) / maxf(batch["steps"], 1)
 		_event_rate = maxf(per_step, 0.8 * _event_rate)  # (up at once, down slowly)
 		if batch["births"] > 0 or batch["deaths"] > 0:
 			_pending_reads.append(seq)
@@ -883,26 +844,29 @@ func _take_out(rid: int, data: PackedByteArray) -> void:
 ## What the newest OUT says: the counts, the stats and the answers to the questions asked with it.
 func _take_answers_from_out(rid: int, data: PackedByteArray, request: Dictionary) -> void:
 	_last_out_rid = rid
-	var count := data.decode_u32(0)
+	var count := data.decode_u32((GpuLayout.OUT_CNT + GpuLayout.CNT_BUPS) * 4)
 	_count = count
 	_count_known = true
-	_last_pcnt = data.decode_u32(16 * 4)
+	_last_pcnt = data.decode_u32((GpuLayout.OUT_PCNT + GpuLayout.PCNT_SLOTS) * 4)
 	_clouds_at_head = request["clouds_sent"]
-	_overflows = {"clouds_to_grid": data.decode_u32(18 * 4), "list_entries_cut": data.decode_u32(19 * 4), "births_lost": data.decode_u32(10 * 4), "deaths_lost": data.decode_u32(11 * 4)}
+	_overflows = {
+		"clouds_to_grid": data.decode_u32((GpuLayout.OUT_PCNT + GpuLayout.PCNT_TO_GRID) * 4), "list_entries_cut": data.decode_u32((GpuLayout.OUT_PCNT + GpuLayout.PCNT_CUT) * 4),
+		"births_lost": data.decode_u32((GpuLayout.OUT_CNT + GpuLayout.CNT_BIRTHS_LOST) * 4), "deaths_lost": data.decode_u32((GpuLayout.OUT_CNT + GpuLayout.CNT_DEATHS_LOST) * 4)}
 	_stats = _stats_at(data, 0)
 	var q: Dictionary = request["questions"]
-	var o := GpuKernels.OUT_Q * 4
+	var o := GpuLayout.OUT_Q * 4
 	if not q["pick"].is_empty():
-		var index := data.decode_u32(o)
+		var index := data.decode_u32(o + GpuLayout.QO_INDEX * 4)
 		var id := -1
 		if index != 0xFFFFFFFF:
-			var record := GpuSim.whole_record(data.slice(o + 8, o + 8 + GpuSim.ANSWER_BYTES))
+			var at := o + GpuLayout.QO_RECORD * 4
+			var record := GpuSim.whole_record(data.slice(at, at + GpuSim.ANSWER_BYTES))
 			id = GpuSim.id_of(record, 0)
 			_records[id] = record
 		_pick_answer = {"local": q["pick"][0], "slack": q["pick"][1], "id": id}
 	var near: Array = q["near"]
 	for s in near.size():
-		var w := o + (26 * 4 if s == 0 else (228 + 2 * (s - 1)) * 4)
+		var w := o + (GpuLayout.QO_NEAR if s == 0 else GpuLayout.QO_NEAR_MORE + 2 * (s - 1)) * 4
 		var bits := data.decode_u32(w)
 		var value := Vector2(-1.0 if bits == 0xFFFFFFFF else sqrt(data.decode_float(w)), float(data.decode_u32(w + 4)))
 		var key_local: Vector2 = near[s][0]
@@ -911,16 +875,16 @@ func _take_answers_from_out(rid: int, data: PackedByteArray, request: Dictionary
 			if _near_answers[k][1] == key_near and (_near_answers[k][0] as Vector2).distance_to(key_local) <= SAME_POINT_PIXELS * _pixel_um:
 				_near_answers.remove_at(k)
 		_near_answers.append([key_local, key_near, value])
-		if _near_answers.size() > 2 * GpuKernels.NEAR_SLOTS:
+		if _near_answers.size() > 2 * GpuLayout.NEAR_SLOTS:
 			_near_answers.pop_front()
 	var fractions: Array = q["fractions"]
 	for f in fractions.size():
-		_fraction_answers[fractions[f]] = float(data.decode_u32(o + (28 + f) * 4)) / count if count > 0 else 0.0
+		_fraction_answers[fractions[f]] = float(data.decode_u32(o + (GpuLayout.QO_FRAC + f) * 4)) / count if count > 0 else 0.0
 	var tracked: Array = q["tracked"]
 	for t in tracked.size():
-		var w := o + (36 + GpuSim.ANSWER_WORDS * t) * 4
+		var w := o + (GpuLayout.QO_TRACKED + GpuSim.ANSWER_WORDS * t) * 4
 		var id: int = tracked[t]
-		if data.decode_u32(w) == 0xFFFFFFFF and data.decode_u32(w + 21 * 4) == 0xFFFFFFFF:
+		if data.decode_u32(w + GpuLayout.R_ID_LO * 4) == 0xFFFFFFFF and data.decode_u32(w + GpuLayout.R_ID_HI * 4) == 0xFFFFFFFF:
 			if _records.has(id):
 				_gone[id] = _records[id]  # (not found: no longer alive. Its place is kept: its record says it lives until its death is applied, a few frames on)
 			_records.erase(id)
@@ -938,18 +902,18 @@ func _samples_from(data: PackedByteArray, batch: Dictionary) -> Array:
 
 ## Stats sample `sample` of an OUT as BupSim.population_stats' dictionary.
 func _stats_at(data: PackedByteArray, sample: int) -> Dictionary:
-	var o := (GpuKernels.OUT_STATS + GpuKernels.STATS_WORDS * sample) * 4
-	var count := int(data.decode_float(o))
+	var o := (GpuLayout.OUT_STATS + GpuLayout.STATS_WORDS * sample) * 4
+	var count := int(data.decode_float(o + GpuLayout.ST_COUNT * 4))
 	var per := 1.0 / maxf(count, 1)
 	var out := {"count": count}
 	for g in 4:
-		out[GENE_NAMES[g]] = data.decode_float(o + (1 + g) * 4) * per
-	out["harm"] = data.decode_float(o + 5 * 4) * per
-	out["mutations"] = data.decode_float(o + 6 * 4) * per
-	out["mutator"] = data.decode_float(o + 8 * 4) * per
-	out["donor"] = float(data.decode_u32(o + 9 * 4)) * per
-	out["key"] = data.decode_float(o + 10 * 4) * per
-	out["generation"] = data.decode_float(o + 11 * 4) * per
+		out[GENE_NAMES[g]] = data.decode_float(o + (GpuLayout.ST_SPEED + g) * 4) * per
+	out["harm"] = data.decode_float(o + GpuLayout.ST_HARM * 4) * per
+	out["mutations"] = data.decode_float(o + GpuLayout.ST_MUTATIONS * 4) * per
+	out["mutator"] = data.decode_float(o + GpuLayout.ST_MUTATOR * 4) * per
+	out["donor"] = float(data.decode_u32(o + GpuLayout.ST_DONORS * 4)) * per
+	out["key"] = data.decode_float(o + GpuLayout.ST_KEY * 4) * per
+	out["generation"] = data.decode_float(o + GpuLayout.ST_DIVISIONS * 4) * per
 	return out
 
 
@@ -979,12 +943,12 @@ func _sync_epoch() -> void:
 		return
 	if not _batches.is_empty():
 		push_warning("GpuWorld: a new state was loaded with %d batches' family events not applied (_take_unapplied_events first)" % _batches.size())
-	_pipeline_reset(gpu.count)
+	reset_pipeline(gpu.count)
 
 
-## (for 3C, right after load_from_cpu) Drops every result in flight and every batch not yet applied (their events are lost: take them
+## Drops every result in flight and every batch not yet applied (their events are lost: take them
 ## first with _take_unapplied_events), starts afresh, and takes `bups` as the count until the first readback.
-func _pipeline_reset(bups: int) -> void:
+func reset_pipeline(bups: int) -> void:
 	if gpu != null:
 		_seen_loads = gpu.loads
 	_epoch += 1
@@ -1060,31 +1024,31 @@ func _add_erase(x: float, y: float, disc_radius: float, strength: float) -> void
 ## QIN's words for the questions `q` (GpuKernels' layout).
 func _qin(q: Dictionary) -> PackedByteArray:
 	var b := PackedByteArray()
-	b.resize(GpuKernels.QIN_WORDS * 4)
+	b.resize(GpuLayout.QIN_WORDS * 4)
 	if not q["pick"].is_empty():
 		var at: Vector2 = q["pick"][0]
-		b.encode_u32(0, 1)
-		b.encode_float(4, at.x)
-		b.encode_float(8, at.y)
-		b.encode_float(12, q["pick"][1])
-		b.encode_float(16, q["pick"][2])
+		b.encode_u32(GpuLayout.Q_PICK * 4, 1)
+		b.encode_float(GpuLayout.Q_PICK_X * 4, at.x)
+		b.encode_float(GpuLayout.Q_PICK_Y * 4, at.y)
+		b.encode_float(GpuLayout.Q_SLACK * 4, q["pick"][1])
+		b.encode_float(GpuLayout.Q_PIXEL * 4, q["pick"][2])
 	var near: Array = q["near"]
-	b.encode_u32(GpuKernels.Q_NEAR * 4, near.size())
+	b.encode_u32(GpuLayout.Q_NEAR * 4, near.size())
 	for s in near.size():
-		var w := (GpuKernels.Q_NEAR + 1 + 3 * s) * 4
+		var w := (GpuLayout.Q_NEAR_FIRST + 3 * s) * 4
 		b.encode_float(w, near[s][0].x)
 		b.encode_float(w + 4, near[s][0].y)
 		b.encode_float(w + 8, near[s][1])
 	var fractions: Array = q["fractions"]
-	b.encode_u32(GpuKernels.Q_FRAC * 4, fractions.size())
+	b.encode_u32(GpuLayout.Q_FRAC * 4, fractions.size())
 	for f in fractions.size():
-		var w := (GpuKernels.Q_FRAC + 1 + 2 * f) * 4
+		var w := (GpuLayout.Q_FRAC_FIRST + 2 * f) * 4
 		b.encode_u32(w, fractions[f][0])
 		b.encode_u32(w + 4, _float_at_least(fractions[f][1]))
 	var tracked: Array = q["tracked"]
-	b.encode_u32(GpuKernels.Q_TRACK * 4, tracked.size())
+	b.encode_u32(GpuLayout.Q_TRACK * 4, tracked.size())
 	for t in tracked.size():
-		var w := (GpuKernels.Q_TRACK + 1 + 2 * t) * 4
+		var w := (GpuLayout.Q_TRACK_FIRST + 2 * t) * 4
 		b.encode_u32(w, tracked[t] & 0xFFFFFFFF)
 		b.encode_u32(w + 4, (tracked[t] >> 32) & 0xFFFFFFFF)
 	return b
@@ -1104,7 +1068,7 @@ static func _float_at_least(value: float) -> int:
 
 ## The sense range of a record's bup (BupSim's: sense * sqrt(sqrt(mass) / reference_size)).
 func _sense_range(record: PackedByteArray) -> float:
-	return record.decode_float(9 * 4) * sqrt(sqrt(record.decode_float(6 * 4)) / float(gpu.consts["reference_size"]))
+	return record.decode_float(GpuLayout.R_SENSE * 4) * sqrt(sqrt(record.decode_float(GpuLayout.R_MASS * 4)) / float(gpu.consts["reference_size"]))
 
 
 func _frame_rate() -> float:
@@ -1122,9 +1086,9 @@ static func _oldest(asked: Dictionary) -> Variant:
 	return oldest
 
 
-## (3A) Records the render kernel for this frame: writes `instance_count` instances of the MultiMesh whose RD buffer is `multimesh`
+## Records the render kernel for this frame: writes `instance_count` instances of the MultiMesh whose RD buffer is `multimesh`
 ## (RenderingServer.multimesh_get_buffer_rd_rid) from the bups (a port of BupSim.render_buffer: 16 floats each; slots past the count
-## all zero; trails from words 22/23 of the records), at `pixel_um` µm to the pixel. Never through multimesh.buffer or the
+## all zero; trails from R_PX, R_PY of the records), at `pixel_um` µm to the pixel. Never through multimesh.buffer or the
 ## per-instance setters (a CPU copy would overwrite the GPU's).
 func draw_bups(multimesh: RID, instance_count: int, pixel_um: float) -> void:
 	if gpu == null:

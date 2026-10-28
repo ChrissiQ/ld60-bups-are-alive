@@ -12,14 +12,14 @@ extends RefCounted
 ## small populations once that class is lost by chance (Muller's ratchet).
 ##
 ## RATES ARE RAISED. A real E. coli makes about 1-3 x 10^-3 mutations per genome per division
-## (Drake 1991; Lee et al. 2012; from memory, unchecked here), so the rates below are about a
-## hundred and thirty times higher (they were four hundred times higher before MUTATION_SUPPLY, below, cut them to a third). The reason: a real culture has ~10^8 cells and a dish here has at most
-## 300, so the supply of new mutations per generation (population x rate) would be nearly nil.
+## (Drake 1991: about 3 x 10^-3; Lee et al. 2012: about 1 x 10^-3 by sequencing), so the rates below are about a
+## hundred and thirty times higher (MUTATION_SUPPLY, below, is the factor on the base rates). The reason: a real culture has ~10^8 cells and a dish
+## here holds 100,000 bups by default (2,000,000 at most), so the supply of new mutations per generation (population x rate) would be much smaller.
 ## Raising the rate keeps that supply near what a real culture sees, and selection and clonal
 ## interference work in a comparable regime; drift is much stronger than in life (a mutation's
 ## chance of fixing by luck is 1/N). The shape of the spectrum is realistic. Mutations happen at
 ## division, so how many arrive per second of simulation time depends on how often bups divide;
-## playing at x3 or x8 multiplies the divisions, and so the mutations, per second you wait.
+## playing at x100 or x10,000 multiplies the divisions, and so the mutations, per second you wait.
 
 const GENES := {
 	# name: [min, max, mutation step (stddev)]
@@ -47,7 +47,7 @@ const RANDOM_VAL_POWER := 0.85  ## the same for brightness, less strongly
 
 # Expected mutations per division (Poisson), each of its own kind, for a bup with the usual mutation rate (a mutator makes daughters with
 # its rate times these, see below).
-const MUTATION_SUPPLY := 1.0 / 3.0  ## the share of the earlier base rates that is kept (1, 0.2 and 0.004), so that the strong mutator alleles below stay survivable at the real folds: a 150-fold mutator makes about 10 harmful mutations a division at this supply, and 30 at the old one, where most daughters die (the user chose to lower the base rate rather than scale the mutators; ordinary evolution is slower by the same factor)
+const MUTATION_SUPPLY := 1.0 / 3.0  ## the share of the base rates that is kept (1, 0.2 and 0.004 per division before this), so that the strong mutator alleles below stay survivable at the real folds: a 150-fold mutator makes about 10 harmful mutations a division at this supply (30 at the full base rates, where most daughters die); ordinary evolution is slower by the same factor
 const TRAIT_MUTATIONS := 1.0 * MUTATION_SUPPLY  ## change one trait by a random amount; helpful or harmful depending on the dish
 const HARMFUL_MUTATIONS := 0.2 * MUTATION_SUPPLY  ## damage elsewhere in the genome, adding to `harm`
 const COMPENSATORY_MUTATIONS := 0.004 * MUTATION_SUPPLY  ## the rare helpful ones: they repair some harm
@@ -66,7 +66,7 @@ const MUTATOR_FOLD_STRONG := 100.0  ## a mutS- or mutL-like allele, the commones
 const MUTATOR_FOLD_TOP := 150.0  ## a mutT-like allele (a fifth)
 ## A new mutator allele per division: in life 5e-6 per cell per generation (Boe et al. 2000), when a genome mutates 0.003 times a
 ## generation (Drake 1991; Lee et al. 2012): the same ratio to this dish's rate.
-const MUTATOR_RATE := 5.0e-6 * (TRAIT_MUTATIONS + HARMFUL_MUTATIONS) / 0.003
+const MUTATOR_RATE := 5.0e-6 * (TRAIT_MUTATIONS + HARMFUL_MUTATIONS) / Biology.REAL_MUTATIONS_PER_DIVISION
 const MUTATOR_DOWN_SHARE := 0.3  ## antimutator mutations in a mutator, as a share of the mutator rate [choice: no measured ratio; Wielgoss et al. saw two in the time one mutator arose]
 
 # Conjugation: a donor is a bup with the F factor integrated in its chromosome (an Hfr cell). It passes a run of its genes to a bup that is not a
@@ -94,7 +94,7 @@ const REACH_FACTOR_3 := 1.50  ## the third
 const REACH_COST := 0.05  ## the share of its growth a bup gives up for each raise [Fraebel et al. 2017: about 10% less growth for about 50% more speed; motility costs several percent of protein and energy, in proportion to expression (Ni et al. 2020)], on top of what the larger trait already costs in upkeep
 ## A raise per division: beneficial mutations arise at about 1e-5 per genome per generation with an exponential spread of effects of mean 2% (Perfeito et al. 2007; Imhof
 ## & Schloetterer 2001), so one of 10% or more (the chance e^-5, about 0.7%) is about 7e-8 a generation; scaled as the mutator's rate is, by this dish's mutation rate over a real genome's.
-const REACH_RATE := 1.0e-5 * exp(-5.0) * (TRAIT_MUTATIONS + HARMFUL_MUTATIONS) / 0.003
+const REACH_RATE := 1.0e-5 * exp(-5.0) * (TRAIT_MUTATIONS + HARMFUL_MUTATIONS) / Biology.REAL_MUTATIONS_PER_DIVISION
 
 # --- The acetate key: a rare two-step change that lets a lineage live on acetate far better ---
 # Cross-feeding on acetate is kept in real populations by regulatory mutations (of acs) that raise uptake at low acetate (Rosenzweig et al. 1994; Treves et al. 1998). Like the citrate use of the

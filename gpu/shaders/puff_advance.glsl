@@ -9,6 +9,12 @@ layout(set = 0, binding = 2, std430) buffer B_PUFF { float PUFF[]; };
 layout(set = 0, binding = 3, std430) buffer B_INSIDE { int INSIDE[]; };
 layout(set = 0, binding = 4, std430) buffer B_DPLO { uint DPLO[]; };
 layout(set = 0, binding = 5, std430) buffer B_DPHI { uint DPHI[]; };
+const uint PCNT_SLOTS = 0u;
+const int P_CELLS = 1;
+const int P_CLOUD_SPREAD = 70;
+const int P_HANDOVER = 64;
+const int P_ORIGIN = 3;
+const int P_SPACING = 2;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
@@ -23,8 +29,8 @@ void add_dep(uint cell, float amount) { // 2^20 to the unit, in 64 bits
 	}
 }
 void deposit_xy(float x, float y, float mass) {
-	int n = int(P[1]); float sp = P[2];
-	float fx = (x + P[3]) / sp - 0.5, fy = (y + P[3]) / sp - 0.5;
+	int n = int(P[P_CELLS]); float sp = P[P_SPACING];
+	float fx = (x + P[P_ORIGIN]) / sp - 0.5, fy = (y + P[P_ORIGIN]) / sp - 0.5;
 	int x0 = int(floor(fx)), y0 = int(floor(fy));
 	float tx = fx - float(x0), ty = fy - float(y0);
 	int cells[4]; float weights[4]; float kept = 0.0; int count = 0;
@@ -41,29 +47,29 @@ void deposit_xy(float x, float y, float mass) {
 
 void main() {
 	uint k = gl_GlobalInvocationID.x;
-	if (k >= PCNT[0]) return;
+	if (k >= PCNT[PCNT_SLOTS]) return;
 	uint o = k * 8u;
 	if (PUFF[o + 5] < 0.5) return;
-	float v = PUFF[o + 3] + P[70];
+	float v = PUFF[o + 3] + P[P_CLOUD_SPREAD];
 	PUFF[o + 3] = v;
 	float mass = PUFF[o + 2];
 	if (mass <= 1e-9) { PUFF[o + 5] = 0.0; return; }
-	if (sqrt(v) >= P[64]) {
+	if (sqrt(v) >= P[P_HANDOVER]) {
 		float x = PUFF[o], y = PUFF[o + 1];
-		int n = int(P[1]); float sp = P[2]; float reach = 4.0 * sqrt(v);
-		int x0 = max(0, int(floor((x - reach + P[3]) / sp - 0.5))), x1 = min(n - 1, int(ceil((x + reach + P[3]) / sp - 0.5)));
-		int y0 = max(0, int(floor((y - reach + P[3]) / sp - 0.5))), y1 = min(n - 1, int(ceil((y + reach + P[3]) / sp - 0.5)));
+		int n = int(P[P_CELLS]); float sp = P[P_SPACING]; float reach = 4.0 * sqrt(v);
+		int x0 = max(0, int(floor((x - reach + P[P_ORIGIN]) / sp - 0.5))), x1 = min(n - 1, int(ceil((x + reach + P[P_ORIGIN]) / sp - 0.5)));
+		int y0 = max(0, int(floor((y - reach + P[P_ORIGIN]) / sp - 0.5))), y1 = min(n - 1, int(ceil((y + reach + P[P_ORIGIN]) / sp - 0.5)));
 		float sum = 0.0;
 		for (int cy = y0; cy <= y1; cy++) for (int cx = x0; cx <= x1; cx++) {
 			if (INSIDE[cy * n + cx] == 0) continue;
-			float dx = (float(cx) + 0.5) * sp - P[3] - x, dy = (float(cy) + 0.5) * sp - P[3] - y;
+			float dx = (float(cx) + 0.5) * sp - P[P_ORIGIN] - x, dy = (float(cy) + 0.5) * sp - P[P_ORIGIN] - y;
 			sum += exp(-(dx * dx + dy * dy) / (2.0 * v));
 		}
 		if (sum <= 1e-12) deposit_xy(x, y, mass);
 		else {
 			for (int cy = y0; cy <= y1; cy++) for (int cx = x0; cx <= x1; cx++) {
 				if (INSIDE[cy * n + cx] == 0) continue;
-				float dx = (float(cx) + 0.5) * sp - P[3] - x, dy = (float(cy) + 0.5) * sp - P[3] - y;
+				float dx = (float(cx) + 0.5) * sp - P[P_ORIGIN] - x, dy = (float(cy) + 0.5) * sp - P[P_ORIGIN] - y;
 				add_dep(uint(cy * n + cx), mass * exp(-(dx * dx + dy * dy) / (2.0 * v)) / sum);
 			}
 		}

@@ -42,7 +42,7 @@ func _initialize() -> void:
 		for v in acetate:
 			before += v
 		var energy_before := 0.0
-		var ex0 := dish.sim.export_state()
+		var ex0 := dish.sim.export_state_bytes().to_float32_array()
 		for i in COUNT:
 			energy_before += ex0[i * GpuSim.STRIDE + 5]
 		gpu.run_steps(1)
@@ -59,7 +59,7 @@ func _initialize() -> void:
 		gpu_gain[level] = [before - after, gpu_body - body0]
 		var cpu_before: float = dish.acetate.total()
 		dish.sim.step(20.0, PackedVector2Array(), PackedFloat32Array(), 0.0, 0.0)
-		var ex1 := dish.sim.export_state()
+		var ex1 := dish.sim.export_state_bytes().to_float32_array()
 		var cpu_body := 0.0
 		for i in ex1.size() / GpuSim.STRIDE:
 			cpu_body += ex1[i * GpuSim.STRIDE + 5] + ex1[i * GpuSim.STRIDE + 6] * Cell.COST_PER_MASS

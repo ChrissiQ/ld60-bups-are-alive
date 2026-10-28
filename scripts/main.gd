@@ -18,7 +18,6 @@ const PAINT_MIN_PIXELS := 24.0  ## the least screen distance between two places 
 const PAINT_MAX_STEPS := 60  ## the most places one pointer movement makes (a fast sweep across the dish is not worth more than this)
 const PAN_KEY_PIXELS := 600.0  ## screen pixels a second the view moves while a pan key (W, A, S or D) is held
 const FIT_MARGIN := 24.0  ## screen pixels kept clear round the dish when framing it in the stage
-const VIEWS_MIN_WIDTH := 900.0  ## a window narrower than this leaves the layer toggles out of the top bar
 const MIN_TABS_WIDTH := 140.0  ## the least the dish tabs are given before the layer toggles make way for them
 const VITALS_MAX_SHARE := 0.55  ## the most of the window's width the top bar's readout may take
 const TRAY_RESERVE := 48.0  ## at the top of the stage, room for the tool options that open there (kept whether they are open or not, so choosing a tool never moves the dish)
@@ -26,7 +25,7 @@ const TUTORIAL_ZOOM := 6.0  ## how close the tutorial brings the camera to a bup
 const TUTORIAL_BUP_PIXELS := 18.0  ## the lit square round that bup is this far out on each side
 const MAX_DISHES := 20  ## the most dishes at once (the strip holds that many)
 const LINEAGE_ELSEWHERE_MSEC := 30000  ## how often the lineage panel looks again for a line's bups alive in other dishes
-const LOCKSTEP_MIN_GAP := 1.0  ## a dish at least this many simulated seconds behind the world's target is advanced (a shorter step would be a fine one, which only the processor runs); nearer, it waits
+const LOCKSTEP_MIN_GAP := 1.0  ## a dish at least this many simulated seconds behind the world's target is advanced (a shorter step would be a fine one, Dish.FINE_STEP or less, whose run-and-tumble steps cost far more per simulated second); nearer, it waits
 const CATCHUP_SECONDS := 5.0  ## when the dishes are further apart than a frame holds (after a fast speed, one dish can be a minute ahead), the ones behind are asked for this many simulated seconds a frame (what the frame's budget allows) until they have caught up
 const COST_SMOOTHING := 0.4  ## how much of a dish's newest timing goes into its running average
 const LOCKSTEP_MIN_SHARE := 0.25  ## at speeds where a frame holds less than four of those seconds, a quarter of the frame's step
@@ -40,7 +39,7 @@ const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) stil
 @onready var vitals: RichTextLabel = %Readout  ## the top bar: how many bups, the time and the playback speed
 @onready var placed_row: StatRow = %PlacedRow  ## the dish card's details: how many nutrient doses you placed
 @onready var dish_details: TraySection = %DishDetails  ## the dish in the main view: what was placed, and the colony's averages (the details key opens and closes it)
-@onready var colony: VBoxContainer = %Colony  ## the details: the placed row, then the colony's average traits, one row each (made as they are first shown)
+@onready var colony: TraitRows = %Colony  ## the details: the placed row, then the colony's average traits, one row each (made as they are first shown)
 @onready var goal_card: PanelContainer = %GoalCard  ## top of the side column: what the current experiment asks, and how far along it is
 @onready var goal_kicker: Label = %GoalKicker
 @onready var goal_title: Label = %GoalTitle
@@ -51,17 +50,11 @@ const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) stil
 @onready var graph: Control = %Graph
 @onready var graph_section: TraySection = %GraphSection  ## the graph's section of the tray (Y opens and closes it)
 @onready var all_details: TraySection = %AllDetails  ## the figures of every dish together
-@onready var all_rows: VBoxContainer = %AllRows
+@onready var all_rows: TraitRows = %AllRows
 @onready var freezer_section: TraySection = %FreezerSection  ## the frozen dishes (hidden while there are none)
-@onready var freezer_flow: HFlowContainer = %FreezerFlow
-@onready var freeze_button: Button = %FreezeButton  ## freezes the dish in the main view
-@onready var freezer_empty: Label = %FreezerEmpty
+@onready var freezer_shelf: FreezerShelf = %FreezerShelf  ## the freezer's content: the frozen dishes and the button that freezes the one in view
 @onready var old_dish_dialog: AcceptDialog = $MenuLayer/OldDishDialog
-@onready var span_switch: Control = %SpanSwitch  ## the graph's time span: one button for each (see HistoryGraph.SPAN_LEGENDS)
-@onready var trait_select: OptionButton = %TraitSelect  ## ... and the trait on its right axis
-@onready var scope_switch: Control = %ScopeSwitch  ## one dish or all together (only with more than one dish)
-var _scope_buttons: Array[Button] = []
-var _span_buttons := {}  ## HistoryGraph.Span -> its button
+@onready var graph_controls: GraphControls = %GraphControls  ## the graph's switches and trait drop-down
 @onready var playback_panel: Control = %Playback  ## the pause and speed buttons in the top bar
 @onready var views: Control = %Views  ## the graph and layer toggles in the top bar
 @onready var menu_button: Button = %MenuButton
@@ -127,11 +120,9 @@ var tool := Toolbar.Tool.SELECT  ## kept in step with the toolbar's selection (s
 var sim_speed := 1.0  ## seconds of simulation per real second (the toolbar sets it)
 var achieved_speed := 1.0  ## what the simulation actually managed lately: lower than sim_speed when the frame budget cut a step short
 var paused := false
-var _freezer: Array[Dictionary] = []  ## the frozen dishes, in the order they went in: {number, data (Dish.to_dict), picture (a texture), bups, button}
-var _all_rows := {}  ## trait (or "mutations", "harm", "dishes", "bups") -> its StatRow in the all-dishes section
 var _old_dish: Dish  ## the dish a pipette took bups from, while the question about it is up (null: no question)
+var _stats_cache := {}  ## Dish -> [its time, its edit count, the msec it was worked out, its population_stats]: a scan of every bup, so not worked out again for the same moment (see _stats_of)
 var _vitals_width := 0.0  ## the widest the top bar's readout has been (see _update_hud)
-var _colony_rows := {}  ## trait (or "mutations", "harm") -> its StatRow in the dish card
 var menu_open: bool:  ## the Escape menu is up: the game is frozen behind it and takes no input
 	get:
 		return pause_menu.visible
@@ -142,6 +133,7 @@ var _stack: Array[Dictionary] = []
 var _lineage_shown := {}  ## what the lineage list was last built from, so it is only rebuilt when that changes
 var _pointer_stamp := []  ## what the hover and placement preview were last worked out from
 var _point_stamp := []  ## the same for the nutrient readout under the pointer
+var _old_dish_was_paused := false  ## whether the game was already held when a pipette's question about the old dish came, which it goes back to
 var _tutorial_was_paused := false  ## whether the game was held before the tour began, which it goes back to
 var _tutorial_bup := -1  ## the bup the tour asked the player to pick, once it has set the view up for that (-1: it has not)
 var _tutorial_watched_before: Array[int] = []  ## who was on the watch list when the tour began, so it takes off only whom it put there
@@ -212,10 +204,13 @@ func _ready() -> void:
 	stage.resized.connect(_on_stage_resized)
 	get_viewport().size_changed.connect(_adapt_layout)
 	_adapt_layout()
-	_setup_graph_controls()
+	graph_controls.setup(graph)
+	all_rows.set_lead("dishes", Strings.t("hud.all_dishes"))
+	all_rows.set_lead("bups", Strings.t("hud.all_bups"))
 	_setup_old_dish_dialog()
-	freeze_button.pressed.connect(func() -> void: freeze_dish(dish))
-	_refresh_freezer()
+	freezer_shelf.freeze_requested.connect(func() -> void: freeze_dish(dish))
+	freezer_shelf.thaw_requested.connect(thaw)
+	freezer_section.visible = free_mode  # (the goals' dish is the only one: nothing to freeze)
 	menu_button.pressed.connect(_open_menu)
 	menu_button.tooltip_text = Strings.t("hud.menu_tip")
 	_on_tool_selected(toolbar.current_tool())  # the toolbar decides the starting tool
@@ -419,6 +414,8 @@ func _update_info_panel() -> void:
 		husk_place = Dish.NO_HUSK
 	var editing := dish.selected_source != null and dish.selected_id < 0
 	var alive_info: Dictionary = dish.bup_info(bup_id) if bup_id >= 0 else {}  # (fetched once: the panels below are built from it)
+	if bup_id >= 0 and alive_info.is_empty() and dish.has_bup(bup_id):
+		alive_info = dish.lineage_info(bup_id)  # (alive, but on the GPU its record has not come back yet: its family record stands in, rather than showing it as deceased)
 	var dead := bup_id >= 0 and alive_info.is_empty()  # a selected bup that has died stays up, as a record
 	var lineage_open: bool = bup_id >= 0 and bup_id == dish.selected_id and _stack.size() > 0 and _stack.back()["view"] == "lineage"
 	var something := bup_id >= 0 or source != null or floating != null or not husk.is_empty()
@@ -635,7 +632,7 @@ func _note_divisions(id: int, info: Dictionary) -> bool:
 
 func _info_text(b: Dictionary) -> String:
 	var text := Strings.t("panel.bup", [SimClock.format_minutes(b["born"]), b["divisions"]])
-	text += Strings.t("panel.steering", [_steering_word(b["steering"])])
+	text += Strings.t("panel.steering", [_steering_word(b.get("steering", 0.5))])
 	text += Strings.t("panel.dish_line", [_dish_numbers[dish]])  # (the dish it is in now)
 	return text.rstrip("\n")
 
@@ -706,7 +703,7 @@ func debug_state() -> Dictionary:
 		"dishes": dishes.map(func(d: Dish) -> Dictionary: return {"number": _dish_numbers[d], "bups": d.population(), "time": d.time, "history_origin": d.history_origin, "position": [d.global_position.x, d.global_position.y], "backend": d.backend_running(), "husks": d.sim.husk_count(), "behind_s": maxf(dishes.reduce(func(m: float, o: Dish) -> float: return maxf(m, o.time), 0.0) - d.time, 0.0), "rule": DebugLog.rule(d)}),
 		"switch_turn": _switch_turn,
 		"frame_budget_usec": FRAME_BUDGET_USEC,
-		"freezer": _freezer.map(func(entry: Dictionary) -> Dictionary: return {"number": entry["number"], "bups": entry["bups"], "frozen_at": entry["data"].get("time", 0.0)}),
+		"freezer": freezer_shelf.entries.map(func(entry: Dictionary) -> Dictionary: return {"number": entry["number"], "bups": entry["bups"], "frozen_at": entry["data"].get("time", 0.0)}),
 	}
 
 
@@ -765,6 +762,8 @@ func _on_key(event: InputEventKey) -> void:
 			_toggle_watch()
 	elif KeyBindings.matches("lineage", event):
 		_open_lineage()
+	elif layers_panel.toggle_for_key(event):
+		pass
 	elif KeyBindings.matches("slower", event):
 		toolbar.step_speed(-1)
 	elif KeyBindings.matches("faster", event):
@@ -863,7 +862,7 @@ func _show_lineage(id: int) -> void:
 	var elsewhere := _alive_elsewhere(chain)
 	var key := [elsewhere]
 	for ancestor in chain:
-		key.append([ancestor, dish.has_bup(ancestor), dish.bup_name(ancestor)])
+		key.append([ancestor, dish.has_bup(ancestor), dish.bup_custom_name(ancestor)])  # (a name changes only by being given or taken away: the default one comes from the record, which never changes)
 	if _lineage_shown.get("id") == id and _lineage_shown.get("key") == key:
 		return
 	_lineage_shown = {"id": id, "key": key}
@@ -1047,6 +1046,8 @@ func _advance_timed(d: Dish, seconds: float, budget_usec: int) -> void:
 
 ## Auto moves one dish between the processor and the GPU at a time: dishes that all decide in the same frame would each see the others' load as it was, and all go (or all come
 ## back) together. Of the dishes waiting, the one that wants the GPU and costs the processor most goes first; with none waiting, the turn goes round the dishes.
+## A dish's wish (`Dish.switch_wanted`) lasts until it is next advanced, which asks again: a dish that the budget leaves out or that is not due keeps its turn
+## until it does advance, instead of the turn passing to it in a frame it is not advanced in and being lost.
 func _let_one_dish_switch() -> void:
 	var chosen: Dish = null
 	for d in dishes:
@@ -1059,7 +1060,6 @@ func _let_one_dish_switch() -> void:
 		chosen = dishes[_switch_turn]
 	for d in dishes:
 		d.switch_allowed = d == chosen
-		d.switch_wanted = false  # (a dish that still wants a change says so again in this frame's advance; one that is not advanced has nothing to say)
 
 
 ## The world's time: that of the slowest dish.
@@ -1137,6 +1137,7 @@ func _remove_dish(d: Dish) -> void:
 		set_main_dish(dishes[at - 1] if at > 0 else dishes[1])
 	dishes.erase(d)
 	_dish_numbers.erase(d)
+	_stats_cache.erase(d)
 	_extinct_queue.erase(d)
 	dish_strip.remove(d)
 	dish_strip.light(dish)
@@ -1150,7 +1151,7 @@ func freeze_dish(d: Dish) -> void:
 	if not dishes.has(d) or dishes.size() < 2:
 		return
 	var picture := dish_strip.picture_of(d)
-	_freezer.append({
+	freezer_shelf.add({
 		"number": _dish_numbers[d],
 		"data": d.to_dict(),
 		"bups": d.population(),
@@ -1158,7 +1159,6 @@ func freeze_dish(d: Dish) -> void:
 	})
 	var number: int = _dish_numbers[d]
 	_remove_dish(d)
-	_refresh_freezer()
 	_show_banner(Strings.t("hud.banner_frozen", [number]), 1.5)
 
 
@@ -1179,12 +1179,18 @@ func thaw(entry: Dictionary) -> void:
 	var world := world_time()
 	var data: Dictionary = (entry["data"] as Dictionary).duplicate(true)
 	_move_saved_dish_to(data, world)
+	var emptied: Dish = null  # (the last running dish died out while others were frozen and stayed, empty: the thawed dish takes its place)
+	if dishes.size() == 1 and _extinct_queue.is_empty() and dishes[0].time > 0.0 and dishes[0].population() == 0:
+		emptied = dishes[0]
 	var d := add_dish(null, entry["number"])
 	if not d.from_dict(data):
 		_remove_dish(d)
 		return
-	_freezer.erase(entry)
-	_refresh_freezer()
+	if emptied != null:
+		set_main_dish(d)
+		_remove_dish(emptied)
+		_show_banner("", 0.0)
+	freezer_shelf.remove(entry)
 
 
 ## What a dish's save holds in the times of the run, moved on to `world` (the dish was frozen at an earlier time): the plankton's and the bloom's times go with
@@ -1217,26 +1223,10 @@ static func _pad_series(series_by_name: Dictionary, count: int) -> void:
 				series.append(last)
 
 
-## The freezer's section of the tray: a button for each frozen dish (its picture and number; a click unfreezes it). It is there only while something is in it.
-func _refresh_freezer() -> void:
-	for child in freezer_flow.get_children():
-		child.queue_free()
-	for entry in _freezer:
-		var button := Button.new()
-		button.theme_type_variation = &"PictureButton"
-		button.icon = entry["picture"]
-		button.text = Strings.t("dishes.caption", [entry["number"]])
-		button.tooltip_text = Strings.t("hud.unfreeze_tip", [entry["number"], UiText.thousands(entry["bups"])])
-		button.focus_mode = Control.FOCUS_NONE
-		button.pressed.connect(thaw.bind(entry))
-		freezer_flow.add_child(button)
-	freezer_empty.visible = _freezer.is_empty()
-	freezer_section.visible = free_mode  # (the goals' dish is the only one: nothing to freeze)
-
-
 ## After a pipette: the dish the bups came from is what the player decides about, and nothing else can be done until they have. The game holds meanwhile.
 func _ask_about_old_dish(source: Dish, moved: int, receiver: Dish) -> void:
 	_old_dish = source
+	_old_dish_was_paused = paused
 	toolbar.set_paused(true)
 	toolbar.resume_locked = true
 	var number: int = _dish_numbers[source]
@@ -1273,7 +1263,7 @@ func _answer_old_dish(choice: String) -> void:
 	if _pipette_waiting:
 		_end_pipette_wait(true)  # (the pause the pipette's timer held is what using the pipette ends)
 	else:
-		toolbar.set_paused(false)  # (the question paused the game; answering it goes on)
+		toolbar.set_paused(_old_dish_was_paused)  # (the question held the game; answering gives it back as it was)
 
 
 ## The rect of something in the tray, scrolled into view first (the tray scrolls when its sections are taller than the window).
@@ -1288,52 +1278,11 @@ func _tutorial_show_graph() -> void:
 	side.ensure_control_visible.call_deferred(graph_section)
 
 
-## The graph's two choices as controls above it: a switch for the time span (all four in view) and a drop-down for the trait (eight).
-## They are one choice for the graph whichever way it is made (the G and T keys too), so they follow it (`_show_graph_choices`).
-func _setup_graph_controls() -> void:
-	var group := ButtonGroup.new()
-	for mode: HistoryGraph.Span in HistoryGraph.SPAN_LEGENDS:
-		var button := Button.new()
-		button.theme_type_variation = &"SwitchButton"
-		button.toggle_mode = true
-		button.button_group = group
-		button.focus_mode = Control.FOCUS_NONE  # (the keyboard has G)
-		button.text = Strings.t(HistoryGraph.SPAN_LEGENDS[mode])
-		button.pressed.connect(graph.set_span.bind(mode))
-		span_switch.get_node("Choices").add_child(button)
-		_span_buttons[mode] = button
-	var scope_group := ButtonGroup.new()
-	for all in [false, true]:
-		var button := Button.new()
-		button.theme_type_variation = &"SwitchButton"
-		button.toggle_mode = true
-		button.button_group = scope_group
-		button.focus_mode = Control.FOCUS_NONE
-		button.pressed.connect(graph.set_all_dishes.bind(all))
-		scope_switch.get_node("Choices").add_child(button)
-		_scope_buttons.append(button)
-	_scope_buttons[1].text = Strings.t("graph.scope_all")
-	scope_switch.tooltip_text = Strings.t("graph.scope_tip")
-	for trait_name: String in HistoryGraph.TRAITS:
-		trait_select.add_item(Strings.t("genes.graph_" + trait_name))
-	trait_select.item_selected.connect(graph.set_trait)
-	trait_select.item_selected.connect(func(_index: int) -> void: trait_select.release_focus.call_deferred())  # (a choice completes the interaction: Space goes back to the game)
-	span_switch.tooltip_text = Strings.t("graph.span_tip")
-	trait_select.tooltip_text = Strings.t("graph.trait_tip")
-
-
+## What the graph's controls show follows the graph (they are one choice whichever way it is made), and what depends on how many dishes run.
 func _show_graph_choices() -> void:
-	var shown: HistoryGraph.Span = graph.shown_span()
-	for mode: HistoryGraph.Span in _span_buttons:
-		_span_buttons[mode].set_pressed_no_signal(mode == shown)
-	scope_switch.visible = dishes.size() > 1
+	graph_controls.show_choices(graph, dishes.size(), _dish_numbers.get(dish, 0))
 	all_details.visible = dishes.size() > 1  # (with one dish there is no "all")
-	freeze_button.disabled = dishes.size() < 2  # (the last running dish stays)
-	_scope_buttons[0].text = Strings.t("graph.scope_dish", [_dish_numbers.get(dish, 0)])
-	_scope_buttons[0].set_pressed_no_signal(not graph.combined())
-	_scope_buttons[1].set_pressed_no_signal(graph.combined())
-	if trait_select.selected != graph.trait_index:
-		trait_select.select(graph.trait_index)
+	freezer_shelf.freeze_button.disabled = dishes.size() < 2  # (the last running dish stays)
 
 
 ## Brings another dish into the main view: the panels and the graph follow it, and the camera goes back to where (and how close) it last looked at that dish, or frames the dish if it has not looked yet; what was open on the old dish (a selection, a lineage) is closed.
@@ -1360,9 +1309,12 @@ func set_main_dish(d: Dish) -> void:
 		_fit_camera()
 
 
-func _resize_dish(new_radius: float) -> void:
-	dish.resize_to(new_radius)
-	camera.position = dish.global_position + (camera.position - dish.global_position).limit_length(dish.radius)
+func _resize_dish(target: Dish, new_radius: float) -> void:
+	if not dishes.has(target):  # (frozen or gone since the menu was opened)
+		return
+	target.resize_to(new_radius)
+	if target == dish:
+		camera.position = dish.global_position + (camera.position - dish.global_position).limit_length(dish.radius)
 
 
 ## A goal-mode experiment is saved on the way out; free mode is not saved.
@@ -1566,7 +1518,7 @@ func _announce_extinct() -> void:
 			_view_before_extinct = dish
 		set_main_dish(d)
 	toolbar.set_paused(true)
-	if dishes.size() == 1 and not _freezer.is_empty():
+	if dishes.size() == 1 and not freezer_shelf.entries.is_empty():
 		_show_banner(Strings.t("hud.banner_extinct_frozen", [_dish_numbers[d]]), 1e9)
 		return
 	if dishes.size() == 1:
@@ -1640,76 +1592,47 @@ func _update_hud() -> void:
 	vitals.custom_minimum_size.x = minf(_vitals_width, get_viewport_rect().size.x * VITALS_MAX_SHARE)
 	_fit_top_bar()
 	placed_row.value_text = UiText.thousands(dish.nutrients_placed)
-	var stats := dish.population_stats()
-	if _colony_rows.is_empty():
-		for gene: String in Genome.LABELED:
-			_add_colony_row(gene, Genome.label(gene))
-		_add_colony_row("mutations", Strings.t("hud.colony_mutations"))
-		_add_colony_row("harm", Strings.t("hud.colony_harm"))
-		_add_colony_row("donor", Strings.t("hud.colony_donors"))
-		_add_colony_row("key", Strings.t("hud.colony_key"))
-		_add_colony_row("generation", Strings.t("hud.colony_generation"))
-	for gene: String in Genome.LABELED:
-		(_colony_rows[gene] as StatRow).value_text = Genome.format(gene, stats[gene])
-	(_colony_rows["mutations"] as StatRow).value_text = "%.1f" % stats["mutations"]
-	(_colony_rows["harm"] as StatRow).value_text = "%.1f%%" % (stats["harm"] * 100.0)
-	(_colony_rows["donor"] as StatRow).value_text = "%.1f%%" % (stats["donor"] * 100.0)
-	(_colony_rows["key"] as StatRow).value_text = "%.1f%%" % (stats["key"] * 100.0)
-	(_colony_rows["generation"] as StatRow).value_text = UiText.thousands(stats["generation"], 1)
+	colony.show_stats(_stats_of(dish))
 	_update_all_details()
+
+
+## A dish's `population_stats`, worked out again only when its time or an edit has changed it and LIVE_TEXT_MSEC has passed since (below x100 the HUD asks every frame,
+## and on the processor each answer is a scan of every bup; the figures move too slowly there for a tenth of a second to show).
+func _stats_of(d: Dish) -> Dictionary:
+	if d.runs_on_gpu():
+		return d.population_stats()  # (the GPU's figures are the last it sent back: nothing to scan, and they change while time stands still)
+	var now := Time.get_ticks_msec()
+	var kept: Array = _stats_cache.get(d, [])
+	if not kept.is_empty() and (kept[0] == d.time and kept[1] == d.edit_count or now - kept[2] < LIVE_TEXT_MSEC):
+		return kept[3]
+	var stats := d.population_stats()
+	_stats_cache[d] = [d.time, d.edit_count, now, stats]
+	return stats
 
 
 ## The all-dishes section: how many dishes run and how many bups they hold, and the traits averaged over every bup of every dish (each dish counts by its bups).
 func _update_all_details() -> void:
 	if not all_details.open:
 		return
-	if _all_rows.is_empty():
-		for key: String in ["dishes", "bups"]:
-			_add_all_row(key, Strings.t("hud.all_" + key))
-		for gene: String in Genome.LABELED:
-			_add_all_row(gene, Genome.label(gene))
-		_add_all_row("mutations", Strings.t("hud.colony_mutations"))
-		_add_all_row("harm", Strings.t("hud.colony_harm"))
-		_add_all_row("donor", Strings.t("hud.colony_donors"))
-		_add_all_row("key", Strings.t("hud.colony_key"))
-		_add_all_row("generation", Strings.t("hud.colony_generation"))
 	var total := 0.0
 	var sums := {}
 	for d in dishes:
-		var stats := d.population_stats()
+		var stats := _stats_of(d)
 		var count := float(stats["count"])
 		total += count
-		for key: String in Genome.LABELED + ["mutations", "harm", "donor", "key", "generation"]:
+		for key: String in TraitRows.keys():
 			sums[key] = float(sums.get(key, 0.0)) + float(stats[key]) * count
-	(_all_rows["dishes"] as StatRow).value_text = str(dishes.size())
-	(_all_rows["bups"] as StatRow).value_text = UiText.thousands(total)
-	var mean := func(key: String) -> float: return float(sums.get(key, 0.0)) / total if total > 0.0 else 0.0
-	for gene: String in Genome.LABELED:
-		(_all_rows[gene] as StatRow).value_text = Genome.format(gene, mean.call(gene))
-	(_all_rows["mutations"] as StatRow).value_text = "%.1f" % mean.call("mutations")
-	(_all_rows["harm"] as StatRow).value_text = "%.1f%%" % (mean.call("harm") * 100.0)
-	(_all_rows["donor"] as StatRow).value_text = "%.1f%%" % (mean.call("donor") * 100.0)
-	(_all_rows["key"] as StatRow).value_text = "%.1f%%" % (mean.call("key") * 100.0)
-	(_all_rows["generation"] as StatRow).value_text = UiText.thousands(mean.call("generation"), 1)
-
-
-func _add_all_row(key: String, label: String) -> void:
-	var row: StatRow = preload("res://ui/stat_row.tscn").instantiate()
-	row.label_text = label
-	all_rows.add_child(row)
-	_all_rows[key] = row
+	var mean := {}
+	for key: String in TraitRows.keys():
+		mean[key] = float(sums.get(key, 0.0)) / total if total > 0.0 else 0.0
+	all_rows.show_stats(mean)
+	all_rows.set_lead_text("dishes", str(dishes.size()))
+	all_rows.set_lead_text("bups", UiText.thousands(total))
 
 
 ## The details key: the dish's details section opens or closes.
 func _toggle_colony() -> void:
 	dish_details.open = not dish_details.open
-
-
-func _add_colony_row(key: String, label: String) -> void:
-	var row: StatRow = preload("res://ui/stat_row.tscn").instantiate()
-	row.label_text = label
-	colony.add_child(row)
-	_colony_rows[key] = row
 
 
 ## The pause menu's "Replay tutorial": back to the game, and the tutorial begins.

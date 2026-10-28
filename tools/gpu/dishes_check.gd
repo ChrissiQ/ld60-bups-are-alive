@@ -24,10 +24,7 @@ func _run() -> void:
 	start.dish_radius = 5000.0
 	start.bup_limit = 30000
 	start.spread_founders()
-	Session.free_start = start
-	Session.mode = Session.Mode.FREE
-	Session.load_requested = false
-	var m: Node = load("res://scenes/main.tscn").instantiate()
+	var m: Node = TestUtil.free_game(start)
 	root.add_child(m)
 	await process_frame
 	m.toolbar.set_paused(false)

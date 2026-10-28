@@ -174,7 +174,9 @@ func _redraw(entry: Dictionary) -> void:
 	entry["drawn"] = true
 	var camera: Camera2D = entry["camera"]
 	camera.global_position = dish.global_position
-	camera.zoom = Vector2.ONE * (THUMB / (2.0 * dish.radius * MARGIN))
+	var scale := THUMB / (2.0 * dish.radius * MARGIN)
+	camera.zoom = Vector2.ONE * scale
+	dish.prepare_picture(scale)  # (a dish that is not in the main view builds its picture only here)
 	entry["viewport"].render_target_update_mode = SubViewport.UPDATE_ONCE
 
 

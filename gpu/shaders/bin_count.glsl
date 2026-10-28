@@ -7,22 +7,28 @@ layout(set = 0, binding = 0, std430) buffer B_P { float P[]; };
 layout(set = 0, binding = 1, std430) buffer B_PCNT { uint PCNT[]; };
 layout(set = 0, binding = 2, std430) buffer B_PUFF { float PUFF[]; };
 layout(set = 0, binding = 3, std430) buffer B_BINC { uint BINC[]; };
+const uint PCNT_SLOTS = 0u;
+const int P_BINS_ACROSS = 67;
+const int P_BIN_SIZE = 66;
+const int P_CLOUD_CUT = 65;
+const int P_DETECTION_FLOOR = 9;
+const int P_ORIGIN = 3;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
 void main() {
-	uint k = gl_GlobalInvocationID.x; if (k >= PCNT[0]) return;
+	uint k = gl_GlobalInvocationID.x; if (k >= PCNT[PCNT_SLOTS]) return;
 	uint o = k * 8u;
 	if (PUFF[o + 5] < 0.5) return;
 	float mass = PUFF[o + 2], v = PUFF[o + 3], x = PUFF[o], y = PUFF[o + 1];
 	float peak = mass / (6.2831853 * v);
-	float cut = max(P[65] * PUFF[o + 4] * P[9], 1e-30);
+	float cut = max(P[P_CLOUD_CUT] * PUFF[o + 4] * P[P_DETECTION_FLOOR], 1e-30);
 	float reach = peak > cut ? sqrt(2.0 * v * log(peak / cut)) : 0.0;
 	PUFF[o + 6] = reach * reach; PUFF[o + 7] = sqrt(v);
-	int nb = int(P[67]); float bs = P[66];
-	int lx = clamp(int((x - reach + P[3]) / bs), 0, nb - 1), hx = clamp(int((x + reach + P[3]) / bs), 0, nb - 1);
-	int ly = clamp(int((y - reach + P[3]) / bs), 0, nb - 1), hy = clamp(int((y + reach + P[3]) / bs), 0, nb - 1);
+	int nb = int(P[P_BINS_ACROSS]); float bs = P[P_BIN_SIZE];
+	int lx = clamp(int((x - reach + P[P_ORIGIN]) / bs), 0, nb - 1), hx = clamp(int((x + reach + P[P_ORIGIN]) / bs), 0, nb - 1);
+	int ly = clamp(int((y - reach + P[P_ORIGIN]) / bs), 0, nb - 1), hy = clamp(int((y + reach + P[P_ORIGIN]) / bs), 0, nb - 1);
 	for (int by = ly; by <= hy; by++) for (int bx = lx; bx <= hx; bx++) atomicAdd(BINC[by * nb + bx], 1u);
 }

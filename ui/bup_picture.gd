@@ -23,11 +23,12 @@ func show_info(info: Dictionary) -> void:
 
 
 ## How long the bup is, in µm: its reserve at the most it could hold, over what a µm of body holds (the dish draws it by its mass the same way). A record that holds no reserve (a
-## living bup that is on the GPU, not looked at) has the length its size gene divides at.
+## living bup that is on the GPU, not looked at) has the length its size gene divides at once settled (twice the mass the gene adds, at the body's length per mass).
 static func body_length(info: Dictionary) -> float:
 	var reserve := float(info.get("max_energy", 0.0))
 	if reserve <= 0.0:
-		return maxf(float(info.get("size_gene", Biology.BIRTH_LENGTH)), Biology.WIDTH)
+		var added := Cell.mass_to_add({"size": float(info.get("size_gene", Cell.REFERENCE_SIZE))})
+		return maxf(2.0 * added * Cell.MASS_UM, Biology.WIDTH)
 	return maxf(reserve / Cell.RESERVE_PER_MASS * Cell.MASS_UM, Biology.WIDTH)
 
 

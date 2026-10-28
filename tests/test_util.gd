@@ -40,6 +40,14 @@ static func small_start() -> StartConditions:
 	return start
 
 
+## The game screen in free mode with `start`, as Main starts from the setup screen: not yet in the tree, so its _ready has not run.
+static func free_game(start: StartConditions) -> Node:
+	Session.free_start = start
+	Session.mode = Session.Mode.FREE
+	Session.load_requested = false
+	return load(Scenes.GAME).instantiate()
+
+
 ## Units of nutrient dissolved in the dish.
 static func units(dish: Dish) -> float:
 	return dish.field.total() / Dish.NUTRIENT_ENERGY

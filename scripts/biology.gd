@@ -33,7 +33,6 @@ const NUTRIENT_DIFFUSION := WATER_DIFFUSION / MEDIUM_THICKNESS  ## µm^2/s
 
 # --- Body ------------------------------------------------------------------------------------
 const BIRTH_LENGTH := 2.0  ## µm [search: length 2.6-4.0 µm in one compilation; 2 at birth is typical]
-const DIVISION_LENGTH := 4.0  ## µm [search]
 const WIDTH := 0.9  ## µm [search: diameter 0.68-1.04 µm]
 
 # --- Growth and upkeep -----------------------------------------------------------------------

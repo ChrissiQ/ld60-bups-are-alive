@@ -10,9 +10,10 @@ layout(set = 0, binding = 3, std430) buffer B_RLO { uint RLO[]; };
 layout(set = 0, binding = 4, std430) buffer B_RHI { uint RHI[]; };
 layout(set = 0, binding = 5, std430) buffer B_ALO { uint ALO[]; };
 layout(set = 0, binding = 6, std430) buffer B_AHI { uint AHI[]; };
+const int P_CELLS = 1;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
-void main() { uint i = gl_GlobalInvocationID.x; if (i >= uint(P[1] * P[1])) return; DLO[i] = 0u; DHI[i] = 0u; RLO[i] = 0u; RHI[i] = 0u; ALO[i] = 0u; AHI[i] = 0u; }
+void main() { uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return; DLO[i] = 0u; DHI[i] = 0u; RLO[i] = 0u; RHI[i] = 0u; ALO[i] = 0u; AHI[i] = 0u; }

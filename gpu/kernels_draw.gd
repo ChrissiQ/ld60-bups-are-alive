@@ -7,7 +7,7 @@ extends RefCounted
 ## To add a kernel: build it in `all()` with GpuKernels.add(out, name, body, buffer_names, extra, local_size)
 ## (the header, FUNCS and one declaration per buffer are added for you; binding = position in `buffer_names`). Buffers the simulation
 ## has (P, CNT, BUPS, BUPS_U, ...) take their types from GpuKernels.TYPES; a buffer of the drawing's own (the MultiMesh's, say) is
-## declared in TYPES below. The bup record and P are described at the top of gpu/kernels.gd (P[74..77] are the drawing's constants).
+## declared in TYPES below. The bup record and P are in gpu/gpu_layout.gd (P_MIN_LENGTH_PX to P_MAX_TRAIL_PX are the drawing's constants), and `add` declares the names a kernel uses.
 ## A kernel bound to a buffer GpuSim does not own (the MultiMesh's RD buffer) is set up with GpuSim.make_external_kernel().
 
 ## The element type of each buffer only the drawing's kernels bind (name -> GLSL type).
@@ -37,47 +37,47 @@ vec3 from_hsv(float h, float s, float v) {
 """
 
 ## A port of BupSim::render_buffer (native/src/bup_sim.cpp): one thread per MultiMesh slot, push constant pa = µm per pixel,
-## pb = the slots in the picture. A bup is drawn at its true length unless that is under P[74] pixels, a streak back to where it was
-## in the last picture (words 22, 23; >= 1e30: none) when it has moved farther than its length (at most P[77] pixels), and its own
+## pb = the slots in the picture. A bup is drawn at its true length unless that is under P_MIN_LENGTH_PX pixels, a streak back to where it was
+## in the last picture (R_PX, R_PY; >= 1e30: none) when it has moved farther than its length (at most P_MAX_TRAIL_PX pixels), and its own
 ## colour. Slots past the live count are all zero (drawn as nothing); a bup past the picture's slots is not drawn and keeps no place,
-## so it gets no trail from the gap. Every bup drawn notes where it was (words 22, 23), for the next picture's trail. Words 22 and 23
+## so it gets no trail from the gap. Every bup drawn notes where it was (R_PX, R_PY), for the next picture's trail. They
 ## never feed the simulation, so drawing does not change a run.
 const K_RENDER_BUPS := """
 void main() {
 	uint i = gl_GlobalInvocationID.x;
 	uint slots = uint(pcs.pb);
-	uint live = CNT[0];
+	uint live = CNT[CNT_BUPS];
 	if (i >= slots) {
-		if (i < live) { BUPS[i * 28u + 22u] = 3e38; BUPS[i * 28u + 23u] = 3e38; }
+		if (i < live) { BUPS[i * RECORD_WORDS + R_PX] = 3e38; BUPS[i * RECORD_WORDS + R_PY] = 3e38; }
 		return;
 	}
 	if (i >= live) {
 		INST[i * 4u] = vec4(0.0); INST[i * 4u + 1u] = vec4(0.0); INST[i * 4u + 2u] = vec4(0.0); INST[i * 4u + 3u] = vec4(0.0);
 		return;
 	}
-	uint b = i * 28u;
+	uint b = i * RECORD_WORDS;
 	float pixel_um = pcs.pa;
-	float x = BUPS[b + 1u], y = BUPS[b + 2u];
-	float len = max(BUPS[b + 6u] * P[14], P[74] * pixel_um);
-	float width = max(P[75], P[76] * pixel_um);
+	float x = BUPS[b + R_X], y = BUPS[b + R_Y];
+	float len = max(BUPS[b + R_MASS] * P[P_MASS_UM], P[P_MIN_LENGTH_PX] * pixel_um);
+	float width = max(P[P_WIDTH], P[P_MIN_WIDTH_PX] * pixel_um);
 	float margin = pixel_um;
-	float ux = BUPS[b + 3u], uy = BUPS[b + 4u], trail = 0.0;
-	float ox = BUPS[b + 22u], oy = BUPS[b + 23u];
+	float ux = BUPS[b + R_DX], uy = BUPS[b + R_DY], trail = 0.0;
+	float ox = BUPS[b + R_PX], oy = BUPS[b + R_PY];
 	if (ox < 1e30) {
 		float mx = x - ox, my = y - oy;
 		float moved = sqrt(mx * mx + my * my);
 		if (moved > len) {
 			ux = mx / moved;
 			uy = my / moved;
-			trail = min(moved, P[77] * pixel_um);
+			trail = min(moved, P[P_MAX_TRAIL_PX] * pixel_um);
 		}
 	}
-	BUPS[b + 22u] = x;
-	BUPS[b + 23u] = y;
+	BUPS[b + R_PX] = x;
+	BUPS[b + R_PY] = y;
 	float ql = len + trail + 2.0 * margin, qw = width + 2.0 * margin;
 	INST[i * 4u] = vec4(ux * ql, -uy * qw, 0.0, x - ux * trail * 0.5);
 	INST[i * 4u + 1u] = vec4(uy * ql, ux * qw, 0.0, y - uy * trail * 0.5);
-	INST[i * 4u + 2u] = vec4(from_hsv(BUPS[b + 16u], BUPS[b + 17u], BUPS[b + 18u]), 1.0);
+	INST[i * 4u + 2u] = vec4(from_hsv(BUPS[b + R_HUE], BUPS[b + R_SAT], BUPS[b + R_VAL]), 1.0);
 	INST[i * 4u + 3u] = vec4(len, width, margin, trail);
 }
 """

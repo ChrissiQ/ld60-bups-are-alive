@@ -196,15 +196,10 @@ func _init() -> void:
 	check(fine_dish.field.size == 200, "a resized dish keeps its nutrient detail")
 	var fine_copy := _make_dish()
 	check(fine_copy.from_dict(TestUtil.saved(fine_dish)) and fine_copy.field.size == 200 and fine_copy.field.get_max_across() == 200, "the nutrient detail survives save and load")
-	var old_save := TestUtil.saved(fine_dish)
-	old_save.erase("nutrient_resolution")
-	old_save["field"] = Array(_make_dish().field.values())  # (a save from before the setting: the default grid)
 	var plain := _make_dish()
 	plain.strike(StartConditions.new())
-	var plain_save := TestUtil.saved(plain)
-	plain_save.erase("nutrient_resolution")
 	var plain_copy := _make_dish()
-	check(plain_copy.from_dict(plain_save) and plain_copy.field.size == 100, "a save without the setting loads with the default grid")
+	check(plain_copy.from_dict(TestUtil.saved(plain)) and plain_copy.field.size == 100, "the usual nutrient detail survives save and load")
 	# The medium thickness (an advanced option): how fast the nutrient spreads, kept through resize, save and load.
 	var thin_start := StartConditions.new()
 	thin_start.medium_thickness = 4.0
@@ -216,9 +211,7 @@ func _init() -> void:
 	var thin_copy := _make_dish()
 	check(thin_copy.from_dict(TestUtil.saved(thin_dish)) and is_equal_approx(thin_copy.medium_thickness, 4.0) and is_equal_approx(thin_copy.field.get_diffusion(), Biology.WATER_DIFFUSION / 4.0), "the medium thickness survives save and load")
 	var usual_copy := _make_dish()
-	var usual_save := TestUtil.saved(usual_dish)
-	usual_save.erase("medium_thickness")
-	check(usual_copy.from_dict(usual_save) and is_equal_approx(usual_copy.field.get_diffusion(), Biology.NUTRIENT_DIFFUSION), "a save without the setting loads with the usual medium")
+	check(usual_copy.from_dict(TestUtil.saved(usual_dish)) and is_equal_approx(usual_copy.field.get_diffusion(), Biology.NUTRIENT_DIFFUSION), "the usual medium survives save and load")
 	check(StartConditions.from_dict({"medium_thickness": 0.0}).medium_thickness == StartConditions.MIN_MEDIUM_THICKNESS and StartConditions.from_dict({"medium_thickness": 1000.0}).medium_thickness == StartConditions.MAX_MEDIUM_THICKNESS, "the medium thickness is clamped when loaded")
 	check(StartConditions.from_dict({"nutrient_resolution": 9999}).nutrient_resolution == StartConditions.MAX_NUTRIENT_RESOLUTION and StartConditions.from_dict({"nutrient_resolution": 10}).nutrient_resolution == StartConditions.MIN_NUTRIENT_RESOLUTION, "the nutrient detail is clamped when loaded")
 	check(absf(TestUtil.units(large_copy) - TestUtil.units(large)) < 0.5, "...with its dissolved nutrient (%.1f vs %.1f)" % [TestUtil.units(large_copy), TestUtil.units(large)])
@@ -414,12 +407,12 @@ func _init() -> void:
 	screen._reset_all()
 	var reset_ok := true
 	for i in 5:
-		reset_ok = reset_ok and screen._names[i].text == "" and screen._colors[i].color.is_equal_approx(Genome.color_of(Genome.founder()))
-	check(reset_ok and screen.reset_button.tooltip_text == "Reset all", "the reset icon (hover: Reset all) clears every name and puts every colour back to the default")
+		reset_ok = reset_ok and screen._names[i].text == "" and not screen._colors[i].color.is_equal_approx(screen._colors[(i + 1) % 5].color)
+	check(reset_ok and screen.reset_button.tooltip_text == "Reset all", "the reset icon (hover: Reset all) clears every name and puts the colours back to the default: evenly spaced, each its own")
 	screen._names[2].text = "  Maeve "
 	screen._colors[2].color = Color.html("#3366cc")
 	var collected: Array = screen._collect()
-	check(collected.size() == 3 and collected[0] == {} and collected[2] == {"name": "Maeve", "color": "#3366cc"}, "what is typed and picked is collected, tidied, and trailing founders left at the default are not kept (%s)" % [collected])
+	check(collected.size() == 5 and collected[0].keys() == ["color"] and collected[2] == {"name": "Maeve", "color": "#3366cc"}, "what is typed and picked is collected and tidied: a name typed, the colours the founders have (%s)" % [collected])
 	# Going back keeps nothing: the settings stay as they were, even after a reset or edits.
 	var founders_before: Array = Session.free_start.founders.duplicate(true)
 	var file_before: String = FileAccess.get_file_as_string(StartConditions.settings_path)
@@ -922,7 +915,7 @@ func _init() -> void:
 	var broken := {
 		"no bups block": func(x: Dictionary) -> void: x.erase("cells"),
 		"bups in the old format, a list": func(x: Dictionary) -> void: x["cells"] = [{"pos": [1.0, 1.0]}],
-		"bups block of the wrong size for a record": func(x: Dictionary) -> void: x["cells"] = Dish._pack_bytes(PackedByteArray([1, 2, 3])),
+		"bups block of the wrong size for a record": func(x: Dictionary) -> void: x["cells"] = DishCodec.pack_bytes(PackedByteArray([1, 2, 3])),
 		"bups block that does not decompress to its size": func(x: Dictionary) -> void: x["cells"]["raw"] = int(x["cells"]["raw"]) + 96,
 		"no family records": func(x: Dictionary) -> void: x.erase("lineage"),
 		"family records cut short": func(x: Dictionary) -> void: x["lineage"]["z"] = str(x["lineage"]["z"]).substr(0, 20),
@@ -934,6 +927,14 @@ func _init() -> void:
 		"history holds text": func(x: Dictionary) -> void: x["history"]["pop"][0] = "no",
 		"radius is text": func(x: Dictionary) -> void: x["radius"] = "big",
 		"time is not a number": func(x: Dictionary) -> void: x["time"] = NAN,
+		"no nutrient detail": func(x: Dictionary) -> void: x.erase("nutrient_resolution"),
+		"no medium thickness": func(x: Dictionary) -> void: x.erase("medium_thickness"),
+		"no clouds": func(x: Dictionary) -> void: x.erase("clouds"),
+		"a cloud of four numbers": func(x: Dictionary) -> void: x["clouds"] = [[1.0, 2.0, 3.0, 4.0]],
+		"history without a series": func(x: Dictionary) -> void: x["history"].erase("key"),
+		"no whole-run history": func(x: Dictionary) -> void: x.erase("history_all"),
+		"whole-run history without a series": func(x: Dictionary) -> void: x["history_all"].erase("pop"),
+		"no whole-run history factor": func(x: Dictionary) -> void: x.erase("history_all_factor"),
 	}
 	for what in broken:
 		var bad: Dictionary = good.duplicate(true)
@@ -1127,7 +1128,7 @@ func _init() -> void:
 	Session.free_start = chosen
 	Session.mode = Session.Mode.FREE
 	Session.load_requested = true  # must be ignored in free mode
-	var m: Node = load("res://scenes/main.tscn").instantiate()
+	var m: Node = load(Scenes.GAME).instantiate()
 	root.add_child(m)
 	await process_frame
 	check(m.free_mode, "main.free_mode")
@@ -1177,7 +1178,7 @@ func _init() -> void:
 
 	# The free scene begins the dish from the free start conditions.
 	Session.mode = Session.Mode.FREE
-	var m2: Node = load("res://scenes/main.tscn").instantiate()
+	var m2: Node = load(Scenes.GAME).instantiate()
 	root.add_child(m2)
 	await process_frame
 	check(m2.dish.population() == 150 and absf(TestUtil.density(m2.dish) - 40.0) < 1.0 and m2.dish.feed_density == 11.0, "the free scene begins with the free start conditions")
@@ -1187,7 +1188,7 @@ func _init() -> void:
 	# Goal mode scene still uses the default start and has goals.
 	Session.mode = Session.Mode.GOALS
 	Session.load_requested = false
-	var m3: Node = load("res://scenes/main.tscn").instantiate()
+	var m3: Node = load(Scenes.GAME).instantiate()
 	root.add_child(m3)
 	# Checked straight after _ready, before the first frame: once frames run, the sim feeds
 	# and eats nutrient, so the amounts would depend on how long the first frame took.
@@ -1314,8 +1315,10 @@ func _backend_rule_tests() -> void:
 	# Without a GPU nothing is ever loaded, and no frame wants it.
 	var w := _make_dish()
 	w.strike(chosen)
-	for i in 29:
+	# The takeover wait is real seconds, not a count of frames: the frames that make it are fewer when each is longer (a frame counts at most 0.1 s).
+	check(Dish.wait_frames(1.0 / 60.0) == 30 and Dish.wait_frames(1.0 / 120.0) == 60 and Dish.wait_frames(0.1) == 5, "the GPU's wait (%.1f s) is 30 frames at 60 Hz, 60 at 120 Hz and 5 at the 0.1 s cap" % Dish.GPU_WAIT_SECONDS)
+	for i in Dish.wait_frames(1.0 / 60.0) + 1:  # (past the wait: a dish that wanted the GPU would have taken it by now)
 		w._choose_backend(1.67)
-	check(w._gpu_wanted_seconds == 0.0 and not w.gpu_active, "no frame wants the GPU where there is none, and the processor runs (it would take over after %.1f s)" % Dish.GPU_WAIT_SECONDS)
+	check(w._gpu_wanted_seconds == 0.0 and not w.gpu_active, "no frame wants the GPU where there is none, and the processor runs after the whole wait")
 	w.set_backend_setting("garbage")
 	check(w.backend_setting == auto, "a setting that is not one of the three is Auto, for the dish too")

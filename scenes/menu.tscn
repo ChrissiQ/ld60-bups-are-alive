@@ -101,3 +101,4 @@ ok_button_text = "@menu.start_over_ok"
 dialog_text = "@menu.start_over_text"
 cancel_button_text = "@menu.start_over_cancel"
 dialog_autowrap = true
+metadata/destructive = true

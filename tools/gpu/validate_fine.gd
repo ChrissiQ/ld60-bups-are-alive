@@ -83,7 +83,7 @@ func _init() -> void:
 		for minute in range(1, minutes + 1):
 			for k in per_minute:
 				dish.step(step)
-			var ex: PackedFloat32Array = sim.export_state()
+			var ex: PackedFloat32Array = sim.export_state_bytes().to_float32_array()
 			var sum_signal := 0.0
 			var sum_radius := 0.0
 			var tumbling := 0

@@ -17,10 +17,7 @@ func _run() -> void:
 	var chosen := TestUtil.small_start()
 	chosen.bups = 40
 	chosen.nutrient_density = 40
-	Session.free_start = chosen
-	Session.mode = Session.Mode.FREE
-	Session.load_requested = false
-	var m: Node = load("res://scenes/main.tscn").instantiate()
+	var m: Node = TestUtil.free_game(chosen)
 	root.add_child(m)
 	await process_frame
 	var first: Dish = m.dish
@@ -54,6 +51,12 @@ func _run() -> void:
 		m._let_one_dish_switch()
 		turns.append(m.dishes.filter(func(d: Dish) -> bool: return d.switch_allowed).size())
 	check(turns == [1, 1, 1, 1], "exactly one dish at a time may change backend (%s)" % [turns])
+	other.switch_wanted = true
+	other.switch_wanted_gpu = true
+	m._let_one_dish_switch()
+	m._let_one_dish_switch()  # (no advance between: as for a dish the budget leaves out)
+	check(other.switch_allowed and other.switch_wanted and not first.switch_allowed, "a dish waiting to change backend keeps its wish and its turn until it is next advanced")
+	other.switch_wanted = false
 	m.set_main_dish(other)
 	check(m.dish == other and m.graph.dish == other and m.watch_list.dishes.has(other), "a choice brings the other dish into the main view, with the graph and the watch list")
 	check(m.camera.position.distance_to(other.global_position) <= other.radius, "the camera is on it")
@@ -138,7 +141,7 @@ func _run() -> void:
 	check(m.dish == base, "if the player moved to another dish while it was shown, they stay where they went")
 	m.queue_free()
 	await process_frame
-	m = load("res://scenes/main.tscn").instantiate()
+	m = load(Scenes.GAME).instantiate()
 	root.add_child(m)
 	await process_frame
 	first = m.dish
@@ -167,7 +170,7 @@ func _run() -> void:
 	check(made.population() == 11 and first.population() == 6 and before == 17, "the bups in the circle moved (%d in the new dish, %d left)" % [made.population(), first.population()])
 	check(m.old_dish_dialog.visible and m._old_dish == first and m.paused, "the pipette asks what to do with the old dish, and the game holds until it is answered")
 	m._answer_old_dish("keep")
-	check(not m.old_dish_dialog.visible and m.dishes.has(first), "keeping it leaves both running")
+	check(not m.old_dish_dialog.visible and m.dishes.has(first) and m.paused, "keeping it leaves both dishes there, and the game as paused as it was")
 	var moved_id: int = made.sim.alive_ids()[0]
 	check(m._info_text(made.bup_info(moved_id)).contains("dish %d" % m._dish_numbers[made]), "a bup's panel says which dish it is in now (dish %d)" % m._dish_numbers[made])
 	var seen_from := made.view_zoom
@@ -221,6 +224,24 @@ func _run() -> void:
 		frames += 1
 	check(absf(leading.time - lagging.time) <= 1.0 and frames < 400, "a gap of 40 s between the dishes is closed in %d frames at x1, not 2400" % frames)
 	m._set_pipette_timer(0.0)
+	# A size chosen for a dish goes to that dish, whichever is in view when it arrives.
+	var sized: Dish = m.dishes[0]
+	var viewed: Dish = m.dishes[1]
+	m.set_main_dish(viewed)
+	var viewed_radius := viewed.radius
+	var sized_radius := sized.radius
+	m._resize_dish(sized, 2000.0)
+	check(sized.radius == 2000.0 and viewed.radius == viewed_radius, "a size chosen for one dish does not resize the one in view")
+	# A layer's key flips it with the layer buttons hidden (a shortcut does not reach a hidden button).
+	m.layers_panel.get_parent().get_parent().visible = false
+	var key := InputEventKey.new()
+	key.keycode = KeyBindings.key("layer_medium")
+	key.pressed = true
+	var shown := viewed.layer_shown(Dish.Layer.MEDIUM)
+	m._on_key(key)
+	check(viewed.layer_shown(Dish.Layer.MEDIUM) == not shown, "a layer key works with its buttons hidden")
+	m._on_key(key)
+	m.layers_panel.get_parent().get_parent().visible = true
 	m.queue_free()
 	await process_frame
 	TestUtil.finish(self, "DISHES TESTS OK")

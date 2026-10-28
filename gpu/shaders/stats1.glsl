@@ -6,29 +6,45 @@ layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs
 layout(set = 0, binding = 0, std430) buffer B_CNT { uint CNT[]; };
 layout(set = 0, binding = 1, std430) buffer B_BUPS { float BUPS[]; };
 layout(set = 0, binding = 2, std430) buffer B_SPART { float SPART[]; };
+const uint CNT_BUPS = 0u;
+const uint RECORD_WORDS = 28u;
+const uint R_DIVISIONS = 20u;
+const uint R_DONOR = 14u;
+const uint R_HARM = 15u;
+const uint R_METABOLISM = 10u;
+const uint R_MUTATIONS = 19u;
+const uint R_MUTATOR = 13u;
+const uint R_REACH = 12u;
+const uint R_SENSE = 9u;
+const uint R_SIZE = 11u;
+const uint R_SPEED = 8u;
+const uint STATS_SUMS = 11u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
-shared float sm[10 * 256];
+const int SUMS = int(STATS_SUMS);
+shared float sm[SUMS * 256];
 void main() {
 	uint i = gl_GlobalInvocationID.x, l = gl_LocalInvocationID.x;
-	float v[10] = float[10](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-	if (i < CNT[0]) {
-		uint b = i * 28u;
-		float h = BUPS[b + 15u];
-		v[0] = 1.0; v[1] = BUPS[b + 8u]; v[2] = BUPS[b + 9u]; v[3] = BUPS[b + 10u]; v[4] = BUPS[b + 11u];
+	float v[SUMS];
+	for (int k = 0; k < SUMS; k++) v[k] = 0.0;
+	if (i < CNT[CNT_BUPS]) {
+		uint b = i * RECORD_WORDS;
+		float h = BUPS[b + R_HARM];
+		v[0] = 1.0; v[1] = BUPS[b + R_SPEED]; v[2] = BUPS[b + R_SENSE]; v[3] = BUPS[b + R_METABOLISM]; v[4] = BUPS[b + R_SIZE];
 		v[5] = h < 0.1 ? h * (1.0 - h * (0.5 - h * (0.16666667 - h * 0.041666668))) : 1.0 - exp(-h);  // (1 - exp(-h) without the loss of a small h's digits)
-		v[6] = BUPS[b + 19u]; v[7] = BUPS[b + 13u];
-		v[8] = ((int(BUPS[b + 12u] + 0.5) >> 8) & 3) == 2 ? 1.0 : 0.0;  // (the bups with the acetate key)
-		v[9] = BUPS[b + 20u];
+		v[6] = BUPS[b + R_MUTATIONS]; v[7] = BUPS[b + R_MUTATOR];
+		v[8] = ((int(BUPS[b + R_REACH] + 0.5) >> 8) & 3) == 2 ? 1.0 : 0.0;  // (the bups with the acetate key)
+		v[9] = BUPS[b + R_DIVISIONS];
+		v[10] = BUPS[b + R_DONOR];  // (1 for a donor, 0 for the rest)
 	}
-	for (int k = 0; k < 10; k++) sm[k * 256 + int(l)] = v[k];
+	for (int k = 0; k < SUMS; k++) sm[k * 256 + int(l)] = v[k];
 	barrier();
 	for (uint half_ = 128u; half_ > 0u; half_ >>= 1u) {
-		if (l < half_) for (int k = 0; k < 10; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
+		if (l < half_) for (int k = 0; k < SUMS; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
 		barrier();
 	}
-	if (l == 0u) for (int k = 0; k < 10; k++) SPART[gl_WorkGroupID.x * 10u + uint(k)] = sm[k * 256];
+	if (l == 0u) for (int k = 0; k < SUMS; k++) SPART[gl_WorkGroupID.x * STATS_SUMS + uint(k)] = sm[k * 256];
 }

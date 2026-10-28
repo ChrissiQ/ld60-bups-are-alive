@@ -14,7 +14,7 @@ func _init() -> void:
 	sc.spread_founders()
 	dish.strike(sc)
 	var field = dish.field
-	var template: PackedFloat32Array = dish.sim.export_state().slice(0, GpuSim.STRIDE)
+	var template: PackedFloat32Array = dish.sim.export_state_bytes().to_float32_array().slice(0, GpuSim.STRIDE)
 	var bups := PackedFloat32Array()
 	bups.resize(n * GpuSim.STRIDE)
 	var max_e := float(consts["reserve_per_mass"]) * template[6]

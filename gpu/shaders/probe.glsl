@@ -9,6 +9,10 @@ layout(set = 0, binding = 2, std430) buffer B_BINS { uint BINS[]; };
 layout(set = 0, binding = 3, std430) buffer B_BINC { uint BINC[]; };
 layout(set = 0, binding = 4, std430) buffer B_PQ { float PQ[]; };
 layout(set = 0, binding = 5, std430) buffer B_PR { float PR[]; };
+const int P_BINS_ACROSS = 67;
+const int P_BIN_SIZE = 66;
+const int P_ENTRY_CAPACITY = 72;
+const int P_ORIGIN = 3;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
@@ -17,10 +21,10 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 // the clouds' concentration and gradient where a bup is, and the smallest sigma among the clouds that reach it (as the CPU's puff_probe)
 void puffs_at(float x, float y, out float c, out float gx, out float gy, out float sigma) {
 	c = 0.0; gx = 0.0; gy = 0.0; sigma = 1e18;
-	int nb = int(P[67]); float bs = P[66];
-	int bx = clamp(int((x + P[3]) / bs), 0, nb - 1), by = clamp(int((y + P[3]) / bs), 0, nb - 1);
+	int nb = int(P[P_BINS_ACROSS]); float bs = P[P_BIN_SIZE];
+	int bx = clamp(int((x + P[P_ORIGIN]) / bs), 0, nb - 1), by = clamp(int((y + P[P_ORIGIN]) / bs), 0, nb - 1);
 	uint b = uint(by * nb + bx);
-	uint e0 = BINS[b], e1 = min(e0 + BINC[b], uint(P[72]));
+	uint e0 = BINS[b], e1 = min(e0 + BINC[b], uint(P[P_ENTRY_CAPACITY]));
 	for (uint e = e0; e < e1; e++) {
 		vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];  // x, y, mass, variance | reach^2, sigma, cloud index, 0
 		float dx = x - r0.x, dy = y - r0.y, r2 = fma(dy, dy, dx * dx);  // (fma written out: the compiler contracted the old gathering code this way, and exp() magnifies a last-bit change in r2)

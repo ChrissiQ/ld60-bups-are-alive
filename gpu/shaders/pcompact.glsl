@@ -8,6 +8,7 @@ layout(set = 0, binding = 1, std430) buffer B_PAL { uint PAL[]; };
 layout(set = 0, binding = 2, std430) buffer B_PEXC { uint PEXC[]; };
 layout(set = 0, binding = 3, std430) buffer B_PUFF_V { vec4 PUFF_V[]; };
 layout(set = 0, binding = 4, std430) buffer B_PUFF2_V { vec4 PUFF2_V[]; };
+const uint PCNT_SLOTS = 0u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
@@ -15,6 +16,6 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 
 void main() {
 	uint t = gl_GlobalInvocationID.x; uint k = t / 2u, part = t % 2u;
-	if (k >= PCNT[0]) return;
+	if (k >= PCNT[PCNT_SLOTS]) return;
 	if (PAL[k] == 1u) PUFF2_V[PEXC[k] * 2u + part] = PUFF_V[k * 2u + part];
 }

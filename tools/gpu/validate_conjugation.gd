@@ -1,14 +1,18 @@
 extends SceneTree
-## godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/validate_conjugation.gd -- N
-## The GPU's conjugation against the CPU's `conjugate`: N pairs, a donor and a bup 1 µm from it (and not swimming, so that the GPU's step, which has no fine path, keeps them touching), the pairs far apart, the rate so high that every
+## godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/validate_conjugation.gd -- N [gap_um size]
+## The GPU's conjugation against the CPU's `conjugate`: N pairs, a donor and a bup `gap_um` from it (default 1; not swimming, so that the GPU's step keeps them touching), the pairs far apart, the rate so high that every
 ## touching pair transfers in the one step. What the recipients end up with (the share that took the first gene, and the run lengths) from each,
-## and that a bup that is not touching a donor, and a donor, are left as they were.
+## and that a bup that is not touching a donor, and a donor, are left as they were. With `size`, both bups of a pair have that size gene and are near
+## dividing, so that big bodies (a pair touching across more than the GPU's 20 µm cells: size 12 with a gap of 28) can be checked.
 const DONOR := {"speed": 0.001, "sense": 100.0, "metabolism": 1.5, "size": 6.0}
 const PLAIN := {"speed": 0.0, "sense": 40.0, "metabolism": 0.5, "size": 3.0}
 
 
 func _init() -> void:
-	var n := int(OS.get_cmdline_user_args()[0])
+	var args := OS.get_cmdline_user_args()
+	var n := int(args[0])
+	var gap := float(args[1]) if args.size() > 1 else 1.0
+	var size := float(args[2]) if args.size() > 2 else 0.0
 	SimConstants.apply()
 	var consts := SimConstants.build()
 	consts["conj_rate"] = 1000.0
@@ -30,15 +34,23 @@ func _init() -> void:
 	donor_genome["donor"] = true
 	var plain_genome := Genome.founder()
 	plain_genome.merge(PLAIN, true)
+	var mass := 5.0
+	var birth := 5.0
+	if size > 0.0:
+		donor_genome["size"] = size
+		plain_genome["size"] = size
+		mass = 1.2 * size * size  # (a little short of the division mass, birth + 0.5 x size²)
+		birth = 0.8 * size * size
+	var spacing := maxf(60.0, 3.0 * (gap + mass * Cell.MASS_UM))  # (far enough that a recipient touches no other pair's donor)
 	var ids := []
 	for k in n:
-		var at := Vector2(-4500.0 + 60.0 * (k % side), -4500.0 + 60.0 * (k / side))
-		dish.sim.add_bup(at, donor_genome, 50.0, sqrt(5.0), 5.0, 0, Vector2.RIGHT)
-		ids.append(dish.sim.add_bup(at + Vector2(1.0, 0.0), plain_genome, 50.0, sqrt(5.0), 5.0, 0, Vector2.RIGHT))
+		var at := Vector2(-4500.0 + spacing * (k % side), -4500.0 + spacing * (k / side))
+		dish.sim.add_bup(at, donor_genome, 50.0, sqrt(mass), birth, 0, Vector2.RIGHT)
+		ids.append(dish.sim.add_bup(at + Vector2(gap, 0.0), plain_genome, 50.0, sqrt(mass), birth, 0, Vector2.RIGHT))
 	var alone := dish.sim.add_bup(Vector2(4900.0, 4900.0), plain_genome, 50.0, sqrt(5.0), 5.0, 0, Vector2.RIGHT)
-	var state: PackedFloat32Array = dish.sim.export_state()  # (the records the GPU starts from: the same bups)
+	var state: PackedFloat32Array = dish.sim.export_state_bytes().to_float32_array()  # (the records the GPU starts from: the same bups)
 	dish.sim.conjugate(0.1)
-	var cpu := _tally(dish.sim.export_state(), state, n)
+	var cpu := _tally(dish.sim.export_state_bytes().to_float32_array(), state, n)
 	# --- the GPU, from the same records
 	var gpu := GpuSim.new()
 	var field = dish.field

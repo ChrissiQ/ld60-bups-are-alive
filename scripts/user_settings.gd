@@ -34,10 +34,11 @@ static var reduce_motion: bool:
 static var _loaded := false
 static var _system_motion := false
 static var _system_motion_at := -10000
+const SYSTEM_MOTION_CACHE_MSEC := 30000  ## how long the answer of the macOS query is kept
 static var _applied := false
 static var native_override := -1.0  ## tests and screenshots pretend the display has this density
 ## The operating system's setting. Godot's own query can answer false where the system says on (seen on macOS), so macOS is also asked
-## directly, at most once a second (this is read every frame on the title screen).
+## directly (a process is spawned and waited for), at most once in `SYSTEM_MOTION_CACHE_MSEC` (this is read every frame on the title screen).
 static func system_reduce_motion() -> bool:
 	if DisplayServer.get_name() == "headless":
 		return false
@@ -45,7 +46,7 @@ static func system_reduce_motion() -> bool:
 		return true
 	if OS.get_name() != "macOS":
 		return false
-	if Time.get_ticks_msec() - _system_motion_at >= 1000:
+	if Time.get_ticks_msec() - _system_motion_at >= SYSTEM_MOTION_CACHE_MSEC:
 		_system_motion_at = Time.get_ticks_msec()
 		var out := []
 		_system_motion = OS.execute("/usr/bin/defaults", ["read", "com.apple.universalaccess", "reduceMotion"], out) == 0 and str(out[0]).strip_edges() == "1"
@@ -214,7 +215,7 @@ static func apply() -> void:
 ## The key that flips full screen, as the player reads it. F11 is the system's own "Show Desktop" on a Mac (it slides the windows away and never reaches
 ## the game), so there it is Ctrl+Cmd+F, which is also what other Mac programs use.
 static func fullscreen_key_label() -> String:
-	return "Ctrl+Cmd+F" if OS.get_name() == "macOS" else "F11"
+	return Strings.t("options.fullscreen_key_mac" if OS.get_name() == "macOS" else "options.fullscreen_key")
 
 
 static func is_fullscreen_key(event: InputEventKey) -> bool:

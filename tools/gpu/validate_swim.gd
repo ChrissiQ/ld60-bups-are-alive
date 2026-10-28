@@ -42,7 +42,7 @@ func _init() -> void:
 		sim.add_bup(sim.random_point(rad * 0.5), g, Dish.FOUNDER_ENERGY, sqrt(born * 1.5), born, 0, Vector2.RIGHT)
 	for id in sim.bup_ids():  # a spread of speeds and senses, so that the bins fill
 		pass
-	var s0: PackedFloat32Array = sim.export_state()
+	var s0: PackedFloat32Array = sim.export_state_bytes().to_float32_array()
 	for i in s0.size() / GpuSim.STRIDE:
 		s0[i * GpuSim.STRIDE + 8] = randf_range(10.0, 60.0)   # speed
 		s0[i * GpuSim.STRIDE + 9] = randf_range(15.0, 150.0)  # sense
@@ -56,8 +56,8 @@ func _init() -> void:
 		var genome := Genome.founder()
 		genome["speed"] = g["speed"]; genome["sense"] = g["sense"]
 		sim.add_bup(Vector2(s0[i * GpuSim.STRIDE + 1], s0[i * GpuSim.STRIDE + 2]), genome, Dish.FOUNDER_ENERGY, sqrt(s0[i * GpuSim.STRIDE + 6]), s0[i * GpuSim.STRIDE + 7], 0, Vector2.RIGHT)
-	s0 = sim.export_state()
-	var b0: PackedByteArray = sim.export_state_bytes()  # (the same bups as s0, as the GPU's records)
+	var b0: PackedByteArray = sim.export_state_bytes()  # (the bups as the GPU's records; s0 their words as floats, the ids through GpuSim.id_of)
+	s0 = b0.to_float32_array()
 	var conc0: PackedFloat32Array = field.values()
 	var owner: PackedInt32Array = field.export_owner()
 	var nn: int = field.get_size()
@@ -65,7 +65,8 @@ func _init() -> void:
 	for i in nn * nn:
 		eff[i] = conc0[owner[i]] if owner[i] >= 0 else 0.0
 	dish.step(20.0)
-	var s1: PackedFloat32Array = sim.export_state()
+	var b1: PackedByteArray = sim.export_state_bytes()
+	var s1: PackedFloat32Array = b1.to_float32_array()
 	var gpu := GpuSim.new()
 	print("GPU: ", gpu.device_name(), "  bups ", s0.size() / GpuSim.STRIDE, "  cells across ", nn, "  spacing ", field.get_spacing(), "  moves ", gpu.moves_for(20.0) if false else "")
 	gpu.load_state(nn, field.get_spacing(), dish.radius, conc0, owner, b0, consts)
@@ -73,10 +74,10 @@ func _init() -> void:
 	var out := gpu.read_bups().to_float32_array()
 	var idx1 := {}
 	for i in s1.size() / GpuSim.STRIDE:
-		idx1[int(s1[i * GpuSim.STRIDE])] = i
+		idx1[GpuSim.id_of(b1, i)] = i
 	var bins := {}
 	for i in s0.size() / GpuSim.STRIDE:
-		var j: int = idx1.get(int(s0[i * GpuSim.STRIDE]), -1)
+		var j: int = idx1.get(GpuSim.id_of(b0, i), -1)
 		if j < 0:
 			continue
 		var gr := _grad(eff, nn, field.get_spacing(), dish.radius, s0[i * GpuSim.STRIDE + 1], s0[i * GpuSim.STRIDE + 2])

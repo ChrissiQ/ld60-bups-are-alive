@@ -7,6 +7,23 @@ layout(set = 0, binding = 0, std430) buffer B_P { float P[]; };
 layout(set = 0, binding = 1, std430) buffer B_CNT { uint CNT[]; };
 layout(set = 0, binding = 2, std430) buffer B_BUPS { float BUPS[]; };
 layout(set = 0, binding = 3, std430) buffer B_INST { vec4 INST[]; };
+const uint CNT_BUPS = 0u;
+const int P_MASS_UM = 14;
+const int P_MAX_TRAIL_PX = 77;
+const int P_MIN_LENGTH_PX = 74;
+const int P_MIN_WIDTH_PX = 76;
+const int P_WIDTH = 75;
+const uint RECORD_WORDS = 28u;
+const uint R_DX = 3u;
+const uint R_DY = 4u;
+const uint R_HUE = 16u;
+const uint R_MASS = 6u;
+const uint R_PX = 22u;
+const uint R_PY = 23u;
+const uint R_SAT = 17u;
+const uint R_VAL = 18u;
+const uint R_X = 1u;
+const uint R_Y = 2u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
@@ -30,37 +47,37 @@ vec3 from_hsv(float h, float s, float v) {
 void main() {
 	uint i = gl_GlobalInvocationID.x;
 	uint slots = uint(pcs.pb);
-	uint live = CNT[0];
+	uint live = CNT[CNT_BUPS];
 	if (i >= slots) {
-		if (i < live) { BUPS[i * 28u + 22u] = 3e38; BUPS[i * 28u + 23u] = 3e38; }
+		if (i < live) { BUPS[i * RECORD_WORDS + R_PX] = 3e38; BUPS[i * RECORD_WORDS + R_PY] = 3e38; }
 		return;
 	}
 	if (i >= live) {
 		INST[i * 4u] = vec4(0.0); INST[i * 4u + 1u] = vec4(0.0); INST[i * 4u + 2u] = vec4(0.0); INST[i * 4u + 3u] = vec4(0.0);
 		return;
 	}
-	uint b = i * 28u;
+	uint b = i * RECORD_WORDS;
 	float pixel_um = pcs.pa;
-	float x = BUPS[b + 1u], y = BUPS[b + 2u];
-	float len = max(BUPS[b + 6u] * P[14], P[74] * pixel_um);
-	float width = max(P[75], P[76] * pixel_um);
+	float x = BUPS[b + R_X], y = BUPS[b + R_Y];
+	float len = max(BUPS[b + R_MASS] * P[P_MASS_UM], P[P_MIN_LENGTH_PX] * pixel_um);
+	float width = max(P[P_WIDTH], P[P_MIN_WIDTH_PX] * pixel_um);
 	float margin = pixel_um;
-	float ux = BUPS[b + 3u], uy = BUPS[b + 4u], trail = 0.0;
-	float ox = BUPS[b + 22u], oy = BUPS[b + 23u];
+	float ux = BUPS[b + R_DX], uy = BUPS[b + R_DY], trail = 0.0;
+	float ox = BUPS[b + R_PX], oy = BUPS[b + R_PY];
 	if (ox < 1e30) {
 		float mx = x - ox, my = y - oy;
 		float moved = sqrt(mx * mx + my * my);
 		if (moved > len) {
 			ux = mx / moved;
 			uy = my / moved;
-			trail = min(moved, P[77] * pixel_um);
+			trail = min(moved, P[P_MAX_TRAIL_PX] * pixel_um);
 		}
 	}
-	BUPS[b + 22u] = x;
-	BUPS[b + 23u] = y;
+	BUPS[b + R_PX] = x;
+	BUPS[b + R_PY] = y;
 	float ql = len + trail + 2.0 * margin, qw = width + 2.0 * margin;
 	INST[i * 4u] = vec4(ux * ql, -uy * qw, 0.0, x - ux * trail * 0.5);
 	INST[i * 4u + 1u] = vec4(uy * ql, ux * qw, 0.0, y - uy * trail * 0.5);
-	INST[i * 4u + 2u] = vec4(from_hsv(BUPS[b + 16u], BUPS[b + 17u], BUPS[b + 18u]), 1.0);
+	INST[i * 4u + 2u] = vec4(from_hsv(BUPS[b + R_HUE], BUPS[b + R_SAT], BUPS[b + R_VAL]), 1.0);
 	INST[i * 4u + 3u] = vec4(len, width, margin, trail);
 }

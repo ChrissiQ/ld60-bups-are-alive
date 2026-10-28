@@ -7,50 +7,63 @@ layout(set = 0, binding = 0, std430) buffer B_CNT { uint CNT[]; };
 layout(set = 0, binding = 1, std430) buffer B_BUPS { float BUPS[]; };
 layout(set = 0, binding = 2, std430) buffer B_QIN { uint QIN[]; };
 layout(set = 0, binding = 3, std430) buffer B_OUT { uint OUT[]; };
+const uint CNT_BUPS = 0u;
+const uint FRACTIONS = 4u;
+const uint NEAR_SLOTS = 4u;
+const uint OUT_Q = 32u;
+const uint QO_FRAC = 28u;
+const uint QO_NEAR = 26u;
+const uint QO_NEAR_MORE = 228u;
+const uint Q_FRAC = 18u;
+const uint Q_FRAC_FIRST = 19u;
+const uint Q_NEAR = 5u;
+const uint Q_NEAR_FIRST = 6u;
+const uint RECORD_WORDS = 28u;
+const uint R_SPEED = 8u;
+const uint R_X = 1u;
+const uint R_Y = 2u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
-const uint OUT_Q = 32u; const uint OUT_STATS = 272u;
-
-shared uint smin[4 * 256];
-shared uint scnt[8 * 256];
+shared uint smin[NEAR_SLOTS * 256u];
+shared uint scnt[(NEAR_SLOTS + FRACTIONS) * 256u];
 void main() {
 	uint i = gl_GlobalInvocationID.x, l = gl_LocalInvocationID.x;
-	uint nn = QIN[5], nf = QIN[18];
-	bool live = i < CNT[0];
-	uint b = i * 28u;
-	float x = live ? BUPS[b + 1u] : 0.0, y = live ? BUPS[b + 2u] : 0.0;
-	for (uint s = 0u; s < 4u; s++) {
+	uint nn = QIN[Q_NEAR], nf = QIN[Q_FRAC];
+	bool live = i < CNT[CNT_BUPS];
+	uint b = i * RECORD_WORDS;
+	float x = live ? BUPS[b + R_X] : 0.0, y = live ? BUPS[b + R_Y] : 0.0;
+	for (uint s = 0u; s < NEAR_SLOTS; s++) {
 		uint m = 0xFFFFFFFFu, c = 0u;
 		if (live && s < nn) {
-			float qx = uintBitsToFloat(QIN[6u + 3u * s]), qy = uintBitsToFloat(QIN[7u + 3u * s]), near = uintBitsToFloat(QIN[8u + 3u * s]);
+			float qx = uintBitsToFloat(QIN[Q_NEAR_FIRST + 3u * s]), qy = uintBitsToFloat(QIN[Q_NEAR_FIRST + 1u + 3u * s]), near = uintBitsToFloat(QIN[Q_NEAR_FIRST + 2u + 3u * s]);
 			float dx = x - qx, dy = y - qy, d2 = dx * dx + dy * dy;
 			m = floatBitsToUint(d2);
 			c = d2 <= near * near ? 1u : 0u;
 		}
 		smin[s * 256u + l] = m; scnt[s * 256u + l] = c;
 	}
-	for (uint f = 0u; f < 4u; f++) {
+	for (uint f = 0u; f < FRACTIONS; f++) {
 		uint c = 0u;
-		if (live && f < nf) c = BUPS[b + 8u + QIN[19u + 2u * f]] >= uintBitsToFloat(QIN[20u + 2u * f]) ? 1u : 0u;
-		scnt[(4u + f) * 256u + l] = c;
+		if (live && f < nf) c = BUPS[b + R_SPEED + QIN[Q_FRAC_FIRST + 2u * f]] >= uintBitsToFloat(QIN[Q_FRAC_FIRST + 1u + 2u * f]) ? 1u : 0u;
+		scnt[(NEAR_SLOTS + f) * 256u + l] = c;
 	}
 	barrier();
 	for (uint half_ = 128u; half_ > 0u; half_ >>= 1u) {
 		if (l < half_) {
-			for (uint s = 0u; s < 4u; s++) smin[s * 256u + l] = min(smin[s * 256u + l], smin[s * 256u + l + half_]);
-			for (uint k = 0u; k < 8u; k++) scnt[k * 256u + l] += scnt[k * 256u + l + half_];
+			for (uint s = 0u; s < NEAR_SLOTS; s++) smin[s * 256u + l] = min(smin[s * 256u + l], smin[s * 256u + l + half_]);
+			for (uint k = 0u; k < NEAR_SLOTS + FRACTIONS; k++) scnt[k * 256u + l] += scnt[k * 256u + l + half_];
 		}
 		barrier();
 	}
 	if (l == 0u) {
 		for (uint s = 0u; s < nn; s++) {
-			uint od = s == 0u ? OUT_Q + 26u : OUT_Q + 228u + 2u * (s - 1u);
+			uint od = s == 0u ? OUT_Q + QO_NEAR : OUT_Q + QO_NEAR_MORE + 2u * (s - 1u);
 			if (smin[s * 256u] != 0xFFFFFFFFu) atomicMin(OUT[od], smin[s * 256u]);
 			if (scnt[s * 256u] > 0u) atomicAdd(OUT[od + 1u], scnt[s * 256u]);
 		}
-		for (uint f = 0u; f < nf; f++) if (scnt[(4u + f) * 256u] > 0u) atomicAdd(OUT[OUT_Q + 28u + f], scnt[(4u + f) * 256u]);
+		for (uint f = 0u; f < nf; f++) if (scnt[(NEAR_SLOTS + f) * 256u] > 0u) atomicAdd(OUT[OUT_Q + QO_FRAC + f], scnt[(NEAR_SLOTS + f) * 256u]);
 	}
 }

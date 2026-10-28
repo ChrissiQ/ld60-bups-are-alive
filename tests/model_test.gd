@@ -382,11 +382,11 @@ func _init() -> void:
 		if id != parent_one:
 			child_one = id
 	lin.remove_bup(parent_one)
-	var saved_lines: Array = lin.lineage_export()
+	var saved_lines: PackedByteArray = lin.lineage_export_bytes()
 	var lin2 := BupSim.new()
 	lin2.reset(300.0, 6)
 	lin2.add_bup(Vector2.ZERO, Genome.founder(), 50.0, -1.0, -1.0, 1, Vector2.RIGHT, child_one)  # the living bup, as a loaded game restores her
-	lin2.lineage_import(saved_lines)
+	lin2.lineage_import_bytes(saved_lines)
 	check(lin2.lineage_chain(child_one) == lin.lineage_chain(child_one) and lin2.lineage_chain(child_one).size() == 2 and lin2.lineage_info(parent_one)["died"] == lin.lineage_info(parent_one)["died"] and not lin2.lineage_info(parent_one)["alive"], "a dead ancestor's record survives export and import")
 	lin2.remove_bup(child_one)
 	check(lin2.record_count() == 0, "...and is dropped with its last living descendant after an import")

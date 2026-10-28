@@ -6,9 +6,10 @@ layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs
 layout(set = 0, binding = 0, std430) buffer B_PCNT { uint PCNT[]; };
 layout(set = 0, binding = 1, std430) buffer B_PUFF_V { vec4 PUFF_V[]; };
 layout(set = 0, binding = 2, std430) buffer B_PUFF2_V { vec4 PUFF2_V[]; };
+const uint PCNT_KEPT = 1u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
-void main() { uint t = gl_GlobalInvocationID.x; if (t >= PCNT[1] * 2u) return; PUFF_V[t] = PUFF2_V[t]; }
+void main() { uint t = gl_GlobalInvocationID.x; if (t >= PCNT[PCNT_KEPT] * 2u) return; PUFF_V[t] = PUFF2_V[t]; }

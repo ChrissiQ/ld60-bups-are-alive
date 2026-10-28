@@ -83,15 +83,55 @@ class BupSim : public RefCounted {
 		float fast = 0, slow = 0, noise = 0, tumbling = 0;
 		bool primed = false;
 	};
+	// What a bup inherits: Bup and Record each hold these fields under the same names, and they are copied between the two, a
+	// dictionary and the GPU's record only through the helpers below (a new heritable field is added here and there, and in the
+	// GPU's record and events).
 	struct Genome {
-		float genes[4];
-		float hue, sat, val, harm;
-		int mutations;
-		bool lethal;
+		float genes[4] = { 0, 0, 0, 0 };
+		float hue = 0, sat = 0, val = 0, harm = 0;
+		int mutations = 0;
+		bool lethal = false; // (made by `mutate` only: a lethal daughter is never born, so no bup or record has it)
 		float mutator = 1;
 		bool donor = false;
 		int reach = 0;
 	};
+	template <typename T>
+	static Genome genome_of(const T &b) {
+		Genome g;
+		for (int i = 0; i < 4; i++) {
+			g.genes[i] = b.genes[i];
+		}
+		g.hue = b.hue;
+		g.sat = b.sat;
+		g.val = b.val;
+		g.harm = b.harm;
+		g.mutations = b.mutations;
+		g.mutator = b.mutator;
+		g.donor = b.donor;
+		g.reach = b.reach;
+		return g;
+	}
+	template <typename T>
+	static void set_genome(T &to, const Genome &g) {
+		for (int i = 0; i < 4; i++) {
+			to.genes[i] = g.genes[i];
+		}
+		to.hue = g.hue;
+		to.sat = g.sat;
+		to.val = g.val;
+		to.harm = g.harm;
+		to.mutations = g.mutations;
+		to.mutator = g.mutator;
+		to.donor = g.donor;
+		to.reach = g.reach;
+	}
+	// A genome as a dictionary has it (the keys of mutate_genome and add_bup; what is missing is a founder's), and the genome into a
+	// dictionary: with the size gene as "size" (a genome) or "size_gene" (bup_info and lineage_info, where "size" is the body's).
+	static Genome genome_from_dict(const Dictionary &d);
+	static void put_genome(Dictionary &out, const Genome &g, bool info_keys);
+	// The genome in a GPU record (words 8-19: genes, reach, mutator, donor, harm, hue, sat, val, mutations; see export_state_bytes).
+	static Genome record_genome(const uint8_t *record);
+	static void put_record_genome(uint8_t *record, const Genome &g);
 
 	// The family record of every bup that is alive, and of every dead one that still has a living
 	// descendant or is being looked at (see `holds`). Dead bups are only ever in this table, never in
@@ -101,12 +141,12 @@ class BupSim : public RefCounted {
 		int born = 0, died = -1;
 		int holds = 0; // records that name this one as their parent, plus pins: while any, a dead record stays
 		int divisions = 0, mutations = 0;
-		float genes[4] = { 0, 0, 0, 0 };
+		float genes[4] = { 0, 0, 0, 0 }; // as it was born, and as it was when it died (a conjugation can change them in between)
 		float hue = 0, sat = 0, val = 0, harm = 0;
 		float mutator = 1;
 		float max_energy = 0; // the reserve it could hold, as it was when it died
-		int reach = 0; // its raised ceilings and its acetate key (`Bup::reach`), as it was born, and as it was when it died (a conjugation can change them in between)
-		bool donor = false; // whether it carried the F factor, the same way
+		int reach = 0; // its raised ceilings and its acetate key (`Bup::reach`), as the genes are
+		bool donor = false; // whether it carried the F factor
 		float mass = 0, energy = 0, birth_mass = 0; // what it was when it died: its body, its reserve and the mass it was born with (a living bup's are its own)
 		String name; // what the player called it, if anything: it lives and goes with the record
 		bool alive = true;
@@ -126,7 +166,7 @@ class BupSim : public RefCounted {
 	double husk_seconds = 0.0; // how long a husk lasts (the leak's lifetime), always set
 	bool death_husks = false; // a dead bup leaves a husk (else its nutrient is given back at once)
 	bool stationary_phase = false; // starving bups stop growing, shrink and die at a constant rate (see Biology.STARVE_*), instead of dying when the reserve is gone
-	void add_husk(float x, float y, float energy);
+	void add_husk(float x, float y, float energy, double age = 0.0); // `age`: how long it has been leaking already (a GPU death the CPU hears of late)
 	void advance_husks(double delta);
 	int now_minutes() const { return (int)(now_seconds / 60.0); }
 	void make_record(const Bup &b, int64_t parent);
@@ -157,7 +197,8 @@ class BupSim : public RefCounted {
 	Dictionary info_of(const Bup &b) const; // what bup_info says of a bup
 	Vector3 steering_of(double x, double y, double speed, double sense_range) const;
 	void emit_sources(double delta, const PackedVector2Array &source_pos, const PackedFloat32Array &source_rates); // a step of the sources' emissions
-	int find(int64_t id) const;
+	int find(int64_t id) const; // the bup's index in `bups` (-1: none)
+	mutable std::unordered_map<int64_t, int> find_hints; // where `find` last found each bup it was asked for (the same few are asked for every frame)
 	Bup *get(int64_t id);
 
 	double size_of(const Bup &b) const;
@@ -256,11 +297,10 @@ public:
 	PackedFloat64Array husk_near(const Vector2 &at, double radius) const; // the nearest husk within radius of a point, as husks_export gives one (5 numbers); empty if none
 	PackedFloat32Array husk_buffer(double size, int capacity) const; // every husk as one instance of a 2D multimesh, `size` µm square (8 floats each: the transform's two rows), padded with empty instances to `capacity`
 	void husks_import(const PackedFloat64Array &saved);
-	PackedFloat32Array export_state() const; // every bup, 28 floats each (see the order in the .cpp; the id as a float): for the GPU tools' comparisons
 	// The bups and the GPU simulation (gpu/gpu_world.gd), which keeps the bups on the GPU and the family records here:
 	// export_state_bytes / import_state_bytes move every bup as the GPU's record (see the .cpp) without touching the records;
 	// info_from_state is bup_info for one such record; apply_events builds the records from the GPU's births and deaths;
-	// alive_ids is bup_ids from the records (the bups are on the GPU); step_world is only the sources' part of `step`;
+	// alive_ids is bup_ids from the records (the bups are on the GPU); step_world is the world's part of `step` (the clock, the sources' emissions, the husks' leaks), which `step` calls first;
 	// steering_at is bup_steering for a swimmer of this speed and sense range at a point.
 	PackedByteArray export_state_bytes() const;
 	void import_state_bytes(const PackedByteArray &state);
@@ -309,11 +349,11 @@ public:
 	PackedInt64Array lineage_chain(int64_t id) const;
 	bool pin(int64_t id);
 	void unpin(int64_t id);
-	Array lineage_export() const;
-	void lineage_import(const Array &saved, const PackedInt64Array &pinned = PackedInt64Array()); // `pinned`: ids to keep a hold on, whatever else is pruned
-	// The same records as one block of bytes (a save of a big dish: a dictionary for each of a hundred thousand records is slow to make and to
-	// write). Little-endian, and not a stable format: 32-bit count, the records (LINEAGE_BYTES each: id, parent, born, died, divisions,
-	// mutations, four genes, hue, sat, val, harm, max_energy), 32-bit count of names, and each name as id, byte length and UTF-8.
+	Array lineage_export() const; // every record as lineage_info gives a dead one (for the tests and tools)
+	// The records as one block of bytes (a save; a dictionary for each of a hundred thousand records is slow to make and to write).
+	// Little-endian, and not a stable format: 32-bit count, the records (LINEAGE_BYTES each: id, parent, born, died, divisions, mutations,
+	// four genes, hue, sat, val, harm, mutator, max_energy, reach with the F factor in bit 31, mass, energy, birth mass), 32-bit count of
+	// names, and each name as id, byte length and UTF-8. `pinned`: ids to keep a hold on, whatever else is pruned.
 	PackedByteArray lineage_export_bytes() const;
 	void lineage_import_bytes(const PackedByteArray &data, const PackedInt64Array &pinned = PackedInt64Array());
 	void set_bup_energy(int64_t id, double energy);

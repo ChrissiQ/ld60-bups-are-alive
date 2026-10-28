@@ -6,31 +6,44 @@ layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs
 layout(set = 0, binding = 0, std430) buffer B_CNT { uint CNT[]; };
 layout(set = 0, binding = 1, std430) buffer B_SPART { float SPART[]; };
 layout(set = 0, binding = 2, std430) buffer B_OUT { uint OUT[]; };
+const uint CNT_BUPS = 0u;
+const uint STATS_SUMS = 11u;
+const uint STATS_WORDS = 16u;
+const uint ST_COUNT = 0u;
+const uint ST_DIVISIONS = 11u;
+const uint ST_DONORS = 9u;
+const uint ST_KEY = 10u;
+const uint ST_MUTATIONS = 6u;
+const uint ST_MUTATOR = 8u;
+const uint ST_SPEED = 1u;
+const uint ST_STEP = 7u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
-shared float sm[10 * 256];
+const int SUMS = int(STATS_SUMS);
+shared float sm[SUMS * 256];
 void main() {
 	uint l = gl_LocalInvocationID.x, groups = uint(pcs.pa);
-	float v[10] = float[10](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-	for (uint g = l; g < groups; g += 256u) for (int k = 0; k < 10; k++) v[k] += SPART[g * 10u + uint(k)];
-	for (int k = 0; k < 10; k++) sm[k * 256 + int(l)] = v[k];
+	float v[SUMS];
+	for (int k = 0; k < SUMS; k++) v[k] = 0.0;
+	for (uint g = l; g < groups; g += 256u) for (int k = 0; k < SUMS; k++) v[k] += SPART[g * STATS_SUMS + uint(k)];
+	for (int k = 0; k < SUMS; k++) sm[k * 256 + int(l)] = v[k];
 	barrier();
 	for (uint half_ = 128u; half_ > 0u; half_ >>= 1u) {
-		if (l < half_) for (int k = 0; k < 10; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
+		if (l < half_) for (int k = 0; k < SUMS; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
 		barrier();
 	}
 	if (l == 0u) {
 		uint o = uint(pcs.pb);
-		OUT[o] = floatBitsToUint(float(CNT[0]));  // (the count exactly, not summed)
-		for (int k = 1; k < 7; k++) OUT[o + uint(k)] = floatBitsToUint(sm[k * 256]);
-		OUT[o + 7u] = floatBitsToUint(pcs.pc);
-		OUT[o + 8u] = floatBitsToUint(sm[7 * 256]);  // (the mutator's sum)
-		OUT[o + 9u] = CNT[15];  // (the donors of the last step)
-		OUT[o + 10u] = floatBitsToUint(sm[8 * 256]);  // (the key's count)
-		OUT[o + 11u] = floatBitsToUint(sm[9 * 256]);  // (the divisions' sum)
-		for (uint k = 12u; k < 16u; k++) OUT[o + k] = 0u;
+		OUT[o + ST_COUNT] = floatBitsToUint(float(CNT[CNT_BUPS]));  // (the count exactly, not summed)
+		for (uint k = ST_SPEED; k <= ST_MUTATIONS; k++) OUT[o + k] = floatBitsToUint(sm[k * 256u]);  // (sums 1 to 6 are in the sample's order)
+		OUT[o + ST_STEP] = floatBitsToUint(pcs.pc);
+		OUT[o + ST_MUTATOR] = floatBitsToUint(sm[7 * 256]);  // (the mutator's sum)
+		OUT[o + ST_DONORS] = uint(sm[10 * 256] + 0.5);  // (the donors' count: of the bups now, as the CPU's population_stats, not of the last step)
+		OUT[o + ST_KEY] = floatBitsToUint(sm[8 * 256]);  // (the key's count)
+		OUT[o + ST_DIVISIONS] = floatBitsToUint(sm[9 * 256]);  // (the divisions' sum)
+		for (uint k = ST_DIVISIONS + 1u; k < STATS_WORDS; k++) OUT[o + k] = 0u;
 	}
 }

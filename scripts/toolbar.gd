@@ -97,10 +97,6 @@ func step_speed(direction: int) -> void:
 	speeds[clampi(at + direction, 0, speeds.size() - 1)].button_pressed = true
 
 
-func _current_button() -> Button:
-	return _tool_buttons.get(current_tool())
-
-
 ## The button for a tool, so other widgets (like the options tray) can line up with it.
 func button_for(tool: Tool) -> Button:
 	return _tool_buttons.get(tool)

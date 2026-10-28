@@ -9,7 +9,7 @@ extends Control
 signal resume_requested
 signal quit_requested
 signal tour_requested  ## the guided tour was asked for again
-signal dish_radius_chosen(radius: float)
+signal dish_radius_chosen(dish: Dish, radius: float)  ## the dish the menu was opened for, which is not always the one in view when this arrives
 signal bup_limit_chosen(limit: int)
 
 @onready var card: PanelContainer = %Card
@@ -47,6 +47,7 @@ const DISH_SETTLE_SECONDS := 0.6  ## how long the dish-size slider is still befo
 
 var _free_mode := false
 var _from_game := false  ## the encyclopedia was opened straight from the game (a click on a band of the genome map), not from this menu: leaving it goes back to the game
+var _dish: Dish  ## the dish the menu was opened for
 var _dish_change := 0  ## counts changes to the dish-size slider, so only the last of a quick run counts
 var _record_shown := false  ## the starting-conditions record is wanted (it is hidden while the controls are up)
 var _opening := false  ## true while the rows are being set up, so that doesn't count as a choice
@@ -77,6 +78,7 @@ func _ready() -> void:
 ## cannot go below them: the limit can't drop under the bups there are. The dish can grow or shrink.
 func open(dish: Dish, free_mode: bool, started_as: StartConditions = null) -> void:
 	_free_mode = free_mode
+	_dish = dish
 	_from_game = false
 	settings.visible = free_mode
 	right.visible = free_mode
@@ -127,9 +129,10 @@ func _on_dish_row_changed(v: float) -> void:
 		return
 	_dish_change += 1
 	var change := _dish_change
+	var target := _dish
 	await get_tree().create_timer(DISH_SETTLE_SECONDS).timeout
-	if change == _dish_change:
-		dish_radius_chosen.emit(snappedf(v * StartConditions.UM_PER_MM, 1.0))
+	if change == _dish_change and is_instance_valid(target):
+		dish_radius_chosen.emit(target, snappedf(v * StartConditions.UM_PER_MM, 1.0))
 
 
 func close() -> void:

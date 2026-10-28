@@ -132,7 +132,7 @@ func _read_cpu() -> Array:
 	donor_mean = st["donor"]
 	var energy := 0.0
 	acetate_total = dish.acetate.total()
-	var ex: PackedFloat32Array = dish.sim.export_state()
+	var ex: PackedFloat32Array = dish.sim.export_state_bytes().to_float32_array()
 	var np: int = ex.size() / GpuSim.STRIDE
 	for i in np:
 		energy += ex[i * GpuSim.STRIDE + 5]

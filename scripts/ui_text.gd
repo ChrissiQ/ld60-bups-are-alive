@@ -2,7 +2,7 @@ class_name UiText
 extends RefCounted
 ## Shared text styling: every number is shown in the theme's "Bright" colour.
 ## Feed text through `numbers()` and show the result in a RichTextLabel with bbcode on.
-## (The whole game is set in one font, so numbers need no special typeface.)
+## (The number typeface, Commit Mono, comes from the theme's number types, not from this code.)
 
 static var _number: RegEx = RegEx.create_from_string("(\\d+)(\\.\\d+)?(/s|%|s\\b)?")
 const TOOLTIP_WIDTH := 38  ## characters a tooltip line holds (see TooltipFit)

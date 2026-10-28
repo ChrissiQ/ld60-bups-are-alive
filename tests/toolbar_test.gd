@@ -68,9 +68,7 @@ func _init() -> void:
 	start.dish_radius = 300.0  # the tests place things by hand and count on a small dish
 	start.nutrient_density = 0
 	start.feed_density = 0.0
-	Session.free_start = start
-	Session.mode = Session.Mode.FREE
-	var m: Node = load("res://scenes/main.tscn").instantiate()
+	var m: Node = TestUtil.free_game(start)
 	root.add_child(m)
 	await process_frame
 	await process_frame
@@ -557,6 +555,7 @@ func _init() -> void:
 	m.toolbar.select_tool(Toolbar.Tool.SELECT)
 	m.dish.select_at(float_spot)
 	floater.burst_at = m.dish.time + 1.0
+	m.dish._first_burst = -INF  # (the dish's own bound on when the first bursts, which this test has just moved)
 	m.dish.advance(Dish.BURST_CHECK_SECONDS)  # (plankton are looked over for bursts once in this long)
 	check(m.dish.selected_plankton == null and m.dish.plankton.is_empty(), "a selected plankton that bursts is let go")
 	picks[Dish.PickMode.ALL].button_pressed = true
@@ -929,7 +928,7 @@ func _init() -> void:
 	await process_frame
 	Session.mode = Session.Mode.GOALS
 	Session.load_requested = false
-	var g: Node = load("res://scenes/main.tscn").instantiate()
+	var g: Node = load(Scenes.GAME).instantiate()
 	root.add_child(g)
 	await process_frame
 	check(not g.paused and not g.pause_ring.visible, "goal mode starts running, no ring")

@@ -6,22 +6,36 @@ layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs
 layout(set = 0, binding = 0, std430) buffer B_CNT { uint CNT[]; };
 layout(set = 0, binding = 1, std430) buffer B_PCNT { uint PCNT[]; };
 layout(set = 0, binding = 2, std430) buffer B_OUT { uint OUT[]; };
+const uint ANSWER_WORDS = 24u;
+const uint CNT_WORDS = 16u;
+const uint NEAR_SLOTS = 4u;
+const uint OUT_CNT = 0u;
+const uint OUT_PCNT = 16u;
+const uint OUT_Q = 32u;
+const uint PCNT_WORDS = 8u;
+const uint QOUT_WORDS = 240u;
+const uint QO_D2 = 1u;
+const uint QO_INDEX = 0u;
+const uint QO_NEAR = 26u;
+const uint QO_NEAR_MORE = 228u;
+const uint QO_TRACKED = 36u;
+const uint R_ID_HI = 21u;
+const uint R_ID_LO = 0u;
+const uint TRACKED = 8u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
-const uint OUT_Q = 32u; const uint OUT_STATS = 272u;
-
 void main() {
 	uint t = gl_GlobalInvocationID.x;
-	if (t < 16u) OUT[t] = CNT[t];
-	else if (t < 24u) OUT[t] = PCNT[t - 16u];
-	if (t >= 240u) return;
+	if (t < CNT_WORDS) OUT[OUT_CNT + t] = CNT[t];
+	else if (t < CNT_WORDS + PCNT_WORDS) OUT[OUT_PCNT + t - CNT_WORDS] = PCNT[t - CNT_WORDS];
+	if (t >= QOUT_WORDS) return;
 	uint q = OUT_Q + t;
 	uint v = 0u;
-	if (t == 0u || t == 1u || t == 26u) v = 0xFFFFFFFFu;  // (no pick; d² past any, for atomicMin)
-	if (t >= 36u && t < 228u) { uint w = (t - 36u) % 24u; if (w == 0u || w == 21u) v = 0xFFFFFFFFu; }  // (a tracked bup not found)
-	if (t >= 228u && t < 234u && (t - 228u) % 2u == 0u) v = 0xFFFFFFFFu;
+	if (t == QO_INDEX || t == QO_D2 || t == QO_NEAR) v = 0xFFFFFFFFu;  // (no pick; d² past any, for atomicMin)
+	if (t >= QO_TRACKED && t < QO_TRACKED + TRACKED * ANSWER_WORDS) { uint w = (t - QO_TRACKED) % ANSWER_WORDS; if (w == R_ID_LO || w == R_ID_HI) v = 0xFFFFFFFFu; }  // (a tracked bup not found)
+	if (t >= QO_NEAR_MORE && t < QO_NEAR_MORE + 2u * (NEAR_SLOTS - 1u) && (t - QO_NEAR_MORE) % 2u == 0u) v = 0xFFFFFFFFu;
 	OUT[q] = v;
 }

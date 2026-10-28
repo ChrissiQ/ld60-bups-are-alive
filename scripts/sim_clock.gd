@@ -1,7 +1,7 @@
 class_name SimClock
 extends RefCounted
 ## How the simulation clock is shown. It counts the seconds the simulation has run,
-## which is what the bups' swimming and tumbling happen in. Playback speed (x1, x3, x8) only
+## which is what the bups' swimming and tumbling happen in. Playback speed (x1 to x10,000) only
 ## changes how fast it runs against the wall clock.
 
 

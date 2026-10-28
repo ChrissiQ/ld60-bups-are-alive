@@ -44,7 +44,7 @@ func _init() -> void:
 	key_row.segments.gui_input.emit(left)
 	check(not key_row.button_pressed, "Right chooses Off")
 	key_row.queue_free()
-	var tabs_screen: Control = load("res://scenes/free_setup.tscn").instantiate()
+	var tabs_screen: Control = load(Scenes.FREE_SETUP).instantiate()
 	root.add_child(tabs_screen)
 	await process_frame
 	check(tabs_screen.basic_tab.focus_mode == Control.FOCUS_ALL and tabs_screen.advanced_toggle.focus_mode == Control.FOCUS_ALL, "the Basics and Advanced tabs take keyboard focus")
@@ -114,7 +114,7 @@ func _init() -> void:
 	# End to end through the real setup screen: choose, GO, "relaunch", reopen.
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(TEMP))
 	Session.free_start = StartConditions.load_saved()
-	var setup: Control = load("res://scenes/free_setup.tscn").instantiate()
+	var setup: Control = load(Scenes.FREE_SETUP).instantiate()
 	root.add_child(setup)
 	await process_frame
 	check(setup.bups_row.slider.value == 4 and setup.nutrients_row.slider.value == 32, "first ever visit shows the defaults")
@@ -134,7 +134,7 @@ func _init() -> void:
 	await process_frame
 	# Simulate a fresh launch: reload from disk the way Session does at startup.
 	Session.free_start = StartConditions.load_saved()
-	var again: Control = load("res://scenes/free_setup.tscn").instantiate()
+	var again: Control = load(Scenes.FREE_SETUP).instantiate()
 	root.add_child(again)
 	await process_frame
 	check(again.bups_row.slider.value == 55 and again.nutrients_row.slider.value == 90 and again.rate_row.slider.value == 3 and is_equal_approx(again.dish_row.slider.value, 2.5) and again.detail_row.slider.value == 250 and again.thickness_row.slider.value == 8,
@@ -146,7 +146,7 @@ func _init() -> void:
 	bloomy.dish_radius = 20000.0  # (a 20 mm dish: about 1,257 mm²)
 	bloomy.bloom_density = 0.5  # (about 628 a day, so about 26 floating at a time)
 	Session.free_start = bloomy
-	var preview: Control = load("res://scenes/free_setup.tscn").instantiate()
+	var preview: Control = load(Scenes.FREE_SETUP).instantiate()
 	root.add_child(preview)
 	await process_frame
 	check(preview.dish.plankton.is_empty(), "the preview has no plankton the moment it is made")
@@ -166,7 +166,7 @@ func _init() -> void:
 
 	# The advanced options have a reset of their own: it clears them and nothing else, and is there only while one is changed.
 	Session.free_start = StartConditions.new()
-	var adv: Control = load("res://scenes/free_setup.tscn").instantiate()
+	var adv: Control = load(Scenes.FREE_SETUP).instantiate()
 	root.add_child(adv)
 	await process_frame
 	check(not adv.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "with the advanced options shut there is no reset showing, and with them as usual no 'changed'")
@@ -213,7 +213,7 @@ func _init() -> void:
 	# The GPU setting, an advanced option: three buttons of one group (Auto, On, Off), kept with the other choices, counted in the
 	# advanced heading, reset with the advanced options, and a one-line notice for On where this machine has no GPU to use.
 	Session.free_start = StartConditions.new()
-	var gs: Control = load("res://scenes/free_setup.tscn").instantiate()
+	var gs: Control = load(Scenes.FREE_SETUP).instantiate()
 	root.add_child(gs)
 	await process_frame
 	var auto := StartConditions.BACKEND_AUTO
@@ -238,7 +238,7 @@ func _init() -> void:
 	gs.queue_free()
 	await process_frame
 	Session.free_start = StartConditions.load_saved()
-	var gs2: Control = load("res://scenes/free_setup.tscn").instantiate()
+	var gs2: Control = load(Scenes.FREE_SETUP).instantiate()
 	root.add_child(gs2)
 	await process_frame
 	check(gs2.backend_toggle.off_button.button_pressed and not gs2.backend_toggle.automatic and gs2._start.sim_backend == off, "the next launch shows the setting")
@@ -256,7 +256,7 @@ func _init() -> void:
 	# A number box: focus from the keyboard selects the whole number (typing replaces it); focus from a click selects nothing,
 	# so the mouse can then select part of it.
 	Session.free_start = StartConditions.new()
-	var boxes: Control = load("res://scenes/free_setup.tscn").instantiate()
+	var boxes: Control = load(Scenes.FREE_SETUP).instantiate()
 	root.add_child(boxes)
 	await process_frame
 	var box: LineEdit = boxes.bloom_row.value_field
@@ -295,7 +295,7 @@ func _init() -> void:
 	prev.save()
 	Session.free_start = StartConditions.load_saved()
 	var file_before := FileAccess.get_file_as_string(TEMP)
-	var reset_screen: Control = load("res://scenes/free_setup.tscn").instantiate()
+	var reset_screen: Control = load(Scenes.FREE_SETUP).instantiate()
 	root.add_child(reset_screen)
 	current_scene = reset_screen
 	await process_frame
@@ -311,7 +311,7 @@ func _init() -> void:
 	check(_same(StartConditions.load_saved(), prev), "the previous preference is still what loads next time")
 	# Reopen: still shows the previous preference, not the defaults.
 	current_scene = null
-	var reopened: Control = load("res://scenes/free_setup.tscn").instantiate()
+	var reopened: Control = load(Scenes.FREE_SETUP).instantiate()
 	root.add_child(reopened)
 	await process_frame
 	check(reopened.bups_row.slider.value == 31 and reopened.nutrients_row.slider.value == 77, "reopening shows the previous preference")
@@ -341,7 +341,7 @@ func _init() -> void:
 	# A saved value off the slider's step grid: what is shown, previewed and played must agree.
 	_write_raw('{"bups": 7, "nutrient_density": 33, "feed_density": 6.5, "dish_radius": 3050}')
 	Session.free_start = StartConditions.load_saved()
-	var off_grid: Control = load("res://scenes/free_setup.tscn").instantiate()
+	var off_grid: Control = load(Scenes.FREE_SETUP).instantiate()
 	root.add_child(off_grid)
 	await process_frame
 	check(off_grid._start.feed_density == off_grid.rate_row.value, "working copy takes the slider's rate (%s vs shown %s)" % [off_grid._start.feed_density, off_grid.rate_row.value])

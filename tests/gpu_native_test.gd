@@ -6,7 +6,9 @@ extends SceneTree
 ## the CPU's own step, the living ids from the records (alive_ids), the sources' part of a step on its own (step_world), and the field
 ## as packed arrays (NutrientField.export_packed / import_packed). Headless: nothing here needs a GPU.
 
-const RECORD_BYTES := 112
+const RECORD_BYTES := GpuLayout.RECORD_WORDS * 4
+const BIRTH_BYTES := GpuLayout.BIRTH_WORDS * 4
+const DEATH_BYTES := GpuLayout.DEATH_WORDS * 4
 
 
 func check(ok: bool, what: String) -> void:
@@ -23,7 +25,7 @@ func _init() -> void:
 
 
 static func _id_of(records: PackedByteArray, i: int) -> int:
-	return records.decode_u32(i * RECORD_BYTES) | (records.decode_u32(i * RECORD_BYTES + 21 * 4) << 32)
+	return records.decode_u32(i * RECORD_BYTES + GpuLayout.R_ID_LO * 4) | (records.decode_u32(i * RECORD_BYTES + GpuLayout.R_ID_HI * 4) << 32)
 
 
 ## A genome with every heritable figure away from the founder's, from the sim's own random numbers (so a run is the same every time).
@@ -64,16 +66,18 @@ func _records_round_trip() -> void:
 	for i in ids.size():
 		ids_ok = ids_ok and _id_of(state, i) == ids[i]
 		high += 1 if ids[i] >= (1 << 32) else 0
-	check(ids_ok and high > 400, "each record holds its bup's id in words 0 and 21 (%d of them past 2^32)" % high)
+	check(ids_ok and high > 400, "each record holds its bup's id in R_ID_LO and R_ID_HI (%d of them past 2^32)" % high)
 	var floats := state.to_float32_array()
 	var drawn := 0
 	var undrawn := 0
 	for i in ids.size():
-		if floats[i * 24 + 22] >= 1e30 and floats[i * 24 + 23] >= 1e30:
+		var o := i * GpuLayout.RECORD_WORDS
+		if floats[o + GpuLayout.R_PX] >= 1e30 and floats[o + GpuLayout.R_PY] >= 1e30:
 			undrawn += 1
-		elif absf(floats[i * 24 + 22]) <= 10000.0 and absf(floats[i * 24 + 23]) <= 10000.0:
+		elif absf(floats[o + GpuLayout.R_PX]) <= 10000.0 and absf(floats[o + GpuLayout.R_PY]) <= 10000.0:
 			drawn += 1
-	check(drawn > 0 and undrawn > 0 and drawn + undrawn == ids.size(), "words 22 and 23 hold where it was last drawn, or a value from 1e30 up if nowhere yet (%d drawn, %d not)" % [drawn, undrawn])
+	# (the first 600 were drawn, then a step: at most 600 have a last picture, and every newborn and the 400 never drawn have none)
+	check(drawn > 0 and drawn <= 600 and undrawn >= ids.size() - 600 and drawn + undrawn == ids.size(), "R_PX and R_PY hold where it was last drawn, or a value from 1e30 up if nowhere yet (%d drawn, %d not)" % [drawn, undrawn])
 	var other := BupSim.new()
 	other.reset(10000.0, 3)
 	other.import_state_bytes(state)
@@ -132,29 +136,33 @@ func _events_against_the_cpu() -> void:
 				continue
 			var info := cpu.bup_info(id)
 			var e := PackedByteArray()
-			e.resize(64)
-			e.encode_u32(0, id & 0xFFFFFFFF); e.encode_u32(4, id >> 32)
+			e.resize(BIRTH_BYTES)
+			e.encode_u32(GpuLayout.EB_ID_LO * 4, id & 0xFFFFFFFF); e.encode_u32(GpuLayout.EB_ID_HI * 4, id >> 32)
 			var parent: int = cpu.lineage_info(id)["parent"]
-			e.encode_u32(8, parent & 0xFFFFFFFF); e.encode_u32(12, parent >> 32)
-			e.encode_u32(16, k); e.encode_u32(20, info["divisions"]); e.encode_u32(24, info["mutations"])
-			var words := [info["speed"], info["sense"], info["metabolism"], info["size_gene"], info["hue"], info["sat"], info["val"], info["harm"], info["mutator"]]
-			for w in words.size():
-				e.encode_float(28 + 4 * w, words[w])
+			e.encode_u32(GpuLayout.EB_PARENT_LO * 4, parent & 0xFFFFFFFF); e.encode_u32(GpuLayout.EB_PARENT_HI * 4, parent >> 32)
+			e.encode_u32(GpuLayout.EB_STEP * 4, k); e.encode_u32(GpuLayout.EB_DIVISIONS * 4, info["divisions"]); e.encode_u32(GpuLayout.EB_TRAITS * 4, info["mutations"])
+			var words := {GpuLayout.EB_SPEED: info["speed"], GpuLayout.EB_SENSE: info["sense"], GpuLayout.EB_METABOLISM: info["metabolism"], GpuLayout.EB_SIZE: info["size_gene"],
+				GpuLayout.EB_HUE: info["hue"], GpuLayout.EB_SAT: info["sat"], GpuLayout.EB_VAL: info["val"], GpuLayout.EB_HARM: info["harm"], GpuLayout.EB_MUTATOR: info["mutator"]}
+			for w: int in words:
+				e.encode_float(w * 4, words[w])
 			births.append_array(e)
 		for id: int in before:
 			if after.has(id):
 				continue
 			var kept := cpu.lineage_info(id)  # (the record, if it stayed: what the bup was when it died)
 			var e := PackedByteArray()
-			e.resize(40)
-			e.encode_u32(0, id & 0xFFFFFFFF); e.encode_u32(4, id >> 32); e.encode_u32(8, k)
-			e.encode_u32(12, kept["divisions"] if not kept.is_empty() else before[id]["divisions"])
+			e.resize(DEATH_BYTES)
+			e.encode_u32(GpuLayout.ED_ID_LO * 4, id & 0xFFFFFFFF); e.encode_u32(GpuLayout.ED_ID_HI * 4, id >> 32); e.encode_u32(GpuLayout.ED_STEP * 4, k)
+			e.encode_u32(GpuLayout.ED_TRAITS * 4, kept["divisions"] if not kept.is_empty() else before[id]["divisions"])
 			var gone: Dictionary = kept if not kept.is_empty() else before[id]
-			e.encode_float(16, gone["mass"])
-			e.encode_float(32, gone["energy"])
-			e.encode_float(36, gone["birth_mass"])
+			e.encode_float(GpuLayout.ED_MASS * 4, gone["mass"])
+			e.encode_float(GpuLayout.ED_ENERGY * 4, gone["energy"])
+			e.encode_float(GpuLayout.ED_BIRTH_MASS * 4, gone["birth_mass"])
+			var genes := {GpuLayout.ED_SPEED: gone["speed"], GpuLayout.ED_SENSE: gone["sense"], GpuLayout.ED_METABOLISM: gone["metabolism"], GpuLayout.ED_SIZE: gone["size_gene"]}
+			for w: int in genes:
+				e.encode_float(w * 4, genes[w])
 			deaths.append_array(e)
-	check(births.size() / 64 > 20 and deaths.size() / 40 > 10, "the CPU run has births and deaths to compare (%d and %d)" % [births.size() / 64, deaths.size() / 40])
+	check(births.size() / BIRTH_BYTES > 20 and deaths.size() / DEATH_BYTES > 10, "the CPU run has births and deaths to compare (%d and %d)" % [births.size() / BIRTH_BYTES, deaths.size() / DEATH_BYTES])
 	records.set_time(12345.0)
 	records.apply_events(births, deaths, 20.0, 20.0)
 	var by_id_cpu := {}
@@ -190,10 +198,10 @@ func _events_against_the_cpu() -> void:
 	check(is_equal_approx(records.lineage_info(keys_cpu[0])["born"], cpu.lineage_info(keys_cpu[0])["born"]), "records are stamped with their step's time")
 	var again := records.lineage_export()
 	var still_kept := PackedByteArray()  # (a birth whose record has since been freed cannot be told from a new one: a batch must be given once)
-	for i in births.size() / 64:
-		var id := births.decode_u32(i * 64) | (births.decode_u32(i * 64 + 4) << 32)
+	for i in births.size() / BIRTH_BYTES:
+		var id := births.decode_u32(i * BIRTH_BYTES + GpuLayout.EB_ID_LO * 4) | (births.decode_u32(i * BIRTH_BYTES + GpuLayout.EB_ID_HI * 4) << 32)
 		if records.has_record(id):
-			still_kept.append_array(births.slice(i * 64, i * 64 + 64))
+			still_kept.append_array(births.slice(i * BIRTH_BYTES, (i + 1) * BIRTH_BYTES))
 	records.apply_events(still_kept, PackedByteArray(), 20.0, 20.0)
 	check(still_kept.size() > 0 and records.lineage_export().size() == again.size(), "a birth given again while its record is kept is not recorded twice")
 	var newest := 0

@@ -10,30 +10,37 @@ layout(set = 0, binding = 3, std430) buffer B_EVR { int EVR[]; };
 layout(set = 0, binding = 4, std430) buffer B_EVP { float EVP[]; };
 layout(set = 0, binding = 5, std430) buffer B_CONC { float CONC[]; };
 layout(set = 0, binding = 6, std430) buffer B_INSIDE { int INSIDE[]; };
+const uint EV_PUFF_FLOATS = 6u;
+const uint PCNT_SLOTS = 0u;
+const uint PCNT_TO_GRID = 2u;
+const int P_CELLS = 1;
+const int P_ORIGIN = 3;
+const int P_PUFF_CAPACITY = 71;
+const int P_SPACING = 2;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
 void to_grid(float x, float y, float mass, float v) {
-	int n = int(P[1]); float sp = P[2]; float area = sp * sp; float reach = 4.0 * sqrt(v);
-	int x0 = max(0, int(floor((x - reach + P[3]) / sp - 0.5))), x1 = min(n - 1, int(ceil((x + reach + P[3]) / sp - 0.5)));
-	int y0 = max(0, int(floor((y - reach + P[3]) / sp - 0.5))), y1 = min(n - 1, int(ceil((y + reach + P[3]) / sp - 0.5)));
+	int n = int(P[P_CELLS]); float sp = P[P_SPACING]; float area = sp * sp; float reach = 4.0 * sqrt(v);
+	int x0 = max(0, int(floor((x - reach + P[P_ORIGIN]) / sp - 0.5))), x1 = min(n - 1, int(ceil((x + reach + P[P_ORIGIN]) / sp - 0.5)));
+	int y0 = max(0, int(floor((y - reach + P[P_ORIGIN]) / sp - 0.5))), y1 = min(n - 1, int(ceil((y + reach + P[P_ORIGIN]) / sp - 0.5)));
 	float sum = 0.0;
 	for (int cy = y0; cy <= y1; cy++) for (int cx = x0; cx <= x1; cx++) {
 		if (INSIDE[cy * n + cx] == 0) continue;
-		float dx = (float(cx) + 0.5) * sp - P[3] - x, dy = (float(cy) + 0.5) * sp - P[3] - y;
+		float dx = (float(cx) + 0.5) * sp - P[P_ORIGIN] - x, dy = (float(cy) + 0.5) * sp - P[P_ORIGIN] - y;
 		sum += exp(-(dx * dx + dy * dy) / (2.0 * v));
 	}
 	if (sum > 1e-12) {
 		for (int cy = y0; cy <= y1; cy++) for (int cx = x0; cx <= x1; cx++) {
 			if (INSIDE[cy * n + cx] == 0) continue;
-			float dx = (float(cx) + 0.5) * sp - P[3] - x, dy = (float(cy) + 0.5) * sp - P[3] - y;
+			float dx = (float(cx) + 0.5) * sp - P[P_ORIGIN] - x, dy = (float(cy) + 0.5) * sp - P[P_ORIGIN] - y;
 			CONC[cy * n + cx] += mass * exp(-(dx * dx + dy * dy) / (2.0 * v)) / sum / area;
 		}
 		return;
 	}
-	float fx = (x + P[3]) / sp - 0.5, fy = (y + P[3]) / sp - 0.5;
+	float fx = (x + P[P_ORIGIN]) / sp - 0.5, fy = (y + P[P_ORIGIN]) / sp - 0.5;
 	int bx = int(floor(fx)), by = int(floor(fy));
 	float tx = fx - float(bx), ty = fy - float(by);
 	int cells[4]; float weights[4]; float kept = 0.0; int count = 0;
@@ -51,18 +58,18 @@ void main() {
 	if (gl_GlobalInvocationID.x != 0u) return;  // (one thread: a dispatch of 1 runs a whole group of 64)
 	int st = int(pcs.pa);
 	int start = EVR[st * 4], cnt = EVR[st * 4 + 1];
-	uint slots = PCNT[0], cap = uint(P[71]);
+	uint slots = PCNT[PCNT_SLOTS], cap = uint(P[P_PUFF_CAPACITY]);
 	for (int e = 0; e < cnt; e++) {
 		if (slots >= cap) {
-			uint qo = uint(start + e) * 6u;
+			uint qo = uint(start + e) * EV_PUFF_FLOATS;
 			to_grid(EVP[qo], EVP[qo + 1], EVP[qo + 2], EVP[qo + 3]);
-			PCNT[2] += 1u;
+			PCNT[PCNT_TO_GRID] += 1u;
 			continue;
 		}
-		uint q = uint(start + e) * 6u, o = slots * 8u;
+		uint q = uint(start + e) * EV_PUFF_FLOATS, o = slots * 8u;
 		PUFF[o] = EVP[q]; PUFF[o + 1] = EVP[q + 1]; PUFF[o + 2] = EVP[q + 2]; PUFF[o + 3] = EVP[q + 3]; PUFF[o + 4] = EVP[q + 4];
 		PUFF[o + 5] = 1.0; PUFF[o + 6] = 0.0; PUFF[o + 7] = 0.0;
 		slots++;
 	}
-	PCNT[0] = slots;
+	PCNT[PCNT_SLOTS] = slots;
 }

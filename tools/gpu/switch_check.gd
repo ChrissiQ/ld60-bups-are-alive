@@ -1,5 +1,5 @@
 extends SceneTree
-## Step 3C checks (windowed: they need a RenderingDevice).
+## Switch checks (windowed: they need a RenderingDevice).
 ##   godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/switch_check.gd -- bench [reps [clouds]]
 ##       CPU against GPU, time per step at 2k-50k bups (with `clouds` plankton clouds in the dish, 0 by default): what the Auto rule's
 ##       costs (Dish.CPU_STEP_MODEL, GPU_STEP_MODEL) were fitted to.
@@ -14,8 +14,8 @@ const BENCH_DISHES := [[10000.0, 100], [90000.0, 100], [90000.0, 400]]  ## [radi
 const BENCH_DELTAS := [1.67, 16.7]
 
 
-## The GpuWorld of the check: what the pipeline of Step 3B provides to the transfer (the two hooks `export_to_cpu` and `load_from_cpu` call, see
-## their comments), made here from readbacks, since the lineage events kernel is 3B's. A bup that is on the GPU now and was not at the
+## The GpuWorld of the check: what the pipeline provides to the transfer (the two hooks `export_to_cpu` and `load_from_cpu` call, see
+## their comments), made here from readbacks, since a stand-in has no lineage events kernel. A bup that is on the GPU now and was not at the
 ## last look is a birth (its parent is not known here: 0), one that was and is not is a death, and that is what `_take_unapplied_events`
 ## hands out, once. The records of a dish that has these events and nothing else are one for each living bup, with no ancestors.
 class CheckWorld extends GpuWorld:
@@ -45,13 +45,15 @@ class CheckWorld extends GpuWorld:
 		for id: int in known:
 			if not seen.has(id):
 				var e := PackedByteArray()
-				e.resize(40)
-				e.encode_u32(0, id & 0xFFFFFFFF); e.encode_u32(4, (id >> 32) & 0xFFFFFFFF)
-				e.encode_u32(12, known[id][1]); e.encode_float(16, known[id][0])
+				e.resize(GpuLayout.DEATH_WORDS * 4)
+				e.encode_u32(GpuLayout.ED_ID_LO * 4, id & 0xFFFFFFFF); e.encode_u32(GpuLayout.ED_ID_HI * 4, (id >> 32) & 0xFFFFFFFF)
+				e.encode_u32(GpuLayout.ED_TRAITS * 4, known[id][1]); e.encode_float(GpuLayout.ED_MASS * 4, known[id][0])
+				for g in 4:
+					e.encode_float((GpuLayout.ED_SPEED + g) * 4, known[id][2 + g])
 				deaths.append_array(e)
 		known.clear()
 		for i in records.size() / GpuSim.RECORD_BYTES:
-			known[GpuSim.id_of(records, i)] = [words[i * GpuSim.STRIDE + 6], int(words[i * GpuSim.STRIDE + 20])]
+			known[GpuSim.id_of(records, i)] = _known_of(words, i)
 		if births.size() > 0 or deaths.size() > 0:
 			sets.append({"births": births, "deaths": deaths, "first_step_end": now_seconds, "step_seconds": 0.0})
 
@@ -60,7 +62,7 @@ class CheckWorld extends GpuWorld:
 		sets = []
 		return out
 
-	func _pipeline_reset(bups: int) -> void:
+	func reset_pipeline(bups: int) -> void:
 		resets += 1
 		sets = []
 		known.clear()
@@ -68,7 +70,12 @@ class CheckWorld extends GpuWorld:
 			var records := gpu.rd.buffer_get_data(gpu.buffer("BUPS"), 0, bups * GpuSim.RECORD_BYTES)
 			var words := records.to_float32_array()
 			for i in bups:
-				known[GpuSim.id_of(records, i)] = [words[i * GpuSim.STRIDE + 6], int(words[i * GpuSim.STRIDE + 20])]
+				known[GpuSim.id_of(records, i)] = _known_of(words, i)
+
+	## What a death event of record `i` would say: its mass, its divisions, its four genes.
+	static func _known_of(words: PackedFloat32Array, i: int) -> Array:
+		var o := i * GpuSim.STRIDE
+		return [words[o + GpuLayout.R_MASS], int(words[o + GpuLayout.R_DIVISIONS]), words[o + GpuLayout.R_SPEED], words[o + GpuLayout.R_SENSE], words[o + GpuLayout.R_METABOLISM], words[o + GpuLayout.R_SIZE]]
 
 	func bup_count() -> int:
 		var count := [0]  # (a lambda holds a copy of a number: an array is shared)
@@ -111,18 +118,11 @@ func _gpu_batches(dish: Dish, world: CheckWorld, batches: int) -> void:
 	var was_active := dish.gpu_active
 	dish.gpu_active = false  # (the dish's world steps on the CPU here: its GPU path is the pipeline's, not this check's)
 	for b in batches:
-		var ranges := PackedInt32Array(); var puffs_all := PackedFloat32Array(); var cells_all := PackedInt32Array(); var amts_all := PackedFloat32Array()
+		var events := GpuSim.WorldEvents.new()
 		for st in 9:
 			dish.step(20.0)
-			var pf := dish.field.take_recorded_puffs()
-			var cc := dish.field.take_recorded_cells()
-			var aa := dish.field.take_recorded_amounts()
-			ranges.append_array(PackedInt32Array([puffs_all.size() / 6, pf.size() / 5, cells_all.size(), cc.size()]))
-			for j in pf.size() / 5:
-				puffs_all.append_array(PackedFloat32Array([pf[j * 5], pf[j * 5 + 1], pf[j * 5 + 2], pf[j * 5 + 3], pf[j * 5 + 4], 0.0]))
-			cells_all.append_array(cc)
-			amts_all.append_array(aa)
-		world.gpu.run_steps(9, {"ranges": ranges, "puffs": puffs_all, "cells": cells_all, "amounts": amts_all})
+			events.add_step(dish.field)
+		world.gpu.run_steps(9, events.as_dict())
 		world.look(dish.time)
 	dish.gpu_active = was_active
 
@@ -130,7 +130,7 @@ func _gpu_batches(dish: Dish, world: CheckWorld, batches: int) -> void:
 ## What the GPU holds now, read back: {"records", "count", "next_id", "total" (grid and clouds), "clouds"}.
 func _gpu_state(world: CheckWorld) -> Dictionary:
 	var gpu := world.gpu
-	var conc := gpu.read_conc()
+	var conc := gpu.read_conc_settled()
 	var total := 0.0
 	for v in conc:
 		total += v
@@ -380,26 +380,42 @@ func _dish_switching() -> void:
 	dish.set_backend_setting(StartConditions.BACKEND_CPU)
 	dish._choose_backend(1.67)
 	_ok(not dish.gpu_active and dish.sim.bup_count() == pop, "the setting set to Off moves them back at the next frame")
+	# Auto at x10,000: the rule's two thresholds (the GPU takes over above AUTO_CPU_UP_USEC, hands back below AUTO_CPU_DOWN_USEC), so a
+	# dish whose estimate lies between them stays where it is. Each side is asked of the rule with where the dish is.
+	var top := Dish.backend_frame_costs(18.5, dish.field.get_size(), dish.sim.moves_for(18.5), pop, 0, dish.field.puff_count())
 	dish.set_backend_setting(StartConditions.BACKEND_AUTO)
 	for i in 40:
 		dish._choose_backend(18.5)
-	_ok(dish.gpu_active == Dish.backend_wants_gpu(StartConditions.BACKEND_AUTO, 18.5, dish.sim.moves_for(18.5), dish.field.get_size(), pop, true, true, 0, dish.field.puff_count()), "Auto with %d bups at x10,000: the GPU if the rule wants it, else the processor" % pop)
+	var takes_over := Dish.backend_wants_gpu(StartConditions.BACKEND_AUTO, 18.5, dish.sim.moves_for(18.5), dish.field.get_size(), pop, false, true, 0, dish.field.puff_count())
+	_ok(dish.gpu_active == takes_over, "Auto with %d bups at x10,000, from the processor (its frame estimated at %.0f µs, the GPU's %.0f; the GPU takes over above %.0f): %s" % [pop, top.x, top.y, Dish.AUTO_CPU_UP_USEC, "the GPU" if takes_over else "the processor"])
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
 	for i in Dish.wait_frames(Dish.RULE_FRAME_SECONDS):
 		dish._choose_backend(1.67)
 	_ok(dish.gpu_active, "On again: the GPU after %d coarse frames" % Dish.wait_frames(Dish.RULE_FRAME_SECONDS))
 	dish.set_backend_setting(StartConditions.BACKEND_AUTO)
-	for i in Dish.AUTO_DOWN_FRAMES - 1:
+	for i in Dish.AUTO_DOWN_FRAMES:
 		dish._choose_backend(18.5)
-	_ok(dish.gpu_active, "the setting changed to Auto, whose rule wants the processor for %d bups: %d frames, the GPU still holds them (its count may be late)" % [pop, Dish.AUTO_DOWN_FRAMES - 1])
-	dish._choose_backend(18.5)
+	var keeps := Dish.backend_wants_gpu(StartConditions.BACKEND_AUTO, 18.5, dish.sim.moves_for(18.5), dish.field.get_size(), pop, true, true, 0, dish.field.puff_count())
+	_ok(dish.gpu_active == keeps, "...and from the GPU (it hands back below %.0f µs): %s after %d frames" % [Dish.AUTO_CPU_DOWN_USEC, "the GPU" if keeps else "the processor", Dish.AUTO_DOWN_FRAMES])
+	dish.set_backend_setting(StartConditions.BACKEND_GPU)
+	for i in Dish.wait_frames(Dish.RULE_FRAME_SECONDS):
+		dish._choose_backend(1.67)
+	# Auto's hand-back, at x100, where the rule wants the processor even from the GPU.
+	var x100 := Dish.backend_frame_costs(1.67, dish.field.get_size(), dish.sim.moves_for(1.67), pop, 0, dish.field.puff_count())
+	_ok(dish.gpu_active and not Dish.backend_wants_gpu(StartConditions.BACKEND_AUTO, 1.67, dish.sim.moves_for(1.67), dish.field.get_size(), pop, true, true, 0, dish.field.puff_count()), "on the GPU, and Auto's rule wants the processor for %d bups at x100 (its frame estimated at %.0f µs, below %.0f)" % [pop, x100.x, Dish.AUTO_CPU_DOWN_USEC])
+	dish.set_backend_setting(StartConditions.BACKEND_AUTO)
+	for i in Dish.AUTO_DOWN_FRAMES - 1:
+		dish._choose_backend(1.67)
+	_ok(dish.gpu_active, "the setting changed to Auto, whose rule wants the processor: %d frames, the GPU still holds them (its count may be late)" % (Dish.AUTO_DOWN_FRAMES - 1))
+	dish._choose_backend(1.67)
 	_ok(not dish.gpu_active and dish.sim.bup_count() == pop, "...the next one (%d in a row) brings them back" % Dish.AUTO_DOWN_FRAMES)
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
 	for i in Dish.wait_frames(Dish.RULE_FRAME_SECONDS):
 		dish._choose_backend(1.67)
 	dish.set_backend_setting(StartConditions.BACKEND_AUTO)
 	for i in 5:
-		dish._choose_backend(18.5)
+		dish._choose_backend(1.67)
+	_ok(dish.gpu_active and dish._cpu_votes == 5, "Auto again, wanting the processor: 5 frames counted (%d), the GPU still holds them" % dish._cpu_votes)
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
 	dish._choose_backend(18.5)
 	_ok(dish.gpu_active and dish._cpu_votes == 0, "...and the rule's wait starts again whenever it wants the GPU")

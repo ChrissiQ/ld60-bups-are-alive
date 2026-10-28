@@ -5,6 +5,8 @@ layout(local_size_x = 64) in;
 layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs;
 layout(set = 0, binding = 0, std430) buffer B_CNT { uint CNT[]; };
 layout(set = 0, binding = 1, std430) buffer B_DTAB { uint DTAB[]; };
+const uint CNT_DONORS = 15u;
+const uint CNT_DONOR_REACH = 14u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
@@ -19,5 +21,5 @@ void main() {
 	uint t = gl_GlobalInvocationID.x;
 	if (t < (DMASK + 1u) * 4u) DTAB[t] = 0xFFFFFFFFu;
 	else if (t < (DMASK + 1u) * 4u + 2048u) DTAB[t] = 0u;  // (the bitmap of the buckets in use)
-	if (t == 0u) CNT[15] = 0u;
+	if (t == 0u) { CNT[CNT_DONORS] = 0u; CNT[CNT_DONOR_REACH] = 0u; }
 }

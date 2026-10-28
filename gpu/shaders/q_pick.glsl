@@ -9,21 +9,33 @@ layout(set = 0, binding = 2, std430) buffer B_BUPS { float BUPS[]; };
 layout(set = 0, binding = 3, std430) buffer B_QIN { uint QIN[]; };
 layout(set = 0, binding = 4, std430) buffer B_QD { uint QD[]; };
 layout(set = 0, binding = 5, std430) buffer B_OUT { uint OUT[]; };
+const uint CNT_BUPS = 0u;
+const uint OUT_Q = 32u;
+const int P_MASS_UM = 14;
+const int P_MIN_LENGTH_PX = 74;
+const uint QO_D2 = 1u;
+const uint Q_PICK = 0u;
+const uint Q_PICK_X = 1u;
+const uint Q_PICK_Y = 2u;
+const uint Q_PIXEL = 4u;
+const uint Q_SLACK = 3u;
+const uint RECORD_WORDS = 28u;
+const uint R_MASS = 6u;
+const uint R_X = 1u;
+const uint R_Y = 2u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
-const uint OUT_Q = 32u; const uint OUT_STATS = 272u;
-
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0] || QIN[0] == 0u) return;
-	uint b = i * 28u;
-	float px = uintBitsToFloat(QIN[1]), py = uintBitsToFloat(QIN[2]), slack = uintBitsToFloat(QIN[3]), pixel = uintBitsToFloat(QIN[4]);
-	float reach = 0.5 * max(BUPS[b + 6u] * P[14], P[74] * pixel) + slack;
-	float dx = BUPS[b + 1u] - px, dy = BUPS[b + 2u] - py;
+	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS] || QIN[Q_PICK] == 0u) return;
+	uint b = i * RECORD_WORDS;
+	float px = uintBitsToFloat(QIN[Q_PICK_X]), py = uintBitsToFloat(QIN[Q_PICK_Y]), slack = uintBitsToFloat(QIN[Q_SLACK]), pixel = uintBitsToFloat(QIN[Q_PIXEL]);
+	float reach = 0.5 * max(BUPS[b + R_MASS] * P[P_MASS_UM], P[P_MIN_LENGTH_PX] * pixel) + slack;
+	float dx = BUPS[b + R_X] - px, dy = BUPS[b + R_Y] - py;
 	float d2 = dx * dx + dy * dy;
 	uint bits = 0xFFFFFFFFu;
-	if (d2 <= reach * reach) { bits = floatBitsToUint(d2); atomicMin(OUT[OUT_Q + 1u], bits); }
+	if (d2 <= reach * reach) { bits = floatBitsToUint(d2); atomicMin(OUT[OUT_Q + QO_D2], bits); }
 	QD[i] = bits;
 }

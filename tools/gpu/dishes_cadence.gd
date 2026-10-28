@@ -8,9 +8,7 @@ func _run() -> void:
 	var big := StartConditions.new()
 	big.bups = 250; big.bup_limit = 350000; big.dish_radius = 90000.0; big.nutrient_density = 4.0; big.bloom_density = 2.0
 	big.spread_founders()
-	Session.free_start = big
-	Session.mode = Session.Mode.FREE
-	var m: Node = load("res://scenes/main.tscn").instantiate()
+	var m: Node = TestUtil.free_game(big)
 	root.add_child(m)
 	await process_frame
 	m.toolbar.set_paused(false)

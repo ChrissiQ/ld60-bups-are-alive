@@ -23,6 +23,30 @@ layout(set = 0, binding = 16, std430) buffer B_AWLO { uint AWLO[]; };
 layout(set = 0, binding = 17, std430) buffer B_AWHI { uint AWHI[]; };
 layout(set = 0, binding = 18, std430) buffer B_ADLO { uint ADLO[]; };
 layout(set = 0, binding = 19, std430) buffer B_ADHI { uint ADHI[]; };
+const uint CNT_BUPS = 0u;
+const int P_ACETATE_SLOPE = 101;
+const int P_ACETATE_THRESHOLD = 102;
+const int P_ACETATE_UPTAKE = 103;
+const int P_BINS_ACROSS = 67;
+const int P_BIN_SIZE = 66;
+const int P_CELLS = 1;
+const int P_COST_PER_MASS = 21;
+const int P_DELTA = 5;
+const int P_ENTRY_CAPACITY = 72;
+const int P_HALF_SATURATION = 24;
+const int P_KEY_FACTOR = 106;
+const int P_ORIGIN = 3;
+const int P_RESERVE_PER_MASS = 22;
+const int P_SPACING = 2;
+const int P_UPTAKE_PER_SIZE = 23;
+const uint RECORD_WORDS = 28u;
+const uint R_ENERGY = 5u;
+const uint R_HARM = 15u;
+const uint R_MASS = 6u;
+const uint R_METABOLISM = 10u;
+const uint R_REACH = 12u;
+const uint R_X = 1u;
+const uint R_Y = 2u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
@@ -31,10 +55,10 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 // the clouds' concentration and gradient where a bup is, and the smallest sigma among the clouds that reach it (as the CPU's puff_probe)
 void puffs_at(float x, float y, out float c, out float gx, out float gy, out float sigma) {
 	c = 0.0; gx = 0.0; gy = 0.0; sigma = 1e18;
-	int nb = int(P[67]); float bs = P[66];
-	int bx = clamp(int((x + P[3]) / bs), 0, nb - 1), by = clamp(int((y + P[3]) / bs), 0, nb - 1);
+	int nb = int(P[P_BINS_ACROSS]); float bs = P[P_BIN_SIZE];
+	int bx = clamp(int((x + P[P_ORIGIN]) / bs), 0, nb - 1), by = clamp(int((y + P[P_ORIGIN]) / bs), 0, nb - 1);
 	uint b = uint(by * nb + bx);
-	uint e0 = BINS[b], e1 = min(e0 + BINC[b], uint(P[72]));
+	uint e0 = BINS[b], e1 = min(e0 + BINC[b], uint(P[P_ENTRY_CAPACITY]));
 	for (uint e = e0; e < e1; e++) {
 		vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];  // x, y, mass, variance | reach^2, sigma, cloud index, 0
 		float dx = x - r0.x, dy = y - r0.y, r2 = fma(dy, dy, dx * dx);  // (fma written out: the compiler contracted the old gathering code this way, and exp() magnifies a last-bit change in r2)
@@ -58,25 +82,25 @@ void add_fixed2(uint cell, float w, int which) { // 2^30 to the unit, in 64 bits
 	}
 }
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
-	uint b = i * 28u;
+	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+	uint b = i * RECORD_WORDS;
 	float wg = WANT[i], wc = WANTC[i];
-	float mass = BUPS[b + 6], yld = exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]);
-	float max_e = P[22] * mass;
-	float energy = BUPS[b + 5];
-	float x = BUPS[b + 1], y = BUPS[b + 2];
-	int n = int(P[1]);
-	int ix = clamp(int((x + P[3]) / P[2]), 0, n - 1), iy = clamp(int((y + P[3]) / P[2]), 0, n - 1);
+	float mass = BUPS[b + R_MASS], yld = exp(-BUPS[b + R_HARM]) / sqrt(BUPS[b + R_METABOLISM]);
+	float max_e = P[P_RESERVE_PER_MASS] * mass;
+	float energy = BUPS[b + R_ENERGY];
+	float x = BUPS[b + R_X], y = BUPS[b + R_Y];
+	int n = int(P[P_CELLS]);
+	int ix = clamp(int((x + P[P_ORIGIN]) / P[P_SPACING]), 0, n - 1), iy = clamp(int((y + P[P_ORIGIN]) / P[P_SPACING]), 0, n - 1);
 	int o = OWNER[iy * n + ix];
 	WANT2[i] = 0.0;
 	if (wg > 0.0 || wc > 0.0) {
 		float got = wg > 0.0 ? wg * SCALE[CELLOF[i]] : 0.0;
 		if (wc > 0.0) {
 			float cc, pgx, pgy, psig; puffs_at(x, y, cc, pgx, pgy, psig);
-			int nb = int(P[67]); float bs = P[66];
-			int bx = clamp(int((x + P[3]) / bs), 0, nb - 1), by = clamp(int((y + P[3]) / bs), 0, nb - 1);
+			int nb = int(P[P_BINS_ACROSS]); float bs = P[P_BIN_SIZE];
+			int bx = clamp(int((x + P[P_ORIGIN]) / bs), 0, nb - 1), by = clamp(int((y + P[P_ORIGIN]) / bs), 0, nb - 1);
 			uint bin = uint(by * nb + bx);
-			uint e0 = BINS[bin], e1 = min(e0 + BINC[bin], uint(P[72]));
+			uint e0 = BINS[bin], e1 = min(e0 + BINC[bin], uint(P[P_ENTRY_CAPACITY]));
 			for (uint e = e0; e < e1; e++) {
 				vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];
 				float ddx = x - r0.x, ddy = y - r0.y, r2 = fma(ddy, ddy, ddx * ddx);
@@ -89,8 +113,8 @@ void main() {
 		}
 		float let_go = 0.0;
 		if (got > 0.0 && mass > 0.0 && o >= 0) {
-			float per_hour = got * yld / (P[21] * mass * P[5]) * 3600.0;
-			let_go = got * min(0.5, P[101] * max(0.0, per_hour - P[102]));
+			float per_hour = got * yld / (P[P_COST_PER_MASS] * mass * P[P_DELTA]) * 3600.0;
+			let_go = got * min(0.5, P[P_ACETATE_SLOPE] * max(0.0, per_hour - P[P_ACETATE_THRESHOLD]));
 			if (let_go > 0.0) add_fixed2(uint(o), let_go, 1);
 		}
 		energy = min(energy + got * yld, max_e);
@@ -99,12 +123,12 @@ void main() {
 	float room = max_e - energy;
 	if (o >= 0 && room > 0.0 && CONC2[o] > 0.0) {
 		float ca = CONC2[o], cg = max(CONC[o], 0.0);
-		float rate = P[103] * (((int(BUPS[b + 12] + 0.5) >> 8) & 3) == 2 ? P[106] : 1.0) * P[23] * sqrt(mass) * BUPS[b + 10];
-		float w2 = min(rate * ca / (P[24] + ca) * (P[24] / (P[24] + cg)) * P[5], room / yld);
+		float rate = P[P_ACETATE_UPTAKE] * (((int(BUPS[b + R_REACH] + 0.5) >> 8) & 3) == 2 ? P[P_KEY_FACTOR] : 1.0) * P[P_UPTAKE_PER_SIZE] * sqrt(mass) * BUPS[b + R_METABOLISM];
+		float w2 = min(rate * ca / (P[P_HALF_SATURATION] + ca) * (P[P_HALF_SATURATION] / (P[P_HALF_SATURATION] + cg)) * P[P_DELTA], room / yld);
 		if (w2 > 0.0) {
 			WANT2[i] = w2; CELL2[i] = o;
 			add_fixed2(uint(o), w2, 0);
 		}
 	}
-	BUPS[b + 5] = energy;
+	BUPS[b + R_ENERGY] = energy;
 }

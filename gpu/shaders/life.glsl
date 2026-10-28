@@ -9,6 +9,81 @@ layout(set = 0, binding = 2, std430) buffer B_BUPS { float BUPS[]; };
 layout(set = 0, binding = 3, std430) buffer B_CHILD { float CHILD[]; };
 layout(set = 0, binding = 4, std430) buffer B_SURV { uint SURV[]; };
 layout(set = 0, binding = 5, std430) buffer B_KID { uint KID[]; };
+const uint CNT_BUPS = 0u;
+const uint CNT_GROWTH = 12u;
+const uint CNT_SEED = 7u;
+const uint CNT_STEP = 5u;
+const uint CNT_TRIMMED = 13u;
+const int P_ADD_MASS_FACTOR = 56;
+const int P_CAPACITY = 62;
+const int P_COMPENSATORY_MUTATIONS = 34;
+const int P_DEATH_CHANCE = 59;
+const int P_DELTA = 5;
+const int P_DIVISION_SPREAD = 58;
+const int P_DONOR_GAIN = 90;
+const int P_DONOR_LOSS = 92;
+const int P_GENE_MAX = 48;
+const int P_GENE_MIN = 44;
+const int P_GENE_STEP = 52;
+const int P_HARMFUL_MUTATIONS = 33;
+const int P_HARM_SHAPE = 36;
+const int P_HUE_STEP = 40;
+const int P_KEY_POTENTIATION_RATE = 104;
+const int P_KEY_RATE = 105;
+const int P_LETHAL_FRACTION = 35;
+const int P_LIMIT = 60;
+const int P_MAINTENANCE_FLOOR = 19;
+const int P_MASS_UM = 14;
+const int P_MAX_HARM = 39;
+const int P_MEAN_HARM = 37;
+const int P_MEAN_REPAIR = 38;
+const int P_MUTATOR_DOWN_SHARE = 81;
+const int P_MUTATOR_FOLD_STRONG = 83;
+const int P_MUTATOR_FOLD_TOP = 84;
+const int P_MUTATOR_FOLD_WEAK = 82;
+const int P_MUTATOR_RATE = 80;
+const int P_REACH_FACTOR_1 = 98;
+const int P_REACH_FACTOR_2 = 99;
+const int P_REACH_FACTOR_3 = 100;
+const int P_REACH_RATE = 96;
+const int P_RESERVE_PER_MASS = 22;
+const int P_SAT_STEP = 41;
+const int P_STARVE_DEATH_EXPONENT = 88;
+const int P_STARVE_DEATH_RATE = 87;
+const int P_STARVE_MIN_MASS_SHARE = 89;
+const int P_STATIONARY = 85;
+const int P_TRAIT_MUTATIONS = 32;
+const int P_VAL_MIN = 43;
+const int P_VAL_STEP = 42;
+const uint RECORD_WORDS = 28u;
+const uint R_BIRTH_MASS = 7u;
+const uint R_DIVISIONS = 20u;
+const uint R_DONOR = 14u;
+const uint R_DX = 3u;
+const uint R_DY = 4u;
+const uint R_ENERGY = 5u;
+const uint R_FAST = 24u;
+const uint R_HARM = 15u;
+const uint R_HUE = 16u;
+const uint R_ID_HI = 21u;
+const uint R_ID_LO = 0u;
+const uint R_MASS = 6u;
+const uint R_METABOLISM = 10u;
+const uint R_MUTATIONS = 19u;
+const uint R_MUTATOR = 13u;
+const uint R_NOISE = 26u;
+const uint R_PX = 22u;
+const uint R_PY = 23u;
+const uint R_REACH = 12u;
+const uint R_SAT = 17u;
+const uint R_SENSE = 9u;
+const uint R_SIZE = 11u;
+const uint R_SLOW = 25u;
+const uint R_SPEED = 8u;
+const uint R_TUMBLING = 27u;
+const uint R_VAL = 18u;
+const uint R_X = 1u;
+const uint R_Y = 2u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
@@ -36,101 +111,101 @@ int poisson(float mean, inout uint s) {
 	return count;
 }
 void drift(inout float hue, inout float sat, inout float val, inout uint s) {  // (the colour is a neutral marker: every counted mutation moves it, as the CPU's note_mutation)
-	hue = fract(hue + gauss(s) * P[40]); sat = clamp(sat + gauss(s) * P[41], 0.0, 1.0); val = clamp(val + gauss(s) * P[42], P[43], 1.0);
+	hue = fract(hue + gauss(s) * P[P_HUE_STEP]); sat = clamp(sat + gauss(s) * P[P_SAT_STEP], 0.0, 1.0); val = clamp(val + gauss(s) * P[P_VAL_STEP], P[P_VAL_MIN], 1.0);
 }
 void main() {
 	uint i = gl_GlobalInvocationID.x;
-	if (i >= uint(P[62])) return;
-	uint n_now = CNT[0];
+	if (i >= uint(P[P_CAPACITY])) return;
+	uint n_now = CNT[CNT_BUPS];
 	SURV[i] = 0u; KID[i] = 0u;
 	if (i >= n_now) return;
-	uint b = i * 28u;
-	uint s = hash(hash(CNT[7] ^ (CNT[5] * 0x85EBCA6BU) ^ 777U) + i * 0x9E3779B9U);  // (this dish's stream, this step, this bup)
-	float energy = BUPS[b + 5], mass = BUPS[b + 6], birth = BUPS[b + 7], add_mass = P[56] * BUPS[b + 11] * BUPS[b + 11], rate = BUPS[b + 13], donor = BUPS[b + 14];
-	int reach = int(BUPS[b + 12] + 0.5);  // (the building size from the size gene; the mutation rate of this bup, which its daughter is made at)
-	float trim = max(0.0, float(n_now) + float(CNT[12]) - P[60]) / float(n_now);
+	uint b = i * RECORD_WORDS;
+	uint s = hash(hash(CNT[CNT_SEED] ^ (CNT[CNT_STEP] * 0x85EBCA6BU) ^ 777U) + i * 0x9E3779B9U);  // (this dish's stream, this step, this bup)
+	float energy = BUPS[b + R_ENERGY], mass = BUPS[b + R_MASS], birth = BUPS[b + R_BIRTH_MASS], add_mass = P[P_ADD_MASS_FACTOR] * BUPS[b + R_SIZE] * BUPS[b + R_SIZE], rate = BUPS[b + R_MUTATOR], donor = BUPS[b + R_DONOR];
+	int reach = int(BUPS[b + R_REACH] + 0.5);  // (the building size from the size gene; the mutation rate of this bup, which its daughter is made at)
+	float trim = max(0.0, float(n_now) + float(CNT[CNT_GROWTH]) - P[P_LIMIT]) / float(n_now);
 	bool natural;
-	if (P[85] > 0.5) {  // the stationary phase: a starving bup (at the growth floor) dies at a constant rate that grows with its metabolism, or when it has shrunk to a share of its birth mass
-		natural = u01(s) < P[59];
-		if (!natural && energy <= P[19]) natural = mass < P[89] * birth || u01(s) < 1.0 - exp(-P[87] * exp(P[88] * BUPS[b + 10]) * P[5]);
+	if (P[P_STATIONARY] > 0.5) {  // the stationary phase: a starving bup (at the growth floor) dies at a constant rate that grows with its metabolism, or when it has shrunk to a share of its birth mass
+		natural = u01(s) < P[P_DEATH_CHANCE];
+		if (!natural && energy <= P[P_MAINTENANCE_FLOOR]) natural = mass < P[P_STARVE_MIN_MASS_SHARE] * birth || u01(s) < 1.0 - exp(-P[P_STARVE_DEATH_RATE] * exp(P[P_STARVE_DEATH_EXPONENT] * BUPS[b + R_METABOLISM]) * P[P_DELTA]);
 	} else {
-		natural = energy <= 0.0 || u01(s) < P[59];
+		natural = energy <= 0.0 || u01(s) < P[P_DEATH_CHANCE];
 	}
 	bool trimmed = !natural && u01(s) < trim;  // (the same draws as one chain of `||`)
-	if (trimmed) atomicAdd(CNT[13], 1u);  // (counted, so that the growth the next trim expects leaves out the trim's own deaths)
-	if (natural) BUPS[b + 23] = -2.0;  // (a death by starvation or chance, not a trim: `death_clouds` gives its body back; the record is gone after `copy`)
+	if (trimmed) atomicAdd(CNT[CNT_TRIMMED], 1u);  // (counted, so that the growth the next trim expects leaves out the trim's own deaths)
+	if (natural) BUPS[b + R_PY] = -2.0;  // (a death by starvation or chance, not a trim: `death_clouds` gives its body back; the record is gone after `copy`)
 	if (natural || trimmed) return;
 	SURV[i] = 1u;
 	if (mass >= birth + add_mass) {
-		float keep = clamp(0.5 + P[58] * gauss(s), 0.35, 0.65);
+		float keep = clamp(0.5 + P[P_DIVISION_SPREAD] * gauss(s), 0.35, 0.65);
 		float dm = mass * (1.0 - keep), de = energy * (1.0 - keep);
 		mass *= keep; energy *= keep;
-		BUPS[b + 6] = mass; BUPS[b + 5] = energy; BUPS[b + 7] = mass;
-		BUPS[b + 20] += 1.0;  // (the cell left in the parent's place is a product of this division, whether or not the daughter lives)
+		BUPS[b + R_MASS] = mass; BUPS[b + R_ENERGY] = energy; BUPS[b + R_BIRTH_MASS] = mass;
+		BUPS[b + R_DIVISIONS] += 1.0;  // (the cell left in the parent's place is a product of this division, whether or not the daughter lives)
 		// the daughter's genome: the parent's, mutated
-		float g[4] = float[4](BUPS[b + 8], BUPS[b + 9], BUPS[b + 10], BUPS[b + 11]);
-		float hue = BUPS[b + 16], sat = BUPS[b + 17], val = BUPS[b + 18], harm = BUPS[b + 15], muts = BUPS[b + 19];
+		float g[4] = float[4](BUPS[b + R_SPEED], BUPS[b + R_SENSE], BUPS[b + R_METABOLISM], BUPS[b + R_SIZE]);
+		float hue = BUPS[b + R_HUE], sat = BUPS[b + R_SAT], val = BUPS[b + R_VAL], harm = BUPS[b + R_HARM], muts = BUPS[b + R_MUTATIONS];
 		bool lethal = false;
-		int traits = poisson(P[32] * rate, s);
+		int traits = poisson(P[P_TRAIT_MUTATIONS] * rate, s);
 		for (int t = 0; t < traits; t++) {
 			int gene = int(u01(s) * 4.0) % 4;
 			int lv = (reach >> (2 * gene)) & 3;
-			float changed = clamp(g[gene] + gauss(s) * P[52 + gene], P[44 + gene], P[48 + gene] * (lv == 0 ? 1.0 : (lv == 1 ? P[98] : (lv == 2 ? P[99] : P[100]))));
+			float changed = clamp(g[gene] + gauss(s) * P[P_GENE_STEP + gene], P[P_GENE_MIN + gene], P[P_GENE_MAX + gene] * (lv == 0 ? 1.0 : (lv == 1 ? P[P_REACH_FACTOR_1] : (lv == 2 ? P[P_REACH_FACTOR_2] : P[P_REACH_FACTOR_3]))));
 			if (changed != g[gene]) {
 				g[gene] = changed; muts += 1.0;
 				drift(hue, sat, val, s);
 			}
 		}
-		int harmful = poisson(P[33] * rate, s);
+		int harmful = poisson(P[P_HARMFUL_MUTATIONS] * rate, s);
 		for (int t = 0; t < harmful; t++) {
-			if (u01(s) < P[35]) lethal = true;
-			else harm = min(harm + gamma_(P[36], s) * P[37] / P[36], P[39]);
+			if (u01(s) < P[P_LETHAL_FRACTION]) lethal = true;
+			else harm = min(harm + gamma_(P[P_HARM_SHAPE], s) * P[P_MEAN_HARM] / P[P_HARM_SHAPE], P[P_MAX_HARM]);
 			muts += 1.0;
 			drift(hue, sat, val, s);
 		}
 		if (harm > 0.0) {
-			int repairs = poisson(P[34] * rate, s);
+			int repairs = poisson(P[P_COMPENSATORY_MUTATIONS] * rate, s);
 			for (int t = 0; t < repairs; t++) {
-				harm = max(harm + log(max(u01(s), 1e-12)) * P[38], 0.0);
+				harm = max(harm + log(max(u01(s), 1e-12)) * P[P_MEAN_REPAIR], 0.0);
 				muts += 1.0;
 				drift(hue, sat, val, s);
 			}
 		}
 		// The mutation rate itself changes in jumps (see the CPU's mutate): a new mutator allele sets it to one of three folds, an antimutator halves it.
 		float mutator = rate, allele = u01(s);
-		if (allele < P[80]) {
+		if (allele < P[P_MUTATOR_RATE]) {
 			float pick = u01(s);
-			mutator = max(mutator, pick < 0.2 ? P[82] : (pick < 0.8 ? P[83] : P[84]));
+			mutator = max(mutator, pick < 0.2 ? P[P_MUTATOR_FOLD_WEAK] : (pick < 0.8 ? P[P_MUTATOR_FOLD_STRONG] : P[P_MUTATOR_FOLD_TOP]));
 			muts += 1.0; drift(hue, sat, val, s);
-		} else if (mutator > 1.0 && allele < P[80] * (1.0 + P[81])) {
+		} else if (mutator > 1.0 && allele < P[P_MUTATOR_RATE] * (1.0 + P[P_MUTATOR_DOWN_SHARE])) {
 			mutator = max(1.0, mutator * 0.5);
 			muts += 1.0; drift(hue, sat, val, s);
 		}
 		float flip = u01(s);  // (the F factor integrates or leaves, rarely)
-		float child_donor = donor > 0.5 ? (flip < P[92] ? 0.0 : 1.0) : (flip < P[90] ? 1.0 : 0.0);
+		float child_donor = donor > 0.5 ? (flip < P[P_DONOR_LOSS] ? 0.0 : 1.0) : (flip < P[P_DONOR_GAIN] ? 1.0 : 0.0);
 		int child_reach = reach;  // (a rare mutation raises one gene's ceiling, up to three times)
 		int key_now = (child_reach >> 8) & 3;  // (the acetate key: potentiated at a rate, then made by a potentiated line at another)
-		if (key_now == 0 ? u01(s) < P[104] : (key_now == 1 && u01(s) < P[105])) { child_reach += 256; muts += 1.0; drift(hue, sat, val, s); }
-		if (u01(s) < P[96]) {
+		if (key_now == 0 ? u01(s) < P[P_KEY_POTENTIATION_RATE] : (key_now == 1 && u01(s) < P[P_KEY_RATE])) { child_reach += 256; muts += 1.0; drift(hue, sat, val, s); }
+		if (u01(s) < P[P_REACH_RATE]) {
 			int gg = int(u01(s) * 4.0) % 4;
 			if (((child_reach >> (2 * gg)) & 3) < 3) { child_reach += 1 << (2 * gg); muts += 1.0; drift(hue, sat, val, s); }
 		}
 		if (!lethal) {
 			KID[i] = 1u;
-			float a = u01(s) * 6.2831853, off = 0.5 * mass * P[14];
-			uint c = i * 28u;
-			CHILD[c + 0] = 0.0;  // (the id, words 0 and 21, is written by `compact` as integers)
-			CHILD[c + 1] = BUPS[b + 1] + cos(a) * off; CHILD[c + 2] = BUPS[b + 2] + sin(a) * off;
-			CHILD[c + 3] = 1.0; CHILD[c + 4] = 0.0;
-			CHILD[c + 5] = min(de, P[22] * dm); CHILD[c + 6] = dm; CHILD[c + 7] = dm;
-			CHILD[c + 8] = g[0]; CHILD[c + 9] = g[1]; CHILD[c + 10] = g[2]; CHILD[c + 11] = g[3];
-			CHILD[c + 12] = float(child_reach);
-			CHILD[c + 13] = mutator;
-			CHILD[c + 14] = child_donor;
-			CHILD[c + 15] = harm;
-			CHILD[c + 16] = hue; CHILD[c + 17] = sat; CHILD[c + 18] = val; CHILD[c + 19] = muts; CHILD[c + 20] = BUPS[b + 20];
-			CHILD[c + 21] = 0.0; CHILD[c + 22] = 3e38; CHILD[c + 23] = 3e38;  // (no picture yet: no trail)
-			CHILD[c + 24] = -1.0; CHILD[c + 25] = 0.0; CHILD[c + 26] = 0.0; CHILD[c + 27] = 0.0;  // (no chemotaxis memory yet: a fast signal below 0 is none read)
+			float a = u01(s) * 6.2831853, off = 0.5 * mass * P[P_MASS_UM];
+			uint c = i * RECORD_WORDS;
+			CHILD[c + R_ID_LO] = 0.0;  // (the id, R_ID_LO and R_ID_HI, is written by `compact` as integers)
+			CHILD[c + R_X] = BUPS[b + R_X] + cos(a) * off; CHILD[c + R_Y] = BUPS[b + R_Y] + sin(a) * off;
+			CHILD[c + R_DX] = 1.0; CHILD[c + R_DY] = 0.0;
+			CHILD[c + R_ENERGY] = min(de, P[P_RESERVE_PER_MASS] * dm); CHILD[c + R_MASS] = dm; CHILD[c + R_BIRTH_MASS] = dm;
+			CHILD[c + R_SPEED] = g[0]; CHILD[c + R_SENSE] = g[1]; CHILD[c + R_METABOLISM] = g[2]; CHILD[c + R_SIZE] = g[3];
+			CHILD[c + R_REACH] = float(child_reach);
+			CHILD[c + R_MUTATOR] = mutator;
+			CHILD[c + R_DONOR] = child_donor;
+			CHILD[c + R_HARM] = harm;
+			CHILD[c + R_HUE] = hue; CHILD[c + R_SAT] = sat; CHILD[c + R_VAL] = val; CHILD[c + R_MUTATIONS] = muts; CHILD[c + R_DIVISIONS] = BUPS[b + R_DIVISIONS];
+			CHILD[c + R_ID_HI] = 0.0; CHILD[c + R_PX] = 3e38; CHILD[c + R_PY] = 3e38;  // (no picture yet: no trail)
+			CHILD[c + R_FAST] = -1.0; CHILD[c + R_SLOW] = 0.0; CHILD[c + R_NOISE] = 0.0; CHILD[c + R_TUMBLING] = 0.0;  // (no chemotaxis memory yet: a fast signal below 0 is none read)
 		}
 	}
 }

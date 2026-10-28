@@ -22,7 +22,7 @@ var out_dir := ""
 var from_source := OS.get_environment("GPU_FROM_SOURCE") == "1"
 
 
-## A GpuWorld whose count is set by the check (GpuWorld.bup_count is Step 3B's: a stub until then).
+## A GpuWorld whose count is set by the check.
 class CountedWorld extends GpuWorld:
 	var known := 0
 

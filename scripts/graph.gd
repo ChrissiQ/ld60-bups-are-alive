@@ -28,7 +28,6 @@ const POP_STEPS := [10.0, 20.0, 25.0, 50.0, 100.0, 150.0, 200.0, 300.0, 500.0]
 
 const BIG_STEPS := [1.0, 1.2, 1.6, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0]  ## the leading digits of the axis maximums past POP_STEPS
 
-signal choices_changed  ## the span or the trait was changed (the controls above the graph follow)
 
 var dish: Dish  ## the dish in the main view
 var dishes: Array = []  ## every dish that runs (the screen's own list)
@@ -82,7 +81,6 @@ func _now() -> float:
 
 func set_all_dishes(value: bool) -> void:
 	all_dishes = value
-	choices_changed.emit()
 
 
 func cycle_trait() -> void:
@@ -91,7 +89,6 @@ func cycle_trait() -> void:
 
 func set_trait(index: int) -> void:
 	trait_index = index
-	choices_changed.emit()
 
 
 ## The mode being shown: the one chosen with G, or until it is pressed the one the run has grown into.
@@ -116,7 +113,6 @@ func cycle_span() -> void:
 func set_span(mode: Span) -> void:
 	span = mode
 	chosen = true
-	choices_changed.emit()
 
 
 ## The top of the harm axis: the smallest of HARM_STEPS that holds every sample, so low harm is not squashed
@@ -244,12 +240,14 @@ func _draw() -> void:
 	var window := span_seconds(mode, now)
 	var x_min := window_start_for(mode, now)
 	var x_max := x_min + window
-	var pops := _series("pop", x_min, mode)
-	var vals := _series(trait_name, x_min, mode)
-	var spec: Array = Genome.GENES.get(trait_name, [1.0, mutator_axis_max(_values(vals))] if trait_name == "mutator" else [0.0, generation_axis_max(_values(vals))] if trait_name == "generation" else [0.0, harm_axis_max(_values(vals))])
+	var dish_pops := _pops_per_dish(x_min, mode)  # (each dish's population points, read once for both series)
+	var pops := _series("pop", x_min, mode, dish_pops)
+	var vals := _series(trait_name, x_min, mode, dish_pops)
+	var shown_values := _values(vals)
+	var spec: Array = Genome.GENES.get(trait_name, [1.0, mutator_axis_max(shown_values)] if trait_name == "mutator" else [0.0, generation_axis_max(shown_values)] if trait_name == "generation" else [0.0, harm_axis_max(shown_values)])
 	var lo: float = spec[0]
 	var hi: float = spec[1]
-	for v: float in _values(vals):  # (a gene whose ceiling was raised can pass its usual top)
+	for v: float in shown_values:  # (a gene whose ceiling was raised can pass its usual top)
 		hi = maxf(hi, ceilf(v))
 	var peak := 10.0
 	for p in pops:
@@ -327,19 +325,28 @@ func _points_of(d: Dish, name: String, x_min: float, mode: Span, shift: float) -
 	return out
 
 
+## Every dish's population points on the shown clock (what `_series` weighs a trait by), in the order of `dishes`; empty unless the dishes are shown together.
+func _pops_per_dish(x_min: float, mode: Span) -> Array:
+	var out: Array = []
+	if combined():
+		for d: Dish in dishes:
+			out.append(_points_of(d, "pop", x_min, mode, d.history_origin))
+	return out
+
+
 ## The series as the graph draws it: the main dish's, or every dish's together. The dishes' samples are not at quite the same times (a dish that joined
 ## later started its own sampling), so the sum goes along the times of the longest one, each dish read between its own samples (nothing before it
 ## began, its last value after its history ends). A trait is the mean over the dishes, each counting by its bups.
-func _series(name: String, x_min: float, mode: Span) -> PackedVector2Array:
+## `dish_pops` is `_pops_per_dish` when the caller already has it (the population and the trait are then built from one reading of the dishes).
+func _series(name: String, x_min: float, mode: Span, dish_pops: Array = []) -> PackedVector2Array:
 	if not combined():
 		return _points(name, x_min, mode)
-	var pops: Array[PackedVector2Array] = []
-	var vals: Array[PackedVector2Array] = []
+	var pops: Array = dish_pops if not dish_pops.is_empty() else _pops_per_dish(x_min, mode)
+	var vals: Array = []
 	var grid := PackedVector2Array()
-	for d: Dish in dishes:
-		var pop := _points_of(d, "pop", x_min, mode, d.history_origin)
-		pops.append(pop)
-		vals.append(pop if name == "pop" else _points_of(d, name, x_min, mode, d.history_origin))
+	for k in dishes.size():
+		var pop: PackedVector2Array = pops[k]
+		vals.append(pop if name == "pop" else _points_of(dishes[k], name, x_min, mode, dishes[k].history_origin))
 		if pop.size() > grid.size():
 			grid = pop
 	var pop_cursor := []

@@ -6,12 +6,14 @@ layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs
 layout(set = 0, binding = 0, std430) buffer B_P { float P[]; };
 layout(set = 0, binding = 1, std430) buffer B_CONC { float CONC[]; };
 layout(set = 0, binding = 2, std430) buffer B_WGT { float WGT[]; };
+const int P_CELLS = 1;
+const int P_FEED = 61;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[1] * P[1])) return;
-	CONC[i] += P[61] * WGT[i];
+	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
+	CONC[i] += P[P_FEED] * WGT[i];
 }

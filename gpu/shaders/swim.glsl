@@ -11,6 +11,72 @@ layout(set = 0, binding = 4, std430) buffer B_TABLE { float TABLE[]; };
 layout(set = 0, binding = 5, std430) buffer B_ENTD { vec4 ENTD[]; };
 layout(set = 0, binding = 6, std430) buffer B_BINS { uint BINS[]; };
 layout(set = 0, binding = 7, std430) buffer B_BINC { uint BINC[]; };
+const uint CNT_BUPS = 0u;
+const uint CNT_SEED = 7u;
+const uint CNT_STEP = 5u;
+const int P_BASE_UPKEEP = 16;
+const int P_BINS_ACROSS = 67;
+const int P_BIN_SIZE = 66;
+const int P_CELLS = 1;
+const int P_CHEMOTAXIS_GAIN = 110;
+const int P_COST_PER_MASS = 21;
+const int P_DELTA = 5;
+const int P_DETECTION_FLOOR = 9;
+const int P_DONOR_COST = 91;
+const int P_DRAG_UPKEEP = 57;
+const int P_ENTRY_CAPACITY = 72;
+const int P_FINE_STEP = 108;
+const int P_GRADIENT_NOISE = 11;
+const int P_GROWTH_RATE = 20;
+const int P_KEY_COST = 107;
+const int P_MAINTENANCE_FLOOR = 19;
+const int P_MAINTENANCE_PER_MASS = 17;
+const int P_MASS_UM = 14;
+const int P_MEMORY_LONG = 117;
+const int P_MEMORY_SHORT = 116;
+const int P_MOTION_DLE = 30;
+const int P_MOTION_DLS = 28;
+const int P_MOTION_LE0 = 29;
+const int P_MOTION_LS0 = 27;
+const int P_MOTION_NE = 26;
+const int P_MOTION_NS = 25;
+const int P_MOTION_S0 = 31;
+const int P_MOTION_STEP = 68;
+const int P_MOTION_STRUCTURE = 69;
+const int P_MOVES = 6;
+const int P_NOISE_REFERENCE = 10;
+const int P_ORIGIN = 3;
+const int P_RADIUS = 4;
+const int P_REACH_COST = 97;
+const int P_REFERENCE_SENSE = 12;
+const int P_REFERENCE_SIZE = 13;
+const int P_ROTATIONAL_DIFFUSION = 115;
+const int P_SENSE_UPKEEP = 18;
+const int P_SPACING = 2;
+const int P_STARVE_COST = 86;
+const int P_STATIONARY = 85;
+const int P_TUMBLE_BASE = 109;
+const int P_TUMBLE_SECONDS = 112;
+const int P_TUMBLE_TURN_MEAN = 113;
+const int P_TUMBLE_TURN_SPREAD = 114;
+const int P_TUMBLE_UP_FACTOR = 111;
+const int P_UPKEEP_SCALE = 79;
+const uint RECORD_WORDS = 28u;
+const uint R_DONOR = 14u;
+const uint R_DX = 3u;
+const uint R_DY = 4u;
+const uint R_ENERGY = 5u;
+const uint R_FAST = 24u;
+const uint R_MASS = 6u;
+const uint R_METABOLISM = 10u;
+const uint R_NOISE = 26u;
+const uint R_REACH = 12u;
+const uint R_SENSE = 9u;
+const uint R_SLOW = 25u;
+const uint R_SPEED = 8u;
+const uint R_TUMBLING = 27u;
+const uint R_X = 1u;
+const uint R_Y = 2u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
@@ -18,9 +84,9 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 
 // the field's concentration (and its gradient) at a point, bilinear in the snapshot, as the CPU's read_snapshot_xy
 void readf(float x, float y, out float c, out float gx, out float gy) {
-	int n = int(P[1]); float sp = P[2];
-	float fx = clamp((x + P[3]) / sp - 0.5, 0.0, float(n) - 1.001);
-	float fy = clamp((y + P[3]) / sp - 0.5, 0.0, float(n) - 1.001);
+	int n = int(P[P_CELLS]); float sp = P[P_SPACING];
+	float fx = clamp((x + P[P_ORIGIN]) / sp - 0.5, 0.0, float(n) - 1.001);
+	float fy = clamp((y + P[P_ORIGIN]) / sp - 0.5, 0.0, float(n) - 1.001);
 	int x0 = int(fx), y0 = int(fy);
 	float tx = fx - float(x0), ty = fy - float(y0);
 	int i0 = y0 * n + x0;
@@ -33,11 +99,11 @@ void readf(float x, float y, out float c, out float gx, out float gy) {
 }
 
 void lookup(float s, float eps, out float f, out float along, out float across) {
-	int ns = int(P[25]), ne = int(P[26]);
+	int ns = int(P[P_MOTION_NS]), ne = int(P[P_MOTION_NE]);
 	float below = 1.0;
-	if (s < P[31]) { below = s / P[31]; s = P[31]; }
-	float x = clamp((log(s) - P[27]) / P[28], 0.0, float(ns - 1) - 1e-4);
-	float y = clamp((log(max(eps, 1e-12)) - P[29]) / P[30], 0.0, float(ne - 1) - 1e-4);
+	if (s < P[P_MOTION_S0]) { below = s / P[P_MOTION_S0]; s = P[P_MOTION_S0]; }
+	float x = clamp((log(s) - P[P_MOTION_LS0]) / P[P_MOTION_DLS], 0.0, float(ns - 1) - 1e-4);
+	float y = clamp((log(max(eps, 1e-12)) - P[P_MOTION_LE0]) / P[P_MOTION_DLE], 0.0, float(ne - 1) - 1e-4);
 	int i = int(x), j = int(y);
 	float tx = x - float(i), ty = y - float(j);
 	int k00 = i * ne + j, k10 = k00 + ne, k01 = k00 + 1, k11 = k10 + 1;
@@ -56,10 +122,10 @@ void lookup(float s, float eps, out float f, out float along, out float across) 
 // the clouds' concentration and gradient where a bup is, and the smallest sigma among the clouds that reach it (as the CPU's puff_probe)
 void puffs_at(float x, float y, out float c, out float gx, out float gy, out float sigma) {
 	c = 0.0; gx = 0.0; gy = 0.0; sigma = 1e18;
-	int nb = int(P[67]); float bs = P[66];
-	int bx = clamp(int((x + P[3]) / bs), 0, nb - 1), by = clamp(int((y + P[3]) / bs), 0, nb - 1);
+	int nb = int(P[P_BINS_ACROSS]); float bs = P[P_BIN_SIZE];
+	int bx = clamp(int((x + P[P_ORIGIN]) / bs), 0, nb - 1), by = clamp(int((y + P[P_ORIGIN]) / bs), 0, nb - 1);
 	uint b = uint(by * nb + bx);
-	uint e0 = BINS[b], e1 = min(e0 + BINC[b], uint(P[72]));
+	uint e0 = BINS[b], e1 = min(e0 + BINC[b], uint(P[P_ENTRY_CAPACITY]));
 	for (uint e = e0; e < e1; e++) {
 		vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];  // x, y, mass, variance | reach^2, sigma, cloud index, 0
 		float dx = x - r0.x, dy = y - r0.y, r2 = fma(dy, dy, dx * dx);  // (fma written out: the compiler contracted the old gathering code this way, and exp() magnifies a last-bit change in r2)
@@ -73,31 +139,31 @@ void puffs_at(float x, float y, out float c, out float gx, out float gy, out flo
 }
 
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
-	uint b = i * 28u;
-	float x = BUPS[b + 1], y = BUPS[b + 2], dx = BUPS[b + 3], dy = BUPS[b + 4];
-	float energy = BUPS[b + 5], mass = BUPS[b + 6];
-	float speed = BUPS[b + 8], sense = BUPS[b + 9], metab = BUPS[b + 10], drag = P[57] * BUPS[b + 8] * BUPS[b + 8], donor = BUPS[b + 14];  // (the drag cost from the speed gene; word 14 is the donor flag)
-	float delta = P[5];
-	uint s = hash(hash(CNT[7] ^ (CNT[5] * 0x85EBCA6BU) ^ 12345U) + i * 0x9E3779B9U);  // (this dish's stream, this step, this bup)
+	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+	uint b = i * RECORD_WORDS;
+	float x = BUPS[b + R_X], y = BUPS[b + R_Y], dx = BUPS[b + R_DX], dy = BUPS[b + R_DY];
+	float energy = BUPS[b + R_ENERGY], mass = BUPS[b + R_MASS];
+	float speed = BUPS[b + R_SPEED], sense = BUPS[b + R_SENSE], metab = BUPS[b + R_METABOLISM], drag = P[P_DRAG_UPKEEP] * BUPS[b + R_SPEED] * BUPS[b + R_SPEED], donor = BUPS[b + R_DONOR];  // (the drag cost from the speed gene)
+	float delta = P[P_DELTA];
+	uint s = hash(hash(CNT[CNT_SEED] ^ (CNT[CNT_STEP] * 0x85EBCA6BU) ^ 12345U) + i * 0x9E3779B9U);  // (this dish's stream, this step, this bup)
 	float size = sqrt(mass);
-	float srange = sense * sqrt(size / P[13]);
-	float sense_k = P[11] * (P[12] / srange);
-	float radius = P[4];
-	float limit = radius - 0.5 * mass * P[14];
+	float srange = sense * sqrt(size / P[P_REFERENCE_SIZE]);
+	float sense_k = P[P_GRADIENT_NOISE] * (P[P_REFERENCE_SENSE] / srange);
+	float radius = P[P_RADIUS];
+	float limit = radius - 0.5 * mass * P[P_MASS_UM];
 	float nw2 = limit > 0.0 ? limit * limit : -1.0;
 	float hx = 0.0, hy = 0.0, hl = 0.0; bool pending = false;
-	float floor_c = P[9], noise_ref = P[10];
+	float floor_c = P[P_DETECTION_FLOOR], noise_ref = P[P_NOISE_REFERENCE];
 	// what it reads at the start, and from the clouds that reach it how finely to cut its step (as the CPU's moves_for_structure)
 	float c0, gx0, gy0; readf(x, y, c0, gx0, gy0);
 	float pc, pgx, pgy, sig; puffs_at(x, y, pc, pgx, pgy, sig);
 	c0 += pc; gx0 += pgx; gy0 += pgy;
 	int moves = 0;
-	bool fine = P[6] > 0.5 && delta <= P[108];  // (a step as short as the fine step: it follows the individual run and tumble, as the CPU's swim_by_runs)
-	if (P[6] > 0.5 && !fine) {
-		float structure = min(P[2], 2.0 * sig);
-		float sc = max(1.0, structure / max(P[69], 1.0));
-		moves = max(1, int(ceil(delta / (P[68] * sc * sc))));
+	bool fine = P[P_MOVES] > 0.5 && delta <= P[P_FINE_STEP];  // (a step as short as the fine step: it follows the individual run and tumble, as the CPU's swim_by_runs)
+	if (P[P_MOVES] > 0.5 && !fine) {
+		float structure = min(P[P_SPACING], 2.0 * sig);
+		float sc = max(1.0, structure / max(P[P_MOTION_STRUCTURE], 1.0));
+		moves = max(1, int(ceil(delta / (P[P_MOTION_STEP] * sc * sc))));
 	}
 	float sub = delta / float(max(moves, 1));
 	for (int m = 0; m < moves; m++) {
@@ -149,26 +215,26 @@ void main() {
 	if (fine) {
 		// It reads the nutrient where it is (on a log scale) and compares it with its own recent past, and tumbles less often while it improves; while
 		// it tumbles it does not swim; a run bends a little by rotational diffusion.
-		float memory = exp(-delta / P[116]);
-		float noise = BUPS[b + 26] * memory + sqrt(1.0 - memory * memory) * gauss(s);
+		float memory = exp(-delta / P[P_MEMORY_SHORT]);
+		float noise = BUPS[b + R_NOISE] * memory + sqrt(1.0 - memory * memory) * gauss(s);
 		float signal = log(1.0 + c0 / floor_c);
-		float fast = BUPS[b + 24], slow = BUPS[b + 25];
+		float fast = BUPS[b + R_FAST], slow = BUPS[b + R_SLOW];
 		if (fast < 0.0) { fast = signal; slow = signal; }  // (none read yet)
 		fast += (signal - fast) * (1.0 - memory);
-		slow += (signal - slow) * (1.0 - exp(-delta / P[117]));
+		slow += (signal - slow) * (1.0 - exp(-delta / P[P_MEMORY_LONG]));
 		float err_now = min(sense_k * sqrt(noise_ref / max(c0, 1e-5)), 5.0);
-		float rate = P[109] * clamp(1.0 - P[110] * (fast - slow + err_now * noise), P[111], 1.0);
-		float tumbling = BUPS[b + 27];
+		float rate = P[P_TUMBLE_BASE] * clamp(1.0 - P[P_CHEMOTAXIS_GAIN] * (fast - slow + err_now * noise), P[P_TUMBLE_UP_FACTOR], 1.0);
+		float tumbling = BUPS[b + R_TUMBLING];
 		if (tumbling > 0.0) {
 			tumbling -= delta;
 		} else {
 			float turn;
 			if (u01(s) < rate * delta) {
-				tumbling = P[112];
-				turn = gauss(s) * P[114] + P[113];
+				tumbling = P[P_TUMBLE_SECONDS];
+				turn = gauss(s) * P[P_TUMBLE_TURN_SPREAD] + P[P_TUMBLE_TURN_MEAN];
 				if (u01(s) >= 0.5) turn = -turn;
 			} else {
-				turn = gauss(s) * P[115] * sqrt(delta);
+				turn = gauss(s) * P[P_ROTATIONAL_DIFFUSION] * sqrt(delta);
 			}
 			float cs = cos(turn), sn = sin(turn);
 			float ndx = dx * cs - dy * sn, ndy = dx * sn + dy * cs;
@@ -186,27 +252,27 @@ void main() {
 			if (al < 0.1) { float sg = u01(s) < 0.5 ? 1.0 : -1.0; ax = -ny * sg; ay = nx * sg; al = 1.0; }
 			dx = ax / al; dy = ay / al;
 		}
-		BUPS[b + 24] = fast; BUPS[b + 25] = slow; BUPS[b + 26] = noise; BUPS[b + 27] = tumbling;
+		BUPS[b + R_FAST] = fast; BUPS[b + R_SLOW] = slow; BUPS[b + R_NOISE] = noise; BUPS[b + R_TUMBLING] = tumbling;
 	} else {
-		BUPS[b + 24] = -1.0;  // (the signal memory isn't kept up while drifting)
+		BUPS[b + R_FAST] = -1.0;  // (the signal memory isn't kept up while drifting)
 	}
-	BUPS[b + 1] = x; BUPS[b + 2] = y; BUPS[b + 3] = dx; BUPS[b + 4] = dy;
+	BUPS[b + R_X] = x; BUPS[b + R_Y] = y; BUPS[b + R_DX] = dx; BUPS[b + R_DY] = dy;
 	// then it pays its upkeep and grows (with the stationary phase on, a bup at the growth floor pays only the starving maintenance, from the
 	// reserve and then from its body)
-	if (P[85] > 0.5 && energy <= P[19]) {
-		energy -= P[86] * mass * delta;
-		if (energy < 0.0) { mass += energy / P[21]; energy = 0.0; }
-		BUPS[b + 5] = energy; BUPS[b + 6] = mass;
+	if (P[P_STATIONARY] > 0.5 && energy <= P[P_MAINTENANCE_FLOOR]) {
+		energy -= P[P_STARVE_COST] * mass * delta;
+		if (energy < 0.0) { mass += energy / P[P_COST_PER_MASS]; energy = 0.0; }
+		BUPS[b + R_ENERGY] = energy; BUPS[b + R_MASS] = mass;
 		return;
 	}
-	float upkeep = P[79] * (P[16] + P[17] * mass) + drag * size + P[18] * sense;
+	float upkeep = P[P_UPKEEP_SCALE] * (P[P_BASE_UPKEEP] + P[P_MAINTENANCE_PER_MASS] * mass) + drag * size + P[P_SENSE_UPKEEP] * sense;
 	energy -= upkeep * delta;
-	if (energy > P[19]) {
-		int rl = int(BUPS[b + 12] + 0.5);
+	if (energy > P[P_MAINTENANCE_FLOOR]) {
+		int rl = int(BUPS[b + R_REACH] + 0.5);
 		float raised = float((rl & 3) + ((rl >> 2) & 3) + ((rl >> 4) & 3) + ((rl >> 6) & 3));
-		float grow = min(P[20] * metab * mass * delta * (donor > 0.5 ? 1.0 - P[91] : 1.0) * max(0.2, 1.0 - P[97] * raised) * (((rl >> 8) & 3) == 2 ? 1.0 - P[107] : 1.0), (energy - P[19]) / P[21]);  // (a donor, and a bup with raised ceilings, give up a share of their growth)
-		energy -= grow * P[21];
+		float grow = min(P[P_GROWTH_RATE] * metab * mass * delta * (donor > 0.5 ? 1.0 - P[P_DONOR_COST] : 1.0) * max(0.2, 1.0 - P[P_REACH_COST] * raised) * (((rl >> 8) & 3) == 2 ? 1.0 - P[P_KEY_COST] : 1.0), (energy - P[P_MAINTENANCE_FLOOR]) / P[P_COST_PER_MASS]);  // (a donor, and a bup with raised ceilings, give up a share of their growth)
+		energy -= grow * P[P_COST_PER_MASS];
 		mass += grow;
 	}
-	BUPS[b + 5] = energy; BUPS[b + 6] = mass;
+	BUPS[b + R_ENERGY] = energy; BUPS[b + R_MASS] = mass;
 }

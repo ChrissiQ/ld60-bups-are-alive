@@ -76,8 +76,8 @@ func _init() -> void:
 	Session.free_start = StartConditions.new()
 	var screens := {}
 	Session.mode = Session.Mode.FREE
-	screens["game(free)"] = load("res://scenes/main.tscn").instantiate()
-	screens["setup"] = load("res://scenes/free_setup.tscn").instantiate()
+	screens["game(free)"] = load(Scenes.GAME).instantiate()
+	screens["setup"] = load(Scenes.FREE_SETUP).instantiate()
 	screens["menu"] = load("res://scenes/menu.tscn").instantiate()
 	screens["intro"] = load("res://scenes/intro.tscn").instantiate()
 	for k in screens:

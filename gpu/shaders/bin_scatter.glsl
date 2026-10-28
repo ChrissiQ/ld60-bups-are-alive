@@ -8,22 +8,28 @@ layout(set = 0, binding = 1, std430) buffer B_PCNT { uint PCNT[]; };
 layout(set = 0, binding = 2, std430) buffer B_PUFF { float PUFF[]; };
 layout(set = 0, binding = 3, std430) buffer B_BCUR { uint BCUR[]; };
 layout(set = 0, binding = 4, std430) buffer B_ENT { uint ENT[]; };
+const uint PCNT_CUT = 3u;
+const uint PCNT_SLOTS = 0u;
+const int P_BINS_ACROSS = 67;
+const int P_BIN_SIZE = 66;
+const int P_ENTRY_CAPACITY = 72;
+const int P_ORIGIN = 3;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
 void main() {
-	uint k = gl_GlobalInvocationID.x; if (k >= PCNT[0]) return;
+	uint k = gl_GlobalInvocationID.x; if (k >= PCNT[PCNT_SLOTS]) return;
 	uint o = k * 8u;
 	if (PUFF[o + 5] < 0.5) return;
 	float x = PUFF[o], y = PUFF[o + 1], reach = sqrt(PUFF[o + 6]);
-	int nb = int(P[67]); float bs = P[66];
-	int lx = clamp(int((x - reach + P[3]) / bs), 0, nb - 1), hx = clamp(int((x + reach + P[3]) / bs), 0, nb - 1);
-	int ly = clamp(int((y - reach + P[3]) / bs), 0, nb - 1), hy = clamp(int((y + reach + P[3]) / bs), 0, nb - 1);
+	int nb = int(P[P_BINS_ACROSS]); float bs = P[P_BIN_SIZE];
+	int lx = clamp(int((x - reach + P[P_ORIGIN]) / bs), 0, nb - 1), hx = clamp(int((x + reach + P[P_ORIGIN]) / bs), 0, nb - 1);
+	int ly = clamp(int((y - reach + P[P_ORIGIN]) / bs), 0, nb - 1), hy = clamp(int((y + reach + P[P_ORIGIN]) / bs), 0, nb - 1);
 	for (int by = ly; by <= hy; by++) for (int bx = lx; bx <= hx; bx++) {
 		uint pos = atomicAdd(BCUR[by * nb + bx], 1u);
-		if (pos < uint(P[72])) ENT[pos] = k;
-		else atomicAdd(PCNT[3], 1u);  // (the lists are full: this entry is cut, and counted)
+		if (pos < uint(P[P_ENTRY_CAPACITY])) ENT[pos] = k;
+		else atomicAdd(PCNT[PCNT_CUT], 1u);  // (the lists are full: this entry is cut, and counted)
 	}
 }

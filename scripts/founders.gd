@@ -80,12 +80,12 @@ func _randomise_colors() -> void:
 		picker.color = Genome.random_color()
 
 
-## Every founder back to the default: no name chosen, and the default colour.
+## Every founder back to the default: no name chosen, and the default colours (`StartConditions.new()`'s: evenly spaced in hue).
 func _reset_all() -> void:
-	var default_colour := Genome.color_of(Genome.founder())
+	var spread := Genome.spread_colors(_colors.size())
 	for i in _names.size():
 		_names[i].text = ""
-		_colors[i].color = default_colour
+		_colors[i].color = spread[i]
 
 
 ## Every founder a name from the list of silly ones (each used once, as there are more names than founders can be).

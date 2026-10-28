@@ -9,14 +9,16 @@ layout(set = 0, binding = 2, std430) buffer B_BINS { uint BINS[]; };
 layout(set = 0, binding = 3, std430) buffer B_BINC { uint BINC[]; };
 layout(set = 0, binding = 4, std430) buffer B_ENT { uint ENT[]; };
 layout(set = 0, binding = 5, std430) buffer B_ENTD { vec4 ENTD[]; };
+const int P_BINS = 73;
+const int P_ENTRY_CAPACITY = 72;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
 void main() {
-	uint b = gl_GlobalInvocationID.x; if (b >= uint(P[73])) return;
-	uint e0 = BINS[b], e1 = min(e0 + BINC[b], uint(P[72]));
+	uint b = gl_GlobalInvocationID.x; if (b >= uint(P[P_BINS])) return;
+	uint e0 = BINS[b], e1 = min(e0 + BINC[b], uint(P[P_ENTRY_CAPACITY]));
 	for (uint a = e0 + 1u; a < e1; a++) {
 		uint v = ENT[a]; uint j = a;
 		while (j > e0 && ENT[j - 1u] > v) { ENT[j] = ENT[j - 1u]; j--; }

@@ -151,7 +151,7 @@ func _finish() -> void:
 		for i in 4:
 			await process_frame
 		if world != null and world.gpu != null:
-			world._pipeline_reset(0)
+			world.reset_pipeline(0)
 			RenderingServer.call_on_render_thread(world.gpu.release)
 			await process_frame
 	for i in 3:
@@ -801,6 +801,7 @@ func _edits() -> void:
 	for i in 200:
 		cpu_dish.advance(160.0, 0)
 	var cpu_saved := JSON.parse_string(JSON.stringify(cpu_dish.to_dict())) as Dictionary
+	cpu_saved["backend"] = StartConditions.BACKEND_GPU  # (a save keeps its dish's setting: this one is to stay on the GPU)
 	cpu_dish.queue_free()
 	quiet_until = frames_run + 5
 	_ok(dish.from_dict(cpu_saved), "a save made on the CPU loads into the dish on the GPU")

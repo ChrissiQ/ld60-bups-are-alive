@@ -23,6 +23,24 @@ layout(set = 0, binding = 16, std430) buffer B_BINS { uint BINS[]; };
 layout(set = 0, binding = 17, std430) buffer B_BINC { uint BINC[]; };
 layout(set = 0, binding = 18, std430) buffer B_PDLO { uint PDLO[]; };
 layout(set = 0, binding = 19, std430) buffer B_PDHI { uint PDHI[]; };
+const uint CNT_BUPS = 0u;
+const int P_BINS_ACROSS = 67;
+const int P_BIN_SIZE = 66;
+const int P_CELLS = 1;
+const int P_DELTA = 5;
+const int P_ENTRY_CAPACITY = 72;
+const int P_HALF_SATURATION = 24;
+const int P_ORIGIN = 3;
+const int P_RESERVE_PER_MASS = 22;
+const int P_SPACING = 2;
+const int P_UPTAKE_PER_SIZE = 23;
+const uint RECORD_WORDS = 28u;
+const uint R_ENERGY = 5u;
+const uint R_HARM = 15u;
+const uint R_MASS = 6u;
+const uint R_METABOLISM = 10u;
+const uint R_X = 1u;
+const uint R_Y = 2u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
@@ -31,10 +49,10 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 // the clouds' concentration and gradient where a bup is, and the smallest sigma among the clouds that reach it (as the CPU's puff_probe)
 void puffs_at(float x, float y, out float c, out float gx, out float gy, out float sigma) {
 	c = 0.0; gx = 0.0; gy = 0.0; sigma = 1e18;
-	int nb = int(P[67]); float bs = P[66];
-	int bx = clamp(int((x + P[3]) / bs), 0, nb - 1), by = clamp(int((y + P[3]) / bs), 0, nb - 1);
+	int nb = int(P[P_BINS_ACROSS]); float bs = P[P_BIN_SIZE];
+	int bx = clamp(int((x + P[P_ORIGIN]) / bs), 0, nb - 1), by = clamp(int((y + P[P_ORIGIN]) / bs), 0, nb - 1);
 	uint b = uint(by * nb + bx);
-	uint e0 = BINS[b], e1 = min(e0 + BINC[b], uint(P[72]));
+	uint e0 = BINS[b], e1 = min(e0 + BINC[b], uint(P[P_ENTRY_CAPACITY]));
 	for (uint e = e0; e < e1; e++) {
 		vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];  // x, y, mass, variance | reach^2, sigma, cloud index, 0
 		float dx = x - r0.x, dy = y - r0.y, r2 = fma(dy, dy, dx * dx);  // (fma written out: the compiler contracted the old gathering code this way, and exp() magnifies a last-bit change in r2)
@@ -49,9 +67,9 @@ void puffs_at(float x, float y, out float c, out float gx, out float gy, out flo
 
 // the grid's concentration a bup at the point reads (bilinear in the snapshot), and how much of it is its own cell's (`own`)
 void readc(float x, float y, int own, out float c, out float own_share) {
-	int n = int(P[1]); float sp = P[2];
-	float fx = clamp((x + P[3]) / sp - 0.5, 0.0, float(n) - 1.001);
-	float fy = clamp((y + P[3]) / sp - 0.5, 0.0, float(n) - 1.001);
+	int n = int(P[P_CELLS]); float sp = P[P_SPACING];
+	float fx = clamp((x + P[P_ORIGIN]) / sp - 0.5, 0.0, float(n) - 1.001);
+	float fy = clamp((y + P[P_ORIGIN]) / sp - 0.5, 0.0, float(n) - 1.001);
 	int x0 = int(fx), y0 = int(fy);
 	float tx = fx - float(x0), ty = fy - float(y0);
 	int i0 = y0 * n + x0;
@@ -84,23 +102,23 @@ void add_puff_demand(uint k, float mass) { // 2^20 to the unit
 	}
 }
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
-	uint b = i * 28u;
-	float x = BUPS[b + 1], y = BUPS[b + 2], energy = BUPS[b + 5], mass = BUPS[b + 6], metab = BUPS[b + 10], yld = exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]);  // (word 12 holds the raised ceilings now: the yield comes from harm and metabolism)
-	float max_e = P[22] * mass;
+	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+	uint b = i * RECORD_WORDS;
+	float x = BUPS[b + R_X], y = BUPS[b + R_Y], energy = BUPS[b + R_ENERGY], mass = BUPS[b + R_MASS], metab = BUPS[b + R_METABOLISM], yld = exp(-BUPS[b + R_HARM]) / sqrt(BUPS[b + R_METABOLISM]);  // (the yield, from harm and metabolism)
+	float max_e = P[P_RESERVE_PER_MASS] * mass;
 	WANT[i] = -1.0; WANTC[i] = 0.0; CELLOF[i] = -1;
 	if (energy < max_e) {
-		int n = int(P[1]);
-		int ix = clamp(int((x + P[3]) / P[2]), 0, n - 1), iy = clamp(int((y + P[3]) / P[2]), 0, n - 1);
+		int n = int(P[P_CELLS]);
+		int ix = clamp(int((x + P[P_ORIGIN]) / P[P_SPACING]), 0, n - 1), iy = clamp(int((y + P[P_ORIGIN]) / P[P_SPACING]), 0, n - 1);
 		int o = OWNER[iy * n + ix];
 		float cg = 0.0, own_share = 0.0;
 		if (o >= 0) readc(x, y, o, cg, own_share);
 		float cc, pgx, pgy, psig; puffs_at(x, y, cc, pgx, pgy, psig);
 		float ct = cg + cc;
 		if (ct > 0.0) {
-			float rate = P[23] * sqrt(mass) * metab;
+			float rate = P[P_UPTAKE_PER_SIZE] * sqrt(mass) * metab;
 			float room = max(max_e - energy, 0.0) / yld;
-			float w = min(rate * ct / (P[24] + ct) * P[5], room);
+			float w = min(rate * ct / (P[P_HALF_SATURATION] + ct) * P[P_DELTA], room);
 			if (w > 0.0) {
 				float wg = cc > 0.0 ? w * cg / ct : w;
 				float wc = w - wg;
@@ -112,10 +130,10 @@ void main() {
 				}
 				if (wc > 0.0 && cc > 0.0) {
 					WANTC[i] = wc;
-					int nb = int(P[67]); float bs = P[66];
-					int bx = clamp(int((x + P[3]) / bs), 0, nb - 1), by = clamp(int((y + P[3]) / bs), 0, nb - 1);
+					int nb = int(P[P_BINS_ACROSS]); float bs = P[P_BIN_SIZE];
+					int bx = clamp(int((x + P[P_ORIGIN]) / bs), 0, nb - 1), by = clamp(int((y + P[P_ORIGIN]) / bs), 0, nb - 1);
 					uint bin = uint(by * nb + bx);
-					uint e0 = BINS[bin], e1 = min(e0 + BINC[bin], uint(P[72]));
+					uint e0 = BINS[bin], e1 = min(e0 + BINC[bin], uint(P[P_ENTRY_CAPACITY]));
 					for (uint e = e0; e < e1; e++) {
 						vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];
 						float ddx = x - r0.x, ddy = y - r0.y, r2 = fma(ddy, ddy, ddx * ddx);

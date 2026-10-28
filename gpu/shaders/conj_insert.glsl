@@ -7,6 +7,15 @@ layout(set = 0, binding = 0, std430) buffer B_P { float P[]; };
 layout(set = 0, binding = 1, std430) buffer B_CNT { uint CNT[]; };
 layout(set = 0, binding = 2, std430) buffer B_BUPS { float BUPS[]; };
 layout(set = 0, binding = 3, std430) buffer B_DTAB { uint DTAB[]; };
+const uint CNT_BUPS = 0u;
+const uint CNT_DONORS = 15u;
+const uint CNT_DONOR_REACH = 14u;
+const int P_MASS_UM = 14;
+const uint RECORD_WORDS = 28u;
+const uint R_DONOR = 14u;
+const uint R_MASS = 6u;
+const uint R_X = 1u;
+const uint R_Y = 2u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
@@ -18,11 +27,12 @@ uint dhash(int cx, int cy) { return hash(uint(cx) * 73856093u ^ uint(cy) * 19349
 float keyed01(uint a, uint b, uint c) { uint h = hash(hash(hash(a ^ 0x9E3779B9u) + b * 0x85EBCA6Bu) ^ (c * 0xC2B2AE35u)); return (float(h >> 8) + 0.5) / 16777216.0; }
 
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
-	uint b = i * 28u;
-	if (BUPS[b + 14] < 0.5) return;
-	atomicAdd(CNT[15], 1u);
-	uint h = dhash(int(floor(BUPS[b + 1] / DCELL)), int(floor(BUPS[b + 2] / DCELL)));
+	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+	uint b = i * RECORD_WORDS;
+	if (BUPS[b + R_DONOR] < 0.5) return;
+	atomicAdd(CNT[CNT_DONORS], 1u);
+	atomicMax(CNT[CNT_DONOR_REACH], floatBitsToUint(0.5 * BUPS[b + R_MASS] * P[P_MASS_UM]));  // (a positive float's bits order as the float does)
+	uint h = dhash(int(floor(BUPS[b + R_X] / DCELL)), int(floor(BUPS[b + R_Y] / DCELL)));
 	atomicOr(DTAB[(DMASK + 1u) * 4u + (h >> 5u)], 1u << (h & 31u));
 	for (uint s = 0u; s < 4u; s++) {
 		if (atomicCompSwap(DTAB[h * 4u + s], 0xFFFFFFFFu, i) == 0xFFFFFFFFu) break;

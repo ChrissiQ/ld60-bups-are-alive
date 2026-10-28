@@ -7,21 +7,28 @@ layout(set = 0, binding = 0, std430) buffer B_CNT { uint CNT[]; };
 layout(set = 0, binding = 1, std430) buffer B_BUPS_U { uint BUPS_U[]; };
 layout(set = 0, binding = 2, std430) buffer B_QIN { uint QIN[]; };
 layout(set = 0, binding = 3, std430) buffer B_OUT { uint OUT[]; };
+const uint ANSWER_WORDS = 24u;
+const uint CNT_BUPS = 0u;
+const uint OUT_Q = 32u;
+const uint QO_TRACKED = 36u;
+const uint Q_TRACK = 27u;
+const uint Q_TRACK_FIRST = 28u;
+const uint RECORD_WORDS = 28u;
+const uint R_ID_HI = 21u;
+const uint R_ID_LO = 0u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
-const uint OUT_Q = 32u; const uint OUT_STATS = 272u;
-
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
-	uint n = QIN[27]; if (n == 0u) return;
-	uint b = i * 28u, lo = BUPS_U[b], hi = BUPS_U[b + 21u];
+	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+	uint n = QIN[Q_TRACK]; if (n == 0u) return;
+	uint b = i * RECORD_WORDS, lo = BUPS_U[b + R_ID_LO], hi = BUPS_U[b + R_ID_HI];
 	for (uint t = 0u; t < n; t++) {
-		if (QIN[28u + 2u * t] == lo && QIN[29u + 2u * t] == hi) {
-			uint o = OUT_Q + 36u + t * 24u;
-			for (uint w = 0u; w < 24u; w++) OUT[o + w] = BUPS_U[b + w];
+		if (QIN[Q_TRACK_FIRST + 2u * t] == lo && QIN[Q_TRACK_FIRST + 1u + 2u * t] == hi) {
+			uint o = OUT_Q + QO_TRACKED + t * ANSWER_WORDS;
+			for (uint w = 0u; w < ANSWER_WORDS; w++) OUT[o + w] = BUPS_U[b + w];
 		}
 	}
 }

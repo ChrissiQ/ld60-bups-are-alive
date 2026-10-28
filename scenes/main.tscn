@@ -31,6 +31,9 @@
 [ext_resource type="PackedScene" path="res://ui/layers_panel.tscn" id="layers_panel"]
 [ext_resource type="PackedScene" path="res://ui/dish_strip.tscn" id="dish_strip"]
 [ext_resource type="Script" path="res://ui/tray_section.gd" id="tray_section"]
+[ext_resource type="Script" path="res://ui/graph_controls.gd" id="graph_controls"]
+[ext_resource type="Script" path="res://ui/freezer_shelf.gd" id="freezer_shelf"]
+[ext_resource type="Script" path="res://ui/trait_rows.gd" id="trait_rows"]
 [ext_resource type="PackedScene" path="res://ui/tutorial.tscn" id="tutorial"]
 [ext_resource type="Texture2D" path="res://icons/lineage.svg" id="lineage_icon"]
 [ext_resource type="Texture2D" path="res://icons/watch.svg" id="watch_icon"]
@@ -690,6 +693,7 @@ open = false
 unique_name_in_owner = true
 theme_type_variation = &"SnugStack"
 layout_mode = 2
+script = ExtResource("trait_rows")
 
 [node name="PlacedRow" parent="HUD/Frame/Layout/Middle/Side/Stack/DishDetails/Colony" instance=ExtResource("stat_row")]
 unique_name_in_owner = true
@@ -703,31 +707,37 @@ script = ExtResource("tray_section")
 title_key = "hud.graph_title"
 tip_key = "hud.graph_tip"
 
-[node name="ScopeSwitch" type="PanelContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/GraphSection"]
+[node name="GraphControls" type="VBoxContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/GraphSection"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"TightStack"
+script = ExtResource("graph_controls")
+
+[node name="ScopeSwitch" type="PanelContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/GraphSection/GraphControls"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
 size_flags_horizontal = 0
 theme_type_variation = &"SwitchSegments"
 
-[node name="Choices" type="HBoxContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/GraphSection/ScopeSwitch"]
+[node name="Choices" type="HBoxContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/GraphSection/GraphControls/ScopeSwitch"]
 layout_mode = 2
 theme_type_variation = &"SegmentRow"
 
-[node name="Controls" type="HBoxContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/GraphSection"]
+[node name="Controls" type="HBoxContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/GraphSection/GraphControls"]
 layout_mode = 2
 theme_type_variation = &"TightRow"
 
-[node name="SpanSwitch" type="PanelContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/GraphSection/Controls"]
+[node name="SpanSwitch" type="PanelContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/GraphSection/GraphControls/Controls"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"SwitchSegments"
 
-[node name="Choices" type="HBoxContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/GraphSection/Controls/SpanSwitch"]
+[node name="Choices" type="HBoxContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/GraphSection/GraphControls/Controls/SpanSwitch"]
 layout_mode = 2
 theme_type_variation = &"SegmentRow"
 
-[node name="TraitSelect" type="OptionButton" parent="HUD/Frame/Layout/Middle/Side/Stack/GraphSection/Controls"]
+[node name="TraitSelect" type="OptionButton" parent="HUD/Frame/Layout/Middle/Side/Stack/GraphSection/GraphControls/Controls"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -751,6 +761,7 @@ open = false
 unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"SnugStack"
+script = ExtResource("trait_rows")
 
 [node name="WatchSection" type="PanelContainer" parent="HUD/Frame/Layout/Middle/Side/Stack"]
 unique_name_in_owner = true
@@ -771,7 +782,13 @@ script = ExtResource("tray_section")
 title_key = "hud.freezer_title"
 tip_key = "hud.freezer_tip"
 
-[node name="FreezeButton" type="Button" parent="HUD/Frame/Layout/Middle/Side/Stack/FreezerSection"]
+[node name="FreezerShelf" type="VBoxContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/FreezerSection"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"TightStack"
+script = ExtResource("freezer_shelf")
+
+[node name="FreezeButton" type="Button" parent="HUD/Frame/Layout/Middle/Side/Stack/FreezerSection/FreezerShelf"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 0
@@ -779,14 +796,14 @@ theme_type_variation = &"SmallButton"
 text = "@hud.freeze_this"
 tooltip_text = "@hud.freeze_tip"
 
-[node name="FreezerEmpty" type="Label" parent="HUD/Frame/Layout/Middle/Side/Stack/FreezerSection"]
+[node name="FreezerEmpty" type="Label" parent="HUD/Frame/Layout/Middle/Side/Stack/FreezerSection/FreezerShelf"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"Note"
 text = "@hud.freezer_empty"
 autowrap_mode = 3
 
-[node name="FreezerFlow" type="HFlowContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/FreezerSection"]
+[node name="FreezerFlow" type="HFlowContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/FreezerSection/FreezerShelf"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"TightFlow"

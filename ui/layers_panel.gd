@@ -49,13 +49,19 @@ func _setup(button: Button, layer: Dish.Layer, key_name: String) -> void:
 	_buttons[layer] = button
 
 
-## Each button's tooltip and shortcut from the keys as they are now (also after the player changes one).
+## Each button's tooltip from the keys as they are now (also after the player changes one). The keys themselves are not button shortcuts: a shortcut does not
+## reach a button that is hidden, and the top bar hides these buttons on a small window while their keys go on (`toggle_for_key`).
 func _apply_keys() -> void:
 	for button: Button in _buttons.values():
 		var action: String = button.get_meta("action")
 		button.tooltip_text = Strings.t("toolbar.tip", [Strings.t("layers." + (button.get_meta("name") as String)), KeyBindings.label(action)])
-		var shortcut := Shortcut.new()
-		var event := InputEventKey.new()
-		event.keycode = KeyBindings.key(action)
-		shortcut.events.append(event)
-		button.shortcut = shortcut
+
+
+## Flips the layer whose key this is; returns whether there was one. The husks' key does nothing in a dish without husks (its button is not offered).
+func toggle_for_key(event: InputEventKey) -> bool:
+	for button: Button in _buttons.values():
+		if KeyBindings.matches(button.get_meta("action"), event):
+			if button.get_meta("name") != "husks" or husks_button.visible:
+				button.button_pressed = not button.button_pressed
+			return true
+	return false

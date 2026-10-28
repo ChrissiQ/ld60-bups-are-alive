@@ -130,7 +130,7 @@ func _init() -> void:
 				t += STEP
 				d.sim.step(STEP, PackedVector2Array(), PackedFloat32Array(), 0.0, t)
 				if (s + 1) % per_hour == 0:
-					var recs: PackedFloat32Array = d.sim.export_state()
+					var recs: PackedFloat32Array = d.sim.export_state_bytes().to_float32_array()
 					_sample(mode, tag, stream, start + (s + 1) / per_hour, recs, recs.size() / GpuSim.STRIDE, d.field.total())
 			d.queue_free()
 		else:
@@ -144,18 +144,11 @@ func _init() -> void:
 			gpu.load_state(n, spacing, base.radius, conc0, base.field.export_owner(), recs0, consts, base.bup_limit, base.field.export_fill_weights(), 0.0, STEP, base.field.get_diffusion(), [], bup_seed, 1.0, next_id)
 			var done := 0
 			while done < hours * per_hour:
-				var ranges := PackedInt32Array(); var puffs_all := PackedFloat32Array(); var cells_all := PackedInt32Array(); var amts_all := PackedFloat32Array()
+				var events := GpuSim.WorldEvents.new()
 				for st in 9:
 					w.step(STEP)
-					var pf: PackedFloat32Array = w.field.take_recorded_puffs()
-					var cc: PackedInt32Array = w.field.take_recorded_cells()
-					var aa: PackedFloat32Array = w.field.take_recorded_amounts()
-					ranges.append_array(PackedInt32Array([puffs_all.size() / 6, pf.size() / 5, cells_all.size(), cc.size()]))
-					for j in pf.size() / 5:
-						puffs_all.append_array(PackedFloat32Array([pf[j * 5], pf[j * 5 + 1], pf[j * 5 + 2], pf[j * 5 + 3], pf[j * 5 + 4], 0.0]))
-					cells_all.append_array(cc)
-					amts_all.append_array(aa)
-				gpu.run_steps(9, {"ranges": ranges, "puffs": puffs_all, "cells": cells_all, "amounts": amts_all})
+					events.add_step(w.field)
+				gpu.run_steps(9, events.as_dict())
 				done += 9
 				if done % per_hour == 0:
 					var cnt := gpu.counts()

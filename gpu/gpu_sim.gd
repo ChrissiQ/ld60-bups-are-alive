@@ -2,7 +2,7 @@ class_name GpuSim
 extends RefCounted
 ## The simulation's whole step on the GPU (see AGENTS.md, "GPU path"): feed, diffusion, the plankton clouds,
 ## swimming and growing, uptake, death, division and mutation, compaction. The kernels are gpu/kernels.gd, imported from
-## gpu/shaders/*.glsl; the bup record, P, CNT and PCNT are described at the top of gpu/kernels.gd.
+## gpu/shaders/*.glsl; the bup record, P, CNT and PCNT are laid out in gpu/gpu_layout.gd.
 ##
 ## Two ways to run it:
 ## - a local RenderingDevice (`GpuSim.new()`: tools and tests; needs a window, not --headless): `run_steps` records, submits and waits;
@@ -10,13 +10,13 @@ extends RefCounted
 ##   call submit() or sync(), and every call that touches the device is made on the render thread (RenderingServer.call_on_render_thread).
 ##   A batch is `prepare_steps(steps, plan)` (uploads: before any compute list is open, since the device refuses buffer updates while one
 ##   is) and then `record_steps(cl, steps, plan)` into a compute list the caller has begun.
-## The public API below (signals, vars and functions without a leading underscore, as of Step 3.0) is frozen: add to it, do not change it.
+## The public API below (signals, vars and functions without a leading underscore) is frozen: add to it, do not change it.
 
 signal buffers_rebuilt  ## load_state made new buffers: a kernel set up with make_external_kernel must be set up again
 
-const STRIDE := 28  ## words per bup record (the layout is at the top of gpu/kernels.gd; the same as BupSim.export_state_bytes)
+const STRIDE := GpuLayout.RECORD_WORDS  ## words per bup record (the layout is gpu/gpu_layout.gd's; the same as BupSim.export_state_bytes)
 const RECORD_BYTES := STRIDE * 4
-const ANSWER_WORDS := 24  ## the words of a record the GPU's answers to a pick or a tracked bup carry (all but the chemotaxis memory)
+const ANSWER_WORDS := GpuLayout.ANSWER_WORDS  ## the words of a record the GPU's answers to a pick or a tracked bup carry (all but the chemotaxis memory)
 const ANSWER_BYTES := ANSWER_WORDS * 4
 
 
@@ -24,16 +24,17 @@ const ANSWER_BYTES := ANSWER_WORDS * 4
 static func whole_record(answer: PackedByteArray) -> PackedByteArray:
 	var record := answer.duplicate()
 	record.resize(RECORD_BYTES)
-	record.encode_float(ANSWER_BYTES, -1.0)
+	record.encode_float(GpuLayout.R_FAST * 4, -1.0)
 	return record
-const NO_PICTURE := 3e38  ## px, py (words 22, 23) of a bup with no last picture: no trail (any value >= 1e30 means the same)
-const CNT_WORDS := 16
-const PCNT_WORDS := 8
+const NO_PICTURE := 3e38  ## R_PX, R_PY of a bup with no last picture: no trail (any value >= 1e30 means the same)
+const CNT_WORDS := GpuLayout.CNT_WORDS
+const PCNT_WORDS := GpuLayout.PCNT_WORDS
 const MAX_STEPS_PER_BATCH := 1024
 const EV_PUFFS_CAPACITY := 65536
 const EV_CELLS_CAPACITY := 1048576
 const EVENT_SETS := 4  ## the family events of this many batches can be held at once (each batch writes set seq % EVENT_SETS; a set is
 ## written again only once its batch's events are in the CPU's records: about 4 frames after it ran)
+const EV_PUFF_FLOATS := GpuLayout.EV_PUFF_FLOATS
 const PUSH_CACHE_MOST := 4096
 
 var rd: RenderingDevice
@@ -45,7 +46,7 @@ var count := 0  ## bups at the load (the live count is CNT[0], on the device)
 var capacity := 0  ## bup slots
 var puff_capacity := 262144  ## slots for clouds
 var entry_capacity := 0  ## places in the lists of clouds by square
-var event_capacity := 0  ## births (and as many deaths) one batch's event lists hold: P[78] (the lists are Step 3B's)
+var event_capacity := 0  ## births (and as many deaths) one batch's event lists hold: P_EVENT_CAPACITY
 var bins := 0  ## squares of the cloud lists
 var bins_across := 1
 var p := PackedFloat32Array()
@@ -57,10 +58,10 @@ var delta := 20.0  ## the step's length (s) of the last batch: every entry of P 
 var diffusion := 0.0  ## the medium's diffusion coefficient (µm²/s)
 var acetate := PackedFloat32Array()  ## the acetate field (n*n concentrations) the next load_state starts from (empty: none)
 var feed_per_second := 0.0  ## the feed (concentration per second)
-var upkeep_scale := 1.0  ## the dish's upkeep factor (P[79])
-var stationary := false  ## the dish has the stationary phase on (P[85]; the batch's plan says)
-var death_puff := 0.0  ## what a death gives back at once, per unit of mass (P[63]): P[8], or 0 when the dish makes husks of its deaths (the batch's plan says)
-var limit := 0  ## the most bups (P[60]): past it a random share dies each step
+var upkeep_scale := 1.0  ## the dish's upkeep factor (P_UPKEEP_SCALE)
+var stationary := false  ## the dish has the stationary phase on (P_STATIONARY; the batch's plan says)
+var death_puff := 0.0  ## what a death gives back at once, per unit of mass (P_DEATH_PUFF): P_DEATH_GIVE, or 0 when the dish makes husks of its deaths (the batch's plan says)
+var limit := 0  ## the most bups (P_LIMIT): past it a random share dies each step
 var has_clouds := false  ## whether any cloud has been loaded or sent, or deaths make them: until then the cloud kernels are not run
 var has_events := false
 var _k_total := 0.0  ## the diffusion of one step, D dt / cell²
@@ -141,7 +142,7 @@ func buffer(buf_name: String) -> RID:
 ## - `bup_limit`: the most bups (the buffers hold 5% more and a little; 0: as many as there are), `feed` (concentration per second),
 ##   `step_seconds` (the step's length until a batch says otherwise), `diffusion_coeff` (µm²/s, NutrientField.get_diffusion()),
 ## - `puffs`: the clouds, an Array of [x, y, mass, variance, cut] or a PackedFloat32Array of 5 floats each (NutrientField.export_packed());
-## - `dish_seed`: the dish's seed, folded into every kernel's random numbers (CNT[7]); `upkeep`: the dish's upkeep factor (P[79]);
+## - `dish_seed`: the dish's seed, folded into every kernel's random numbers (CNT_SEED); `upkeep`: the dish's upkeep factor (P_UPKEEP_SCALE);
 ## - `next_id`: the id the next newborn gets (BupSim.get_next_id(); 0: one past the largest id in `bups`).
 ## Every buffer is made afresh, so kernels set up with make_external_kernel must be set up again (`buffers_rebuilt`).
 func load_state(cells_across: int, cell_spacing: float, dish_radius: float, conc: PackedFloat32Array, owner: PackedInt32Array, bups: PackedByteArray, constants: Dictionary, bup_limit := 0, fill_weights := PackedFloat32Array(), feed := 0.0, step_seconds := 20.0, diffusion_coeff := 0.0, puffs: Variant = [], dish_seed := 1, upkeep := 1.0, next_id := 0) -> void:
@@ -180,11 +181,11 @@ func load_state(cells_across: int, cell_spacing: float, dish_radius: float, conc
 		for i in count:
 			first_id = maxi(first_id, id_of(bups, i) + 1)
 	var cnt := _zeros(CNT_WORDS * 4)
-	cnt.encode_u32(0, count)
-	cnt.encode_u32(4 * 4, first_id & 0xFFFFFFFF)
-	cnt.encode_u32(6 * 4, (first_id >> 32) & 0xFFFFFFFF)
-	cnt.encode_u32(7 * 4, (dish_seed ^ (dish_seed >> 32)) & 0xFFFFFFFF)
-	_buf("P", _zeros(128 * 4))
+	cnt.encode_u32(GpuLayout.CNT_BUPS * 4, count)
+	cnt.encode_u32(GpuLayout.CNT_NEXT_ID_LO * 4, first_id & 0xFFFFFFFF)
+	cnt.encode_u32(GpuLayout.CNT_NEXT_ID_HI * 4, (first_id >> 32) & 0xFFFFFFFF)
+	cnt.encode_u32(GpuLayout.CNT_SEED * 4, (dish_seed ^ (dish_seed >> 32)) & 0xFFFFFFFF)
+	_buf("P", _zeros(GpuLayout.P_WORDS * 4))
 	_buf("BUPS", full)
 	_buf("BUPS2", _zeros(capacity * RECORD_BYTES))
 	_buf("CHILD", _zeros(capacity * RECORD_BYTES))
@@ -253,7 +254,7 @@ func load_state(cells_across: int, cell_spacing: float, dish_radius: float, conc
 	bufs["PUFF_V"] = bufs["PUFF"]
 	bufs["PUFF2_V"] = bufs["PUFF2"]
 	var pcnt := _zeros(PCNT_WORDS * 4)
-	pcnt.encode_u32(0, clouds)
+	pcnt.encode_u32(GpuLayout.PCNT_SLOTS * 4, clouds)
 	_buf("PCNT", pcnt)
 	for nm in ["PDLO", "PDHI", "PSCALE", "PAL", "PEXC"]:
 		_buf(nm, _zeros(puff_capacity * 4))
@@ -269,14 +270,14 @@ func load_state(cells_across: int, cell_spacing: float, dish_radius: float, conc
 	_buf("DPHI", _zeros(n * n * 4))
 	_buf("WANTC", _zeros(capacity * 4))
 	# the game's side (gpu/gpu_world.gd): events, the frame's questions and answers, stats, the eraser, the field's copy
-	_buf("EVB", _zeros(EVENT_SETS * event_capacity * 16 * 4))
-	_buf("EVD", _zeros(EVENT_SETS * event_capacity * 10 * 4))
+	_buf("EVB", _zeros(EVENT_SETS * event_capacity * GpuLayout.BIRTH_WORDS * 4))
+	_buf("EVD", _zeros(EVENT_SETS * event_capacity * GpuLayout.DEATH_WORDS * 4))
 	_buf("EVN", _zeros(EVENT_SETS * 2 * 4))
-	_buf("QIN", _zeros(64 * 4))
-	_buf("OUT", _zeros(GpuKernels.OUT_WORDS * 4))
-	_buf("OUTK", _zeros(EVENT_SETS * GpuKernels.OUT_WORDS * 4))
+	_buf("QIN", _zeros(GpuLayout.QIN_WORDS * 4))
+	_buf("OUT", _zeros(GpuLayout.OUT_WORDS * 4))
+	_buf("OUTK", _zeros(EVENT_SETS * GpuLayout.OUT_WORDS * 4))
 	_stats_groups = (capacity + 255) / 256
-	_buf("SPART", _zeros(_stats_groups * 10 * 4))
+	_buf("SPART", _zeros(_stats_groups * GpuLayout.STATS_SUMS * 4))
 	_buf("ERASE", _zeros(GpuKernels.MAX_ERASE * 16))
 	_buf("QD", _zeros(capacity * 4))
 	_buf("MIRROR", _zeros((1 + puff_capacity * 5) * 4))
@@ -344,56 +345,48 @@ func _record_scan_chain(cl: int, prefix: String, sizes: Array) -> void:
 	dispatch(cl, prefix + "a1", sizes[0], float(sizes[0]))
 
 
-## The entries of P that do not depend on the step's length (those are set by _set_step).
+## The entries of P that do not depend on the step's length (those are set by _set_step): every slot of GpuLayout.P_SLOTS of the kinds
+## "const" and "array" from the constants, those of the kind "dish" here.
 func _fill_params() -> void:
-	p.resize(128)
+	p.resize(GpuLayout.P_WORDS)
 	p.fill(0.0)
-	p[0] = count
-	p[1] = n
-	p[2] = spacing
-	p[3] = origin
-	p[4] = radius
-	var names_to_index := {"detection_floor": 9, "noise_reference": 10, "gradient_noise": 11, "reference_sense": 12, "reference_size": 13, "mass_um": 14, "base_upkeep": 16, "maintenance_per_mass": 17, "sense_upkeep": 18, "maintenance_floor": 19, "growth_rate": 20, "cost_per_mass": 21, "reserve_per_mass": 22, "uptake_per_size": 23, "half_saturation": 24,
-		"trait_mutations": 32, "harmful_mutations": 33, "compensatory_mutations": 34, "lethal_fraction": 35, "harm_shape": 36, "mean_harm": 37, "mean_repair": 38, "max_harm": 39,
-		"hue_step": 40, "sat_step": 41, "val_step": 42, "val_min": 43, "add_mass_factor": 56, "drag_upkeep": 57, "division_spread": 58,
-		"min_length_px": 74, "width": 75, "min_width_px": 76, "max_trail_px": 77,
-		"mutator_rate": 80, "mutator_down_share": 81, "mutator_fold_weak": 82, "mutator_fold_strong": 83, "mutator_fold_top": 84,
-		"starve_death_rate": 87, "starve_death_exponent": 88, "starve_min_mass_share": 89,
-		"donor_gain": 90, "donor_cost": 91, "donor_loss": 92, "contact_um": 93, "conj_continue": 95,
-		"reach_rate": 96, "reach_cost": 97, "reach_factor_1": 98, "reach_factor_2": 99, "reach_factor_3": 100,
-		"acetate_slope": 101, "acetate_threshold": 102, "acetate_uptake": 103,
-		"key_potentiation_rate": 104, "key_rate": 105, "key_factor": 106, "key_cost": 107,
-		"fine_step": 108, "tumble_base": 109, "chemotaxis_gain": 110, "tumble_up_factor": 111, "tumble_seconds": 112, "tumble_turn_mean": 113, "tumble_turn_spread": 114,
-		"rotational_diffusion": 115, "memory_short": 116, "memory_long": 117}
-	for key in names_to_index:
-		p[names_to_index[key]] = float(consts[key])
-	p[86] = float(consts["starve_maintenance"]) * float(consts["cost_per_mass"])
-	p[8] = float(consts["death_release"]) * float(consts["cost_per_mass"])  # (what a death gives back per unit of the body's mass)
-	death_puff = p[8]
+	for slot_name: String in GpuLayout.P_SLOTS:
+		var entry: Array = GpuLayout.P_SLOTS[slot_name]
+		if entry[1] == "const":
+			p[entry[0]] = float(consts[slot_name])
+		elif entry[1] == "array":
+			for k: int in entry[2]:
+				p[entry[0] + k] = float(consts[slot_name][k])
+	_set_p("count", count)
+	_set_p("cells", n)
+	_set_p("spacing", spacing)
+	_set_p("origin", origin)
+	_set_p("radius", radius)
+	_set_p("starve_cost", float(consts["starve_maintenance"]) * float(consts["cost_per_mass"]))
+	_set_p("death_give", float(consts["death_release"]) * float(consts["cost_per_mass"]))  # (what a death gives back per unit of the body's mass)
+	death_puff = p[GpuLayout.p_slot("death_give")]
 	var s_axis: Array = consts["motion_s"]
 	var e_axis: Array = consts["motion_e"]
-	p[25] = s_axis.size()
-	p[26] = e_axis.size()
-	p[27] = log(float(s_axis[0]))
-	p[28] = (log(float(s_axis[-1])) - log(float(s_axis[0]))) / (s_axis.size() - 1)
-	p[29] = log(float(e_axis[0]))
-	p[30] = (log(float(e_axis[-1])) - log(float(e_axis[0]))) / (e_axis.size() - 1)
-	p[31] = float(s_axis[0])
-	for g in 4:
-		p[44 + g] = float(consts["gene_min"][g])
-		p[48 + g] = float(consts["gene_max"][g])
-		p[52 + g] = float(consts["gene_step"][g])
-	p[62] = capacity
-	p[64] = float(consts["cloud_handover"]) * spacing
-	p[65] = float(consts["cloud_cut"])
-	p[66] = 0.5 * spacing
-	p[67] = bins_across
-	p[68] = float(consts["motion_step"])
-	p[69] = float(consts["motion_structure"])
-	p[71] = puff_capacity
-	p[72] = entry_capacity
-	p[73] = bins
-	p[78] = event_capacity
+	_set_p("motion_ns", s_axis.size())
+	_set_p("motion_ne", e_axis.size())
+	_set_p("motion_ls0", log(float(s_axis[0])))
+	_set_p("motion_dls", (log(float(s_axis[-1])) - log(float(s_axis[0]))) / (s_axis.size() - 1))
+	_set_p("motion_le0", log(float(e_axis[0])))
+	_set_p("motion_dle", (log(float(e_axis[-1])) - log(float(e_axis[0]))) / (e_axis.size() - 1))
+	_set_p("motion_s0", float(s_axis[0]))
+	_set_p("capacity", capacity)
+	_set_p("handover", float(consts["cloud_handover"]) * spacing)
+	_set_p("bin_size", 0.5 * spacing)
+	_set_p("bins_across", bins_across)
+	_set_p("puff_capacity", puff_capacity)
+	_set_p("entry_capacity", entry_capacity)
+	_set_p("bins", bins)
+	_set_p("event_capacity", event_capacity)
+
+
+## Sets P's slot `slot_name` (a key of GpuLayout.P_SLOTS) in the copy that is uploaded.
+func _set_p(slot_name: String, value: float) -> void:
+	p[GpuLayout.p_slot(slot_name)] = value
 
 
 func moves_for(step_seconds: float) -> int:
@@ -401,23 +394,22 @@ func moves_for(step_seconds: float) -> int:
 	return maxi(1, ceili(step_seconds / (float(consts["motion_step"]) * scale * scale)))
 
 
-## Every entry of P that depends on the step's length (5-7 the motion's sub-steps, 59 the chance of death, 61 the feed, 70 the clouds'
-## spread, and the diffusion's k), and the batch's own (60 the limit, 79 the upkeep factor), for steps of `step_seconds`; then P is
-## uploaded. `swim` false: the bups do not move (for tests of the other parts).
+## Every entry of P of the kind "batch" (GpuLayout.P_SLOTS: those that depend on the step's length, and the batch's own), and the
+## diffusion's k, for steps of `step_seconds`; then P is uploaded. `swim` false: the bups do not move (for tests of the other parts).
 func _set_step(step_seconds: float, swim := true) -> void:
 	delta = step_seconds
 	var moves := moves_for(delta) if swim else 0
-	p[5] = delta
-	p[6] = moves
-	p[7] = delta / maxf(moves, 1)
-	p[59] = minf(float(consts["death_rate"]) * delta, 1.0)
-	p[60] = limit
-	p[61] = feed_per_second * delta
-	p[70] = 2.0 * diffusion * delta
-	p[63] = death_puff
-	p[94] = 1.0 - exp(-float(consts["conj_rate"]) * delta)  # (the chance a touching pair transfers in a step)
-	p[85] = 1.0 if stationary else 0.0
-	p[79] = upkeep_scale
+	_set_p("delta", delta)
+	_set_p("moves", moves)
+	_set_p("sub", delta / maxf(moves, 1))
+	_set_p("death_chance", minf(float(consts["death_rate"]) * delta, 1.0))
+	_set_p("limit", limit)
+	_set_p("feed", feed_per_second * delta)
+	_set_p("cloud_spread", 2.0 * diffusion * delta)
+	_set_p("death_puff", death_puff)
+	_set_p("conj_chance", 1.0 - exp(-float(consts["conj_rate"]) * delta))  # (the chance a touching pair transfers in a step)
+	_set_p("stationary", 1.0 if stationary else 0.0)
+	_set_p("upkeep_scale", upkeep_scale)
 	_k_total = diffusion * delta / (spacing * spacing)
 	var pb := p.to_byte_array()
 	rd.buffer_update(bufs["P"], 0, pb.size(), pb)
@@ -567,7 +559,8 @@ func run_many(steps: int, step_seconds: float, k_per_piece: float, diffuse_piece
 
 
 ## What comes in from outside during a batch of steps: `events` has "ranges" (4 ints per step: first cloud, clouds, first deposit, deposits),
-## "puffs" (6 floats each: x, y, mass, variance, cut, 0) and "cells" / "amounts" (a cell and a concentration to add).
+## "puffs" (EV_PUFF_FLOATS floats each: x, y, mass, variance, cut, 0) and "cells" / "amounts" (a cell and a concentration to add). Made by
+## WorldEvents.
 func _upload_events(steps: int, events: Dictionary) -> void:
 	has_events = not events.is_empty()
 	if not has_events:
@@ -578,7 +571,7 @@ func _upload_events(steps: int, events: Dictionary) -> void:
 	rd.buffer_update(bufs["EVR"], 0, rb.size(), rb)
 	var pf: PackedFloat32Array = events["puffs"]
 	if pf.size() > 0:
-		assert(pf.size() / 6 <= EV_PUFFS_CAPACITY)
+		assert(pf.size() / EV_PUFF_FLOATS <= EV_PUFFS_CAPACITY)
 		var pb := pf.to_byte_array()
 		rd.buffer_update(bufs["EVP"], 0, pb.size(), pb)
 		has_clouds = true
@@ -634,15 +627,15 @@ func record_steps(cl: int, steps: int, plan := {}) -> void:
 ## A stats sample of the bups as they are now into OUT, as sample `sample` (0: the frame's; 1..: the batch's history samples), marked as
 ## taken after step `step` of the batch.
 func record_stats(cl: int, sample: int, step := -1) -> void:
-	assert(sample <= GpuKernels.MAX_SAMPLES)
+	assert(sample <= GpuLayout.MAX_SAMPLES)
 	dispatch(cl, "stats1", _stats_groups * 256)
-	dispatch3(cl, "stats2", 256, float(_stats_groups), float(GpuKernels.OUT_STATS + GpuKernels.STATS_WORDS * sample), float(step))
+	dispatch3(cl, "stats2", 256, float(_stats_groups), float(GpuLayout.OUT_STATS + GpuLayout.STATS_WORDS * sample), float(step))
 
 
 ## The uploads of a frame's questions and eraser discs (before any compute list is open): `qin` the QIN words (GpuKernels' layout),
 ## `erase` 4 floats per disc (x, y, radius, strength), at most GpuKernels.MAX_ERASE discs.
 func prepare_frame(qin: PackedByteArray, erase := PackedFloat32Array()) -> void:
-	assert(qin.size() <= 64 * 4 and erase.size() <= GpuKernels.MAX_ERASE * 4)
+	assert(qin.size() <= GpuLayout.QIN_WORDS * 4 and erase.size() <= GpuKernels.MAX_ERASE * 4)
 	if not qin.is_empty():
 		rd.buffer_update(bufs["QIN"], 0, qin.size(), qin)
 	if not erase.is_empty():
@@ -675,7 +668,7 @@ func record_events(cl: int) -> void:
 ## the questions uploaded by prepare_frame (`pick`: whether a pick was asked, `scan`: whether a nearest or a fraction was, `track`: whether
 ## any bup is tracked).
 func record_frame(cl: int, pick: bool, scan: bool, track: bool) -> void:
-	dispatch(cl, "q_clear", GpuKernels.QOUT_WORDS)
+	dispatch(cl, "q_clear", GpuLayout.QOUT_WORDS)
 	record_stats(cl, 0)
 	if pick:
 		dispatch(cl, "q_pick", capacity)
@@ -689,7 +682,7 @@ func record_frame(cl: int, pick: bool, scan: bool, track: bool) -> void:
 
 ## Keeps OUT's first `words` words as event set `event_set`'s copy in OUTK (after record_frame, for a batch).
 func record_keep(cl: int, event_set: int, words: int) -> void:
-	dispatch(cl, "out_keep", words, float(words), float(event_set * GpuKernels.OUT_WORDS))
+	dispatch(cl, "out_keep", words, float(words), float(event_set * GpuLayout.OUT_WORDS))
 
 
 ## The field's copy: MIRROR gets the first `slots` cloud slots (see the `mirror` kernel). Read CONC and MIRROR after it.
@@ -812,7 +805,7 @@ func release() -> void:
 ## The clouds that are there: [x, y, mass, variance, cut] each.
 func read_puffs() -> Array:
 	var raw := rd.buffer_get_data(bufs["PUFF"]).to_float32_array()
-	var slots := rd.buffer_get_data(bufs["PCNT"]).decode_u32(0)
+	var slots := rd.buffer_get_data(bufs["PCNT"]).decode_u32(GpuLayout.PCNT_SLOTS * 4)
 	var out := []
 	for k in slots:
 		if raw[k * 8 + 5] > 0.5:
@@ -820,7 +813,7 @@ func read_puffs() -> Array:
 	return out
 
 
-## CNT as ints (see gpu/kernels.gd: 0 the bups now, 4/6 the next id's lo/hi words, 7 the seed, ...).
+## CNT as ints (GpuLayout.CNT_*: the bups now, the next id's lo and hi words, the seed, ...).
 func counts() -> PackedInt32Array:
 	return rd.buffer_get_data(bufs["CNT"]).to_int32_array()
 
@@ -828,20 +821,20 @@ func counts() -> PackedInt32Array:
 ## The id the next newborn gets.
 func next_id() -> int:
 	var c := rd.buffer_get_data(bufs["CNT"])
-	return c.decode_u32(4 * 4) | (c.decode_u32(6 * 4) << 32)
+	return c.decode_u32(GpuLayout.CNT_NEXT_ID_LO * 4) | (c.decode_u32(GpuLayout.CNT_NEXT_ID_HI * 4) << 32)
 
 
 ## What was lost or moved for want of room, since the load: clouds that found no slot (they went onto the grid), entries cut from the
-## full lists of clouds by place, and births and deaths that found no event slot (Step 3B's lists).
+## full lists of clouds by place, and births and deaths that found no event slot.
 func overflows() -> Dictionary:
 	var c := rd.buffer_get_data(bufs["CNT"])
 	var pc := rd.buffer_get_data(bufs["PCNT"])
-	return {"clouds_to_grid": pc.decode_u32(2 * 4), "list_entries_cut": pc.decode_u32(3 * 4), "births_lost": c.decode_u32(10 * 4), "deaths_lost": c.decode_u32(11 * 4)}
+	return {"clouds_to_grid": pc.decode_u32(GpuLayout.PCNT_TO_GRID * 4), "list_entries_cut": pc.decode_u32(GpuLayout.PCNT_CUT * 4), "births_lost": c.decode_u32(GpuLayout.CNT_BIRTHS_LOST * 4), "deaths_lost": c.decode_u32(GpuLayout.CNT_DEATHS_LOST * 4)}
 
 
 ## The bups' records (STRIDE words each, in order): read floats with `.to_float32_array()` and ids with `id_of`.
 func read_bups() -> PackedByteArray:
-	var live := counts()[0]
+	var live := counts()[GpuLayout.CNT_BUPS]
 	return rd.buffer_get_data(bufs["BUPS"], 0, live * RECORD_BYTES) if live > 0 else PackedByteArray()  # (a size of 0 would read the whole buffer)
 
 
@@ -849,12 +842,61 @@ func read_conc() -> PackedFloat32Array:
 	return rd.buffer_get_data(bufs["CONC"]).to_float32_array()
 
 
-## The id of record `i` in a block of records (words 0 and 21).
+## The grid with what waits in DPLO/DPHI added: the nutrient the last step's deaths put on the grid, which the next step's `dep_apply`
+## adds to CONC (all the nutrient the grid holds, for an export).
+func read_conc_settled() -> PackedFloat32Array:
+	var conc := read_conc()
+	add_pending_deposits(conc, rd.buffer_get_data(bufs["DPLO"]).to_int32_array(), rd.buffer_get_data(bufs["DPHI"]).to_int32_array(), spacing)
+	return conc
+
+
+## Adds to `conc` what waits in the deposits' fixed-point sums `lo` and `hi` (DPLO, DPHI: 2^20 to the unit, as `dep_apply` adds them).
+static func add_pending_deposits(conc: PackedFloat32Array, lo: PackedInt32Array, hi: PackedInt32Array, cell_spacing: float) -> void:
+	if lo.count(0) == lo.size() and hi.count(0) == hi.size():
+		return
+	var area := cell_spacing * cell_spacing
+	for i in mini(conc.size(), lo.size()):
+		var m := float(hi[i] & 0xFFFFFFFF) * 4096.0 + float(lo[i] & 0xFFFFFFFF) * 9.5367431640625e-7
+		if m > 0.0:
+			conc[i] += m / area
+
+
+## The id of record `i` in a block of records (R_ID_LO and R_ID_HI).
 static func id_of(records: PackedByteArray, i: int) -> int:
-	return records.decode_u32(i * RECORD_BYTES) | (records.decode_u32(i * RECORD_BYTES + 21 * 4) << 32)
+	return records.decode_u32(i * RECORD_BYTES + GpuLayout.R_ID_LO * 4) | (records.decode_u32(i * RECORD_BYTES + GpuLayout.R_ID_HI * 4) << 32)
 
 
 ## Gives record `i` the id `id`.
 static func set_id(records: PackedByteArray, i: int, id: int) -> void:
-	records.encode_u32(i * RECORD_BYTES, id & 0xFFFFFFFF)
-	records.encode_u32(i * RECORD_BYTES + 21 * 4, (id >> 32) & 0xFFFFFFFF)
+	records.encode_u32(i * RECORD_BYTES + GpuLayout.R_ID_LO * 4, id & 0xFFFFFFFF)
+	records.encode_u32(i * RECORD_BYTES + GpuLayout.R_ID_HI * 4, (id >> 32) & 0xFFFFFFFF)
+
+
+## The clouds and deposits a dish's own world makes (plankton, sources, husks) while the GPU runs its bups, step by step, in the form a
+## batch's "events" take (see _upload_events): `add_step` takes what the CPU field recorded in a step (NutrientField.set_recording) as the
+## next step's events.
+class WorldEvents:
+	extends RefCounted
+	var ranges := PackedInt32Array()
+	var puffs := PackedFloat32Array()
+	var cells := PackedInt32Array()
+	var amounts := PackedFloat32Array()
+
+	func add_step(field: NutrientField) -> void:
+		var recorded := field.take_recorded_puffs()  # (5 floats a cloud: x, y, mass, variance, cut)
+		var recorded_cells := field.take_recorded_cells()
+		ranges.append_array(PackedInt32Array([puffs.size() / EV_PUFF_FLOATS, recorded.size() / 5, cells.size(), recorded_cells.size()]))
+		for j in recorded.size() / 5:
+			puffs.append_array(recorded.slice(j * 5, j * 5 + 5))
+			puffs.append(0.0)
+		cells.append_array(recorded_cells)
+		amounts.append_array(field.take_recorded_amounts())
+
+	func is_empty() -> bool:
+		return puffs.is_empty() and cells.is_empty()
+
+	func cloud_count() -> int:
+		return puffs.size() / EV_PUFF_FLOATS
+
+	func as_dict() -> Dictionary:
+		return {"ranges": ranges, "puffs": puffs, "cells": cells, "amounts": amounts}

@@ -6,6 +6,11 @@ layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs
 layout(set = 0, binding = 0, std430) buffer B_P { float P[]; };
 layout(set = 0, binding = 1, std430) buffer B_CNT { uint CNT[]; };
 layout(set = 0, binding = 2, std430) buffer B_PCNT { uint PCNT[]; };
+const uint CNT_BUPS = 0u;
+const uint CNT_SURVIVORS = 1u;
+const uint PCNT_SLOTS = 0u;
+const int P_DEATH_PUFF = 63;
+const int P_PUFF_CAPACITY = 71;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
@@ -13,6 +18,6 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 
 void main() {
 	if (gl_GlobalInvocationID.x != 0u) return;  // (one thread: a dispatch of 1 runs a whole group of 64)
-	if (P[63] <= 0.0) return;
-	PCNT[0] = min(PCNT[0] + (CNT[0] - CNT[1]), uint(P[71]));
+	if (P[P_DEATH_PUFF] <= 0.0) return;
+	PCNT[PCNT_SLOTS] = min(PCNT[PCNT_SLOTS] + (CNT[CNT_BUPS] - CNT[CNT_SURVIVORS]), uint(P[P_PUFF_CAPACITY]));
 }

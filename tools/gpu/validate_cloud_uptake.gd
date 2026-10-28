@@ -32,20 +32,21 @@ func _init() -> void:
 		sim.add_bup(Vector2(r * cos(t) * 1.0, r * sin(t)), g, Dish.FOUNDER_ENERGY, sqrt(born * 1.5), born, 0, Vector2.RIGHT)
 	for id in sim.bup_ids():
 		sim.set_bup_energy(id, randf() * 0.5 * sim.bup_max_energy(id))
-	var s0: PackedFloat32Array = sim.export_state()
-	var b0: PackedByteArray = sim.export_state_bytes()  # (the same bups as s0, as the GPU's records)
+	var b0: PackedByteArray = sim.export_state_bytes()  # (the bups as the GPU's records; s0 their words as floats, the ids through GpuSim.id_of)
+	var s0: PackedFloat32Array = b0.to_float32_array()
 	var conc0: PackedFloat32Array = field.values()
 	var owner: PackedInt32Array = field.export_owner()
 	var puffs0: Array = field.puffs_export()
 	dish.step(20.0)
-	var s1: PackedFloat32Array = sim.export_state()
+	var b1: PackedByteArray = sim.export_state_bytes()
+	var s1: PackedFloat32Array = b1.to_float32_array()
 	var puffs1: Array = field.puffs_export()
 	var idx1 := {}
 	for i in s1.size() / GpuSim.STRIDE:
-		idx1[int(s1[i * GpuSim.STRIDE])] = i
+		idx1[GpuSim.id_of(b1, i)] = i
 	var in_state := b0.duplicate()
 	for i in s0.size() / GpuSim.STRIDE:
-		var j: int = idx1.get(int(s0[i * GpuSim.STRIDE]), -1)
+		var j: int = idx1.get(GpuSim.id_of(b0, i), -1)
 		if j >= 0:
 			in_state.encode_float((i * GpuSim.STRIDE + 1) * 4, s1[j * GpuSim.STRIDE + 1])
 			in_state.encode_float((i * GpuSim.STRIDE + 2) * 4, s1[j * GpuSim.STRIDE + 2])
@@ -56,7 +57,7 @@ func _init() -> void:
 	var gp := gpu.read_puffs()
 	var gain_c := 0.0; var gain_g := 0.0; var sum_abs := 0.0; var matched := 0; var skipped := 0
 	for i in s0.size() / GpuSim.STRIDE:
-		var j: int = idx1.get(int(s0[i * GpuSim.STRIDE]), -1)
+		var j: int = idx1.get(GpuSim.id_of(b0, i), -1)
 		if j < 0 or s1[j * GpuSim.STRIDE + 6] < out[i * GpuSim.STRIDE + 6] * 0.9:
 			skipped += 1
 			continue

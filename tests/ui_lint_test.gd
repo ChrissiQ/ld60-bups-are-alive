@@ -23,7 +23,7 @@ const SETTING_ROW := "res://ui/setting_row.tscn"
 const BANNED_WIDGETS := ["HSlider", "VSlider", "SpinBox", "HScrollBar", "VScrollBar"]
 const WIDGET_ALLOWED := ["res://ui/setting_row.tscn", "res://scenes/main.tscn:NutrientCount", "res://scenes/main.tscn:SourceRate", "res://scenes/main.tscn:BrushSize", "res://scenes/main.tscn:PipetteRadius", "res://scenes/main.tscn:TimerHours"]  ## (the tool tray's number boxes)
 ## World rendering (the dish, bups, nutrient) is art, not UI chrome, so it keeps its own colours.
-const COLOR_ALLOWED := ["res://scripts/dish.gd", "res://scripts/genome.gd"]  ## (the bups' own colours are world data too)
+const COLOR_ALLOWED := ["res://scripts/dish.gd", "res://scripts/dish_drawing.gd", "res://scripts/genome.gd"]  ## (the bups' own colours are world data too)
 ## A bup's name has exactly one source (see BupNames): panels must not build one themselves.
 const NAME_FILES := ["res://scripts/bup_names.gd", "res://scripts/cell.gd", "res://scripts/dish.gd"]  ## the only scripts that may touch how a bup is named
 const NAME_INTERNALS := ["\\btitle_for\\(", "\\bdefault_name\\(", "BupNames\\.clean\\("]  ## (regular expressions: Dish's own bup_default_name( is fine)

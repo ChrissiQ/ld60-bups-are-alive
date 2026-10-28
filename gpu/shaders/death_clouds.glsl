@@ -13,6 +13,21 @@ layout(set = 0, binding = 6, std430) buffer B_PUFF { float PUFF[]; };
 layout(set = 0, binding = 7, std430) buffer B_INSIDE { int INSIDE[]; };
 layout(set = 0, binding = 8, std430) buffer B_DPLO { uint DPLO[]; };
 layout(set = 0, binding = 9, std430) buffer B_DPHI { uint DPHI[]; };
+const uint CNT_BUPS = 0u;
+const uint PCNT_SLOTS = 0u;
+const uint PCNT_TO_GRID = 2u;
+const int P_CELLS = 1;
+const int P_DEATH_PUFF = 63;
+const int P_HANDOVER = 64;
+const int P_ORIGIN = 3;
+const int P_PUFF_CAPACITY = 71;
+const int P_RADIUS = 4;
+const int P_SPACING = 2;
+const uint RECORD_WORDS = 28u;
+const uint R_MASS = 6u;
+const uint R_PY = 23u;
+const uint R_X = 1u;
+const uint R_Y = 2u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
@@ -27,8 +42,8 @@ void add_dep(uint cell, float amount) { // 2^20 to the unit, in 64 bits
 	}
 }
 void deposit_xy(float x, float y, float mass) {
-	int n = int(P[1]); float sp = P[2];
-	float fx = (x + P[3]) / sp - 0.5, fy = (y + P[3]) / sp - 0.5;
+	int n = int(P[P_CELLS]); float sp = P[P_SPACING];
+	float fx = (x + P[P_ORIGIN]) / sp - 0.5, fy = (y + P[P_ORIGIN]) / sp - 0.5;
 	int x0 = int(floor(fx)), y0 = int(floor(fy));
 	float tx = fx - float(x0), ty = fy - float(y0);
 	int cells[4]; float weights[4]; float kept = 0.0; int count = 0;
@@ -45,18 +60,21 @@ void deposit_xy(float x, float y, float mass) {
 
 void main() {
 	uint i = gl_GlobalInvocationID.x;
-	if (i >= CNT[0] || P[63] <= 0.0 || SURV[i] != 0u) return;
-	uint b = i * 28u;
-	uint slot = PCNT[0] + (i - EXCS[i]);
-	if (slot < uint(P[71])) { uint o = slot * 8u; PUFF[o + 5] = 0.0; }  // (empty unless this one is a cloud below)
-	if (BUPS[b + 23] != -2.0) return;
-	float mass = P[63] * BUPS[b + 6], x = BUPS[b + 1], y = BUPS[b + 2];
-	if (slot < uint(P[71]) && 10.0 < P[64]) {
+	if (i >= CNT[CNT_BUPS] || P[P_DEATH_PUFF] <= 0.0 || SURV[i] != 0u) return;
+	uint b = i * RECORD_WORDS;
+	uint slot = PCNT[PCNT_SLOTS] + (i - EXCS[i]);
+	if (slot < uint(P[P_PUFF_CAPACITY])) { uint o = slot * 8u; PUFF[o + 5] = 0.0; }  // (empty unless this one is a cloud below)
+	if (BUPS[b + R_PY] != -2.0) return;
+	float mass = P[P_DEATH_PUFF] * BUPS[b + R_MASS], x = BUPS[b + R_X], y = BUPS[b + R_Y];
+	int n = int(P[P_CELLS]); float sp = P[P_SPACING];
+	int cx = clamp(int((x + P[P_ORIGIN]) / sp), 0, n - 1), cy = clamp(int((y + P[P_ORIGIN]) / sp), 0, n - 1);
+	bool accepted = INSIDE[cy * n + cx] != 0 && x * x + y * y <= P[P_RADIUS] * P[P_RADIUS];
+	if (slot < uint(P[P_PUFF_CAPACITY]) && 10.0 < P[P_HANDOVER] && accepted) {
 		uint o = slot * 8u;
 		PUFF[o] = x; PUFF[o + 1] = y; PUFF[o + 2] = mass; PUFF[o + 3] = 100.0; PUFF[o + 4] = 1.0;
 		PUFF[o + 6] = 0.0; PUFF[o + 7] = 0.0; PUFF[o + 5] = 1.0;
 	} else {
 		deposit_xy(x, y, mass);
-		if (slot >= uint(P[71])) atomicAdd(PCNT[2], 1u);
+		if (slot >= uint(P[P_PUFF_CAPACITY])) atomicAdd(PCNT[PCNT_TO_GRID], 1u);
 	}
 }

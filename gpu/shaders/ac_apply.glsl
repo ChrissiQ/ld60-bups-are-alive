@@ -9,15 +9,22 @@ layout(set = 0, binding = 2, std430) buffer B_BUPS { float BUPS[]; };
 layout(set = 0, binding = 3, std430) buffer B_WANT2 { float WANT2[]; };
 layout(set = 0, binding = 4, std430) buffer B_CELL2 { int CELL2[]; };
 layout(set = 0, binding = 5, std430) buffer B_SCALE2 { float SCALE2[]; };
+const uint CNT_BUPS = 0u;
+const int P_RESERVE_PER_MASS = 22;
+const uint RECORD_WORDS = 28u;
+const uint R_ENERGY = 5u;
+const uint R_HARM = 15u;
+const uint R_MASS = 6u;
+const uint R_METABOLISM = 10u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
+	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
 	float w = WANT2[i];
 	if (w <= 0.0) return;
-	uint b = i * 28u;
-	BUPS[b + 5] = min(BUPS[b + 5] + w * SCALE2[CELL2[i]] * exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]), P[22] * BUPS[b + 6]);
+	uint b = i * RECORD_WORDS;
+	BUPS[b + R_ENERGY] = min(BUPS[b + R_ENERGY] + w * SCALE2[CELL2[i]] * exp(-BUPS[b + R_HARM]) / sqrt(BUPS[b + R_METABOLISM]), P[P_RESERVE_PER_MASS] * BUPS[b + R_MASS]);
 }

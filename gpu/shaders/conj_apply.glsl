@@ -7,6 +7,22 @@ layout(set = 0, binding = 0, std430) buffer B_P { float P[]; };
 layout(set = 0, binding = 1, std430) buffer B_CNT { uint CNT[]; };
 layout(set = 0, binding = 2, std430) buffer B_BUPS { float BUPS[]; };
 layout(set = 0, binding = 3, std430) buffer B_DTAB { uint DTAB[]; };
+const uint CNT_BUPS = 0u;
+const uint CNT_DONORS = 15u;
+const uint CNT_DONOR_REACH = 14u;
+const uint CNT_SEED = 7u;
+const uint CNT_STEP = 5u;
+const int P_CONJ_CHANCE = 94;
+const int P_CONJ_CONTINUE = 95;
+const int P_CONTACT_UM = 93;
+const int P_MASS_UM = 14;
+const uint RECORD_WORDS = 28u;
+const uint R_DONOR = 14u;
+const uint R_MASS = 6u;
+const uint R_REACH = 12u;
+const uint R_SPEED = 8u;
+const uint R_X = 1u;
+const uint R_Y = 2u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
@@ -18,33 +34,34 @@ uint dhash(int cx, int cy) { return hash(uint(cx) * 73856093u ^ uint(cy) * 19349
 float keyed01(uint a, uint b, uint c) { uint h = hash(hash(hash(a ^ 0x9E3779B9u) + b * 0x85EBCA6Bu) ^ (c * 0xC2B2AE35u)); return (float(h >> 8) + 0.5) / 16777216.0; }
 
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0] || CNT[15] == 0u) return;
-	uint b = i * 28u;
-	if (BUPS[b + 14] > 0.5) return;
-	float x = BUPS[b + 1], y = BUPS[b + 2];
-	float rr = 0.5 * BUPS[b + 6] * P[14];
-	int cx = int(floor(x / DCELL)), cy = int(floor(y / DCELL));
+	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS] || CNT[CNT_DONORS] == 0u) return;
+	uint b = i * RECORD_WORDS;
+	if (BUPS[b + R_DONOR] > 0.5) return;
+	float x = BUPS[b + R_X], y = BUPS[b + R_Y];
+	float rr = 0.5 * BUPS[b + R_MASS] * P[P_MASS_UM];
+	float reach = uintBitsToFloat(CNT[CNT_DONOR_REACH]) + rr + P[P_CONTACT_UM];  // (the farthest a donor's centre can be and touch it)
+	int x0 = int(floor((x - reach) / DCELL)), x1 = int(floor((x + reach) / DCELL)), y0 = int(floor((y - reach) / DCELL)), y1 = int(floor((y + reach) / DCELL));
 	uint best = 0xFFFFFFFFu;
-	for (int ox = -1; ox <= 1; ox++) for (int oy = -1; oy <= 1; oy++) {
-		uint h = dhash(cx + ox, cy + oy);
+	for (int gx = x0; gx <= x1; gx++) for (int gy = y0; gy <= y1; gy++) {
+		uint h = dhash(gx, gy);
 		if ((DTAB[(DMASK + 1u) * 4u + (h >> 5u)] & (1u << (h & 31u))) == 0u) continue;  // (no donor in this bucket: the bitmap is small enough to stay in cache)
 		for (uint s = 0u; s < 4u; s++) {
 			uint d = DTAB[h * 4u + s];
 			if (d == 0xFFFFFFFFu || d >= best) continue;
-			uint db = d * 28u;
-			float dx = BUPS[db + 1] - x, dy = BUPS[db + 2] - y;
-			float range = 0.5 * BUPS[db + 6] * P[14] + rr + P[93];
+			uint db = d * RECORD_WORDS;
+			float dx = BUPS[db + R_X] - x, dy = BUPS[db + R_Y] - y;
+			float range = 0.5 * BUPS[db + R_MASS] * P[P_MASS_UM] + rr + P[P_CONTACT_UM];
 			if (dx * dx + dy * dy > range * range) continue;
-			if (keyed01(CNT[7] ^ CNT[5], i, d) < P[94]) best = d;
+			if (keyed01(CNT[CNT_SEED] ^ CNT[CNT_STEP], i, d) < P[P_CONJ_CHANCE]) best = d;
 		}
 	}
 	if (best == 0xFFFFFFFFu) return;
 	int run = 1;
 	for (int k = 0; k < 3; k++) {
-		if (keyed01(CNT[7] ^ CNT[5] ^ 0x5bd1e995u, i * 4u + uint(k), best) < P[95]) run++; else break;
+		if (keyed01(CNT[CNT_SEED] ^ CNT[CNT_STEP] ^ 0x5bd1e995u, i * 4u + uint(k), best) < P[P_CONJ_CONTINUE]) run++; else break;
 	}
-	uint db = best * 28u;
-	for (int g = 0; g < run; g++) BUPS[b + 8u + uint(g)] = BUPS[db + 8u + uint(g)];
+	uint db = best * RECORD_WORDS;
+	for (int g = 0; g < run; g++) BUPS[b + R_SPEED + uint(g)] = BUPS[db + R_SPEED + uint(g)];
 	int mask = (1 << (2 * run)) - 1;  // (the raised ceilings of the genes that moved go with them)
-	BUPS[b + 12] = float((int(BUPS[b + 12] + 0.5) & ~mask) | (int(BUPS[db + 12] + 0.5) & mask));
+	BUPS[b + R_REACH] = float((int(BUPS[b + R_REACH] + 0.5) & ~mask) | (int(BUPS[db + R_REACH] + 0.5) & mask));
 }

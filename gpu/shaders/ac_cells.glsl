@@ -10,16 +10,18 @@ layout(set = 0, binding = 3, std430) buffer B_AWHI { uint AWHI[]; };
 layout(set = 0, binding = 4, std430) buffer B_ADLO { uint ADLO[]; };
 layout(set = 0, binding = 5, std430) buffer B_ADHI { uint ADHI[]; };
 layout(set = 0, binding = 6, std430) buffer B_SCALE2 { float SCALE2[]; };
+const int P_CELLS = 1;
+const int P_SPACING = 2;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[1] * P[1])) return;
+	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
 	float d = float(AWHI[i]) * 4.0 + float(AWLO[i]) * 9.313225746154785e-10;
 	float dep = float(ADHI[i]) * 4.0 + float(ADLO[i]) * 9.313225746154785e-10;
-	float area = P[2] * P[2];
+	float area = P[P_SPACING] * P[P_SPACING];
 	float c = CONC2[i];
 	float s = 0.0;
 	if (d > 0.0 && c > 0.0) {

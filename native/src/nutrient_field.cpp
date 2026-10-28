@@ -189,10 +189,9 @@ void NutrientField::run_blocks(void (*fn)(void *, uint32_t), void *job, int bloc
 }
 
 void NutrientField::snapshot_rows(int first_row, int last_row) {
-	for (int iy = first_row; iy < last_row; iy++) {
-		for (int ix = 0; ix < n; ix++) {
-			eff[(size_t)iy * n + ix] = (float)cell_value(ix, iy);
-		}
+	for (size_t i = (size_t)first_row * n; i < (size_t)last_row * n; i++) {
+		int o = owner[i];
+		eff[i] = o < 0 ? 0.0f : conc[o];
 	}
 }
 
@@ -222,6 +221,37 @@ double NutrientField::puff_reach(const Puff &p) const {
 	double cut = std::max(G.cloud_cut * p.cut * G.detection_floor, 1e-30);
 	return peak > cut ? std::sqrt(2.0 * p.var * std::log(peak / cut)) : 0.0;
 }
+
+// How far a cloud can reach while its variance grows by up to `spread`: its reach first grows with its width, then shrinks as its peak falls
+// (the largest at a variance of mass / (2 pi cut e)). Taking up its nutrient only shrinks it.
+double NutrientField::puff_reach_ahead(const Puff &p, double spread) const {
+	Puff later = p;
+	later.var += spread;
+	double reach = std::max(puff_reach(p), puff_reach(later));
+	double cut = std::max(G.cloud_cut * p.cut * G.detection_floor, 1e-30);
+	double widest = p.mass / (2.0 * 3.14159265358979323846 * cut * 2.718281828459045);
+	if (widest > p.var && widest < later.var) {
+		later.var = widest;
+		reach = std::max(reach, puff_reach(later));
+	}
+	return reach;
+}
+
+// What a read needs of cloud k besides where it is, as the cloud is now; its reach is returned.
+double NutrientField::note_puff(size_t k) const {
+	const Puff &p = puffs[k];
+	double reach = puff_reach(p);
+	ha[k] = 1.0 / (2.0 * 3.14159265358979323846 * p.var);
+	hb[k] = 0.5 / p.var;
+	hreach2[k] = reach * reach;
+	hsigma[k] = std::sqrt(p.var);
+	return reach;
+}
+
+// Between steps this short the lists are kept for up to this many seconds of spreading (unless a cloud comes or goes): each cloud is listed in
+// the bins its reach could touch over that time (`hash_spread`), and what a read needs of each (its width, its reach) is brought up to date every
+// step in between (see advance_puffs), so a read finds what lists made afresh that step would give. Longer steps make them afresh every step.
+static const double HASH_REFRESH = 2.0;
 
 // The clouds' lists are cut into bins this many grid cells across. A read looks at the one bin its point is in and keeps the clouds that reach the point, so
 // the bins' size changes how much work a rebuild and a read each take but not what is found or the order it is summed in: bigger bins mean far fewer entries
@@ -253,13 +283,13 @@ void NutrientField::rebuild_hash() const {
 	lo_y.resize(count);
 	hi_y.resize(count);
 	bin_start.assign(bins + 1, 0);
+	hash_spread = hash_keep ? 2.0 * get_diffusion() * HASH_REFRESH : 0.0;
 	for (size_t i = 0; i < count; i++) { // (first how many bins each puff touches, to size the lists)
 		const Puff &p = puffs[i];
-		double reach = puff_reach(p);
-		ha[i] = 1.0 / (2.0 * 3.14159265358979323846 * p.var);
-		hb[i] = 0.5 / p.var;
-		hreach2[i] = reach * reach;
-		hsigma[i] = std::sqrt(p.var);
+		double reach = note_puff(i);
+		if (hash_spread > 0.0) {
+			reach = puff_reach_ahead(p, hash_spread);
+		}
 		lo_x[i] = std::clamp((int)((p.x - reach + origin) / bin_size), 0, bins_across - 1);
 		hi_x[i] = std::clamp((int)((p.x + reach + origin) / bin_size), 0, bins_across - 1);
 		lo_y[i] = std::clamp((int)((p.y - reach + origin) / bin_size), 0, bins_across - 1);
@@ -501,9 +531,14 @@ void NutrientField::advance_puffs(double dt) {
 	bool removed = kept.size() != puffs.size();
 	puffs.swap(kept);
 	hash_age += dt;
-	if (removed || hash_age >= 2.0) { // (a cloud's width changes by well under 1% in 2 s, so the lists can be a little behind it)
+	hash_keep = dt < HASH_REFRESH;
+	if (removed || hash_age >= HASH_REFRESH || 2.0 * get_diffusion() * hash_age > hash_spread) {
 		hash_dirty = true;
 		hash_age = 0.0;
+	} else if (!hash_dirty && ha.size() == puffs.size()) { // (the lists stay; a young cloud's peak halves in its first seconds, so what a read uses of each does not)
+		for (size_t k = 0; k < puffs.size(); k++) {
+			note_puff(k);
+		}
 	}
 }
 
@@ -562,20 +597,8 @@ std::vector<float> NutrientField::view_values() const {
 }
 
 double NutrientField::view_cell(const std::vector<float> &view, int ix, int iy) const {
-	int i = iy * n + ix;
-	if (!inside[i]) {
-		i = nearest_inside(ix, iy);
-	}
-	return i < 0 ? 0.0 : (double)view[i];
-}
-
-
-double NutrientField::cell_value(int ix, int iy) const {
-	int i = iy * n + ix;
-	if (!inside[i]) {
-		i = nearest_inside(ix, iy);
-	}
-	return i < 0 ? 0.0 : (double)conc[i];
+	int o = owner[(size_t)iy * n + ix];
+	return o < 0 ? 0.0 : (double)view[o];
 }
 
 int NutrientField::index_at(double x, double y) const {
@@ -697,16 +720,7 @@ double NutrientField::erase_disc(const Vector2 &local, double disc_radius, doubl
 }
 
 void NutrientField::read_xy(double x, double y, double &c, double &gx, double &gy) const {
-	double fx = std::clamp((x + origin) / spacing - 0.5, 0.0, n - 1.001);
-	double fy = std::clamp((y + origin) / spacing - 0.5, 0.0, n - 1.001);
-	int x0 = (int)fx, y0 = (int)fy;
-	double tx = fx - x0, ty = fy - y0;
-	double c00 = cell_value(x0, y0), c10 = cell_value(x0 + 1, y0), c01 = cell_value(x0, y0 + 1), c11 = cell_value(x0 + 1, y0 + 1);
-	double top = c00 + (c10 - c00) * tx;
-	double bottom = c01 + (c11 - c01) * tx;
-	c = top + (bottom - top) * ty;
-	gx = ((c10 - c00) + ((c11 - c01) - (c10 - c00)) * ty) / spacing;
-	gy = (bottom - top) / spacing;
+	bilinear(x, y, [this](int ix, int iy) { return cell_value(ix, iy); }, c, gx, gy);
 	rebuild_hash();
 	if (!puffs.empty()) {
 		puff_sum(x, y, c, gx, gy);
@@ -724,14 +738,9 @@ double NutrientField::concentration_xy(double x, double y) const {
 }
 
 double NutrientField::grid_concentration_xy(double x, double y) const {
-	double fx = std::clamp((x + origin) / spacing - 0.5, 0.0, n - 1.001);
-	double fy = std::clamp((y + origin) / spacing - 0.5, 0.0, n - 1.001);
-	int x0 = (int)fx, y0 = (int)fy;
-	double tx = fx - x0, ty = fy - y0;
-	double c00 = cell_value(x0, y0), c10 = cell_value(x0 + 1, y0), c01 = cell_value(x0, y0 + 1), c11 = cell_value(x0 + 1, y0 + 1);
-	double top = c00 + (c10 - c00) * tx;
-	double bottom = c01 + (c11 - c01) * tx;
-	return top + (bottom - top) * ty;
+	double c, gx, gy;
+	bilinear(x, y, [this](int ix, int iy) { return cell_value(ix, iy); }, c, gx, gy);
+	return c;
 }
 
 double NutrientField::sample(const Vector2 &local) const {
@@ -822,18 +831,12 @@ double NutrientField::take_from_clouds(double x, double y, double wanted, double
 }
 
 double NutrientField::uptake_concentration_xy(double x, double y, int own) const {
-	double fx = std::clamp((x + origin) / spacing - 0.5, 0.0, n - 1.001);
-	double fy = std::clamp((y + origin) / spacing - 0.5, 0.0, n - 1.001);
-	int x0 = (int)fx, y0 = (int)fy;
-	double tx = fx - x0, ty = fy - y0;
-	auto cell = [&](int ix, int iy) {
+	double c, gx, gy;
+	bilinear(x, y, [&](int ix, int iy) {
 		size_t i = (size_t)iy * n + ix;
 		return owner[i] == own ? (double)conc[own] : (double)eff[i];
-	};
-	double c00 = cell(x0, y0), c10 = cell(x0 + 1, y0), c01 = cell(x0, y0 + 1), c11 = cell(x0 + 1, y0 + 1);
-	double top = c00 + (c10 - c00) * tx;
-	double bottom = c01 + (c11 - c01) * tx;
-	return top + (bottom - top) * ty;
+	}, c, gx, gy);
+	return c;
 }
 
 double NutrientField::take_cell(int cell, double energy) {
@@ -844,12 +847,9 @@ double NutrientField::take_cell(int cell, double energy) {
 }
 
 double NutrientField::take_from_grid(double x, double y, double energy) {
-	int i = index_at(x, y);
-	if (!inside[i]) {
-		i = nearest_inside(i % n, i / n);
-		if (i < 0) {
-			return 0.0;
-		}
+	int i = owner[index_at(x, y)];
+	if (i < 0) {
+		return 0.0;
 	}
 	double area = spacing * spacing;
 	double taken = std::min(energy, (double)conc[i] * area);

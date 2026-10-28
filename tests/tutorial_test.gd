@@ -12,7 +12,7 @@ func _screen(mode: Session.Mode, wanted: bool) -> Node:
 	Session.mode = mode
 	Session.free_start = TestUtil.small_start()
 	Session.tutorial_wanted = wanted
-	var m: Node = load("res://scenes/main.tscn").instantiate()
+	var m: Node = load(Scenes.GAME).instantiate()
 	root.add_child(m)
 	await process_frame
 	await process_frame
@@ -197,7 +197,7 @@ func _init() -> void:
 	c.tutorial = false
 	check(not StartConditions.from_dict(c.to_dict()).tutorial and StartConditions.new().tutorial and StartConditions.from_dict({}).tutorial and StartConditions.from_dict({"tutorial": "no"}).tutorial, "the setup's tutorial choice is saved, and it defaults to on")
 	Session.free_start = StartConditions.new()
-	var setup: Node = load("res://scenes/free_setup.tscn").instantiate()
+	var setup: Node = load(Scenes.FREE_SETUP).instantiate()
 	root.add_child(setup)
 	await process_frame
 	check(setup.tutorial_toggle.button_pressed and setup._start.tutorial, "free setup starts with the tutorial on")

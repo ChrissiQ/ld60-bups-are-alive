@@ -85,12 +85,7 @@ static func backend(dish: Dish) -> Dictionary:
 	}
 	var world := dish.gpu_world
 	if world != null and world.gpu != null:
-		var counts := {}
-		if world.has_method("overflow_counts"):  # (the pipeline of Step 3B keeps them as read back each frame)
-			counts = world.call("overflow_counts")
-		else:
-			world._transfer_call(func() -> void: counts.assign(world.gpu.overflows()))
-		out["gpu_overflows"] = counts
+		out["gpu_overflows"] = world.overflows()
 	return out
 
 
@@ -183,13 +178,13 @@ static func _constants() -> Dictionary:
 	return out
 
 
-## The husks: how many, the nutrient still in them (what they will leak back), and how many the layer draws.
+## The husks: how many, the nutrient still in them (what they will leak back: the energy at death less the pieces already let go), and how many the layer draws.
 static func _husks(dish: Dish) -> Dictionary:
 	var count := dish.sim.husk_count()
 	var energy := 0.0
 	var saved := dish.sim.husks_export()
 	for i in count:
-		energy += saved[i * 5 + 2]
+		energy += saved[i * 5 + 2] * exp(-0.25 * saved[i * 5 + 4])  # (the energy at death times e^(-k/4) for the k pieces already let go: what BupSim::husk_share leaves)
 	return {"count": count, "energy_held": energy, "drawn": dish.sim.husk_count() if dish.layer_shown(Dish.Layer.HUSKS) else 0}
 
 

@@ -13,36 +13,106 @@ layout(set = 0, binding = 6, std430) buffer B_EXCS { uint EXCS[]; };
 layout(set = 0, binding = 7, std430) buffer B_EXCK { uint EXCK[]; };
 layout(set = 0, binding = 8, std430) buffer B_EVB { uint EVB[]; };
 layout(set = 0, binding = 9, std430) buffer B_EVD { uint EVD[]; };
+const uint BIRTH_WORDS = 16u;
+const uint CNT_BIRTHS = 8u;
+const uint CNT_BIRTHS_LOST = 10u;
+const uint CNT_BUPS = 0u;
+const uint CNT_DEATHS = 9u;
+const uint CNT_DEATHS_LOST = 11u;
+const uint CNT_NEXT_ID_HI = 6u;
+const uint CNT_NEXT_ID_LO = 4u;
+const uint CNT_SURVIVORS = 1u;
+const uint DEATH_WORDS = 14u;
+const uint EB_DIVISIONS = 5u;
+const uint EB_HARM = 14u;
+const uint EB_HUE = 11u;
+const uint EB_ID_HI = 1u;
+const uint EB_ID_LO = 0u;
+const uint EB_METABOLISM = 9u;
+const uint EB_MUTATOR = 15u;
+const uint EB_PARENT_HI = 3u;
+const uint EB_PARENT_LO = 2u;
+const uint EB_SAT = 12u;
+const uint EB_SENSE = 8u;
+const uint EB_SIZE = 10u;
+const uint EB_SPEED = 7u;
+const uint EB_STEP = 4u;
+const uint EB_TRAITS = 6u;
+const uint EB_VAL = 13u;
+const uint ED_BIRTH_MASS = 9u;
+const uint ED_ENERGY = 8u;
+const uint ED_GIVES = 7u;
+const uint ED_ID_HI = 1u;
+const uint ED_ID_LO = 0u;
+const uint ED_MASS = 4u;
+const uint ED_METABOLISM = 12u;
+const uint ED_SENSE = 11u;
+const uint ED_SIZE = 13u;
+const uint ED_SPEED = 10u;
+const uint ED_STEP = 2u;
+const uint ED_TRAITS = 3u;
+const uint ED_X = 5u;
+const uint ED_Y = 6u;
+const uint EV_DONOR_SHIFT = 30u;
+const uint EV_LOW_MASK = 1048575u;
+const uint EV_REACH_MASK = 1023u;
+const uint EV_REACH_SHIFT = 20u;
+const int P_CAPACITY = 62;
+const int P_DEATH_GIVE = 8;
+const int P_EVENT_CAPACITY = 78;
+const uint RECORD_WORDS = 28u;
+const uint R_BIRTH_MASS = 7u;
+const uint R_DIVISIONS = 20u;
+const uint R_DONOR = 14u;
+const uint R_ENERGY = 5u;
+const uint R_HARM = 15u;
+const uint R_HUE = 16u;
+const uint R_ID_HI = 21u;
+const uint R_ID_LO = 0u;
+const uint R_MASS = 6u;
+const uint R_METABOLISM = 10u;
+const uint R_MUTATIONS = 19u;
+const uint R_MUTATOR = 13u;
+const uint R_PY = 23u;
+const uint R_REACH = 12u;
+const uint R_SAT = 17u;
+const uint R_SENSE = 9u;
+const uint R_SIZE = 11u;
+const uint R_SPEED = 8u;
+const uint R_VAL = 18u;
+const uint R_X = 1u;
+const uint R_Y = 2u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
-	uint cap = uint(P[78]), base = uint(pcs.pb) * cap, st = uint(pcs.pa);
-	uint b = i * 28u;
-	if (KID[i] == 1u && CNT[1] + EXCK[i] < uint(P[62])) {  // (a newborn `compact` will place)
-		uint slot = CNT[8] + EXCK[i];
+	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+	uint cap = uint(P[P_EVENT_CAPACITY]), base = uint(pcs.pb) * cap, st = uint(pcs.pa);
+	uint b = i * RECORD_WORDS;
+	if (KID[i] == 1u && CNT[CNT_SURVIVORS] + EXCK[i] < uint(P[P_CAPACITY])) {  // (a newborn `compact` will place)
+		uint slot = CNT[CNT_BIRTHS] + EXCK[i];
 		if (slot < cap) {
-			uint o = (base + slot) * 16u, c = i * 28u;
-			uint lo = CNT[4] + EXCK[i];
-			EVB[o] = lo; EVB[o + 1u] = CNT[6] + (lo < CNT[4] ? 1u : 0u);
-			EVB[o + 2u] = BUPS_U[b]; EVB[o + 3u] = BUPS_U[b + 21u]; EVB[o + 4u] = st;
-			EVB[o + 5u] = uint(uintBitsToFloat(CHILD_U[c + 20u])); EVB[o + 6u] = (uint(uintBitsToFloat(CHILD_U[c + 19u])) & 0xFFFFFu) | ((uint(uintBitsToFloat(CHILD_U[c + 12u]) + 0.5) & 0x3FFu) << 20u) | (uintBitsToFloat(CHILD_U[c + 14u]) > 0.5 ? (1u << 30u) : 0u);
-			EVB[o + 7u] = CHILD_U[c + 8u]; EVB[o + 8u] = CHILD_U[c + 9u]; EVB[o + 9u] = CHILD_U[c + 10u]; EVB[o + 10u] = CHILD_U[c + 11u];
-			EVB[o + 11u] = CHILD_U[c + 16u]; EVB[o + 12u] = CHILD_U[c + 17u]; EVB[o + 13u] = CHILD_U[c + 18u]; EVB[o + 14u] = CHILD_U[c + 15u];
-			EVB[o + 15u] = CHILD_U[c + 13u];
-		} else atomicAdd(CNT[10], 1u);
+			uint o = (base + slot) * BIRTH_WORDS, c = i * RECORD_WORDS;
+			uint lo = CNT[CNT_NEXT_ID_LO] + EXCK[i];
+			EVB[o + EB_ID_LO] = lo; EVB[o + EB_ID_HI] = CNT[CNT_NEXT_ID_HI] + (lo < CNT[CNT_NEXT_ID_LO] ? 1u : 0u);
+			EVB[o + EB_PARENT_LO] = BUPS_U[b + R_ID_LO]; EVB[o + EB_PARENT_HI] = BUPS_U[b + R_ID_HI]; EVB[o + EB_STEP] = st;
+			EVB[o + EB_DIVISIONS] = uint(uintBitsToFloat(CHILD_U[c + R_DIVISIONS])); EVB[o + EB_TRAITS] = (uint(uintBitsToFloat(CHILD_U[c + R_MUTATIONS])) & EV_LOW_MASK) | ((uint(uintBitsToFloat(CHILD_U[c + R_REACH]) + 0.5) & EV_REACH_MASK) << EV_REACH_SHIFT) | (uintBitsToFloat(CHILD_U[c + R_DONOR]) > 0.5 ? (1u << EV_DONOR_SHIFT) : 0u);
+			EVB[o + EB_SPEED] = CHILD_U[c + R_SPEED]; EVB[o + EB_SENSE] = CHILD_U[c + R_SENSE]; EVB[o + EB_METABOLISM] = CHILD_U[c + R_METABOLISM]; EVB[o + EB_SIZE] = CHILD_U[c + R_SIZE];
+			EVB[o + EB_HUE] = CHILD_U[c + R_HUE]; EVB[o + EB_SAT] = CHILD_U[c + R_SAT]; EVB[o + EB_VAL] = CHILD_U[c + R_VAL]; EVB[o + EB_HARM] = CHILD_U[c + R_HARM];
+			EVB[o + EB_MUTATOR] = CHILD_U[c + R_MUTATOR];
+		} else atomicAdd(CNT[CNT_BIRTHS_LOST], 1u);
 	}
 	if (SURV[i] == 0u) {
-		uint slot = CNT[9] + (i - EXCS[i]);  // (the bups not kept before this one)
+		uint slot = CNT[CNT_DEATHS] + (i - EXCS[i]);  // (the bups not kept before this one)
 		if (slot < cap) {
-			uint o = (base + slot) * 10u;
-			EVD[o] = BUPS_U[b]; EVD[o + 1u] = BUPS_U[b + 21u]; EVD[o + 2u] = st; EVD[o + 3u] = (uint(uintBitsToFloat(BUPS_U[b + 20u])) & 0xFFFFFu) | ((uint(uintBitsToFloat(BUPS_U[b + 12u]) + 0.5) & 0x3FFu) << 20u) | (uintBitsToFloat(BUPS_U[b + 14u]) > 0.5 ? (1u << 30u) : 0u);
-			EVD[o + 4u] = BUPS_U[b + 6u]; EVD[o + 5u] = BUPS_U[b + 1u]; EVD[o + 6u] = BUPS_U[b + 2u];
-			EVD[o + 7u] = uintBitsToFloat(BUPS_U[b + 23u]) == -2.0 ? floatBitsToUint(P[8] * uintBitsToFloat(BUPS_U[b + 6u])) : 0u;  // (where it died and what it gives back: 0 for a trimmed one)
-			EVD[o + 8u] = BUPS_U[b + 5u]; EVD[o + 9u] = BUPS_U[b + 7u];  // (its own energy, and the mass it was born with)
-		} else atomicAdd(CNT[11], 1u);
+			uint o = (base + slot) * DEATH_WORDS;
+			EVD[o + ED_ID_LO] = BUPS_U[b + R_ID_LO]; EVD[o + ED_ID_HI] = BUPS_U[b + R_ID_HI]; EVD[o + ED_STEP] = st; EVD[o + ED_TRAITS] = (uint(uintBitsToFloat(BUPS_U[b + R_DIVISIONS])) & EV_LOW_MASK) | ((uint(uintBitsToFloat(BUPS_U[b + R_REACH]) + 0.5) & EV_REACH_MASK) << EV_REACH_SHIFT) | (uintBitsToFloat(BUPS_U[b + R_DONOR]) > 0.5 ? (1u << EV_DONOR_SHIFT) : 0u);
+			EVD[o + ED_MASS] = BUPS_U[b + R_MASS]; EVD[o + ED_X] = BUPS_U[b + R_X]; EVD[o + ED_Y] = BUPS_U[b + R_Y];
+			EVD[o + ED_GIVES] = uintBitsToFloat(BUPS_U[b + R_PY]) == -2.0 ? floatBitsToUint(P[P_DEATH_GIVE] * uintBitsToFloat(BUPS_U[b + R_MASS])) : 0u;  // (where it died and what it gives back: 0 for a trimmed one)
+			EVD[o + ED_ENERGY] = BUPS_U[b + R_ENERGY]; EVD[o + ED_BIRTH_MASS] = BUPS_U[b + R_BIRTH_MASS];  // (its own energy, and the mass it was born with)
+			EVD[o + ED_SPEED] = BUPS_U[b + R_SPEED]; EVD[o + ED_SENSE] = BUPS_U[b + R_SENSE]; EVD[o + ED_METABOLISM] = BUPS_U[b + R_METABOLISM]; EVD[o + ED_SIZE] = BUPS_U[b + R_SIZE];  // (its genes as it died)
+		} else atomicAdd(CNT[CNT_DEATHS_LOST], 1u);
 	}
 }

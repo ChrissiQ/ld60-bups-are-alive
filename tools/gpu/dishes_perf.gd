@@ -18,10 +18,7 @@ func _run() -> void:
 	start.nutrient_density = 4.0
 	start.bloom_density = 2.0
 	start.spread_founders()
-	Session.free_start = start
-	Session.mode = Session.Mode.FREE
-	Session.load_requested = false
-	var m: Node = load("res://scenes/main.tscn").instantiate()
+	var m: Node = TestUtil.free_game(start)
 	root.add_child(m)
 	await process_frame
 	m.toolbar.set_paused(false)

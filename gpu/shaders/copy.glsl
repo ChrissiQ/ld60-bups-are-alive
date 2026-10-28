@@ -6,12 +6,14 @@ layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs
 layout(set = 0, binding = 0, std430) buffer B_CNT { uint CNT[]; };
 layout(set = 0, binding = 1, std430) buffer B_BUPS_V4U { uvec4 BUPS_V4U[]; };
 layout(set = 0, binding = 2, std430) buffer B_BUPS2_V4U { uvec4 BUPS2_V4U[]; };
+const uint CNT_NEXT_COUNT = 3u;
+const uint RECORD_VEC4 = 7u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
 void main() {
-	uint t = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * (gl_NumWorkGroups.x * 64u); if (t >= CNT[3] * 7u) return;  // (a grid of groups when one row is not enough: see compact)
+	uint t = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * (gl_NumWorkGroups.x * 64u); if (t >= CNT[CNT_NEXT_COUNT] * RECORD_VEC4) return;  // (a grid of groups when one row is not enough: see compact)
 	BUPS_V4U[t] = BUPS2_V4U[t];
 }

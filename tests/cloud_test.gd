@@ -129,22 +129,63 @@ func _check_record_traits() -> void:
 	check(other.lineage_info(id).get("donor", false) == true and int(other.lineage_info(id).get("reach", 0)) == (0x0D | (2 << 8)), "...and through the pipette's bytes")
 	copy.free()
 	other.free()
-	# A death the GPU reports carries the bup's divisions, reach word and F factor in one word, as the bup was when it died.
+	# A death the GPU reports carries the bup's divisions, reach word and F factor in one word, and its genes, as the bup was when it died
+	# (a conjugation can have changed the genes and their raised ceilings since its birth: the record shows them together).
 	var gpu_dead := _dish(90.0)
 	var living := gpu_dead.add_bup(Vector2(5.0, 5.0), Genome.founder(), 30.0)
 	gpu_dead.watch_bup(living)
 	var death := PackedByteArray()
-	death.resize(40)
-	death.encode_u32(0, living & 0xFFFFFFFF)
-	death.encode_u32(4, living >> 32)
-	death.encode_u32(8, 0)
-	death.encode_u32(12, 7 | (0x0D << 20) | (1 << 30))
-	death.encode_float(16, 8.0)
-	death.encode_float(32, 6.5)  # (its energy)
-	death.encode_float(36, 5.0)  # (its birth mass)
+	death.resize(GpuLayout.DEATH_WORDS * 4)
+	death.encode_u32(GpuLayout.ED_ID_LO * 4, living & 0xFFFFFFFF)
+	death.encode_u32(GpuLayout.ED_ID_HI * 4, living >> 32)
+	death.encode_u32(GpuLayout.ED_STEP * 4, 0)
+	death.encode_u32(GpuLayout.ED_TRAITS * 4, 7 | (0x0D << GpuLayout.EV_REACH_SHIFT) | (1 << GpuLayout.EV_DONOR_SHIFT))
+	death.encode_float(GpuLayout.ED_MASS * 4, 8.0)
+	death.encode_float(GpuLayout.ED_ENERGY * 4, 6.5)
+	death.encode_float(GpuLayout.ED_BIRTH_MASS * 4, 5.0)
+	death.encode_float(GpuLayout.ED_SPEED * 4, 33.0)
+	death.encode_float(GpuLayout.ED_SENSE * 4, 77.0)
+	death.encode_float(GpuLayout.ED_METABOLISM * 4, 1.5)
+	death.encode_float(GpuLayout.ED_SIZE * 4, 4.5)
 	gpu_dead.sim.apply_events(PackedByteArray(), death, 100.0, 20.0)
 	var gone := gpu_dead.lineage_info(living)
 	check(not gone.is_empty() and not gone["alive"] and int(gone["divisions"]) == 7 and int(gone["reach"]) == 0x0D and gone["donor"] == true and is_equal_approx(gone["mass"], 8.0) and is_equal_approx(gone["energy"], 6.5) and is_equal_approx(gone["birth_mass"], 5.0) and gone["div_mass"] > gone["birth_mass"], "a death event gives the record the bup's divisions, reach word, F factor, mass, reserve and birth mass as it died")
+	check(is_equal_approx(gone["speed"], 33.0) and is_equal_approx(gone["sense"], 77.0) and is_equal_approx(gone["metabolism"], 1.5) and is_equal_approx(gone["size_gene"], 4.5), "...and its genes as it died")
+	# A husk made from a GPU death is as old as the time since that death: a batch's events reach the CPU some frames after its steps.
+	var late := BupSim.new()
+	late.reset(3000.0, 3)
+	late.set_husk_seconds(Biology.HUSK_SECONDS)
+	late.set_death_husks(true)
+	var late_id := late.add_bup(Vector2.ZERO, Genome.founder(), 30.0, -1.0, -1.0, 0, Vector2.RIGHT)
+	late.set_time(5000.0)
+	var late_death := PackedByteArray()
+	late_death.resize(GpuLayout.DEATH_WORDS * 4)
+	late_death.encode_u32(GpuLayout.ED_ID_LO * 4, late_id & 0xFFFFFFFF)
+	late_death.encode_u32(GpuLayout.ED_ID_HI * 4, late_id >> 32)
+	late_death.encode_u32(GpuLayout.ED_STEP * 4, 2)
+	late_death.encode_float(GpuLayout.ED_MASS * 4, 8.0)
+	late_death.encode_float(GpuLayout.ED_GIVES * 4, 10.0)
+	late.apply_events(PackedByteArray(), late_death, 1960.0, 20.0)  # (its step ended at 1,960 + 2 x 20 = 2,000 s; the dish's clock is at 5,000)
+	var late_husk := late.husks_export()
+	check(late_husk.size() == 5 and is_equal_approx(late_husk[3], 3000.0), "a husk from a death heard of late is as old as the time since the death (%s s)" % str(late_husk[3] if late_husk.size() == 5 else -1.0))
+	# On the CPU too: a conjugation's recipient that dies keeps the genes it was given, with their raised ceilings.
+	var cpu_dead := _dish(90.0)
+	var given := cpu_dead.add_bup(Vector2(5.0, 5.0), Genome.founder(), 30.0)
+	cpu_dead.watch_bup(given)
+	var donor_genome := Genome.founder()
+	donor_genome["donor"] = true
+	donor_genome["speed"] = float(donor_genome["speed"]) + 7.0
+	donor_genome["reach"] = 2
+	cpu_dead.add_bup(Vector2(6.0, 5.0), donor_genome, 30.0)
+	for k in 200:
+		cpu_dead.sim.conjugate(60.0)
+		if cpu_dead.sim.transfer_count() > 0:
+			break
+	var given_speed: float = cpu_dead.sim.bup_info(given)["speed"]
+	cpu_dead.sim.remove_bup(given)
+	var dead_record := cpu_dead.lineage_info(given)
+	check(cpu_dead.sim.transfer_count() > 0 and is_equal_approx(given_speed, float(donor_genome["speed"])) and is_equal_approx(dead_record["speed"], given_speed) and int(dead_record["reach"]) & 3 == 2, "a recipient's record, once it dies, has the speed gene it was given (%.1f) with that gene's raised ceiling" % float(dead_record.get("speed", 0.0)))
+	cpu_dead.free()
 	gpu_dead.free()
 	d.free()
 
@@ -223,7 +264,7 @@ func _check_starvation() -> void:
 					survivors["off_first_%s" % metabolism] = d.population()
 			survivors["%s_%s" % [setting, metabolism]] = d.population()
 			var total := 0.0
-			var ex: PackedFloat32Array = d.sim.export_state()
+			var ex: PackedFloat32Array = d.sim.export_state_bytes().to_float32_array()
 			var np: int = ex.size() / GpuSim.STRIDE
 			for i in np:
 				total += ex[i * GpuSim.STRIDE + 6]
@@ -271,7 +312,7 @@ func _check_acetate() -> void:
 		for i in 200:
 			d.sim.add_bup(Vector2(float(i % 20 - 10) * 3000.0, float(i / 20 - 5) * 3000.0), Genome.founder(), 0.5 * Cell.COST_PER_MASS * mass, sqrt(mass), mass, 0, Vector2.RIGHT)
 		d.sim.step(20.0, none, rates, 0.0, 0.0)
-		var ex: PackedFloat32Array = d.sim.export_state()
+		var ex: PackedFloat32Array = d.sim.export_state_bytes().to_float32_array()
 		var body := 0.0
 		for i in ex.size() / GpuSim.STRIDE:
 			body += ex[i * GpuSim.STRIDE + 5] + ex[i * GpuSim.STRIDE + 6] * Cell.COST_PER_MASS
@@ -328,7 +369,7 @@ func _check_key() -> void:
 		for i in 100:
 			g.sim.add_bup(Vector2(float(i % 10 - 5) * 3000.0, float(i / 10 - 5) * 3000.0), genome, 0.9 * Cell.COST_PER_MASS * mass, sqrt(mass), mass, 0, Vector2.RIGHT)
 		g.sim.step(20.0, none, rates, 0.0, 0.0)
-		var ex: PackedFloat32Array = g.sim.export_state()
+		var ex: PackedFloat32Array = g.sim.export_state_bytes().to_float32_array()
 		var total := 0.0
 		for i in ex.size() / GpuSim.STRIDE:
 			total += ex[i * GpuSim.STRIDE + 6]
@@ -444,14 +485,8 @@ func _check_save() -> void:
 	root.add_child(copy)
 	var saved := TestUtil.saved(d)
 	check(copy.from_dict(saved) and copy.field.puff_count() == d.field.puff_count() and absf(copy.field.total() / d.field.total() - 1.0) < 1e-6, "clouds survive save and load (%d, %.2f against %.2f)" % [copy.field.puff_count(), copy.field.total(), d.field.total()])
-	var old := saved.duplicate(true)
-	old.erase("clouds")
-	var plain := Dish.new()
-	root.add_child(plain)
-	check(plain.from_dict(old) and plain.field.puff_count() == 0, "a save from before the clouds loads with none")
 	d.free()
 	copy.free()
-	plain.free()
 
 
 ## A source keeps releasing nutrient at its rate. Where the grid is too coarse for the plume near it, what it releases is kept

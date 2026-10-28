@@ -52,9 +52,12 @@ class NutrientField : public RefCounted {
 	void release_emitter(Emitter &e);
 	void add_puff(double x, double y, double mass, double var, double cut = 1.0);
 	double hash_age = 0.0; // sim seconds the clouds have spread since the lists were last made (they are made afresh when it passes HASH_REFRESH)
-	// The puffs filed by place so that a read looks at one short list: the dish is cut into square 'bins' half a grid cell
-	// across, and each puff is listed in every bin its reach touches (see puff_reach). Rebuilt when the puffs change (and
-	// by `snapshot`, so that the many readers of a step find it done). Per puff, what a read needs besides where it is.
+	bool hash_keep = false; // the steps are short enough that the next lists are made to be kept (see HASH_REFRESH)
+	mutable double hash_spread = 0.0; // how much the clouds' variance may grow before the lists no longer hold every bin a cloud reaches
+	// The puffs filed by place so that a read looks at one short list: the dish is cut into square 'bins' two grid cells
+	// across, and each puff is listed in every bin its reach can touch until the lists are made again (see puff_reach_ahead).
+	// Rebuilt when the puffs change (and by `snapshot`, so that the many readers of a step find it done). Per puff, what a read
+	// needs besides where it is (note_puff: brought up to date every step).
 	mutable bool hash_dirty = true;
 	mutable int bins_across = 1;
 	mutable double bin_size = 1.0;
@@ -62,6 +65,8 @@ class NutrientField : public RefCounted {
 	mutable std::vector<int> scratch_lo_x, scratch_hi_x, scratch_lo_y, scratch_hi_y, scratch_next; // (kept between rebuilds so that one does not allocate)
 	mutable std::vector<double> ha, hb, hreach2, hsigma; // a = 1 / (2 pi var), b = 1 / (2 var), reach2: how far (squared) it can be told from the medium
 	double puff_reach(const Puff &p) const; // how far (µm) from its centre a cloud is above cloud_cut of the detection floor: past that it is not looked for
+	double puff_reach_ahead(const Puff &p, double spread) const;
+	double note_puff(size_t k) const;
 	void rebuild_hash() const;
 	void puff_sum(double x, double y, double &c, double &gx, double &gy) const; // adds the puffs' concentration and gradient at the point
 	void puff_probe(double x, double y, double &c, double &gx, double &gy, double &sigma) const; // the same, and the smallest sigma among the clouds that reach it
@@ -79,8 +84,29 @@ class NutrientField : public RefCounted {
 	double patch_noise(double x, double y) const; // fractal noise at a place in the dish (zero on average; see set_patchiness)
 	int index_at(double x, double y) const;
 	void build(double dish_radius, int cells_across);
-	int nearest_inside(int ix, int iy) const;
-	double cell_value(int ix, int iy) const;
+	int nearest_inside(int ix, int iy) const; // (for `build`, which keeps the answers in `owner`)
+	double cell_value(int ix, int iy) const { // a cell's concentration, a rim cell's being its owner's
+		int o = owner[(size_t)iy * n + ix];
+		return o < 0 ? 0.0 : (double)conc[o];
+	}
+	// The grid's bilinear read, which every read of the field shares: `cell(ix, iy)` gives a cell's value (the field as it is, its
+	// snapshot, ...); `c` is the concentration at the point and gx, gy its gradient (a caller that wants only `c` leaves them unused).
+	template <typename Cell>
+	inline void bilinear(double x, double y, Cell cell, double &c, double &gx, double &gy) const {
+		double fx = std::clamp((x + origin) / spacing - 0.5, 0.0, n - 1.001);
+		double fy = std::clamp((y + origin) / spacing - 0.5, 0.0, n - 1.001);
+		int x0 = (int)fx, y0 = (int)fy;
+		double tx = fx - x0, ty = fy - y0;
+		double c00 = cell(x0, y0), c10 = cell(x0 + 1, y0), c01 = cell(x0, y0 + 1), c11 = cell(x0 + 1, y0 + 1);
+		double top = c00 + (c10 - c00) * tx;
+		double bottom = c01 + (c11 - c01) * tx;
+		c = top + (bottom - top) * ty;
+		gx = ((c10 - c00) + ((c11 - c01) - (c10 - c00)) * ty) / spacing;
+		gy = (bottom - top) / spacing;
+	}
+	inline void read_eff(double x, double y, double &c, double &gx, double &gy) const {
+		bilinear(x, y, [this](int ix, int iy) { return (double)eff[(size_t)iy * n + ix]; }, c, gx, gy);
+	}
 	void sweep(bool along_rows, double k);
 	void solve_run(int first, int step, int count, double k, double *cp, double *dp);
 	void sweep_lines(bool along_rows, double k, int first_line, int last_line);
@@ -183,34 +209,14 @@ public:
 	// many threads at once while nothing changes the field.
 	void snapshot(bool readers = true); // `readers` false: nothing will read the field this step (no bups), so nothing is made
 	inline void read_snapshot_xy(double x, double y, double &c, double &gx, double &gy) const {
-		double fx = std::clamp((x + origin) / spacing - 0.5, 0.0, n - 1.001);
-		double fy = std::clamp((y + origin) / spacing - 0.5, 0.0, n - 1.001);
-		int x0 = (int)fx, y0 = (int)fy;
-		double tx = fx - x0, ty = fy - y0;
-		const float *row = eff.data() + (size_t)y0 * n + x0;
-		double c00 = row[0], c10 = row[1], c01 = row[n], c11 = row[n + 1];
-		double top = c00 + (c10 - c00) * tx;
-		double bottom = c01 + (c11 - c01) * tx;
-		c = top + (bottom - top) * ty;
-		gx = ((c10 - c00) + ((c11 - c01) - (c10 - c00)) * ty) / spacing;
-		gy = (bottom - top) / spacing;
+		read_eff(x, y, c, gx, gy);
 		if (!puffs.empty()) {
 			puff_sum(x, y, c, gx, gy);
 		}
 	}
 	// What read_snapshot_xy gives, and the smallest sigma among the clouds that reach the point (a huge number if none).
 	inline void probe_snapshot_xy(double x, double y, double &c, double &gx, double &gy, double &sigma) const {
-		double fx = std::clamp((x + origin) / spacing - 0.5, 0.0, n - 1.001);
-		double fy = std::clamp((y + origin) / spacing - 0.5, 0.0, n - 1.001);
-		int x0 = (int)fx, y0 = (int)fy;
-		double tx = fx - x0, ty = fy - y0;
-		const float *row = eff.data() + (size_t)y0 * n + x0;
-		double c00 = row[0], c10 = row[1], c01 = row[n], c11 = row[n + 1];
-		double top = c00 + (c10 - c00) * tx;
-		double bottom = c01 + (c11 - c01) * tx;
-		c = top + (bottom - top) * ty;
-		gx = ((c10 - c00) + ((c11 - c01) - (c10 - c00)) * ty) / spacing;
-		gy = (bottom - top) / spacing;
+		read_eff(x, y, c, gx, gy);
 		sigma = 1.0e18;
 		if (!puffs.empty()) {
 			puff_probe(x, y, c, gx, gy, sigma);

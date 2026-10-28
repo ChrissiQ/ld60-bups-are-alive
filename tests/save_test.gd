@@ -57,7 +57,7 @@ func _init() -> void:
 	var bad_zstd := good.duplicate(true)
 	bad_zstd["cells"]["raw"] = int(bad_zstd["cells"]["raw"]) + 96
 	var bad_size := good.duplicate(true)
-	bad_size["cells"] = Dish._pack_bytes(PackedByteArray([1, 2, 3]))
+	bad_size["cells"] = DishCodec.pack_bytes(PackedByteArray([1, 2, 3]))
 	var cut_short := good.duplicate(true)
 	cut_short["lineage"]["z"] = str(cut_short["lineage"]["z"]).substr(0, 20)
 	for bad: Dictionary in [bad_old, bad_zstd, bad_size, cut_short]:
@@ -68,8 +68,12 @@ func _init() -> void:
 	b.rename_bup(named_id, "Zoë")
 	var d2 := Dish.new()
 	root.add_child(d2)
+	b.moved_out[named_id] = 3  # (as a pipette leaves it: the bup went to dish 3)
+	b.set_backend_setting(StartConditions.BACKEND_CPU)
 	if not d2.from_dict(JSON.parse_string(JSON.stringify(b.to_dict()))) or d2.bup_name(named_id) != "Zoë" or d2.sim.record_count() != b.sim.record_count():
 		failures.append("family records through a save (%d vs %d)" % [d2.sim.record_count(), b.sim.record_count()])
+	if d2.moved_out.get(named_id, -1) != 3 or d2.backend_setting != StartConditions.BACKEND_CPU:
+		failures.append("where the pipette's bups went, and the backend setting, through a save (%s, %s)" % [d2.moved_out, d2.backend_setting])
 	# A save of another version is no save at all.
 	if SaveGame.VERSION < 2: failures.append("the save version was not raised with the format")
 

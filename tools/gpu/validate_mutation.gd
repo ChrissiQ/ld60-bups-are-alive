@@ -22,7 +22,7 @@ func _init() -> void:
 	sc.spread_founders()
 	dish.strike(sc)
 	var field = dish.field
-	var template: PackedFloat32Array = dish.sim.export_state().slice(0, GpuSim.STRIDE)
+	var template: PackedFloat32Array = dish.sim.export_state_bytes().to_float32_array().slice(0, GpuSim.STRIDE)
 	# a parent in the middle of every range, with a little harm already (so repairs can happen), the same for every bup
 	var genome := {"speed": 20.0, "sense": 50.0, "metabolism": 1.0, "size": 4.0, "hue": 0.33, "sat": 0.7, "val": 1.0, "harm": 0.2, "mutations": 0, "mutator": parent_mutator, "reach": parent_key << 8}
 	var bups := PackedFloat32Array()

@@ -29,44 +29,14 @@ const TYPES := {
 	"EVB": "uint", "EVD": "uint", "EVN": "uint", "QIN": "uint", "OUT": "uint", "OUTK": "uint", "SPART": "float", "ERASE": "vec4", "QD": "uint", "MIRROR": "float",
 }
 
-# P (parameters, floats): 0 N, 1 n, 2 spacing, 3 origin, 4 radius, 5 delta (the step, s), 6 moves, 7 sub, 8 what a death gives back per unit of the body's mass (death_release x cost_per_mass; the dish's seed is CNT[7]),
-# 9 detection_floor, 10 noise_reference, 11 gradient_noise, 12 reference_sense, 13 reference_size, 14 mass_um, 15 unused (the upkeep scale is 79),
-# 16 base_upkeep, 17 maintenance_per_mass, 18 sense_upkeep, 19 maintenance_floor, 20 growth_rate, 21 cost_per_mass, 22 reserve_per_mass,
-# 23 uptake_per_size, 24 half_saturation, 25 ns, 26 ne, 27 ls0, 28 dls, 29 le0, 30 dle, 31 s_axis[0]
-# 32 trait_mutations, 33 harmful_mutations, 34 compensatory_mutations, 35 lethal_fraction, 36 harm_shape, 37 mean_harm, 38 mean_repair, 39 max_harm,
-# 40 hue_step, 41 sat_step, 42 val_step, 43 val_min, 44-47 gene_min, 48-51 gene_max, 52-55 gene_step, 56 add_mass_factor, 57 drag_upkeep,
-# 58 division_spread, 59 death chance per step, 60 limit (the most bups: a random share dies each step, as many as the colony is expected to exceed it by), 61 feed per step (concentration),
-# 62 capacity (slots), 63 what a death gives back at once, as a cloud, per unit of the body's mass (P[8], or 0 when husks are on: the CPU makes them from the events), 64 handover distance (cloud_handover * spacing), 65 cloud_cut, 66 bin size, 67 bins across, 68 motion_step,
-# 69 motion_structure, 70 cloud spread per step (2 D dt), 71 puff capacity, 72 entry capacity, 73 bins,
-# 74 min_length_px, 75 width (µm), 76 min_width_px, 77 max_trail_px (the drawing's constants), 78 event capacity (births, and deaths, per batch),
-# 80 mutator_rate (a new mutator allele per division), 81 mutator_down_share, 82-84 the three mutator folds (weak, strong, top),
-# 96 reach_rate (a ceiling raised per division), 97 reach_cost (growth lost per raise), 98-100 the factors of the first, second and third raise,
-# 90 donor_gain, 91 donor_cost, 92 donor_loss, 93 contact_um, 94 the chance that a touching donor and recipient transfer in a step, 95 conj_continue,
-# 85 the stationary phase (1: on; the batch's plan says), 86 starve_maintenance x cost_per_mass, 87 starve_death_rate, 88 starve_death_exponent, 89 starve_min_mass_share,
-# 101 acetate_slope, 102 acetate_threshold, 103 acetate_uptake, 104 key_potentiation_rate, 105 key_rate, 106 key_factor, 107 key_cost,
-# 79 upkeep_scale (the dish's upkeep factor: multiplies base_upkeep + maintenance_per_mass * mass),
-# 108 fine_step (a step this short or shorter follows each run and tumble), 109 tumble_base, 110 chemotaxis_gain, 111 tumble_up_factor, 112 tumble_seconds, 113 tumble_turn_mean, 114 tumble_turn_spread, 115 rotational_diffusion, 116 memory_short, 117 memory_long.
-# The entries that depend on the step's length (5, 6, 7, 59, 61, 70, and the diffusion's k in the push constant) are set for every batch.
-# BUPS (the bup records): 28 words each: 0 id_lo (uint bits), 1 x, 2 y, 3 dx, 4 dy, 5 energy, 6 mass, 7 birth_mass, 8 speed, 9 sense,
-#       10 metabolism, 11 size, 12 reach (the raised gene ceilings: two bits a gene, speed the lowest, as a float; the yield is exp(-harm) / sqrt(metabolism), worked out where it is read), 13 mutator (the mutation rate, a multiple of the usual; the building size is P[56] x size²), 14 donor (0 or 1: it carries the F factor; the drag cost is P[57] x speed²), 15 harm, 16 hue, 17 sat, 18 val, 19 mutations, 20 divisions
-#       (both whole numbers as floats), 21 id_hi (uint bits), 22 px, 23 py (where it was in the last picture; >= 1e30: none, newborns 3e38),
-#       24 fast, 25 slow (the signal it has read, short and long memory: the fine path's chemotaxis; fast < 0: none read yet), 26 noise (its receptor noise), 27 tumbling (seconds of tumble left).
-#       The same as BupSim.export_state_bytes().
-# PUFF: 8 floats each: x, y, mass, variance, cut, alive, reach^2, sigma;
-# PCNT (uint, 8): 0 slots in use, 1 slots after compaction, 2 clouds that found no slot and went onto the grid (since the load),
-#       3 list entries cut because the lists were full (since the load), 4-7 spare
-# (a bup that died of starvation or chance has -2 in its word 23 until `copy`, for `death_clouds`: a trimmed one does not give its body back)
-# CNT (uint, 16): 0 bups now, 1 survivors, 2 newborn, 3 bups next, 4 next id lo, 5 step number, 6 next id hi, 7 dish seed,
-#       8 births this batch, 9 deaths this batch, 10 births lost (no event slot, since the load), 11 deaths lost (since the load),
-#       12 what the trim at the limit expects the next step to add: the last step's growth (newborn minus the deaths that were not a trim,
-#       0 if negative) and a margin of CAP_SIGMAS standard deviations of the births and deaths, so the count stops just short of the limit,
-#       13 bups trimmed so far this step (`life` adds, `finalize` reads and clears), 14-15 spare
-# EVB / EVD (uint): EVENT_SETS sets of P[78] events each (a batch writes set `pcs.pb` of `events`): a birth is 16 words (id lo, id hi,
-#       parent lo, parent hi, step, divisions, mutations (the low 20 bits; its reach word in bits 20-29 and its F factor in bit 30); speed, sense, metabolism, size_gene, hue, sat, val, harm, mutator as float bits),
-#       a death 10 (id lo, id hi, step, divisions (the low 20 bits, with its reach word in bits 20-29 and its F factor in bit 30: they change after a birth, by conjugation); mass, x, y, the energy it gives back as float bits: 0 for a trimmed one): BupSim.apply_events' layout. EVN (uint): per set, the
-#       births and deaths of its batch (CNT[8], CNT[9] at its end; past P[78] they were lost). OUTK (uint): per event set, a copy of
-#       OUT as it was at the end of that set's batch (so a stalling read can still find a batch's samples after later frames).
-# QIN (uint, the frame's questions; floats by their bits): see Q_* in gpu/gpu_sim.gd. OUT (uint): the frame's answers, OUT_* there.
+# The layouts of P, the bup records (BUPS, BUPS2, CHILD), CNT, PCNT, the family events (EVB, EVD), QIN and OUT are in gpu/gpu_layout.gd
+# (GpuLayout): a kernel uses their names (P[P_DELTA], BUPS[b + R_MASS], CNT[CNT_BUPS], ...), which `add` declares at its top. The bup record
+# is BupSim.export_state_bytes()' layout, the events BupSim.apply_events'. The entries of P that depend on the step's length or on the
+# batch's plan (the "batch" kind there, and the diffusion's k in the push constant) are set for every batch.
+# PUFF: 8 floats each: x, y, mass, variance, cut, alive, reach^2, sigma.
+# EVB / EVD: EVENT_SETS sets of P_EVENT_CAPACITY events each (a batch writes set `pcs.pb` of `events`). EVN (uint): per set, the births
+#       and deaths of its batch (CNT_BIRTHS, CNT_DEATHS at its end; past P_EVENT_CAPACITY they were lost). OUTK (uint): per event set, a copy
+#       of OUT as it was at the end of that set's batch (so a stalling read can still find a batch's samples after later frames).
 
 const HEAD := """#version 450
 layout(local_size_x = 64) in;
@@ -82,9 +52,9 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 const FIELD_FUNCS := """
 // the field's concentration (and its gradient) at a point, bilinear in the snapshot, as the CPU's read_snapshot_xy
 void readf(float x, float y, out float c, out float gx, out float gy) {
-	int n = int(P[1]); float sp = P[2];
-	float fx = clamp((x + P[3]) / sp - 0.5, 0.0, float(n) - 1.001);
-	float fy = clamp((y + P[3]) / sp - 0.5, 0.0, float(n) - 1.001);
+	int n = int(P[P_CELLS]); float sp = P[P_SPACING];
+	float fx = clamp((x + P[P_ORIGIN]) / sp - 0.5, 0.0, float(n) - 1.001);
+	float fy = clamp((y + P[P_ORIGIN]) / sp - 0.5, 0.0, float(n) - 1.001);
 	int x0 = int(fx), y0 = int(fy);
 	float tx = fx - float(x0), ty = fy - float(y0);
 	int i0 = y0 * n + x0;
@@ -99,11 +69,11 @@ void readf(float x, float y, out float c, out float gx, out float gy) {
 
 const LOOKUP_FUNCS := """
 void lookup(float s, float eps, out float f, out float along, out float across) {
-	int ns = int(P[25]), ne = int(P[26]);
+	int ns = int(P[P_MOTION_NS]), ne = int(P[P_MOTION_NE]);
 	float below = 1.0;
-	if (s < P[31]) { below = s / P[31]; s = P[31]; }
-	float x = clamp((log(s) - P[27]) / P[28], 0.0, float(ns - 1) - 1e-4);
-	float y = clamp((log(max(eps, 1e-12)) - P[29]) / P[30], 0.0, float(ne - 1) - 1e-4);
+	if (s < P[P_MOTION_S0]) { below = s / P[P_MOTION_S0]; s = P[P_MOTION_S0]; }
+	float x = clamp((log(s) - P[P_MOTION_LS0]) / P[P_MOTION_DLS], 0.0, float(ns - 1) - 1e-4);
+	float y = clamp((log(max(eps, 1e-12)) - P[P_MOTION_LE0]) / P[P_MOTION_DLE], 0.0, float(ne - 1) - 1e-4);
 	int i = int(x), j = int(y);
 	float tx = x - float(i), ty = y - float(j);
 	int k00 = i * ne + j, k10 = k00 + ne, k01 = k00 + 1, k11 = k10 + 1;
@@ -125,10 +95,10 @@ const CLOUD_FUNCS := """
 // the clouds' concentration and gradient where a bup is, and the smallest sigma among the clouds that reach it (as the CPU's puff_probe)
 void puffs_at(float x, float y, out float c, out float gx, out float gy, out float sigma) {
 	c = 0.0; gx = 0.0; gy = 0.0; sigma = 1e18;
-	int nb = int(P[67]); float bs = P[66];
-	int bx = clamp(int((x + P[3]) / bs), 0, nb - 1), by = clamp(int((y + P[3]) / bs), 0, nb - 1);
+	int nb = int(P[P_BINS_ACROSS]); float bs = P[P_BIN_SIZE];
+	int bx = clamp(int((x + P[P_ORIGIN]) / bs), 0, nb - 1), by = clamp(int((y + P[P_ORIGIN]) / bs), 0, nb - 1);
 	uint b = uint(by * nb + bx);
-	uint e0 = BINS[b], e1 = min(e0 + BINC[b], uint(P[72]));
+	uint e0 = BINS[b], e1 = min(e0 + BINC[b], uint(P[P_ENTRY_CAPACITY]));
 	for (uint e = e0; e < e1; e++) {
 		vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];  // x, y, mass, variance | reach^2, sigma, cloud index, 0
 		float dx = x - r0.x, dy = y - r0.y, r2 = fma(dy, dy, dx * dx);  // (fma written out: the compiler contracted the old gathering code this way, and exp() magnifies a last-bit change in r2)
@@ -143,12 +113,12 @@ void puffs_at(float x, float y, out float c, out float gx, out float gy, out flo
 """
 
 const K_CLEAR := """
-void main() { uint i = gl_GlobalInvocationID.x; if (i >= uint(P[1] * P[1])) return; DLO[i] = 0u; DHI[i] = 0u; RLO[i] = 0u; RHI[i] = 0u; ALO[i] = 0u; AHI[i] = 0u; }
+void main() { uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return; DLO[i] = 0u; DHI[i] = 0u; RLO[i] = 0u; RHI[i] = 0u; ALO[i] = 0u; AHI[i] = 0u; }
 """
 
 const K_SNAPSHOT := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[1] * P[1])) return;
+	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
 	int o = OWNER[i];
 	EFF[i] = o >= 0 ? CONC[o] : 0.0;
 }
@@ -156,31 +126,31 @@ void main() {
 
 const K_SWIM := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
-	uint b = i * 28u;
-	float x = BUPS[b + 1], y = BUPS[b + 2], dx = BUPS[b + 3], dy = BUPS[b + 4];
-	float energy = BUPS[b + 5], mass = BUPS[b + 6];
-	float speed = BUPS[b + 8], sense = BUPS[b + 9], metab = BUPS[b + 10], drag = P[57] * BUPS[b + 8] * BUPS[b + 8], donor = BUPS[b + 14];  // (the drag cost from the speed gene; word 14 is the donor flag)
-	float delta = P[5];
-	uint s = hash(hash(CNT[7] ^ (CNT[5] * 0x85EBCA6BU) ^ 12345U) + i * 0x9E3779B9U);  // (this dish's stream, this step, this bup)
+	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+	uint b = i * RECORD_WORDS;
+	float x = BUPS[b + R_X], y = BUPS[b + R_Y], dx = BUPS[b + R_DX], dy = BUPS[b + R_DY];
+	float energy = BUPS[b + R_ENERGY], mass = BUPS[b + R_MASS];
+	float speed = BUPS[b + R_SPEED], sense = BUPS[b + R_SENSE], metab = BUPS[b + R_METABOLISM], drag = P[P_DRAG_UPKEEP] * BUPS[b + R_SPEED] * BUPS[b + R_SPEED], donor = BUPS[b + R_DONOR];  // (the drag cost from the speed gene)
+	float delta = P[P_DELTA];
+	uint s = hash(hash(CNT[CNT_SEED] ^ (CNT[CNT_STEP] * 0x85EBCA6BU) ^ 12345U) + i * 0x9E3779B9U);  // (this dish's stream, this step, this bup)
 	float size = sqrt(mass);
-	float srange = sense * sqrt(size / P[13]);
-	float sense_k = P[11] * (P[12] / srange);
-	float radius = P[4];
-	float limit = radius - 0.5 * mass * P[14];
+	float srange = sense * sqrt(size / P[P_REFERENCE_SIZE]);
+	float sense_k = P[P_GRADIENT_NOISE] * (P[P_REFERENCE_SENSE] / srange);
+	float radius = P[P_RADIUS];
+	float limit = radius - 0.5 * mass * P[P_MASS_UM];
 	float nw2 = limit > 0.0 ? limit * limit : -1.0;
 	float hx = 0.0, hy = 0.0, hl = 0.0; bool pending = false;
-	float floor_c = P[9], noise_ref = P[10];
+	float floor_c = P[P_DETECTION_FLOOR], noise_ref = P[P_NOISE_REFERENCE];
 	// what it reads at the start, and from the clouds that reach it how finely to cut its step (as the CPU's moves_for_structure)
 	float c0, gx0, gy0; readf(x, y, c0, gx0, gy0);
 	float pc, pgx, pgy, sig; puffs_at(x, y, pc, pgx, pgy, sig);
 	c0 += pc; gx0 += pgx; gy0 += pgy;
 	int moves = 0;
-	bool fine = P[6] > 0.5 && delta <= P[108];  // (a step as short as the fine step: it follows the individual run and tumble, as the CPU's swim_by_runs)
-	if (P[6] > 0.5 && !fine) {
-		float structure = min(P[2], 2.0 * sig);
-		float sc = max(1.0, structure / max(P[69], 1.0));
-		moves = max(1, int(ceil(delta / (P[68] * sc * sc))));
+	bool fine = P[P_MOVES] > 0.5 && delta <= P[P_FINE_STEP];  // (a step as short as the fine step: it follows the individual run and tumble, as the CPU's swim_by_runs)
+	if (P[P_MOVES] > 0.5 && !fine) {
+		float structure = min(P[P_SPACING], 2.0 * sig);
+		float sc = max(1.0, structure / max(P[P_MOTION_STRUCTURE], 1.0));
+		moves = max(1, int(ceil(delta / (P[P_MOTION_STEP] * sc * sc))));
 	}
 	float sub = delta / float(max(moves, 1));
 	for (int m = 0; m < moves; m++) {
@@ -232,26 +202,26 @@ void main() {
 	if (fine) {
 		// It reads the nutrient where it is (on a log scale) and compares it with its own recent past, and tumbles less often while it improves; while
 		// it tumbles it does not swim; a run bends a little by rotational diffusion.
-		float memory = exp(-delta / P[116]);
-		float noise = BUPS[b + 26] * memory + sqrt(1.0 - memory * memory) * gauss(s);
+		float memory = exp(-delta / P[P_MEMORY_SHORT]);
+		float noise = BUPS[b + R_NOISE] * memory + sqrt(1.0 - memory * memory) * gauss(s);
 		float signal = log(1.0 + c0 / floor_c);
-		float fast = BUPS[b + 24], slow = BUPS[b + 25];
+		float fast = BUPS[b + R_FAST], slow = BUPS[b + R_SLOW];
 		if (fast < 0.0) { fast = signal; slow = signal; }  // (none read yet)
 		fast += (signal - fast) * (1.0 - memory);
-		slow += (signal - slow) * (1.0 - exp(-delta / P[117]));
+		slow += (signal - slow) * (1.0 - exp(-delta / P[P_MEMORY_LONG]));
 		float err_now = min(sense_k * sqrt(noise_ref / max(c0, 1e-5)), 5.0);
-		float rate = P[109] * clamp(1.0 - P[110] * (fast - slow + err_now * noise), P[111], 1.0);
-		float tumbling = BUPS[b + 27];
+		float rate = P[P_TUMBLE_BASE] * clamp(1.0 - P[P_CHEMOTAXIS_GAIN] * (fast - slow + err_now * noise), P[P_TUMBLE_UP_FACTOR], 1.0);
+		float tumbling = BUPS[b + R_TUMBLING];
 		if (tumbling > 0.0) {
 			tumbling -= delta;
 		} else {
 			float turn;
 			if (u01(s) < rate * delta) {
-				tumbling = P[112];
-				turn = gauss(s) * P[114] + P[113];
+				tumbling = P[P_TUMBLE_SECONDS];
+				turn = gauss(s) * P[P_TUMBLE_TURN_SPREAD] + P[P_TUMBLE_TURN_MEAN];
 				if (u01(s) >= 0.5) turn = -turn;
 			} else {
-				turn = gauss(s) * P[115] * sqrt(delta);
+				turn = gauss(s) * P[P_ROTATIONAL_DIFFUSION] * sqrt(delta);
 			}
 			float cs = cos(turn), sn = sin(turn);
 			float ndx = dx * cs - dy * sn, ndy = dx * sn + dy * cs;
@@ -269,38 +239,38 @@ void main() {
 			if (al < 0.1) { float sg = u01(s) < 0.5 ? 1.0 : -1.0; ax = -ny * sg; ay = nx * sg; al = 1.0; }
 			dx = ax / al; dy = ay / al;
 		}
-		BUPS[b + 24] = fast; BUPS[b + 25] = slow; BUPS[b + 26] = noise; BUPS[b + 27] = tumbling;
+		BUPS[b + R_FAST] = fast; BUPS[b + R_SLOW] = slow; BUPS[b + R_NOISE] = noise; BUPS[b + R_TUMBLING] = tumbling;
 	} else {
-		BUPS[b + 24] = -1.0;  // (the signal memory isn't kept up while drifting)
+		BUPS[b + R_FAST] = -1.0;  // (the signal memory isn't kept up while drifting)
 	}
-	BUPS[b + 1] = x; BUPS[b + 2] = y; BUPS[b + 3] = dx; BUPS[b + 4] = dy;
+	BUPS[b + R_X] = x; BUPS[b + R_Y] = y; BUPS[b + R_DX] = dx; BUPS[b + R_DY] = dy;
 	// then it pays its upkeep and grows (with the stationary phase on, a bup at the growth floor pays only the starving maintenance, from the
 	// reserve and then from its body)
-	if (P[85] > 0.5 && energy <= P[19]) {
-		energy -= P[86] * mass * delta;
-		if (energy < 0.0) { mass += energy / P[21]; energy = 0.0; }
-		BUPS[b + 5] = energy; BUPS[b + 6] = mass;
+	if (P[P_STATIONARY] > 0.5 && energy <= P[P_MAINTENANCE_FLOOR]) {
+		energy -= P[P_STARVE_COST] * mass * delta;
+		if (energy < 0.0) { mass += energy / P[P_COST_PER_MASS]; energy = 0.0; }
+		BUPS[b + R_ENERGY] = energy; BUPS[b + R_MASS] = mass;
 		return;
 	}
-	float upkeep = P[79] * (P[16] + P[17] * mass) + drag * size + P[18] * sense;
+	float upkeep = P[P_UPKEEP_SCALE] * (P[P_BASE_UPKEEP] + P[P_MAINTENANCE_PER_MASS] * mass) + drag * size + P[P_SENSE_UPKEEP] * sense;
 	energy -= upkeep * delta;
-	if (energy > P[19]) {
-		int rl = int(BUPS[b + 12] + 0.5);
+	if (energy > P[P_MAINTENANCE_FLOOR]) {
+		int rl = int(BUPS[b + R_REACH] + 0.5);
 		float raised = float((rl & 3) + ((rl >> 2) & 3) + ((rl >> 4) & 3) + ((rl >> 6) & 3));
-		float grow = min(P[20] * metab * mass * delta * (donor > 0.5 ? 1.0 - P[91] : 1.0) * max(0.2, 1.0 - P[97] * raised) * (((rl >> 8) & 3) == 2 ? 1.0 - P[107] : 1.0), (energy - P[19]) / P[21]);  // (a donor, and a bup with raised ceilings, give up a share of their growth)
-		energy -= grow * P[21];
+		float grow = min(P[P_GROWTH_RATE] * metab * mass * delta * (donor > 0.5 ? 1.0 - P[P_DONOR_COST] : 1.0) * max(0.2, 1.0 - P[P_REACH_COST] * raised) * (((rl >> 8) & 3) == 2 ? 1.0 - P[P_KEY_COST] : 1.0), (energy - P[P_MAINTENANCE_FLOOR]) / P[P_COST_PER_MASS]);  // (a donor, and a bup with raised ceilings, give up a share of their growth)
+		energy -= grow * P[P_COST_PER_MASS];
 		mass += grow;
 	}
-	BUPS[b + 5] = energy; BUPS[b + 6] = mass;
+	BUPS[b + R_ENERGY] = energy; BUPS[b + R_MASS] = mass;
 }
 """
 
 const K_DEMAND := """
 // the grid's concentration a bup at the point reads (bilinear in the snapshot), and how much of it is its own cell's (`own`)
 void readc(float x, float y, int own, out float c, out float own_share) {
-	int n = int(P[1]); float sp = P[2];
-	float fx = clamp((x + P[3]) / sp - 0.5, 0.0, float(n) - 1.001);
-	float fy = clamp((y + P[3]) / sp - 0.5, 0.0, float(n) - 1.001);
+	int n = int(P[P_CELLS]); float sp = P[P_SPACING];
+	float fx = clamp((x + P[P_ORIGIN]) / sp - 0.5, 0.0, float(n) - 1.001);
+	float fy = clamp((y + P[P_ORIGIN]) / sp - 0.5, 0.0, float(n) - 1.001);
 	int x0 = int(fx), y0 = int(fy);
 	float tx = fx - float(x0), ty = fy - float(y0);
 	int i0 = y0 * n + x0;
@@ -333,23 +303,23 @@ void add_puff_demand(uint k, float mass) { // 2^20 to the unit
 	}
 }
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
-	uint b = i * 28u;
-	float x = BUPS[b + 1], y = BUPS[b + 2], energy = BUPS[b + 5], mass = BUPS[b + 6], metab = BUPS[b + 10], yld = exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]);  // (word 12 holds the raised ceilings now: the yield comes from harm and metabolism)
-	float max_e = P[22] * mass;
+	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+	uint b = i * RECORD_WORDS;
+	float x = BUPS[b + R_X], y = BUPS[b + R_Y], energy = BUPS[b + R_ENERGY], mass = BUPS[b + R_MASS], metab = BUPS[b + R_METABOLISM], yld = exp(-BUPS[b + R_HARM]) / sqrt(BUPS[b + R_METABOLISM]);  // (the yield, from harm and metabolism)
+	float max_e = P[P_RESERVE_PER_MASS] * mass;
 	WANT[i] = -1.0; WANTC[i] = 0.0; CELLOF[i] = -1;
 	if (energy < max_e) {
-		int n = int(P[1]);
-		int ix = clamp(int((x + P[3]) / P[2]), 0, n - 1), iy = clamp(int((y + P[3]) / P[2]), 0, n - 1);
+		int n = int(P[P_CELLS]);
+		int ix = clamp(int((x + P[P_ORIGIN]) / P[P_SPACING]), 0, n - 1), iy = clamp(int((y + P[P_ORIGIN]) / P[P_SPACING]), 0, n - 1);
 		int o = OWNER[iy * n + ix];
 		float cg = 0.0, own_share = 0.0;
 		if (o >= 0) readc(x, y, o, cg, own_share);
 		float cc, pgx, pgy, psig; puffs_at(x, y, cc, pgx, pgy, psig);
 		float ct = cg + cc;
 		if (ct > 0.0) {
-			float rate = P[23] * sqrt(mass) * metab;
+			float rate = P[P_UPTAKE_PER_SIZE] * sqrt(mass) * metab;
 			float room = max(max_e - energy, 0.0) / yld;
-			float w = min(rate * ct / (P[24] + ct) * P[5], room);
+			float w = min(rate * ct / (P[P_HALF_SATURATION] + ct) * P[P_DELTA], room);
 			if (w > 0.0) {
 				float wg = cc > 0.0 ? w * cg / ct : w;
 				float wc = w - wg;
@@ -361,10 +331,10 @@ void main() {
 				}
 				if (wc > 0.0 && cc > 0.0) {
 					WANTC[i] = wc;
-					int nb = int(P[67]); float bs = P[66];
-					int bx = clamp(int((x + P[3]) / bs), 0, nb - 1), by = clamp(int((y + P[3]) / bs), 0, nb - 1);
+					int nb = int(P[P_BINS_ACROSS]); float bs = P[P_BIN_SIZE];
+					int bx = clamp(int((x + P[P_ORIGIN]) / bs), 0, nb - 1), by = clamp(int((y + P[P_ORIGIN]) / bs), 0, nb - 1);
 					uint bin = uint(by * nb + bx);
-					uint e0 = BINS[bin], e1 = min(e0 + BINC[bin], uint(P[72]));
+					uint e0 = BINS[bin], e1 = min(e0 + BINC[bin], uint(P[P_ENTRY_CAPACITY]));
 					for (uint e = e0; e < e1; e++) {
 						vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];
 						float ddx = x - r0.x, ddy = y - r0.y, r2 = fma(ddy, ddy, ddx * ddx);
@@ -387,7 +357,7 @@ float neglog1m(float x) { // -ln(1 - x)
 	return -log(1.0 - x);
 }
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[1] * P[1])) return;
+	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
 	if (OWNER[i] != int(i)) return;
 	float d = float(DHI[i]) * 4.0 + float(DLO[i]) * 9.313225746154785e-10; // what the bups there wanted
 	SCALE[i] = 0.0;
@@ -396,8 +366,8 @@ void main() {
 	float rho = (float(RHI[i]) * 4.0 + float(RLO[i]) * 9.313225746154785e-10) / d; // the concentration they read, as a share of this cell's
 	float al = max((float(AHI[i]) * 4.0 + float(ALO[i]) * 9.313225746154785e-10) / d, 0.02); // and how much of what they read is this cell's
 	float ct = max(rho * c0, 1e-12);
-	float area = P[2] * P[2];
-	float k = P[24];
+	float area = P[P_SPACING] * P[P_SPACING];
+	float k = P[P_HALF_SATURATION];
 	// What they take as they run the cell down while their uptake follows what they read, ct - al u (u: what has been taken, as a
 	// concentration): u + (k / al) (-ln(1 - al u / ct)) = d (k + ct) / (area ct), found by bisection.
 	float y = d * (k + ct) / (area * ct);
@@ -428,25 +398,25 @@ void add_fixed2(uint cell, float w, int which) { // 2^30 to the unit, in 64 bits
 	}
 }
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
-	uint b = i * 28u;
+	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+	uint b = i * RECORD_WORDS;
 	float wg = WANT[i], wc = WANTC[i];
-	float mass = BUPS[b + 6], yld = exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]);
-	float max_e = P[22] * mass;
-	float energy = BUPS[b + 5];
-	float x = BUPS[b + 1], y = BUPS[b + 2];
-	int n = int(P[1]);
-	int ix = clamp(int((x + P[3]) / P[2]), 0, n - 1), iy = clamp(int((y + P[3]) / P[2]), 0, n - 1);
+	float mass = BUPS[b + R_MASS], yld = exp(-BUPS[b + R_HARM]) / sqrt(BUPS[b + R_METABOLISM]);
+	float max_e = P[P_RESERVE_PER_MASS] * mass;
+	float energy = BUPS[b + R_ENERGY];
+	float x = BUPS[b + R_X], y = BUPS[b + R_Y];
+	int n = int(P[P_CELLS]);
+	int ix = clamp(int((x + P[P_ORIGIN]) / P[P_SPACING]), 0, n - 1), iy = clamp(int((y + P[P_ORIGIN]) / P[P_SPACING]), 0, n - 1);
 	int o = OWNER[iy * n + ix];
 	WANT2[i] = 0.0;
 	if (wg > 0.0 || wc > 0.0) {
 		float got = wg > 0.0 ? wg * SCALE[CELLOF[i]] : 0.0;
 		if (wc > 0.0) {
 			float cc, pgx, pgy, psig; puffs_at(x, y, cc, pgx, pgy, psig);
-			int nb = int(P[67]); float bs = P[66];
-			int bx = clamp(int((x + P[3]) / bs), 0, nb - 1), by = clamp(int((y + P[3]) / bs), 0, nb - 1);
+			int nb = int(P[P_BINS_ACROSS]); float bs = P[P_BIN_SIZE];
+			int bx = clamp(int((x + P[P_ORIGIN]) / bs), 0, nb - 1), by = clamp(int((y + P[P_ORIGIN]) / bs), 0, nb - 1);
 			uint bin = uint(by * nb + bx);
-			uint e0 = BINS[bin], e1 = min(e0 + BINC[bin], uint(P[72]));
+			uint e0 = BINS[bin], e1 = min(e0 + BINC[bin], uint(P[P_ENTRY_CAPACITY]));
 			for (uint e = e0; e < e1; e++) {
 				vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];
 				float ddx = x - r0.x, ddy = y - r0.y, r2 = fma(ddy, ddy, ddx * ddx);
@@ -459,8 +429,8 @@ void main() {
 		}
 		float let_go = 0.0;
 		if (got > 0.0 && mass > 0.0 && o >= 0) {
-			float per_hour = got * yld / (P[21] * mass * P[5]) * 3600.0;
-			let_go = got * min(0.5, P[101] * max(0.0, per_hour - P[102]));
+			float per_hour = got * yld / (P[P_COST_PER_MASS] * mass * P[P_DELTA]) * 3600.0;
+			let_go = got * min(0.5, P[P_ACETATE_SLOPE] * max(0.0, per_hour - P[P_ACETATE_THRESHOLD]));
 			if (let_go > 0.0) add_fixed2(uint(o), let_go, 1);
 		}
 		energy = min(energy + got * yld, max_e);
@@ -469,14 +439,14 @@ void main() {
 	float room = max_e - energy;
 	if (o >= 0 && room > 0.0 && CONC2[o] > 0.0) {
 		float ca = CONC2[o], cg = max(CONC[o], 0.0);
-		float rate = P[103] * (((int(BUPS[b + 12] + 0.5) >> 8) & 3) == 2 ? P[106] : 1.0) * P[23] * sqrt(mass) * BUPS[b + 10];
-		float w2 = min(rate * ca / (P[24] + ca) * (P[24] / (P[24] + cg)) * P[5], room / yld);
+		float rate = P[P_ACETATE_UPTAKE] * (((int(BUPS[b + R_REACH] + 0.5) >> 8) & 3) == 2 ? P[P_KEY_FACTOR] : 1.0) * P[P_UPTAKE_PER_SIZE] * sqrt(mass) * BUPS[b + R_METABOLISM];
+		float w2 = min(rate * ca / (P[P_HALF_SATURATION] + ca) * (P[P_HALF_SATURATION] / (P[P_HALF_SATURATION] + cg)) * P[P_DELTA], room / yld);
 		if (w2 > 0.0) {
 			WANT2[i] = w2; CELL2[i] = o;
 			add_fixed2(uint(o), w2, 0);
 		}
 	}
-	BUPS[b + 5] = energy;
+	BUPS[b + R_ENERGY] = energy;
 }
 """
 
@@ -484,10 +454,10 @@ void main() {
 ## then what they let go is added (it can be eaten from the next step).
 const K_AC_CELLS := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[1] * P[1])) return;
+	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
 	float d = float(AWHI[i]) * 4.0 + float(AWLO[i]) * 9.313225746154785e-10;
 	float dep = float(ADHI[i]) * 4.0 + float(ADLO[i]) * 9.313225746154785e-10;
-	float area = P[2] * P[2];
+	float area = P[P_SPACING] * P[P_SPACING];
 	float c = CONC2[i];
 	float s = 0.0;
 	if (d > 0.0 && c > 0.0) {
@@ -502,11 +472,11 @@ void main() {
 
 const K_AC_APPLY := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
+	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
 	float w = WANT2[i];
 	if (w <= 0.0) return;
-	uint b = i * 28u;
-	BUPS[b + 5] = min(BUPS[b + 5] + w * SCALE2[CELL2[i]] * exp(-BUPS[b + 15]) / sqrt(BUPS[b + 10]), P[22] * BUPS[b + 6]);
+	uint b = i * RECORD_WORDS;
+	BUPS[b + R_ENERGY] = min(BUPS[b + R_ENERGY] + w * SCALE2[CELL2[i]] * exp(-BUPS[b + R_HARM]) / sqrt(BUPS[b + R_METABOLISM]), P[P_RESERVE_PER_MASS] * BUPS[b + R_MASS]);
 }
 """
 
@@ -516,7 +486,7 @@ void main() {
 const K_DIFFUSE := """
 void main() {
 	uint i = gl_GlobalInvocationID.x;
-	int n = int(P[1]);
+	int n = int(P[P_CELLS]);
 	if (i >= uint(n * n)) return;
 	if (INSIDE[i] == 0) { DST[i] = SRC[i]; return; }
 	int x = int(i) % n, y = int(i) / n;
@@ -531,15 +501,15 @@ void main() {
 
 const K_FEED := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[1] * P[1])) return;
-	CONC[i] += P[61] * WGT[i];
+	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
+	CONC[i] += P[P_FEED] * WGT[i];
 }
 """
 
 ## Division, death and mutation (the CPU's `step` after uptake and `mutate`), per bup. A bup dies of an empty reserve or by chance; one
 ## that has grown enough divides: the daughter, if not lethally mutated, is written into CHILD at the parent's index; SURV and KID mark
 ## who is kept and who has a child. A population that would pass the limit loses a random share each step (the CPU replaces a random bup at
-## each birth: the same). The share is what the step's growth is expected to carry over the limit: the last step's growth (CNT[12])
+## each birth: the same). The share is what the step's growth is expected to carry over the limit: the last step's growth (CNT_GROWTH)
 ## added to the count now. Trimming only what is already over leaves the count a step's births above the limit.
 const K_LIFE := """
 float gamma_big(float shape, inout uint s) {
@@ -564,101 +534,101 @@ int poisson(float mean, inout uint s) {
 	return count;
 }
 void drift(inout float hue, inout float sat, inout float val, inout uint s) {  // (the colour is a neutral marker: every counted mutation moves it, as the CPU's note_mutation)
-	hue = fract(hue + gauss(s) * P[40]); sat = clamp(sat + gauss(s) * P[41], 0.0, 1.0); val = clamp(val + gauss(s) * P[42], P[43], 1.0);
+	hue = fract(hue + gauss(s) * P[P_HUE_STEP]); sat = clamp(sat + gauss(s) * P[P_SAT_STEP], 0.0, 1.0); val = clamp(val + gauss(s) * P[P_VAL_STEP], P[P_VAL_MIN], 1.0);
 }
 void main() {
 	uint i = gl_GlobalInvocationID.x;
-	if (i >= uint(P[62])) return;
-	uint n_now = CNT[0];
+	if (i >= uint(P[P_CAPACITY])) return;
+	uint n_now = CNT[CNT_BUPS];
 	SURV[i] = 0u; KID[i] = 0u;
 	if (i >= n_now) return;
-	uint b = i * 28u;
-	uint s = hash(hash(CNT[7] ^ (CNT[5] * 0x85EBCA6BU) ^ 777U) + i * 0x9E3779B9U);  // (this dish's stream, this step, this bup)
-	float energy = BUPS[b + 5], mass = BUPS[b + 6], birth = BUPS[b + 7], add_mass = P[56] * BUPS[b + 11] * BUPS[b + 11], rate = BUPS[b + 13], donor = BUPS[b + 14];
-	int reach = int(BUPS[b + 12] + 0.5);  // (the building size from the size gene; the mutation rate of this bup, which its daughter is made at)
-	float trim = max(0.0, float(n_now) + float(CNT[12]) - P[60]) / float(n_now);
+	uint b = i * RECORD_WORDS;
+	uint s = hash(hash(CNT[CNT_SEED] ^ (CNT[CNT_STEP] * 0x85EBCA6BU) ^ 777U) + i * 0x9E3779B9U);  // (this dish's stream, this step, this bup)
+	float energy = BUPS[b + R_ENERGY], mass = BUPS[b + R_MASS], birth = BUPS[b + R_BIRTH_MASS], add_mass = P[P_ADD_MASS_FACTOR] * BUPS[b + R_SIZE] * BUPS[b + R_SIZE], rate = BUPS[b + R_MUTATOR], donor = BUPS[b + R_DONOR];
+	int reach = int(BUPS[b + R_REACH] + 0.5);  // (the building size from the size gene; the mutation rate of this bup, which its daughter is made at)
+	float trim = max(0.0, float(n_now) + float(CNT[CNT_GROWTH]) - P[P_LIMIT]) / float(n_now);
 	bool natural;
-	if (P[85] > 0.5) {  // the stationary phase: a starving bup (at the growth floor) dies at a constant rate that grows with its metabolism, or when it has shrunk to a share of its birth mass
-		natural = u01(s) < P[59];
-		if (!natural && energy <= P[19]) natural = mass < P[89] * birth || u01(s) < 1.0 - exp(-P[87] * exp(P[88] * BUPS[b + 10]) * P[5]);
+	if (P[P_STATIONARY] > 0.5) {  // the stationary phase: a starving bup (at the growth floor) dies at a constant rate that grows with its metabolism, or when it has shrunk to a share of its birth mass
+		natural = u01(s) < P[P_DEATH_CHANCE];
+		if (!natural && energy <= P[P_MAINTENANCE_FLOOR]) natural = mass < P[P_STARVE_MIN_MASS_SHARE] * birth || u01(s) < 1.0 - exp(-P[P_STARVE_DEATH_RATE] * exp(P[P_STARVE_DEATH_EXPONENT] * BUPS[b + R_METABOLISM]) * P[P_DELTA]);
 	} else {
-		natural = energy <= 0.0 || u01(s) < P[59];
+		natural = energy <= 0.0 || u01(s) < P[P_DEATH_CHANCE];
 	}
 	bool trimmed = !natural && u01(s) < trim;  // (the same draws as one chain of `||`)
-	if (trimmed) atomicAdd(CNT[13], 1u);  // (counted, so that the growth the next trim expects leaves out the trim's own deaths)
-	if (natural) BUPS[b + 23] = -2.0;  // (a death by starvation or chance, not a trim: `death_clouds` gives its body back; the record is gone after `copy`)
+	if (trimmed) atomicAdd(CNT[CNT_TRIMMED], 1u);  // (counted, so that the growth the next trim expects leaves out the trim's own deaths)
+	if (natural) BUPS[b + R_PY] = -2.0;  // (a death by starvation or chance, not a trim: `death_clouds` gives its body back; the record is gone after `copy`)
 	if (natural || trimmed) return;
 	SURV[i] = 1u;
 	if (mass >= birth + add_mass) {
-		float keep = clamp(0.5 + P[58] * gauss(s), 0.35, 0.65);
+		float keep = clamp(0.5 + P[P_DIVISION_SPREAD] * gauss(s), 0.35, 0.65);
 		float dm = mass * (1.0 - keep), de = energy * (1.0 - keep);
 		mass *= keep; energy *= keep;
-		BUPS[b + 6] = mass; BUPS[b + 5] = energy; BUPS[b + 7] = mass;
-		BUPS[b + 20] += 1.0;  // (the cell left in the parent's place is a product of this division, whether or not the daughter lives)
+		BUPS[b + R_MASS] = mass; BUPS[b + R_ENERGY] = energy; BUPS[b + R_BIRTH_MASS] = mass;
+		BUPS[b + R_DIVISIONS] += 1.0;  // (the cell left in the parent's place is a product of this division, whether or not the daughter lives)
 		// the daughter's genome: the parent's, mutated
-		float g[4] = float[4](BUPS[b + 8], BUPS[b + 9], BUPS[b + 10], BUPS[b + 11]);
-		float hue = BUPS[b + 16], sat = BUPS[b + 17], val = BUPS[b + 18], harm = BUPS[b + 15], muts = BUPS[b + 19];
+		float g[4] = float[4](BUPS[b + R_SPEED], BUPS[b + R_SENSE], BUPS[b + R_METABOLISM], BUPS[b + R_SIZE]);
+		float hue = BUPS[b + R_HUE], sat = BUPS[b + R_SAT], val = BUPS[b + R_VAL], harm = BUPS[b + R_HARM], muts = BUPS[b + R_MUTATIONS];
 		bool lethal = false;
-		int traits = poisson(P[32] * rate, s);
+		int traits = poisson(P[P_TRAIT_MUTATIONS] * rate, s);
 		for (int t = 0; t < traits; t++) {
 			int gene = int(u01(s) * 4.0) % 4;
 			int lv = (reach >> (2 * gene)) & 3;
-			float changed = clamp(g[gene] + gauss(s) * P[52 + gene], P[44 + gene], P[48 + gene] * (lv == 0 ? 1.0 : (lv == 1 ? P[98] : (lv == 2 ? P[99] : P[100]))));
+			float changed = clamp(g[gene] + gauss(s) * P[P_GENE_STEP + gene], P[P_GENE_MIN + gene], P[P_GENE_MAX + gene] * (lv == 0 ? 1.0 : (lv == 1 ? P[P_REACH_FACTOR_1] : (lv == 2 ? P[P_REACH_FACTOR_2] : P[P_REACH_FACTOR_3]))));
 			if (changed != g[gene]) {
 				g[gene] = changed; muts += 1.0;
 				drift(hue, sat, val, s);
 			}
 		}
-		int harmful = poisson(P[33] * rate, s);
+		int harmful = poisson(P[P_HARMFUL_MUTATIONS] * rate, s);
 		for (int t = 0; t < harmful; t++) {
-			if (u01(s) < P[35]) lethal = true;
-			else harm = min(harm + gamma_(P[36], s) * P[37] / P[36], P[39]);
+			if (u01(s) < P[P_LETHAL_FRACTION]) lethal = true;
+			else harm = min(harm + gamma_(P[P_HARM_SHAPE], s) * P[P_MEAN_HARM] / P[P_HARM_SHAPE], P[P_MAX_HARM]);
 			muts += 1.0;
 			drift(hue, sat, val, s);
 		}
 		if (harm > 0.0) {
-			int repairs = poisson(P[34] * rate, s);
+			int repairs = poisson(P[P_COMPENSATORY_MUTATIONS] * rate, s);
 			for (int t = 0; t < repairs; t++) {
-				harm = max(harm + log(max(u01(s), 1e-12)) * P[38], 0.0);
+				harm = max(harm + log(max(u01(s), 1e-12)) * P[P_MEAN_REPAIR], 0.0);
 				muts += 1.0;
 				drift(hue, sat, val, s);
 			}
 		}
 		// The mutation rate itself changes in jumps (see the CPU's mutate): a new mutator allele sets it to one of three folds, an antimutator halves it.
 		float mutator = rate, allele = u01(s);
-		if (allele < P[80]) {
+		if (allele < P[P_MUTATOR_RATE]) {
 			float pick = u01(s);
-			mutator = max(mutator, pick < 0.2 ? P[82] : (pick < 0.8 ? P[83] : P[84]));
+			mutator = max(mutator, pick < 0.2 ? P[P_MUTATOR_FOLD_WEAK] : (pick < 0.8 ? P[P_MUTATOR_FOLD_STRONG] : P[P_MUTATOR_FOLD_TOP]));
 			muts += 1.0; drift(hue, sat, val, s);
-		} else if (mutator > 1.0 && allele < P[80] * (1.0 + P[81])) {
+		} else if (mutator > 1.0 && allele < P[P_MUTATOR_RATE] * (1.0 + P[P_MUTATOR_DOWN_SHARE])) {
 			mutator = max(1.0, mutator * 0.5);
 			muts += 1.0; drift(hue, sat, val, s);
 		}
 		float flip = u01(s);  // (the F factor integrates or leaves, rarely)
-		float child_donor = donor > 0.5 ? (flip < P[92] ? 0.0 : 1.0) : (flip < P[90] ? 1.0 : 0.0);
+		float child_donor = donor > 0.5 ? (flip < P[P_DONOR_LOSS] ? 0.0 : 1.0) : (flip < P[P_DONOR_GAIN] ? 1.0 : 0.0);
 		int child_reach = reach;  // (a rare mutation raises one gene's ceiling, up to three times)
 		int key_now = (child_reach >> 8) & 3;  // (the acetate key: potentiated at a rate, then made by a potentiated line at another)
-		if (key_now == 0 ? u01(s) < P[104] : (key_now == 1 && u01(s) < P[105])) { child_reach += 256; muts += 1.0; drift(hue, sat, val, s); }
-		if (u01(s) < P[96]) {
+		if (key_now == 0 ? u01(s) < P[P_KEY_POTENTIATION_RATE] : (key_now == 1 && u01(s) < P[P_KEY_RATE])) { child_reach += 256; muts += 1.0; drift(hue, sat, val, s); }
+		if (u01(s) < P[P_REACH_RATE]) {
 			int gg = int(u01(s) * 4.0) % 4;
 			if (((child_reach >> (2 * gg)) & 3) < 3) { child_reach += 1 << (2 * gg); muts += 1.0; drift(hue, sat, val, s); }
 		}
 		if (!lethal) {
 			KID[i] = 1u;
-			float a = u01(s) * 6.2831853, off = 0.5 * mass * P[14];
-			uint c = i * 28u;
-			CHILD[c + 0] = 0.0;  // (the id, words 0 and 21, is written by `compact` as integers)
-			CHILD[c + 1] = BUPS[b + 1] + cos(a) * off; CHILD[c + 2] = BUPS[b + 2] + sin(a) * off;
-			CHILD[c + 3] = 1.0; CHILD[c + 4] = 0.0;
-			CHILD[c + 5] = min(de, P[22] * dm); CHILD[c + 6] = dm; CHILD[c + 7] = dm;
-			CHILD[c + 8] = g[0]; CHILD[c + 9] = g[1]; CHILD[c + 10] = g[2]; CHILD[c + 11] = g[3];
-			CHILD[c + 12] = float(child_reach);
-			CHILD[c + 13] = mutator;
-			CHILD[c + 14] = child_donor;
-			CHILD[c + 15] = harm;
-			CHILD[c + 16] = hue; CHILD[c + 17] = sat; CHILD[c + 18] = val; CHILD[c + 19] = muts; CHILD[c + 20] = BUPS[b + 20];
-			CHILD[c + 21] = 0.0; CHILD[c + 22] = 3e38; CHILD[c + 23] = 3e38;  // (no picture yet: no trail)
-			CHILD[c + 24] = -1.0; CHILD[c + 25] = 0.0; CHILD[c + 26] = 0.0; CHILD[c + 27] = 0.0;  // (no chemotaxis memory yet: a fast signal below 0 is none read)
+			float a = u01(s) * 6.2831853, off = 0.5 * mass * P[P_MASS_UM];
+			uint c = i * RECORD_WORDS;
+			CHILD[c + R_ID_LO] = 0.0;  // (the id, R_ID_LO and R_ID_HI, is written by `compact` as integers)
+			CHILD[c + R_X] = BUPS[b + R_X] + cos(a) * off; CHILD[c + R_Y] = BUPS[b + R_Y] + sin(a) * off;
+			CHILD[c + R_DX] = 1.0; CHILD[c + R_DY] = 0.0;
+			CHILD[c + R_ENERGY] = min(de, P[P_RESERVE_PER_MASS] * dm); CHILD[c + R_MASS] = dm; CHILD[c + R_BIRTH_MASS] = dm;
+			CHILD[c + R_SPEED] = g[0]; CHILD[c + R_SENSE] = g[1]; CHILD[c + R_METABOLISM] = g[2]; CHILD[c + R_SIZE] = g[3];
+			CHILD[c + R_REACH] = float(child_reach);
+			CHILD[c + R_MUTATOR] = mutator;
+			CHILD[c + R_DONOR] = child_donor;
+			CHILD[c + R_HARM] = harm;
+			CHILD[c + R_HUE] = hue; CHILD[c + R_SAT] = sat; CHILD[c + R_VAL] = val; CHILD[c + R_MUTATIONS] = muts; CHILD[c + R_DIVISIONS] = BUPS[b + R_DIVISIONS];
+			CHILD[c + R_ID_HI] = 0.0; CHILD[c + R_PX] = 3e38; CHILD[c + R_PY] = 3e38;  // (no picture yet: no trail)
+			CHILD[c + R_FAST] = -1.0; CHILD[c + R_SLOW] = 0.0; CHILD[c + R_NOISE] = 0.0; CHILD[c + R_TUMBLING] = 0.0;  // (no chemotaxis memory yet: a fast signal below 0 is none read)
 		}
 	}
 }
@@ -697,39 +667,39 @@ const K_FINALIZE := """
 const float CAP_SIGMAS = 4.0;  // (how far short of the limit the trim aims, in standard deviations: 4 is over it about once in 30,000 steps)
 void main() {
 	if (gl_GlobalInvocationID.x != 0u) return;  // (one thread: a dispatch of 1 runs a whole group of 64)
-	uint n = CNT[0];
-	uint c = uint(P[62]);
+	uint n = CNT[CNT_BUPS];
+	uint c = uint(P[P_CAPACITY]);
 	uint surv = n > 0u ? EXCS[n - 1u] + SURV[n - 1u] : 0u;
 	uint kids = n > 0u ? EXCK[n - 1u] + KID[n - 1u] : 0u;
-	CNT[1] = surv; CNT[2] = kids; CNT[3] = min(surv + kids, c);
-	int natural = int(n - surv) - int(CNT[13]);  // (the deaths that were not a trim)
+	CNT[CNT_SURVIVORS] = surv; CNT[CNT_NEWBORN] = kids; CNT[CNT_NEXT_COUNT] = min(surv + kids, c);
+	int natural = int(n - surv) - int(CNT[CNT_TRIMMED]);  // (the deaths that were not a trim)
 	int growth = int(kids) - natural;
 	// The count after a step is the limit plus (births - deaths) less what was expected of them: two independent counts of about
 	// kids and natural, each Poisson, so the margin is CAP_SIGMAS of sqrt(2 (kids + natural)) and the count is not expected to reach the limit.
 	float margin = CAP_SIGMAS * sqrt(2.0 * float(kids + uint(max(natural, 0))));
-	CNT[12] = uint(max(float(growth), 0.0) + ceil(margin));
-	CNT[13] = 0u;
+	CNT[CNT_GROWTH] = uint(max(float(growth), 0.0) + ceil(margin));
+	CNT[CNT_TRIMMED] = 0u;
 }
 """
 
 const K_COMPACT := """
-// One thread per 16 bytes (a bup is seven of them): a kept bup is copied to its new place, a newborn written after the kept ones, with
-// its id (the next id plus the number of newborns before it: 64 bits in words 0 and 21, lo and hi, with the carry).
+// One thread per 16 bytes (a bup is RECORD_VEC4 of them): a kept bup is copied to its new place, a newborn written after the kept ones, with
+// its id (the next id plus the number of newborns before it: 64 bits in words R_ID_LO and R_ID_HI, with the carry).
 void main() {
 	// (a dispatch of more groups than one dimension allows (65,535 on some drivers: Direct3D 12) is a grid: the thread's number counts rows too)
 	uint t = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * (gl_NumWorkGroups.x * 64u);
-	uint i = t / 7u, part = t % 7u;
-	if (i >= CNT[0]) return;
-	uint c = uint(P[62]);
-	if (SURV[i] == 1u) BUPS2_V4U[EXCS[i] * 7u + part] = BUPS_V4U[i * 7u + part];
+	uint i = t / RECORD_VEC4, part = t % RECORD_VEC4;
+	if (i >= CNT[CNT_BUPS]) return;
+	uint c = uint(P[P_CAPACITY]);
+	if (SURV[i] == 1u) BUPS2_V4U[EXCS[i] * RECORD_VEC4 + part] = BUPS_V4U[i * RECORD_VEC4 + part];
 	if (KID[i] == 1u) {
-		uint slot = CNT[1] + EXCK[i];
+		uint slot = CNT[CNT_SURVIVORS] + EXCK[i];
 		if (slot < c) {
-			uvec4 v = CHILD_V4U[i * 7u + part];
-			uint lo = CNT[4] + EXCK[i];
-			if (part == 0u) v.x = lo;
-			if (part == 5u) v.y = CNT[6] + (lo < CNT[4] ? 1u : 0u);
-			BUPS2_V4U[slot * 7u + part] = v;
+			uvec4 v = CHILD_V4U[i * RECORD_VEC4 + part];
+			uint lo = CNT[CNT_NEXT_ID_LO] + EXCK[i];
+			if (part == R_ID_LO / 4u) v[R_ID_LO % 4u] = lo;
+			if (part == R_ID_HI / 4u) v[R_ID_HI % 4u] = CNT[CNT_NEXT_ID_HI] + (lo < CNT[CNT_NEXT_ID_LO] ? 1u : 0u);
+			BUPS2_V4U[slot * RECORD_VEC4 + part] = v;
 		}
 	}
 }
@@ -737,7 +707,7 @@ void main() {
 
 const K_COPY := """
 void main() {
-	uint t = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * (gl_NumWorkGroups.x * 64u); if (t >= CNT[3] * 7u) return;  // (a grid of groups when one row is not enough: see compact)
+	uint t = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * (gl_NumWorkGroups.x * 64u); if (t >= CNT[CNT_NEXT_COUNT] * RECORD_VEC4) return;  // (a grid of groups when one row is not enough: see compact)
 	BUPS_V4U[t] = BUPS2_V4U[t];
 }
 """
@@ -745,33 +715,33 @@ void main() {
 const K_SETCOUNT := """
 void main() {
 	if (gl_GlobalInvocationID.x != 0u) return;  // (one thread: a dispatch of 1 runs a whole group of 64)
-	uint lo = CNT[4] + CNT[2]; if (lo < CNT[4]) CNT[6] += 1u; CNT[4] = lo; CNT[0] = CNT[3]; CNT[5] += 1u; }
+	uint lo = CNT[CNT_NEXT_ID_LO] + CNT[CNT_NEWBORN]; if (lo < CNT[CNT_NEXT_ID_LO]) CNT[CNT_NEXT_ID_HI] += 1u; CNT[CNT_NEXT_ID_LO] = lo; CNT[CNT_BUPS] = CNT[CNT_NEXT_COUNT]; CNT[CNT_STEP] += 1u; }
 """
 
 ## ---- clouds -------------------------------------------------------------------------------------------------------------------------
 ## New clouds and deposits come from the CPU (plankton bursts, sources: see NutrientField.set_recording) as events with the step they belong to.
 ## One thread, so the slots are taken in the events' order. A cloud that finds every slot taken goes onto the grid at once, as the CPU's
-## add_puff does past MAX_CLOUDS (its deposit_gaussian, and deposit_xy if no cell takes any of it), and is counted in PCNT[2].
+## add_puff does past MAX_CLOUDS (its deposit_gaussian, and deposit_xy if no cell takes any of it), and is counted in PCNT_TO_GRID.
 const K_EV_PUFFS := """
 void to_grid(float x, float y, float mass, float v) {
-	int n = int(P[1]); float sp = P[2]; float area = sp * sp; float reach = 4.0 * sqrt(v);
-	int x0 = max(0, int(floor((x - reach + P[3]) / sp - 0.5))), x1 = min(n - 1, int(ceil((x + reach + P[3]) / sp - 0.5)));
-	int y0 = max(0, int(floor((y - reach + P[3]) / sp - 0.5))), y1 = min(n - 1, int(ceil((y + reach + P[3]) / sp - 0.5)));
+	int n = int(P[P_CELLS]); float sp = P[P_SPACING]; float area = sp * sp; float reach = 4.0 * sqrt(v);
+	int x0 = max(0, int(floor((x - reach + P[P_ORIGIN]) / sp - 0.5))), x1 = min(n - 1, int(ceil((x + reach + P[P_ORIGIN]) / sp - 0.5)));
+	int y0 = max(0, int(floor((y - reach + P[P_ORIGIN]) / sp - 0.5))), y1 = min(n - 1, int(ceil((y + reach + P[P_ORIGIN]) / sp - 0.5)));
 	float sum = 0.0;
 	for (int cy = y0; cy <= y1; cy++) for (int cx = x0; cx <= x1; cx++) {
 		if (INSIDE[cy * n + cx] == 0) continue;
-		float dx = (float(cx) + 0.5) * sp - P[3] - x, dy = (float(cy) + 0.5) * sp - P[3] - y;
+		float dx = (float(cx) + 0.5) * sp - P[P_ORIGIN] - x, dy = (float(cy) + 0.5) * sp - P[P_ORIGIN] - y;
 		sum += exp(-(dx * dx + dy * dy) / (2.0 * v));
 	}
 	if (sum > 1e-12) {
 		for (int cy = y0; cy <= y1; cy++) for (int cx = x0; cx <= x1; cx++) {
 			if (INSIDE[cy * n + cx] == 0) continue;
-			float dx = (float(cx) + 0.5) * sp - P[3] - x, dy = (float(cy) + 0.5) * sp - P[3] - y;
+			float dx = (float(cx) + 0.5) * sp - P[P_ORIGIN] - x, dy = (float(cy) + 0.5) * sp - P[P_ORIGIN] - y;
 			CONC[cy * n + cx] += mass * exp(-(dx * dx + dy * dy) / (2.0 * v)) / sum / area;
 		}
 		return;
 	}
-	float fx = (x + P[3]) / sp - 0.5, fy = (y + P[3]) / sp - 0.5;
+	float fx = (x + P[P_ORIGIN]) / sp - 0.5, fy = (y + P[P_ORIGIN]) / sp - 0.5;
 	int bx = int(floor(fx)), by = int(floor(fy));
 	float tx = fx - float(bx), ty = fy - float(by);
 	int cells[4]; float weights[4]; float kept = 0.0; int count = 0;
@@ -789,20 +759,20 @@ void main() {
 	if (gl_GlobalInvocationID.x != 0u) return;  // (one thread: a dispatch of 1 runs a whole group of 64)
 	int st = int(pcs.pa);
 	int start = EVR[st * 4], cnt = EVR[st * 4 + 1];
-	uint slots = PCNT[0], cap = uint(P[71]);
+	uint slots = PCNT[PCNT_SLOTS], cap = uint(P[P_PUFF_CAPACITY]);
 	for (int e = 0; e < cnt; e++) {
 		if (slots >= cap) {
-			uint qo = uint(start + e) * 6u;
+			uint qo = uint(start + e) * EV_PUFF_FLOATS;
 			to_grid(EVP[qo], EVP[qo + 1], EVP[qo + 2], EVP[qo + 3]);
-			PCNT[2] += 1u;
+			PCNT[PCNT_TO_GRID] += 1u;
 			continue;
 		}
-		uint q = uint(start + e) * 6u, o = slots * 8u;
+		uint q = uint(start + e) * EV_PUFF_FLOATS, o = slots * 8u;
 		PUFF[o] = EVP[q]; PUFF[o + 1] = EVP[q + 1]; PUFF[o + 2] = EVP[q + 2]; PUFF[o + 3] = EVP[q + 3]; PUFF[o + 4] = EVP[q + 4];
 		PUFF[o + 5] = 1.0; PUFF[o + 6] = 0.0; PUFF[o + 7] = 0.0;
 		slots++;
 	}
-	PCNT[0] = slots;
+	PCNT[PCNT_SLOTS] = slots;
 }
 """
 
@@ -827,8 +797,8 @@ void add_dep(uint cell, float amount) { // 2^20 to the unit, in 64 bits
 	}
 }
 void deposit_xy(float x, float y, float mass) {
-	int n = int(P[1]); float sp = P[2];
-	float fx = (x + P[3]) / sp - 0.5, fy = (y + P[3]) / sp - 0.5;
+	int n = int(P[P_CELLS]); float sp = P[P_SPACING];
+	float fx = (x + P[P_ORIGIN]) / sp - 0.5, fy = (y + P[P_ORIGIN]) / sp - 0.5;
 	int x0 = int(floor(fx)), y0 = int(floor(fy));
 	float tx = fx - float(x0), ty = fy - float(y0);
 	int cells[4]; float weights[4]; float kept = 0.0; int count = 0;
@@ -849,29 +819,29 @@ void deposit_xy(float x, float y, float mass) {
 const K_PUFF_ADVANCE := """
 void main() {
 	uint k = gl_GlobalInvocationID.x;
-	if (k >= PCNT[0]) return;
+	if (k >= PCNT[PCNT_SLOTS]) return;
 	uint o = k * 8u;
 	if (PUFF[o + 5] < 0.5) return;
-	float v = PUFF[o + 3] + P[70];
+	float v = PUFF[o + 3] + P[P_CLOUD_SPREAD];
 	PUFF[o + 3] = v;
 	float mass = PUFF[o + 2];
 	if (mass <= 1e-9) { PUFF[o + 5] = 0.0; return; }
-	if (sqrt(v) >= P[64]) {
+	if (sqrt(v) >= P[P_HANDOVER]) {
 		float x = PUFF[o], y = PUFF[o + 1];
-		int n = int(P[1]); float sp = P[2]; float reach = 4.0 * sqrt(v);
-		int x0 = max(0, int(floor((x - reach + P[3]) / sp - 0.5))), x1 = min(n - 1, int(ceil((x + reach + P[3]) / sp - 0.5)));
-		int y0 = max(0, int(floor((y - reach + P[3]) / sp - 0.5))), y1 = min(n - 1, int(ceil((y + reach + P[3]) / sp - 0.5)));
+		int n = int(P[P_CELLS]); float sp = P[P_SPACING]; float reach = 4.0 * sqrt(v);
+		int x0 = max(0, int(floor((x - reach + P[P_ORIGIN]) / sp - 0.5))), x1 = min(n - 1, int(ceil((x + reach + P[P_ORIGIN]) / sp - 0.5)));
+		int y0 = max(0, int(floor((y - reach + P[P_ORIGIN]) / sp - 0.5))), y1 = min(n - 1, int(ceil((y + reach + P[P_ORIGIN]) / sp - 0.5)));
 		float sum = 0.0;
 		for (int cy = y0; cy <= y1; cy++) for (int cx = x0; cx <= x1; cx++) {
 			if (INSIDE[cy * n + cx] == 0) continue;
-			float dx = (float(cx) + 0.5) * sp - P[3] - x, dy = (float(cy) + 0.5) * sp - P[3] - y;
+			float dx = (float(cx) + 0.5) * sp - P[P_ORIGIN] - x, dy = (float(cy) + 0.5) * sp - P[P_ORIGIN] - y;
 			sum += exp(-(dx * dx + dy * dy) / (2.0 * v));
 		}
 		if (sum <= 1e-12) deposit_xy(x, y, mass);
 		else {
 			for (int cy = y0; cy <= y1; cy++) for (int cx = x0; cx <= x1; cx++) {
 				if (INSIDE[cy * n + cx] == 0) continue;
-				float dx = (float(cx) + 0.5) * sp - P[3] - x, dy = (float(cy) + 0.5) * sp - P[3] - y;
+				float dx = (float(cx) + 0.5) * sp - P[P_ORIGIN] - x, dy = (float(cy) + 0.5) * sp - P[P_ORIGIN] - y;
 				add_dep(uint(cy * n + cx), mass * exp(-(dx * dx + dy * dy) / (2.0 * v)) / sum);
 			}
 		}
@@ -882,22 +852,22 @@ void main() {
 
 const K_DEP_APPLY := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[1] * P[1])) return;
+	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
 	float m = float(DPHI[i]) * 4096.0 + float(DPLO[i]) * 9.5367431640625e-7;
-	if (m > 0.0) CONC[i] += m / (P[2] * P[2]);
+	if (m > 0.0) CONC[i] += m / (P[P_SPACING] * P[P_SPACING]);
 	DPLO[i] = 0u; DPHI[i] = 0u;
 }
 """
 
 const K_PUFF_CLEAR := """
-void main() { uint k = gl_GlobalInvocationID.x; if (k >= uint(P[71])) return; PDLO[k] = 0u; PDHI[k] = 0u; PSCALE[k] = 0.0; }
+void main() { uint k = gl_GlobalInvocationID.x; if (k >= uint(P[P_PUFF_CAPACITY])) return; PDLO[k] = 0u; PDHI[k] = 0u; PSCALE[k] = 0.0; }
 """
 
 ## What bups wanted from each cloud, summed (exactly, in fixed point), is shared out in proportion if the cloud has less: each gets its share
 ## in `apply`, from the cloud as it was; then the clouds give it up.
 const K_PUFF_SCALE := """
 void main() {
-	uint k = gl_GlobalInvocationID.x; if (k >= PCNT[0]) return;
+	uint k = gl_GlobalInvocationID.x; if (k >= PCNT[PCNT_SLOTS]) return;
 	float d = float(PDHI[k]) * 4096.0 + float(PDLO[k]) * 9.5367431640625e-7;
 	float mass = PUFF[k * 8u + 2u];
 	PSCALE[k] = d > 0.0 ? min(1.0, mass / d) : 0.0;
@@ -906,7 +876,7 @@ void main() {
 
 const K_PUFF_COMMIT := """
 void main() {
-	uint k = gl_GlobalInvocationID.x; if (k >= PCNT[0]) return;
+	uint k = gl_GlobalInvocationID.x; if (k >= PCNT[PCNT_SLOTS]) return;
 	float d = float(PDHI[k]) * 4096.0 + float(PDLO[k]) * 9.5367431640625e-7;
 	if (d > 0.0) PUFF[k * 8u + 2u] = max(PUFF[k * 8u + 2u] - d * PSCALE[k], 0.0);
 }
@@ -916,51 +886,51 @@ void main() {
 ## each cloud is listed in every square its reach touches. Counted, summed, filled, and each list put in order (the order the threads ran in must
 ## not show in the sums of a read).
 const K_BIN_CLEAR := """
-void main() { uint b = gl_GlobalInvocationID.x; if (b >= uint(P[73])) return; BINC[b] = 0u; }
+void main() { uint b = gl_GlobalInvocationID.x; if (b >= uint(P[P_BINS])) return; BINC[b] = 0u; }
 """
 
 const K_BIN_COUNT := """
 void main() {
-	uint k = gl_GlobalInvocationID.x; if (k >= PCNT[0]) return;
+	uint k = gl_GlobalInvocationID.x; if (k >= PCNT[PCNT_SLOTS]) return;
 	uint o = k * 8u;
 	if (PUFF[o + 5] < 0.5) return;
 	float mass = PUFF[o + 2], v = PUFF[o + 3], x = PUFF[o], y = PUFF[o + 1];
 	float peak = mass / (6.2831853 * v);
-	float cut = max(P[65] * PUFF[o + 4] * P[9], 1e-30);
+	float cut = max(P[P_CLOUD_CUT] * PUFF[o + 4] * P[P_DETECTION_FLOOR], 1e-30);
 	float reach = peak > cut ? sqrt(2.0 * v * log(peak / cut)) : 0.0;
 	PUFF[o + 6] = reach * reach; PUFF[o + 7] = sqrt(v);
-	int nb = int(P[67]); float bs = P[66];
-	int lx = clamp(int((x - reach + P[3]) / bs), 0, nb - 1), hx = clamp(int((x + reach + P[3]) / bs), 0, nb - 1);
-	int ly = clamp(int((y - reach + P[3]) / bs), 0, nb - 1), hy = clamp(int((y + reach + P[3]) / bs), 0, nb - 1);
+	int nb = int(P[P_BINS_ACROSS]); float bs = P[P_BIN_SIZE];
+	int lx = clamp(int((x - reach + P[P_ORIGIN]) / bs), 0, nb - 1), hx = clamp(int((x + reach + P[P_ORIGIN]) / bs), 0, nb - 1);
+	int ly = clamp(int((y - reach + P[P_ORIGIN]) / bs), 0, nb - 1), hy = clamp(int((y + reach + P[P_ORIGIN]) / bs), 0, nb - 1);
 	for (int by = ly; by <= hy; by++) for (int bx = lx; bx <= hx; bx++) atomicAdd(BINC[by * nb + bx], 1u);
 }
 """
 
 const K_BIN_CURSOR := """
-void main() { uint b = gl_GlobalInvocationID.x; if (b >= uint(P[73])) return; BCUR[b] = BINS[b]; }
+void main() { uint b = gl_GlobalInvocationID.x; if (b >= uint(P[P_BINS])) return; BCUR[b] = BINS[b]; }
 """
 
 const K_BIN_SCATTER := """
 void main() {
-	uint k = gl_GlobalInvocationID.x; if (k >= PCNT[0]) return;
+	uint k = gl_GlobalInvocationID.x; if (k >= PCNT[PCNT_SLOTS]) return;
 	uint o = k * 8u;
 	if (PUFF[o + 5] < 0.5) return;
 	float x = PUFF[o], y = PUFF[o + 1], reach = sqrt(PUFF[o + 6]);
-	int nb = int(P[67]); float bs = P[66];
-	int lx = clamp(int((x - reach + P[3]) / bs), 0, nb - 1), hx = clamp(int((x + reach + P[3]) / bs), 0, nb - 1);
-	int ly = clamp(int((y - reach + P[3]) / bs), 0, nb - 1), hy = clamp(int((y + reach + P[3]) / bs), 0, nb - 1);
+	int nb = int(P[P_BINS_ACROSS]); float bs = P[P_BIN_SIZE];
+	int lx = clamp(int((x - reach + P[P_ORIGIN]) / bs), 0, nb - 1), hx = clamp(int((x + reach + P[P_ORIGIN]) / bs), 0, nb - 1);
+	int ly = clamp(int((y - reach + P[P_ORIGIN]) / bs), 0, nb - 1), hy = clamp(int((y + reach + P[P_ORIGIN]) / bs), 0, nb - 1);
 	for (int by = ly; by <= hy; by++) for (int bx = lx; bx <= hx; bx++) {
 		uint pos = atomicAdd(BCUR[by * nb + bx], 1u);
-		if (pos < uint(P[72])) ENT[pos] = k;
-		else atomicAdd(PCNT[3], 1u);  // (the lists are full: this entry is cut, and counted)
+		if (pos < uint(P[P_ENTRY_CAPACITY])) ENT[pos] = k;
+		else atomicAdd(PCNT[PCNT_CUT], 1u);  // (the lists are full: this entry is cut, and counted)
 	}
 }
 """
 
 const K_BIN_SORT := """
 void main() {
-	uint b = gl_GlobalInvocationID.x; if (b >= uint(P[73])) return;
-	uint e0 = BINS[b], e1 = min(e0 + BINC[b], uint(P[72]));
+	uint b = gl_GlobalInvocationID.x; if (b >= uint(P[P_BINS])) return;
+	uint e0 = BINS[b], e1 = min(e0 + BINC[b], uint(P[P_ENTRY_CAPACITY]));
 	for (uint a = e0 + 1u; a < e1; a++) {
 		uint v = ENT[a]; uint j = a;
 		while (j > e0 && ENT[j - 1u] > v) { ENT[j] = ENT[j - 1u]; j--; }
@@ -987,13 +957,13 @@ void main() {
 """
 
 const K_PMARK := """
-void main() { uint k = gl_GlobalInvocationID.x; if (k >= uint(P[71])) return; PAL[k] = (k < PCNT[0] && PUFF[k * 8u + 5u] > 0.5) ? 1u : 0u; }
+void main() { uint k = gl_GlobalInvocationID.x; if (k >= uint(P[P_PUFF_CAPACITY])) return; PAL[k] = (k < PCNT[PCNT_SLOTS] && PUFF[k * 8u + 5u] > 0.5) ? 1u : 0u; }
 """
 
 const K_PCOMPACT := """
 void main() {
 	uint t = gl_GlobalInvocationID.x; uint k = t / 2u, part = t % 2u;
-	if (k >= PCNT[0]) return;
+	if (k >= PCNT[PCNT_SLOTS]) return;
 	if (PAL[k] == 1u) PUFF2_V[PEXC[k] * 2u + part] = PUFF_V[k * 2u + part];
 }
 """
@@ -1001,62 +971,39 @@ void main() {
 const K_PFINAL := """
 void main() {
 	if (gl_GlobalInvocationID.x != 0u) return;  // (one thread: a dispatch of 1 runs a whole group of 64)
-	uint n = PCNT[0]; PCNT[1] = n > 0u ? PEXC[n - 1u] + PAL[n - 1u] : 0u; }
+	uint n = PCNT[PCNT_SLOTS]; PCNT[PCNT_KEPT] = n > 0u ? PEXC[n - 1u] + PAL[n - 1u] : 0u; }
 """
 
 const K_PCOPY := """
-void main() { uint t = gl_GlobalInvocationID.x; if (t >= PCNT[1] * 2u) return; PUFF_V[t] = PUFF2_V[t]; }
+void main() { uint t = gl_GlobalInvocationID.x; if (t >= PCNT[PCNT_KEPT] * 2u) return; PUFF_V[t] = PUFF2_V[t]; }
 """
 
 const K_PSETCOUNT := """
 void main() {
 	if (gl_GlobalInvocationID.x != 0u) return;  // (one thread: a dispatch of 1 runs a whole group of 64)
-	PCNT[0] = PCNT[1];
+	PCNT[PCNT_SLOTS] = PCNT[PCNT_KEPT];
 }
 """
 
 ## ---- the game's side: family events, the frame's questions and answers, stats, the eraser, the field's copy -------------------
-## Layouts (32-bit words). QIN, what the dish asks this frame (floats by their bits): 0 pick asked (1/0), 1 x, 2 y, 3 slack, 4 µm per pixel;
-## 5 nearest asked (0-4), then 6 + 3s: x, y, near of slot s; 18 fractions asked (0-4), then 19 + 2f: gene index (0 speed, 1 sense,
-## 2 metabolism, 3 size), the threshold's bits; 27 bups tracked (0-8), then 28 + 2t: the id's lo and hi words.
-## OUT, the answers: 0-15 CNT and 16-23 PCNT as they were at the end of the frame's work (24-31 spare); from OUT_Q (32) QOUT: 0 the picked
-## bup's index or 0xFFFFFFFF, 1 its d² (float bits), 2-25 its record, 26 the nearest d² of slot 0 (float bits; 0xFFFFFFFF: no bups),
-## 27 how many lie within its `near`, 28-31 the counts for the 4 fractions, 32-35 spare, 36-227 the 8 tracked records (24 words each; ids
-## 0xFFFFFFFF where not found), 228 + 2(s - 1) and 229 + 2(s - 1) the nearest d² and count of slots 1-3; from OUT_STATS (272) the stats
-## samples, 16 words each (floats: count, Σspeed, Σsense, Σmetabolism, Σsize_gene, Σ(1 - exp(-harm)), Σmutations, the step, 0...):
-## sample 0 is the state at the end of the frame's work, 1.. those taken during its batch.
-const Q_PICK := 0
-const Q_NEAR := 5
-const Q_FRAC := 18
-const Q_TRACK := 27
-const QIN_WORDS := 44
-const NEAR_SLOTS := 4
-const FRACTIONS := 4
-const TRACKED := 8
-const OUT_Q := 32
-const QOUT_WORDS := 240
-const OUT_STATS := OUT_Q + QOUT_WORDS
-const STATS_WORDS := 16
-const MAX_SAMPLES := 256  ## history samples one batch can take (1024 steps of 20 s make 171)
-const OUT_WORDS := OUT_STATS + STATS_WORDS * (1 + MAX_SAMPLES)
+## The frame's questions (QIN) and answers (OUT): their words are in gpu/gpu_layout.gd.
+const FRACTIONS := GpuLayout.FRACTIONS  ## (for the dish, which keeps no more fractions asked than QIN has room for)
 const MAX_ERASE := 64  ## eraser discs in one frame
-
-const LAYOUT_GLSL := """
-const uint OUT_Q = 32u; const uint OUT_STATS = 272u;
-"""
 
 ## Before a batch: its counts of births and deaths start from 0.
 const K_EV_BEGIN := """
-void main() { if (gl_GlobalInvocationID.x == 0u) { CNT[8] = 0u; CNT[9] = 0u; } }
+void main() { if (gl_GlobalInvocationID.x == 0u) { CNT[CNT_BIRTHS] = 0u; CNT[CNT_DEATHS] = 0u; } }
 """
 
 ## The family events of a step (after `finalize`, before `compact`, which places the newborns: the same rule), one thread per bup, into
-## event set `pcs.pb`, the step's place in the batch `pcs.pa`: each kept newborn is a birth at CNT[8] + its place among the newborns,
-## each bup not kept a death at CNT[9] + its place among those; so the order is the bups' order, whatever order the threads run in.
-## Conjugation (see the CPU's BupSim::conjugate). The donors (word 14) go into a hashed table of the 20 µm cells they stand in, four slots a cell; then each bup
-## that is not a donor looks in the 3 x 3 cells round it for a donor it touches (its centre no farther than the two bodies' radii and contact_um) that transfers
-## to it this step (a draw keyed by the pair and the step, so that the order the threads run in does not matter), takes the lowest-numbered one, and copies a run of
-## its genes: the first, each next with the chance P[95]. Only a recipient changes, and only itself, so there are no races. CNT[15] counts the donors of the step.
+## event set `pcs.pb`, the step's place in the batch `pcs.pa`: each kept newborn is a birth at CNT_BIRTHS + its place among the newborns,
+## each bup not kept a death at CNT_DEATHS + its place among those; so the order is the bups' order, whatever order the threads run in.
+## Conjugation (see the CPU's BupSim::conjugate). The donors (R_DONOR) go into a hashed table of the 20 µm cells they stand in, four slots a cell, and the
+## largest donor's half length is kept (CNT_DONOR_REACH); then each bup that is not a donor looks in the cells round it as far as a donor can be and still touch
+## it (its own half length, the largest donor's and contact_um: 3 x 3 cells or fewer for the usual sizes) for a donor it touches (centres no farther apart than the
+## two bodies' half lengths and contact_um) that transfers to it this step (a draw keyed by the pair and the step, so that the order the threads run in does not
+## matter), takes the lowest-numbered one, and copies a run of its genes: the first, each next with the chance P_CONJ_CONTINUE. Only a recipient changes, and only
+## itself, so there are no races. CNT_DONORS counts the donors of the step.
 const CONJ_FUNCS := """
 const uint DMASK = 65535u;
 const float DCELL = 20.0;
@@ -1069,17 +1016,18 @@ void main() {
 	uint t = gl_GlobalInvocationID.x;
 	if (t < (DMASK + 1u) * 4u) DTAB[t] = 0xFFFFFFFFu;
 	else if (t < (DMASK + 1u) * 4u + 2048u) DTAB[t] = 0u;  // (the bitmap of the buckets in use)
-	if (t == 0u) CNT[15] = 0u;
+	if (t == 0u) { CNT[CNT_DONORS] = 0u; CNT[CNT_DONOR_REACH] = 0u; }
 }
 """
 
 const K_CONJ_INSERT := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
-	uint b = i * 28u;
-	if (BUPS[b + 14] < 0.5) return;
-	atomicAdd(CNT[15], 1u);
-	uint h = dhash(int(floor(BUPS[b + 1] / DCELL)), int(floor(BUPS[b + 2] / DCELL)));
+	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+	uint b = i * RECORD_WORDS;
+	if (BUPS[b + R_DONOR] < 0.5) return;
+	atomicAdd(CNT[CNT_DONORS], 1u);
+	atomicMax(CNT[CNT_DONOR_REACH], floatBitsToUint(0.5 * BUPS[b + R_MASS] * P[P_MASS_UM]));  // (a positive float's bits order as the float does)
+	uint h = dhash(int(floor(BUPS[b + R_X] / DCELL)), int(floor(BUPS[b + R_Y] / DCELL)));
 	atomicOr(DTAB[(DMASK + 1u) * 4u + (h >> 5u)], 1u << (h & 31u));
 	for (uint s = 0u; s < 4u; s++) {
 		if (atomicCompSwap(DTAB[h * 4u + s], 0xFFFFFFFFu, i) == 0xFFFFFFFFu) break;
@@ -1089,59 +1037,63 @@ void main() {
 
 const K_CONJ_APPLY := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0] || CNT[15] == 0u) return;
-	uint b = i * 28u;
-	if (BUPS[b + 14] > 0.5) return;
-	float x = BUPS[b + 1], y = BUPS[b + 2];
-	float rr = 0.5 * BUPS[b + 6] * P[14];
-	int cx = int(floor(x / DCELL)), cy = int(floor(y / DCELL));
+	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS] || CNT[CNT_DONORS] == 0u) return;
+	uint b = i * RECORD_WORDS;
+	if (BUPS[b + R_DONOR] > 0.5) return;
+	float x = BUPS[b + R_X], y = BUPS[b + R_Y];
+	float rr = 0.5 * BUPS[b + R_MASS] * P[P_MASS_UM];
+	float reach = uintBitsToFloat(CNT[CNT_DONOR_REACH]) + rr + P[P_CONTACT_UM];  // (the farthest a donor's centre can be and touch it)
+	int x0 = int(floor((x - reach) / DCELL)), x1 = int(floor((x + reach) / DCELL)), y0 = int(floor((y - reach) / DCELL)), y1 = int(floor((y + reach) / DCELL));
 	uint best = 0xFFFFFFFFu;
-	for (int ox = -1; ox <= 1; ox++) for (int oy = -1; oy <= 1; oy++) {
-		uint h = dhash(cx + ox, cy + oy);
+	for (int gx = x0; gx <= x1; gx++) for (int gy = y0; gy <= y1; gy++) {
+		uint h = dhash(gx, gy);
 		if ((DTAB[(DMASK + 1u) * 4u + (h >> 5u)] & (1u << (h & 31u))) == 0u) continue;  // (no donor in this bucket: the bitmap is small enough to stay in cache)
 		for (uint s = 0u; s < 4u; s++) {
 			uint d = DTAB[h * 4u + s];
 			if (d == 0xFFFFFFFFu || d >= best) continue;
-			uint db = d * 28u;
-			float dx = BUPS[db + 1] - x, dy = BUPS[db + 2] - y;
-			float range = 0.5 * BUPS[db + 6] * P[14] + rr + P[93];
+			uint db = d * RECORD_WORDS;
+			float dx = BUPS[db + R_X] - x, dy = BUPS[db + R_Y] - y;
+			float range = 0.5 * BUPS[db + R_MASS] * P[P_MASS_UM] + rr + P[P_CONTACT_UM];
 			if (dx * dx + dy * dy > range * range) continue;
-			if (keyed01(CNT[7] ^ CNT[5], i, d) < P[94]) best = d;
+			if (keyed01(CNT[CNT_SEED] ^ CNT[CNT_STEP], i, d) < P[P_CONJ_CHANCE]) best = d;
 		}
 	}
 	if (best == 0xFFFFFFFFu) return;
 	int run = 1;
 	for (int k = 0; k < 3; k++) {
-		if (keyed01(CNT[7] ^ CNT[5] ^ 0x5bd1e995u, i * 4u + uint(k), best) < P[95]) run++; else break;
+		if (keyed01(CNT[CNT_SEED] ^ CNT[CNT_STEP] ^ 0x5bd1e995u, i * 4u + uint(k), best) < P[P_CONJ_CONTINUE]) run++; else break;
 	}
-	uint db = best * 28u;
-	for (int g = 0; g < run; g++) BUPS[b + 8u + uint(g)] = BUPS[db + 8u + uint(g)];
+	uint db = best * RECORD_WORDS;
+	for (int g = 0; g < run; g++) BUPS[b + R_SPEED + uint(g)] = BUPS[db + R_SPEED + uint(g)];
 	int mask = (1 << (2 * run)) - 1;  // (the raised ceilings of the genes that moved go with them)
-	BUPS[b + 12] = float((int(BUPS[b + 12] + 0.5) & ~mask) | (int(BUPS[db + 12] + 0.5) & mask));
+	BUPS[b + R_REACH] = float((int(BUPS[b + R_REACH] + 0.5) & ~mask) | (int(BUPS[db + R_REACH] + 0.5) & mask));
 }
 """
 
 ## What a bup that died of starvation or chance gives back (not one the trim displaced at the limit, as the CPU's step does not for its Moran
-## displacement): a cloud of P[63] (death_release x cost_per_mass) per unit of its mass at its place, as the CPU's add_cloud of radius 0 does:
+## displacement): a cloud of P_DEATH_PUFF (death_release x cost_per_mass) per unit of its mass at its place, as the CPU's add_cloud of radius 0 does:
 ## a cloud of variance 100 µm² in the next free slots (slot = the number of slots in use + the number of bups that died before it, trimmed or not,
-## so a trimmed one's slot is left empty, `alive` 0, until a compaction), a deposit on the grid if the grid is too fine for a cloud or the slots are
-## taken. After `finalize`, before `copy`: the dead bups' records are still where they were. `death_count` then takes the slots.
+## so a trimmed one's slot is left empty, `alive` 0, until a compaction), a deposit on the grid if the grid is too fine for a cloud, the bup is in
+## a rim cell (one whose centre is outside the dish: the CPU's `accepts`) or the slots are taken. After `finalize`, before `copy`: the dead bups' records are still where they were. `death_count` then takes the slots.
 const K_DEATH_CLOUDS := """
 void main() {
 	uint i = gl_GlobalInvocationID.x;
-	if (i >= CNT[0] || P[63] <= 0.0 || SURV[i] != 0u) return;
-	uint b = i * 28u;
-	uint slot = PCNT[0] + (i - EXCS[i]);
-	if (slot < uint(P[71])) { uint o = slot * 8u; PUFF[o + 5] = 0.0; }  // (empty unless this one is a cloud below)
-	if (BUPS[b + 23] != -2.0) return;
-	float mass = P[63] * BUPS[b + 6], x = BUPS[b + 1], y = BUPS[b + 2];
-	if (slot < uint(P[71]) && 10.0 < P[64]) {
+	if (i >= CNT[CNT_BUPS] || P[P_DEATH_PUFF] <= 0.0 || SURV[i] != 0u) return;
+	uint b = i * RECORD_WORDS;
+	uint slot = PCNT[PCNT_SLOTS] + (i - EXCS[i]);
+	if (slot < uint(P[P_PUFF_CAPACITY])) { uint o = slot * 8u; PUFF[o + 5] = 0.0; }  // (empty unless this one is a cloud below)
+	if (BUPS[b + R_PY] != -2.0) return;
+	float mass = P[P_DEATH_PUFF] * BUPS[b + R_MASS], x = BUPS[b + R_X], y = BUPS[b + R_Y];
+	int n = int(P[P_CELLS]); float sp = P[P_SPACING];
+	int cx = clamp(int((x + P[P_ORIGIN]) / sp), 0, n - 1), cy = clamp(int((y + P[P_ORIGIN]) / sp), 0, n - 1);
+	bool accepted = INSIDE[cy * n + cx] != 0 && x * x + y * y <= P[P_RADIUS] * P[P_RADIUS];
+	if (slot < uint(P[P_PUFF_CAPACITY]) && 10.0 < P[P_HANDOVER] && accepted) {
 		uint o = slot * 8u;
 		PUFF[o] = x; PUFF[o + 1] = y; PUFF[o + 2] = mass; PUFF[o + 3] = 100.0; PUFF[o + 4] = 1.0;
 		PUFF[o + 6] = 0.0; PUFF[o + 7] = 0.0; PUFF[o + 5] = 1.0;
 	} else {
 		deposit_xy(x, y, mass);
-		if (slot >= uint(P[71])) atomicAdd(PCNT[2], 1u);
+		if (slot >= uint(P[P_PUFF_CAPACITY])) atomicAdd(PCNT[PCNT_TO_GRID], 1u);
 	}
 }
 """
@@ -1149,101 +1101,107 @@ void main() {
 const K_DEATH_COUNT := """
 void main() {
 	if (gl_GlobalInvocationID.x != 0u) return;  // (one thread: a dispatch of 1 runs a whole group of 64)
-	if (P[63] <= 0.0) return;
-	PCNT[0] = min(PCNT[0] + (CNT[0] - CNT[1]), uint(P[71]));
+	if (P[P_DEATH_PUFF] <= 0.0) return;
+	PCNT[PCNT_SLOTS] = min(PCNT[PCNT_SLOTS] + (CNT[CNT_BUPS] - CNT[CNT_SURVIVORS]), uint(P[P_PUFF_CAPACITY]));
 }
 """
 
 const K_EVENTS := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
-	uint cap = uint(P[78]), base = uint(pcs.pb) * cap, st = uint(pcs.pa);
-	uint b = i * 28u;
-	if (KID[i] == 1u && CNT[1] + EXCK[i] < uint(P[62])) {  // (a newborn `compact` will place)
-		uint slot = CNT[8] + EXCK[i];
+	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+	uint cap = uint(P[P_EVENT_CAPACITY]), base = uint(pcs.pb) * cap, st = uint(pcs.pa);
+	uint b = i * RECORD_WORDS;
+	if (KID[i] == 1u && CNT[CNT_SURVIVORS] + EXCK[i] < uint(P[P_CAPACITY])) {  // (a newborn `compact` will place)
+		uint slot = CNT[CNT_BIRTHS] + EXCK[i];
 		if (slot < cap) {
-			uint o = (base + slot) * 16u, c = i * 28u;
-			uint lo = CNT[4] + EXCK[i];
-			EVB[o] = lo; EVB[o + 1u] = CNT[6] + (lo < CNT[4] ? 1u : 0u);
-			EVB[o + 2u] = BUPS_U[b]; EVB[o + 3u] = BUPS_U[b + 21u]; EVB[o + 4u] = st;
-			EVB[o + 5u] = uint(uintBitsToFloat(CHILD_U[c + 20u])); EVB[o + 6u] = (uint(uintBitsToFloat(CHILD_U[c + 19u])) & 0xFFFFFu) | ((uint(uintBitsToFloat(CHILD_U[c + 12u]) + 0.5) & 0x3FFu) << 20u) | (uintBitsToFloat(CHILD_U[c + 14u]) > 0.5 ? (1u << 30u) : 0u);
-			EVB[o + 7u] = CHILD_U[c + 8u]; EVB[o + 8u] = CHILD_U[c + 9u]; EVB[o + 9u] = CHILD_U[c + 10u]; EVB[o + 10u] = CHILD_U[c + 11u];
-			EVB[o + 11u] = CHILD_U[c + 16u]; EVB[o + 12u] = CHILD_U[c + 17u]; EVB[o + 13u] = CHILD_U[c + 18u]; EVB[o + 14u] = CHILD_U[c + 15u];
-			EVB[o + 15u] = CHILD_U[c + 13u];
-		} else atomicAdd(CNT[10], 1u);
+			uint o = (base + slot) * BIRTH_WORDS, c = i * RECORD_WORDS;
+			uint lo = CNT[CNT_NEXT_ID_LO] + EXCK[i];
+			EVB[o + EB_ID_LO] = lo; EVB[o + EB_ID_HI] = CNT[CNT_NEXT_ID_HI] + (lo < CNT[CNT_NEXT_ID_LO] ? 1u : 0u);
+			EVB[o + EB_PARENT_LO] = BUPS_U[b + R_ID_LO]; EVB[o + EB_PARENT_HI] = BUPS_U[b + R_ID_HI]; EVB[o + EB_STEP] = st;
+			EVB[o + EB_DIVISIONS] = uint(uintBitsToFloat(CHILD_U[c + R_DIVISIONS])); EVB[o + EB_TRAITS] = (uint(uintBitsToFloat(CHILD_U[c + R_MUTATIONS])) & EV_LOW_MASK) | ((uint(uintBitsToFloat(CHILD_U[c + R_REACH]) + 0.5) & EV_REACH_MASK) << EV_REACH_SHIFT) | (uintBitsToFloat(CHILD_U[c + R_DONOR]) > 0.5 ? (1u << EV_DONOR_SHIFT) : 0u);
+			EVB[o + EB_SPEED] = CHILD_U[c + R_SPEED]; EVB[o + EB_SENSE] = CHILD_U[c + R_SENSE]; EVB[o + EB_METABOLISM] = CHILD_U[c + R_METABOLISM]; EVB[o + EB_SIZE] = CHILD_U[c + R_SIZE];
+			EVB[o + EB_HUE] = CHILD_U[c + R_HUE]; EVB[o + EB_SAT] = CHILD_U[c + R_SAT]; EVB[o + EB_VAL] = CHILD_U[c + R_VAL]; EVB[o + EB_HARM] = CHILD_U[c + R_HARM];
+			EVB[o + EB_MUTATOR] = CHILD_U[c + R_MUTATOR];
+		} else atomicAdd(CNT[CNT_BIRTHS_LOST], 1u);
 	}
 	if (SURV[i] == 0u) {
-		uint slot = CNT[9] + (i - EXCS[i]);  // (the bups not kept before this one)
+		uint slot = CNT[CNT_DEATHS] + (i - EXCS[i]);  // (the bups not kept before this one)
 		if (slot < cap) {
-			uint o = (base + slot) * 10u;
-			EVD[o] = BUPS_U[b]; EVD[o + 1u] = BUPS_U[b + 21u]; EVD[o + 2u] = st; EVD[o + 3u] = (uint(uintBitsToFloat(BUPS_U[b + 20u])) & 0xFFFFFu) | ((uint(uintBitsToFloat(BUPS_U[b + 12u]) + 0.5) & 0x3FFu) << 20u) | (uintBitsToFloat(BUPS_U[b + 14u]) > 0.5 ? (1u << 30u) : 0u);
-			EVD[o + 4u] = BUPS_U[b + 6u]; EVD[o + 5u] = BUPS_U[b + 1u]; EVD[o + 6u] = BUPS_U[b + 2u];
-			EVD[o + 7u] = uintBitsToFloat(BUPS_U[b + 23u]) == -2.0 ? floatBitsToUint(P[8] * uintBitsToFloat(BUPS_U[b + 6u])) : 0u;  // (where it died and what it gives back: 0 for a trimmed one)
-			EVD[o + 8u] = BUPS_U[b + 5u]; EVD[o + 9u] = BUPS_U[b + 7u];  // (its own energy, and the mass it was born with)
-		} else atomicAdd(CNT[11], 1u);
+			uint o = (base + slot) * DEATH_WORDS;
+			EVD[o + ED_ID_LO] = BUPS_U[b + R_ID_LO]; EVD[o + ED_ID_HI] = BUPS_U[b + R_ID_HI]; EVD[o + ED_STEP] = st; EVD[o + ED_TRAITS] = (uint(uintBitsToFloat(BUPS_U[b + R_DIVISIONS])) & EV_LOW_MASK) | ((uint(uintBitsToFloat(BUPS_U[b + R_REACH]) + 0.5) & EV_REACH_MASK) << EV_REACH_SHIFT) | (uintBitsToFloat(BUPS_U[b + R_DONOR]) > 0.5 ? (1u << EV_DONOR_SHIFT) : 0u);
+			EVD[o + ED_MASS] = BUPS_U[b + R_MASS]; EVD[o + ED_X] = BUPS_U[b + R_X]; EVD[o + ED_Y] = BUPS_U[b + R_Y];
+			EVD[o + ED_GIVES] = uintBitsToFloat(BUPS_U[b + R_PY]) == -2.0 ? floatBitsToUint(P[P_DEATH_GIVE] * uintBitsToFloat(BUPS_U[b + R_MASS])) : 0u;  // (where it died and what it gives back: 0 for a trimmed one)
+			EVD[o + ED_ENERGY] = BUPS_U[b + R_ENERGY]; EVD[o + ED_BIRTH_MASS] = BUPS_U[b + R_BIRTH_MASS];  // (its own energy, and the mass it was born with)
+			EVD[o + ED_SPEED] = BUPS_U[b + R_SPEED]; EVD[o + ED_SENSE] = BUPS_U[b + R_SENSE]; EVD[o + ED_METABOLISM] = BUPS_U[b + R_METABOLISM]; EVD[o + ED_SIZE] = BUPS_U[b + R_SIZE];  // (its genes as it died)
+		} else atomicAdd(CNT[CNT_DEATHS_LOST], 1u);
 	}
 }
 """
 
-## After `copy`, before `setcount`: the step's births (those placed: CNT[3] - CNT[1]) and deaths (CNT[0] - CNT[1]) are added to the batch's
+## After `copy`, before `setcount`: the step's births (those placed: CNT_NEXT_COUNT - CNT_SURVIVORS) and deaths (CNT_BUPS - CNT_SURVIVORS) are added to the batch's
 ## counts, which are kept for event set `pcs.pb` too.
 const K_EV_COUNT := """
 void main() {
 	if (gl_GlobalInvocationID.x != 0u) return;
-	CNT[8] += CNT[3] - CNT[1]; CNT[9] += CNT[0] - CNT[1];
+	CNT[CNT_BIRTHS] += CNT[CNT_NEXT_COUNT] - CNT[CNT_SURVIVORS]; CNT[CNT_DEATHS] += CNT[CNT_BUPS] - CNT[CNT_SURVIVORS];
 	uint s = uint(pcs.pb);
-	EVN[s * 2u] = CNT[8]; EVN[s * 2u + 1u] = CNT[9];
+	EVN[s * 2u] = CNT[CNT_BIRTHS]; EVN[s * 2u + 1u] = CNT[CNT_DEATHS];
 }
 """
 
 ## Stats of the bups now, in two passes of fixed order (so a sample is the same every run): sums over groups of 256 bups into SPART,
 ## then one group sums those (`pcs.pa` of them) into OUT at word `pcs.pb`, with the step `pcs.pc`.
 const K_STATS1 := """
-shared float sm[10 * 256];
+const int SUMS = int(STATS_SUMS);
+shared float sm[SUMS * 256];
 void main() {
 	uint i = gl_GlobalInvocationID.x, l = gl_LocalInvocationID.x;
-	float v[10] = float[10](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-	if (i < CNT[0]) {
-		uint b = i * 28u;
-		float h = BUPS[b + 15u];
-		v[0] = 1.0; v[1] = BUPS[b + 8u]; v[2] = BUPS[b + 9u]; v[3] = BUPS[b + 10u]; v[4] = BUPS[b + 11u];
+	float v[SUMS];
+	for (int k = 0; k < SUMS; k++) v[k] = 0.0;
+	if (i < CNT[CNT_BUPS]) {
+		uint b = i * RECORD_WORDS;
+		float h = BUPS[b + R_HARM];
+		v[0] = 1.0; v[1] = BUPS[b + R_SPEED]; v[2] = BUPS[b + R_SENSE]; v[3] = BUPS[b + R_METABOLISM]; v[4] = BUPS[b + R_SIZE];
 		v[5] = h < 0.1 ? h * (1.0 - h * (0.5 - h * (0.16666667 - h * 0.041666668))) : 1.0 - exp(-h);  // (1 - exp(-h) without the loss of a small h's digits)
-		v[6] = BUPS[b + 19u]; v[7] = BUPS[b + 13u];
-		v[8] = ((int(BUPS[b + 12u] + 0.5) >> 8) & 3) == 2 ? 1.0 : 0.0;  // (the bups with the acetate key)
-		v[9] = BUPS[b + 20u];
+		v[6] = BUPS[b + R_MUTATIONS]; v[7] = BUPS[b + R_MUTATOR];
+		v[8] = ((int(BUPS[b + R_REACH] + 0.5) >> 8) & 3) == 2 ? 1.0 : 0.0;  // (the bups with the acetate key)
+		v[9] = BUPS[b + R_DIVISIONS];
+		v[10] = BUPS[b + R_DONOR];  // (1 for a donor, 0 for the rest)
 	}
-	for (int k = 0; k < 10; k++) sm[k * 256 + int(l)] = v[k];
+	for (int k = 0; k < SUMS; k++) sm[k * 256 + int(l)] = v[k];
 	barrier();
 	for (uint half_ = 128u; half_ > 0u; half_ >>= 1u) {
-		if (l < half_) for (int k = 0; k < 10; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
+		if (l < half_) for (int k = 0; k < SUMS; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
 		barrier();
 	}
-	if (l == 0u) for (int k = 0; k < 10; k++) SPART[gl_WorkGroupID.x * 10u + uint(k)] = sm[k * 256];
+	if (l == 0u) for (int k = 0; k < SUMS; k++) SPART[gl_WorkGroupID.x * STATS_SUMS + uint(k)] = sm[k * 256];
 }
 """
 
 const K_STATS2 := """
-shared float sm[10 * 256];
+const int SUMS = int(STATS_SUMS);
+shared float sm[SUMS * 256];
 void main() {
 	uint l = gl_LocalInvocationID.x, groups = uint(pcs.pa);
-	float v[10] = float[10](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-	for (uint g = l; g < groups; g += 256u) for (int k = 0; k < 10; k++) v[k] += SPART[g * 10u + uint(k)];
-	for (int k = 0; k < 10; k++) sm[k * 256 + int(l)] = v[k];
+	float v[SUMS];
+	for (int k = 0; k < SUMS; k++) v[k] = 0.0;
+	for (uint g = l; g < groups; g += 256u) for (int k = 0; k < SUMS; k++) v[k] += SPART[g * STATS_SUMS + uint(k)];
+	for (int k = 0; k < SUMS; k++) sm[k * 256 + int(l)] = v[k];
 	barrier();
 	for (uint half_ = 128u; half_ > 0u; half_ >>= 1u) {
-		if (l < half_) for (int k = 0; k < 10; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
+		if (l < half_) for (int k = 0; k < SUMS; k++) sm[k * 256 + int(l)] += sm[k * 256 + int(l + half_)];
 		barrier();
 	}
 	if (l == 0u) {
 		uint o = uint(pcs.pb);
-		OUT[o] = floatBitsToUint(float(CNT[0]));  // (the count exactly, not summed)
-		for (int k = 1; k < 7; k++) OUT[o + uint(k)] = floatBitsToUint(sm[k * 256]);
-		OUT[o + 7u] = floatBitsToUint(pcs.pc);
-		OUT[o + 8u] = floatBitsToUint(sm[7 * 256]);  // (the mutator's sum)
-		OUT[o + 9u] = CNT[15];  // (the donors of the last step)
-		OUT[o + 10u] = floatBitsToUint(sm[8 * 256]);  // (the key's count)
-		OUT[o + 11u] = floatBitsToUint(sm[9 * 256]);  // (the divisions' sum)
-		for (uint k = 12u; k < 16u; k++) OUT[o + k] = 0u;
+		OUT[o + ST_COUNT] = floatBitsToUint(float(CNT[CNT_BUPS]));  // (the count exactly, not summed)
+		for (uint k = ST_SPEED; k <= ST_MUTATIONS; k++) OUT[o + k] = floatBitsToUint(sm[k * 256u]);  // (sums 1 to 6 are in the sample's order)
+		OUT[o + ST_STEP] = floatBitsToUint(pcs.pc);
+		OUT[o + ST_MUTATOR] = floatBitsToUint(sm[7 * 256]);  // (the mutator's sum)
+		OUT[o + ST_DONORS] = uint(sm[10 * 256] + 0.5);  // (the donors' count: of the bups now, as the CPU's population_stats, not of the last step)
+		OUT[o + ST_KEY] = floatBitsToUint(sm[8 * 256]);  // (the key's count)
+		OUT[o + ST_DIVISIONS] = floatBitsToUint(sm[9 * 256]);  // (the divisions' sum)
+		for (uint k = ST_DIVISIONS + 1u; k < STATS_WORDS; k++) OUT[o + k] = 0u;
 	}
 }
 """
@@ -1252,14 +1210,14 @@ void main() {
 const K_Q_CLEAR := """
 void main() {
 	uint t = gl_GlobalInvocationID.x;
-	if (t < 16u) OUT[t] = CNT[t];
-	else if (t < 24u) OUT[t] = PCNT[t - 16u];
-	if (t >= 240u) return;
+	if (t < CNT_WORDS) OUT[OUT_CNT + t] = CNT[t];
+	else if (t < CNT_WORDS + PCNT_WORDS) OUT[OUT_PCNT + t - CNT_WORDS] = PCNT[t - CNT_WORDS];
+	if (t >= QOUT_WORDS) return;
 	uint q = OUT_Q + t;
 	uint v = 0u;
-	if (t == 0u || t == 1u || t == 26u) v = 0xFFFFFFFFu;  // (no pick; d² past any, for atomicMin)
-	if (t >= 36u && t < 228u) { uint w = (t - 36u) % 24u; if (w == 0u || w == 21u) v = 0xFFFFFFFFu; }  // (a tracked bup not found)
-	if (t >= 228u && t < 234u && (t - 228u) % 2u == 0u) v = 0xFFFFFFFFu;
+	if (t == QO_INDEX || t == QO_D2 || t == QO_NEAR) v = 0xFFFFFFFFu;  // (no pick; d² past any, for atomicMin)
+	if (t >= QO_TRACKED && t < QO_TRACKED + TRACKED * ANSWER_WORDS) { uint w = (t - QO_TRACKED) % ANSWER_WORDS; if (w == R_ID_LO || w == R_ID_HI) v = 0xFFFFFFFFu; }  // (a tracked bup not found)
+	if (t >= QO_NEAR_MORE && t < QO_NEAR_MORE + 2u * (NEAR_SLOTS - 1u) && (t - QO_NEAR_MORE) % 2u == 0u) v = 0xFFFFFFFFu;
 	OUT[q] = v;
 }
 """
@@ -1268,43 +1226,43 @@ void main() {
 ## by atomicMin on its bits (they order as the floats do, for d² >= 0), each bup's own kept in QD for the second pass.
 const K_Q_PICK := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0] || QIN[0] == 0u) return;
-	uint b = i * 28u;
-	float px = uintBitsToFloat(QIN[1]), py = uintBitsToFloat(QIN[2]), slack = uintBitsToFloat(QIN[3]), pixel = uintBitsToFloat(QIN[4]);
-	float reach = 0.5 * max(BUPS[b + 6u] * P[14], P[74] * pixel) + slack;
-	float dx = BUPS[b + 1u] - px, dy = BUPS[b + 2u] - py;
+	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS] || QIN[Q_PICK] == 0u) return;
+	uint b = i * RECORD_WORDS;
+	float px = uintBitsToFloat(QIN[Q_PICK_X]), py = uintBitsToFloat(QIN[Q_PICK_Y]), slack = uintBitsToFloat(QIN[Q_SLACK]), pixel = uintBitsToFloat(QIN[Q_PIXEL]);
+	float reach = 0.5 * max(BUPS[b + R_MASS] * P[P_MASS_UM], P[P_MIN_LENGTH_PX] * pixel) + slack;
+	float dx = BUPS[b + R_X] - px, dy = BUPS[b + R_Y] - py;
 	float d2 = dx * dx + dy * dy;
 	uint bits = 0xFFFFFFFFu;
-	if (d2 <= reach * reach) { bits = floatBitsToUint(d2); atomicMin(OUT[OUT_Q + 1u], bits); }
+	if (d2 <= reach * reach) { bits = floatBitsToUint(d2); atomicMin(OUT[OUT_Q + QO_D2], bits); }
 	QD[i] = bits;
 }
 """
 
 const K_Q_PICK2 := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0] || QIN[0] == 0u) return;
-	if (QD[i] != 0xFFFFFFFFu && QD[i] == OUT[OUT_Q + 1u]) atomicMin(OUT[OUT_Q], i);
+	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS] || QIN[Q_PICK] == 0u) return;
+	if (QD[i] != 0xFFFFFFFFu && QD[i] == OUT[OUT_Q + QO_D2]) atomicMin(OUT[OUT_Q + QO_INDEX], i);
 }
 """
 
-## The picked bup's record (24 threads), and every tracked bup's (one thread per bup: the one with that id copies its record).
+## The picked bup's record (ANSWER_WORDS threads), and every tracked bup's (one thread per bup: the one with that id copies its record).
 const K_Q_RECORD := """
 void main() {
-	uint t = gl_GlobalInvocationID.x; if (t >= 24u) return;
-	uint k = OUT[OUT_Q];
-	if (k != 0xFFFFFFFFu) OUT[OUT_Q + 2u + t] = BUPS_U[k * 28u + t];
+	uint t = gl_GlobalInvocationID.x; if (t >= ANSWER_WORDS) return;
+	uint k = OUT[OUT_Q + QO_INDEX];
+	if (k != 0xFFFFFFFFu) OUT[OUT_Q + QO_RECORD + t] = BUPS_U[k * RECORD_WORDS + t];
 }
 """
 
 const K_Q_TRACK := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[0]) return;
-	uint n = QIN[27]; if (n == 0u) return;
-	uint b = i * 28u, lo = BUPS_U[b], hi = BUPS_U[b + 21u];
+	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+	uint n = QIN[Q_TRACK]; if (n == 0u) return;
+	uint b = i * RECORD_WORDS, lo = BUPS_U[b + R_ID_LO], hi = BUPS_U[b + R_ID_HI];
 	for (uint t = 0u; t < n; t++) {
-		if (QIN[28u + 2u * t] == lo && QIN[29u + 2u * t] == hi) {
-			uint o = OUT_Q + 36u + t * 24u;
-			for (uint w = 0u; w < 24u; w++) OUT[o + w] = BUPS_U[b + w];
+		if (QIN[Q_TRACK_FIRST + 2u * t] == lo && QIN[Q_TRACK_FIRST + 1u + 2u * t] == hi) {
+			uint o = OUT_Q + QO_TRACKED + t * ANSWER_WORDS;
+			for (uint w = 0u; w < ANSWER_WORDS; w++) OUT[o + w] = BUPS_U[b + w];
 		}
 	}
 }
@@ -1313,44 +1271,44 @@ void main() {
 ## The nearest bup and the count within `near` for each nearest slot, and the count at or above each fraction's threshold: summed (and the
 ## least found) in each group of 256 first, then one atomic per group.
 const K_Q_SCAN := """
-shared uint smin[4 * 256];
-shared uint scnt[8 * 256];
+shared uint smin[NEAR_SLOTS * 256u];
+shared uint scnt[(NEAR_SLOTS + FRACTIONS) * 256u];
 void main() {
 	uint i = gl_GlobalInvocationID.x, l = gl_LocalInvocationID.x;
-	uint nn = QIN[5], nf = QIN[18];
-	bool live = i < CNT[0];
-	uint b = i * 28u;
-	float x = live ? BUPS[b + 1u] : 0.0, y = live ? BUPS[b + 2u] : 0.0;
-	for (uint s = 0u; s < 4u; s++) {
+	uint nn = QIN[Q_NEAR], nf = QIN[Q_FRAC];
+	bool live = i < CNT[CNT_BUPS];
+	uint b = i * RECORD_WORDS;
+	float x = live ? BUPS[b + R_X] : 0.0, y = live ? BUPS[b + R_Y] : 0.0;
+	for (uint s = 0u; s < NEAR_SLOTS; s++) {
 		uint m = 0xFFFFFFFFu, c = 0u;
 		if (live && s < nn) {
-			float qx = uintBitsToFloat(QIN[6u + 3u * s]), qy = uintBitsToFloat(QIN[7u + 3u * s]), near = uintBitsToFloat(QIN[8u + 3u * s]);
+			float qx = uintBitsToFloat(QIN[Q_NEAR_FIRST + 3u * s]), qy = uintBitsToFloat(QIN[Q_NEAR_FIRST + 1u + 3u * s]), near = uintBitsToFloat(QIN[Q_NEAR_FIRST + 2u + 3u * s]);
 			float dx = x - qx, dy = y - qy, d2 = dx * dx + dy * dy;
 			m = floatBitsToUint(d2);
 			c = d2 <= near * near ? 1u : 0u;
 		}
 		smin[s * 256u + l] = m; scnt[s * 256u + l] = c;
 	}
-	for (uint f = 0u; f < 4u; f++) {
+	for (uint f = 0u; f < FRACTIONS; f++) {
 		uint c = 0u;
-		if (live && f < nf) c = BUPS[b + 8u + QIN[19u + 2u * f]] >= uintBitsToFloat(QIN[20u + 2u * f]) ? 1u : 0u;
-		scnt[(4u + f) * 256u + l] = c;
+		if (live && f < nf) c = BUPS[b + R_SPEED + QIN[Q_FRAC_FIRST + 2u * f]] >= uintBitsToFloat(QIN[Q_FRAC_FIRST + 1u + 2u * f]) ? 1u : 0u;
+		scnt[(NEAR_SLOTS + f) * 256u + l] = c;
 	}
 	barrier();
 	for (uint half_ = 128u; half_ > 0u; half_ >>= 1u) {
 		if (l < half_) {
-			for (uint s = 0u; s < 4u; s++) smin[s * 256u + l] = min(smin[s * 256u + l], smin[s * 256u + l + half_]);
-			for (uint k = 0u; k < 8u; k++) scnt[k * 256u + l] += scnt[k * 256u + l + half_];
+			for (uint s = 0u; s < NEAR_SLOTS; s++) smin[s * 256u + l] = min(smin[s * 256u + l], smin[s * 256u + l + half_]);
+			for (uint k = 0u; k < NEAR_SLOTS + FRACTIONS; k++) scnt[k * 256u + l] += scnt[k * 256u + l + half_];
 		}
 		barrier();
 	}
 	if (l == 0u) {
 		for (uint s = 0u; s < nn; s++) {
-			uint od = s == 0u ? OUT_Q + 26u : OUT_Q + 228u + 2u * (s - 1u);
+			uint od = s == 0u ? OUT_Q + QO_NEAR : OUT_Q + QO_NEAR_MORE + 2u * (s - 1u);
 			if (smin[s * 256u] != 0xFFFFFFFFu) atomicMin(OUT[od], smin[s * 256u]);
 			if (scnt[s * 256u] > 0u) atomicAdd(OUT[od + 1u], scnt[s * 256u]);
 		}
-		for (uint f = 0u; f < nf; f++) if (scnt[(4u + f) * 256u] > 0u) atomicAdd(OUT[OUT_Q + 28u + f], scnt[(4u + f) * 256u]);
+		for (uint f = 0u; f < nf; f++) if (scnt[(NEAR_SLOTS + f) * 256u] > 0u) atomicAdd(OUT[OUT_Q + QO_FRAC + f], scnt[(NEAR_SLOTS + f) * 256u]);
 	}
 }
 """
@@ -1359,9 +1317,9 @@ void main() {
 ## inside the dish whose centres lie within it, and from the clouds whose centres do, the share strength * (1 - d / radius).
 const K_ERASE_CELLS := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; int n = int(P[1]);
+	uint i = gl_GlobalInvocationID.x; int n = int(P[P_CELLS]);
 	if (i >= uint(n * n) || INSIDE[i] == 0) return;
-	float cx = (float(int(i) % n) + 0.5) * P[2] - P[3], cy = (float(int(i) / n) + 0.5) * P[2] - P[3];
+	float cx = (float(int(i) % n) + 0.5) * P[P_SPACING] - P[P_ORIGIN], cy = (float(int(i) / n) + 0.5) * P[P_SPACING] - P[P_ORIGIN];
 	float c = CONC[i];
 	for (int e = 0; e < int(pcs.pa); e++) {
 		vec4 d = ERASE[e];
@@ -1374,7 +1332,7 @@ void main() {
 
 const K_ERASE_PUFFS := """
 void main() {
-	uint k = gl_GlobalInvocationID.x; if (k >= PCNT[0]) return;
+	uint k = gl_GlobalInvocationID.x; if (k >= PCNT[PCNT_SLOTS]) return;
 	uint o = k * 8u;
 	if (PUFF[o + 5u] < 0.5) return;
 	float m = PUFF[o + 2u];
@@ -1397,9 +1355,9 @@ void main() { uint t = gl_GlobalInvocationID.x; if (t >= uint(pcs.pa)) return; O
 const K_MIRROR := """
 void main() {
 	uint k = gl_GlobalInvocationID.x; if (k >= uint(pcs.pa)) return;
-	if (k == 0u) MIRROR[0] = float(PCNT[0]);
+	if (k == 0u) MIRROR[0] = float(PCNT[PCNT_SLOTS]);
 	uint o = 1u + k * 5u, q = k * 8u;
-	bool live = k < PCNT[0] && PUFF[q + 5u] > 0.5;
+	bool live = k < PCNT[PCNT_SLOTS] && PUFF[q + 5u] > 0.5;
 	MIRROR[o] = live ? PUFF[q] : 0.0; MIRROR[o + 1u] = live ? PUFF[q + 1u] : 0.0; MIRROR[o + 2u] = live ? PUFF[q + 2u] : 0.0;
 	MIRROR[o + 3u] = live ? PUFF[q + 3u] : 0.0; MIRROR[o + 4u] = live ? PUFF[q + 4u] : 0.0;
 }
@@ -1418,7 +1376,6 @@ static func all() -> Dictionary:
 
 ## The simulation's kernels.
 static func core() -> Dictionary:
-	assert(OUT_Q == 32 and OUT_STATS == 272, "LAYOUT_GLSL must match OUT_Q and OUT_STATS")
 	var out := {}
 	_add(out, "feed", K_FEED, ["P", "CONC", "WGT"])
 	_add(out, "clear", K_CLEAR, ["P", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI"])
@@ -1476,12 +1433,12 @@ static func core() -> Dictionary:
 	_add(out, "ev_count", K_EV_COUNT, ["CNT", "EVN"])
 	_add(out, "stats1", K_STATS1, ["CNT", "BUPS", "SPART"], "", 256)
 	_add(out, "stats2", K_STATS2, ["CNT", "SPART", "OUT"], "", 256)
-	_add(out, "q_clear", K_Q_CLEAR, ["CNT", "PCNT", "OUT"], LAYOUT_GLSL)
-	_add(out, "q_pick", K_Q_PICK, ["P", "CNT", "BUPS", "QIN", "QD", "OUT"], LAYOUT_GLSL)
-	_add(out, "q_pick2", K_Q_PICK2, ["CNT", "QIN", "QD", "OUT"], LAYOUT_GLSL)
-	_add(out, "q_record", K_Q_RECORD, ["BUPS_U", "OUT"], LAYOUT_GLSL)
-	_add(out, "q_track", K_Q_TRACK, ["CNT", "BUPS_U", "QIN", "OUT"], LAYOUT_GLSL)
-	_add(out, "q_scan", K_Q_SCAN, ["CNT", "BUPS", "QIN", "OUT"], LAYOUT_GLSL, 256)
+	_add(out, "q_clear", K_Q_CLEAR, ["CNT", "PCNT", "OUT"])
+	_add(out, "q_pick", K_Q_PICK, ["P", "CNT", "BUPS", "QIN", "QD", "OUT"])
+	_add(out, "q_pick2", K_Q_PICK2, ["CNT", "QIN", "QD", "OUT"])
+	_add(out, "q_record", K_Q_RECORD, ["BUPS_U", "OUT"])
+	_add(out, "q_track", K_Q_TRACK, ["CNT", "BUPS_U", "QIN", "OUT"])
+	_add(out, "q_scan", K_Q_SCAN, ["CNT", "BUPS", "QIN", "OUT"], "", 256)
 	_add(out, "erase_cells", K_ERASE_CELLS, ["P", "INSIDE", "CONC", "ERASE"])
 	_add(out, "erase_puffs", K_ERASE_PUFFS, ["PCNT", "PUFF", "ERASE"])
 	_add(out, "mirror", K_MIRROR, ["PCNT", "PUFF", "MIRROR"])
@@ -1490,15 +1447,51 @@ static func core() -> Dictionary:
 
 
 ## One kernel: the header with its local size, a declaration for each buffer (binding = position in `buffer_names`; its element type
-## from TYPES here, or GpuKernelsDraw.TYPES for the drawing's own buffers), FUNCS, `extra`, then the code. For gpu/kernels_draw.gd too.
+## from TYPES here, or GpuKernelsDraw.TYPES for the drawing's own buffers), the names of gpu/gpu_layout.gd the code uses (`layout_names`),
+## FUNCS, `extra`, then the code. For gpu/kernels_draw.gd too.
 static func add(out: Dictionary, kernel_name: String, body: String, buffer_names: Array, extra := "", local := 64) -> void:
 	var src := HEAD.replace("local_size_x = 64", "local_size_x = " + str(local))
 	for k in buffer_names.size():
 		var b: String = buffer_names[k]
 		var type: String = TYPES[b] if TYPES.has(b) else GpuKernelsDraw.TYPES[b]
 		src += "layout(set = 0, binding = %d, std430) buffer B_%s { %s %s[]; };\n" % [k, b, type, b]
-	src += FUNCS + extra + body
+	var code := FUNCS + extra + body
+	var names := layout_names()
+	var used := {}
+	for m in _words().search_all(code):
+		if names.has(m.get_string()):
+			used[m.get_string()] = true
+	var declared: Array = used.keys()
+	declared.sort()
+	for name: String in declared:
+		src += names[name] + "\n"
+	src += code
 	out[kernel_name] = {"source": GENERATED + "#[compute]\n" + src, "buffers": buffer_names, "local_size": local}
+
+
+static var _layout_names := {}
+static var _word_regex: RegEx = null
+
+
+## Every name gpu/gpu_layout.gd gives the GLSL -> its declaration: each int constant as `const uint NAME = value;`, each slot of P as
+## `const int P_<NAME> = slot;`.
+static func layout_names() -> Dictionary:
+	if _layout_names.is_empty():
+		var constants: Dictionary = (load("res://gpu/gpu_layout.gd") as Script).get_script_constant_map()
+		for name: String in constants:
+			if constants[name] is int:
+				_layout_names[name] = "const uint %s = %du;" % [name, constants[name]]
+		for slot_name: String in GpuLayout.P_SLOTS:
+			var glsl := "P_" + slot_name.to_upper()
+			assert(not _layout_names.has(glsl), "GpuLayout: %s is both a constant and a slot of P" % glsl)
+			_layout_names[glsl] = "const int %s = %d;" % [glsl, GpuLayout.p_slot(slot_name)]
+	return _layout_names
+
+
+static func _words() -> RegEx:
+	if _word_regex == null:
+		_word_regex = RegEx.create_from_string("\\b[A-Z][A-Z0-9_]*\\b")
+	return _word_regex
 
 
 static func _add(out: Dictionary, kernel_name: String, body: String, buffer_names: Array, extra := "", local := 64) -> void:

@@ -14,7 +14,7 @@ func check(ok: bool, what: String) -> void:
 
 func _init() -> void:
 	var all := GpuKernels.all()
-	check(all.size() >= 49, "expected at least the 49 kernels of Step 3.0, found %d" % all.size())
+	check(all.size() >= 49, "expected at least the 49 kernels, found %d" % all.size())
 	for kernel_name: String in all:
 		_check_kernel(kernel_name, all[kernel_name])
 	for f in DirAccess.get_files_at("res://gpu/shaders"):

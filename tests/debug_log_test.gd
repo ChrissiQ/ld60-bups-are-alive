@@ -27,7 +27,7 @@ func _init() -> void:
 	Session.mode = Session.Mode.FREE
 	Session.free_start = TestUtil.small_start()
 	Session.tutorial_wanted = true
-	var m: Node = load("res://scenes/main.tscn").instantiate()
+	var m: Node = load(Scenes.GAME).instantiate()
 	root.add_child(m)
 	for i in 3:
 		await process_frame
@@ -69,7 +69,7 @@ func _init() -> void:
 	check(not hotkey.notice.visible, "the notice goes after a few seconds")
 	var first: String = _logs()[0]
 	var kept: Variant = JSON.parse_string(FileAccess.get_file_as_string(DebugLog.directory.path_join(first)))
-	check(kept is Dictionary and kept["scene"] == "res://scenes/main.tscn" and kept.has("dish"), "the log names the screen and has its dish")
+	check(kept is Dictionary and kept["scene"] == Scenes.GAME and kept.has("dish"), "the log names the screen and has its dish")
 
 	# On a screen without a dish (the intro): the screen and the session, and no dish.
 	m.queue_free()

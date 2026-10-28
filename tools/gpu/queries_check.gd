@@ -80,7 +80,7 @@ func _initialize() -> void:
 	print("field: %d clouds" % ((packed["puffs"] as PackedFloat32Array).size() / 5))
 	# fractions at a gene's own value (the float threshold boundary) and at round numbers
 	var words := state.to_float32_array()
-	fractions = [["speed", 30.0], ["sense", float(words[9 + 24 * 17])], ["metabolism", float(words[10 + 24 * 123]) + 1e-12], ["size", 4.2]]
+	fractions = [["speed", 30.0], ["sense", float(words[GpuLayout.R_SENSE + GpuLayout.RECORD_WORDS * 17])], ["metabolism", float(words[GpuLayout.R_METABOLISM + GpuLayout.RECORD_WORDS * 123]) + 1e-12], ["size", 4.2]]
 	print("state: %d bups, the GPU's %s" % [BUPS, world.device_name()])
 
 
@@ -95,7 +95,7 @@ func _new_round() -> void:
 		at = Vector2(rng.randf_range(-RADIUS, RADIUS), rng.randf_range(-RADIUS, RADIUS))
 	pick_q = [at, slack, pixel]
 	near_q = []
-	for s in GpuKernels.NEAR_SLOTS:
+	for s in GpuLayout.NEAR_SLOTS:
 		near_q.append([Vector2(rng.randf_range(-RADIUS, RADIUS), rng.randf_range(-RADIUS, RADIUS)), [0.0, 60.0, 300.0, 1000.0][s]])
 
 
@@ -141,6 +141,7 @@ func _compare_totals() -> void:
 		var cf := ref.fraction_with_gene_at_least(f[0], f[1])
 		checked["fraction"] += 1
 		print("fraction %-10s >= %.9f GPU %.6f CPU %.6f" % [f[0], f[1], gf, cf])
+		_check(cf > 0.0 and cf < 1.0, "fraction %s >= %f: the CPU's %f is all or none, so it tests nothing (0 is also the GPU's answer before one comes back)" % [f[0], f[1], cf])
 		_check(absf(gf - cf) <= 1e-5 * maxf(cf, 1e-30) or gf == cf, "fraction %s >= %f: GPU %f CPU %f" % [f[0], f[1], gf, cf])
 
 
@@ -211,6 +212,7 @@ func _process(_delta: float) -> bool:
 	if phase == "totals":
 		_compare_totals()
 		print("checked %s" % str(checked))
+		_check(checked["pick_hit"] > 0 and checked["fraction"] == fractions.size(), "some picks hit a bup (%d) and every fraction was compared" % checked["pick_hit"])
 		print("QUERIES CHECK " + ("OK" if failures == 0 else "FAILED (%d)" % failures))
 		finishing = 1
 		return false

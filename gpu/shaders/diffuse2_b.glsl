@@ -7,6 +7,7 @@ layout(set = 0, binding = 0, std430) buffer B_P { float P[]; };
 layout(set = 0, binding = 1, std430) buffer B_INSIDE { int INSIDE[]; };
 layout(set = 0, binding = 2, std430) buffer B_CONC2B { float CONC2B[]; };
 layout(set = 0, binding = 3, std430) buffer B_CONC2 { float CONC2[]; };
+const int P_CELLS = 1;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
@@ -14,7 +15,7 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 
 void main() {
 	uint i = gl_GlobalInvocationID.x;
-	int n = int(P[1]);
+	int n = int(P[P_CELLS]);
 	if (i >= uint(n * n)) return;
 	if (INSIDE[i] == 0) { CONC2[i] = CONC2B[i]; return; }
 	int x = int(i) % n, y = int(i) / n;

@@ -13,6 +13,9 @@ layout(set = 0, binding = 6, std430) buffer B_RHI { uint RHI[]; };
 layout(set = 0, binding = 7, std430) buffer B_ALO { uint ALO[]; };
 layout(set = 0, binding = 8, std430) buffer B_AHI { uint AHI[]; };
 layout(set = 0, binding = 9, std430) buffer B_SCALE { float SCALE[]; };
+const int P_CELLS = 1;
+const int P_HALF_SATURATION = 24;
+const int P_SPACING = 2;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
@@ -23,7 +26,7 @@ float neglog1m(float x) { // -ln(1 - x)
 	return -log(1.0 - x);
 }
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[1] * P[1])) return;
+	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
 	if (OWNER[i] != int(i)) return;
 	float d = float(DHI[i]) * 4.0 + float(DLO[i]) * 9.313225746154785e-10; // what the bups there wanted
 	SCALE[i] = 0.0;
@@ -32,8 +35,8 @@ void main() {
 	float rho = (float(RHI[i]) * 4.0 + float(RLO[i]) * 9.313225746154785e-10) / d; // the concentration they read, as a share of this cell's
 	float al = max((float(AHI[i]) * 4.0 + float(ALO[i]) * 9.313225746154785e-10) / d, 0.02); // and how much of what they read is this cell's
 	float ct = max(rho * c0, 1e-12);
-	float area = P[2] * P[2];
-	float k = P[24];
+	float area = P[P_SPACING] * P[P_SPACING];
+	float k = P[P_HALF_SATURATION];
 	// What they take as they run the cell down while their uptake follows what they read, ct - al u (u: what has been taken, as a
 	// concentration): u + (k / al) (-ln(1 - al u / ct)) = d (k + ct) / (area ct), found by bisection.
 	float y = d * (k + ct) / (area * ct);

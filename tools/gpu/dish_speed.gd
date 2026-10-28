@@ -1,7 +1,7 @@
 extends SceneTree
 ## The game's dish on the GPU path at playback speed, as the game screen drives it (scripts/main.gd: each frame advance(frame seconds x
 ## speed, FRAME_BUDGET_USEC), achieved_speed its running mean): frame times, the CPU time of advance(), steps per frame, the speed
-## achieved. The dish does not draw (its drawing is Step 3A's), so the frames hold the simulation and the window only.
+## achieved. The dish does not draw, so the frames hold the simulation and the window only.
 ## godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/dish_speed.gd -- [scenario] [founders] [frames] [speed] [limit]
 
 const Tools := preload("res://tools/gpu/world_tools.gd")

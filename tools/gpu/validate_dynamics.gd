@@ -103,7 +103,7 @@ func _init() -> void:
 			if steps_done >= next_hour * per_hour:
 				var st: Dictionary = dish.population_stats()
 				var energy := 0.0
-				var ex: PackedFloat32Array = dish.sim.export_state()
+				var ex: PackedFloat32Array = dish.sim.export_state_bytes().to_float32_array()
 				var np: int = ex.size() / GpuSim.STRIDE
 				for i in np:
 					energy += ex[i * GpuSim.STRIDE + 5]
@@ -114,7 +114,7 @@ func _init() -> void:
 					break
 	else:
 		var gpu := GpuSim.new(null, OS.get_environment("GPU_FROM_SOURCE") == "1")
-		var feed_per_second: float = start.feed_density * Dish.CONCENTRATION_PER_DENSITY / 3600.0
+		var feed_per_second: float = Dish.feed_per_second(start.feed_density)
 		var with_world := scenario in ["D", "E", "F"]  # (plankton and sources: the CPU dish runs their part, recording what it would do to the field)
 		var start_state: PackedByteArray = dish.sim.export_state_bytes()
 		gpu.load_state(field.get_size(), field.get_spacing(), dish.radius, field.values(), field.export_owner(), start_state, consts, start.bup_limit, field.export_fill_weights(), feed_per_second, step, field.get_diffusion(), [], seed_value, 1.0, dish.sim.get_next_id())
@@ -132,18 +132,11 @@ func _init() -> void:
 		while steps_done < hours * per_hour:
 			var events := {}
 			if with_world:
-				var ranges := PackedInt32Array(); var puffs_all := PackedFloat32Array(); var cells_all := PackedInt32Array(); var amts_all := PackedFloat32Array()
+				var world_events := GpuSim.WorldEvents.new()
 				for st in 9:
 					dish.step(step)
-					var pf: PackedFloat32Array = field.take_recorded_puffs()
-					var cc: PackedInt32Array = field.take_recorded_cells()
-					var aa: PackedFloat32Array = field.take_recorded_amounts()
-					ranges.append_array(PackedInt32Array([puffs_all.size() / 6, pf.size() / 5, cells_all.size(), cc.size()]))
-					for j in pf.size() / 5:
-						puffs_all.append_array(PackedFloat32Array([pf[j * 5], pf[j * 5 + 1], pf[j * 5 + 2], pf[j * 5 + 3], pf[j * 5 + 4], 0.0]))
-					cells_all.append_array(cc)
-					amts_all.append_array(aa)
-				events = {"ranges": ranges, "puffs": puffs_all, "cells": cells_all, "amounts": amts_all}
+					world_events.add_step(field)
+				events = world_events.as_dict()
 			gpu.run_steps(9, events)  # (nine steps: three minutes of sim time at 20 s)
 			steps_done += 9
 			var cnt := gpu.counts()

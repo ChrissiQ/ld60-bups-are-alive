@@ -36,7 +36,7 @@ double fposmod1(double v) {
 
 // The words of the GPU's records and events (little-endian 32-bit words, as the GPU writes them).
 const float NO_PICTURE = 3e38f; // px, py of a record with no last picture (any value from 1e30 up means the same)
-const int BIRTH_WORDS = 16, DEATH_WORDS = 10;
+const int BIRTH_WORDS = 16, DEATH_WORDS = 14;
 void put_u32(uint8_t *record, int word, uint32_t v) { memcpy(record + word * 4, &v, 4); }
 void put_f32(uint8_t *record, int word, float v) { memcpy(record + word * 4, &v, 4); }
 uint32_t get_u32(const uint8_t *record, int word) {
@@ -76,7 +76,6 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("grow", "new_radius"), &BupSim::grow);
 	ClassDB::bind_method(D_METHOD("shrink", "new_radius"), &BupSim::shrink);
 	ClassDB::bind_method(D_METHOD("set_threads", "count"), &BupSim::set_threads);
-	ClassDB::bind_method(D_METHOD("export_state"), &BupSim::export_state);
 	ClassDB::bind_method(D_METHOD("export_state_bytes"), &BupSim::export_state_bytes);
 	ClassDB::bind_method(D_METHOD("import_state_bytes", "state"), &BupSim::import_state_bytes);
 	ClassDB::bind_method(D_METHOD("info_from_state", "state", "index"), &BupSim::info_from_state);
@@ -96,7 +95,6 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("pin", "id"), &BupSim::pin);
 	ClassDB::bind_method(D_METHOD("unpin", "id"), &BupSim::unpin);
 	ClassDB::bind_method(D_METHOD("lineage_export"), &BupSim::lineage_export);
-	ClassDB::bind_method(D_METHOD("lineage_import", "saved", "pinned"), &BupSim::lineage_import, DEFVAL(PackedInt64Array()));
 	ClassDB::bind_method(D_METHOD("lineage_export_bytes"), &BupSim::lineage_export_bytes);
 	ClassDB::bind_method(D_METHOD("lineage_import_bytes", "data", "pinned"), &BupSim::lineage_import_bytes, DEFVAL(PackedInt64Array()));
 	ClassDB::bind_method(D_METHOD("get_next_id"), &BupSim::get_next_id);
@@ -340,33 +338,40 @@ BupSim::Genome BupSim::mutate(const Genome &parent) {
 	return g;
 }
 
+BupSim::Genome BupSim::genome_from_dict(const Dictionary &d) {
+	Genome g;
+	for (int i = 0; i < 4; i++) {
+		g.genes[i] = (float)(double)d.get(GENE_NAMES[i], 0.0);
+	}
+	g.hue = (float)(double)d.get("hue", G.founder_hue);
+	g.sat = (float)(double)d.get("sat", G.founder_sat); // (the usual saturation, for a genome built without one)
+	g.val = (float)(double)d.get("val", G.founder_val);
+	g.harm = (float)(double)d.get("harm", 0.0);
+	g.mutations = (int)d.get("mutations", 0);
+	g.mutator = (float)(double)d.get("mutator", 1.0);
+	g.donor = (bool)d.get("donor", false);
+	g.reach = (int)d.get("reach", 0);
+	return g;
+}
+
+void BupSim::put_genome(Dictionary &out, const Genome &g, bool info_keys) {
+	for (int i = 0; i < 4; i++) {
+		out[i == 3 && info_keys ? "size_gene" : GENE_NAMES[i]] = g.genes[i];
+	}
+	out["hue"] = g.hue;
+	out["sat"] = g.sat;
+	out["val"] = g.val;
+	out["harm"] = g.harm;
+	out["mutator"] = g.mutator;
+	out["donor"] = g.donor;
+	out["reach"] = g.reach;
+	out["mutations"] = g.mutations;
+}
+
 Dictionary BupSim::mutate_genome(const Dictionary &genome) {
-	Genome parent;
-	for (int i = 0; i < 4; i++) {
-		parent.genes[i] = (float)(double)genome.get(GENE_NAMES[i], 0.0);
-	}
-	parent.hue = (float)(double)genome.get("hue", G.founder_hue);
-	parent.sat = (float)(double)genome.get("sat", G.founder_sat);
-	parent.val = (float)(double)genome.get("val", G.founder_val);
-	parent.harm = (float)(double)genome.get("harm", 0.0);
-	parent.mutations = (int)genome.get("mutations", 0);
-	parent.mutator = (float)(double)genome.get("mutator", 1.0);
-	parent.donor = (bool)genome.get("donor", false);
-	parent.reach = (int)genome.get("reach", 0);
-	parent.lethal = false;
-	Genome child = mutate(parent);
+	Genome child = mutate(genome_from_dict(genome));
 	Dictionary out;
-	for (int i = 0; i < 4; i++) {
-		out[GENE_NAMES[i]] = child.genes[i];
-	}
-	out["hue"] = child.hue;
-	out["sat"] = child.sat;
-	out["val"] = child.val;
-	out["harm"] = child.harm;
-	out["mutator"] = child.mutator;
-	out["donor"] = child.donor;
-	out["reach"] = child.reach;
-	out["mutations"] = child.mutations;
+	put_genome(out, child, false);
 	out["lethal"] = child.lethal;
 	return out;
 }
@@ -384,11 +389,29 @@ void BupSim::derive(Bup &b) const {
 	b.drag_upkeep = (float)(G.drag_upkeep * (double)b.genes[0] * b.genes[0]);
 }
 
+// A bup only moves towards the front of `bups` (those before it die and the rest close up; one displaced at the limit takes the last
+// one's place), so a bup asked for before is looked for back from where it was, and only then in the whole list.
 int BupSim::find(int64_t id) const {
+	auto hint = find_hints.find(id);
+	if (hint != find_hints.end()) {
+		for (int i = std::min(hint->second, (int)bups.size() - 1); i >= 0; i--) {
+			if (bups[i].id == id) {
+				hint->second = i;
+				return i;
+			}
+		}
+	}
 	for (size_t i = 0; i < bups.size(); i++) {
 		if (bups[i].id == id) {
+			if (find_hints.size() >= 4096) { // (only a handful are asked for again and again: the watched and the picked)
+				find_hints.clear();
+			}
+			find_hints[id] = (int)i;
 			return (int)i;
 		}
+	}
+	if (hint != find_hints.end()) {
+		find_hints.erase(hint);
 	}
 	return -1;
 }
@@ -411,17 +434,7 @@ int64_t BupSim::add_bup(const Vector2 &pos, const Dictionary &genome, double ene
 	Vector2 d = dir.length() > 1e-6f ? dir.normalized() : Vector2(1, 0);
 	b.dx = d.x;
 	b.dy = d.y;
-	for (int i = 0; i < 4; i++) {
-		b.genes[i] = (float)(double)genome.get(GENE_NAMES[i], 0.0);
-	}
-	b.hue = (float)(double)genome.get("hue", G.founder_hue);
-	b.sat = (float)(double)genome.get("sat", G.founder_sat);  // (the usual saturation, for a genome built without one)
-	b.val = (float)(double)genome.get("val", G.founder_val);
-	b.harm = (float)(double)genome.get("harm", 0.0);
-	b.mutator = (float)(double)genome.get("mutator", 1.0);
-	b.donor = (bool)genome.get("donor", false);
-	b.reach = (int)genome.get("reach", 0);
-	b.mutations = (int)genome.get("mutations", 0);
+	set_genome(b, genome_from_dict(genome));
 	b.divisions = divisions;
 	derive(b);
 	b.birth_mass = (float)(birth_mass < 0.0 ? b.add_mass : birth_mass);
@@ -443,17 +456,7 @@ void BupSim::make_record(const Bup &b, int64_t parent) {
 	}
 	r.born = now_minutes();
 	r.divisions = b.divisions;
-	r.mutations = b.mutations;
-	for (int g = 0; g < 4; g++) {
-		r.genes[g] = b.genes[g];
-	}
-	r.hue = b.hue;
-	r.sat = b.sat;
-	r.val = b.val;
-	r.harm = b.harm;
-	r.mutator = b.mutator;
-	r.reach = b.reach;
-	r.donor = b.donor;
+	set_genome(r, genome_of(b));
 	records[b.id] = r;
 }
 
@@ -468,7 +471,10 @@ void BupSim::record_death(const Bup &b) {
 	r.died = now_minutes();
 	r.divisions = b.divisions;
 	r.max_energy = (float)max_energy(b);
-	r.reach = b.reach; // (what it was when it died: a conjugation can have changed them since it was born)
+	for (int g = 0; g < 4; g++) { // (the genes and their raised ceilings as they were when it died: a conjugation can have changed them since it was born)
+		r.genes[g] = b.genes[g];
+	}
+	r.reach = b.reach;
 	r.donor = b.donor;
 	r.mass = b.mass;
 	r.energy = b.energy;
@@ -518,19 +524,8 @@ Dictionary BupSim::record_info(int64_t id, const Record &r) const {
 	out["born"] = r.born;
 	out["died"] = r.alive ? -1 : r.died;
 	out["divisions"] = r.divisions;
-	out["speed"] = r.genes[0];
-	out["sense"] = r.genes[1];
-	out["metabolism"] = r.genes[2];
-	out["size_gene"] = r.genes[3];
-	out["hue"] = r.hue;
-	out["sat"] = r.sat;
-	out["val"] = r.val;
-	out["harm"] = r.harm;
-	out["mutator"] = r.mutator;
-	out["mutations"] = r.mutations;
+	put_genome(out, genome_of(r), true);
 	out["max_energy"] = r.max_energy;
-	out["reach"] = r.reach;
-	out["donor"] = r.donor;
 	out["mass"] = r.mass;
 	out["energy"] = r.energy;
 	out["birth_mass"] = r.birth_mass;
@@ -583,53 +578,6 @@ Array BupSim::lineage_export() const {
 		out.push_back(record_info(entry.first, entry.second));
 	}
 	return out;
-}
-
-// A saved game's records: they replace those of the same numbers, and the counts that keep a dead
-// record are worked out again from the parents.
-void BupSim::lineage_import(const Array &saved, const PackedInt64Array &pinned) {
-	std::unordered_set<int64_t> living; // (looked up, not searched for: a big dish has as many records as bups)
-	living.reserve(bups.size());
-	for (const Bup &b : bups) {
-		living.insert(b.id);
-	}
-	for (int i = 0; i < saved.size(); i++) {
-		Dictionary d = saved[i];
-		int64_t id = (int64_t)(double)d.get("id", 0);
-		if (id <= 0) {
-			continue;
-		}
-		Record r;
-		r.parent = (int64_t)(double)d.get("parent", 0);
-		r.born = (int)(double)d.get("born", 0);
-		r.died = (int)(double)d.get("died", -1);
-		r.divisions = (int)(double)d.get("divisions", 0);
-		r.mutations = (int)(double)d.get("mutations", 0);
-		r.genes[0] = (float)(double)d.get("speed", 0.0);
-		r.genes[1] = (float)(double)d.get("sense", 0.0);
-		r.genes[2] = (float)(double)d.get("metabolism", 0.0);
-		r.genes[3] = (float)(double)d.get("size_gene", 0.0);
-		r.hue = (float)(double)d.get("hue", G.founder_hue);
-		r.sat = (float)(double)d.get("sat", G.founder_sat);
-		r.val = (float)(double)d.get("val", G.founder_val);
-		r.harm = (float)(double)d.get("harm", 0.0);
-		r.mutator = (float)(double)d.get("mutator", 1.0);
-		r.max_energy = (float)(double)d.get("max_energy", 0.0);
-		r.reach = (int)(double)d.get("reach", 0.0);
-		r.donor = (bool)d.get("donor", false);
-		r.mass = (float)(double)d.get("mass", 0.0);
-		r.energy = (float)(double)d.get("energy", 0.0);
-		r.birth_mass = (float)(double)d.get("birth_mass", 0.0);
-		r.name = d.get("name", String());
-		r.alive = living.count(id) > 0;
-		if (r.alive) {
-			r.died = -1;
-		} else if (r.died < 0) {
-			r.died = now_minutes(); // (alive where it was exported from, but not among these bups: it is not alive here)
-		}
-		records[id] = r;
-	}
-	finish_lineage_import(pinned);
 }
 
 // After a save's records are in: the counts that keep a dead record are worked out again from the parents, the watched ones are
@@ -937,18 +885,7 @@ Dictionary BupSim::info_of(const Bup &b) const {
 	out["size"] = size_of(b);
 	out["length"] = b.mass * G.mass_um;
 	out["divisions"] = b.divisions;
-	out["speed"] = b.genes[0];
-	out["sense"] = b.genes[1];
-	out["metabolism"] = b.genes[2];
-	out["size_gene"] = b.genes[3];
-	out["hue"] = b.hue;
-	out["sat"] = b.sat;
-	out["val"] = b.val;
-	out["harm"] = b.harm;
-	out["mutator"] = b.mutator;
-	out["donor"] = b.donor;
-	out["reach"] = b.reach;
-	out["mutations"] = b.mutations;
+	put_genome(out, genome_of(b), true);
 	out["upkeep"] = upkeep(b);
 	out["steering"] = steering_of(b.x, b.y, b.genes[0], sense_range(b)).z;
 	return out;
@@ -1260,47 +1197,6 @@ Vector2 BupSim::nearest_and_count(const Vector2 &local, double near) const {
 	return Vector2(nearest_sq < 0.0 ? -1.0f : (float)std::sqrt(nearest_sq), (float)count);
 }
 
-// Every bup as 28 floats: id, x, y, dx, dy, energy, mass, birth_mass, speed, sense, metabolism, size, reach, mutator, donor, harm,
-// hue, sat, val, mutations, divisions, parent id (0: not kept here), 2 spare, then its chemotaxis memory (see export_state_bytes).
-PackedFloat32Array BupSim::export_state() const {
-	PackedFloat32Array out;
-	out.resize((int64_t)bups.size() * STATE_WORDS);
-	float *w = out.ptrw();
-	for (size_t i = 0; i < bups.size(); i++) {
-		const Bup &b = bups[i];
-		float *p = w + i * STATE_WORDS;
-		p[0] = (float)b.id;
-		p[1] = b.x;
-		p[2] = b.y;
-		p[3] = b.dx;
-		p[4] = b.dy;
-		p[5] = b.energy;
-		p[6] = b.mass;
-		p[7] = b.birth_mass;
-		p[8] = b.genes[0];
-		p[9] = b.genes[1];
-		p[10] = b.genes[2];
-		p[11] = b.genes[3];
-		p[12] = (float)b.reach;
-		p[13] = b.mutator;
-		p[14] = b.donor ? 1.0f : 0.0f;
-		p[15] = b.harm;
-		p[16] = b.hue;
-		p[17] = b.sat;
-		p[18] = b.val;
-		p[19] = (float)b.mutations;
-		p[20] = (float)b.divisions;
-		p[21] = 0.0f;
-		p[22] = 0.0f;
-		p[23] = 0.0f;
-		p[24] = b.primed ? b.fast : -1.0f;
-		p[25] = b.slow;
-		p[26] = b.noise;
-		p[27] = b.tumbling;
-	}
-	return out;
-}
-
 // ---- the GPU simulation's records and events ------------------------------------------------
 
 // Every bup as the GPU simulation's record (gpu/kernels.gd): 28 32-bit words, 0 the id's low word, 1-20 x, y, dx, dy, energy, mass,
@@ -1314,12 +1210,13 @@ PackedByteArray BupSim::export_state_bytes() const {
 	for (size_t i = 0; i < bups.size(); i++) {
 		const Bup &b = bups[i];
 		uint8_t *r = w + i * STATE_WORDS * 4;
-		const float words[20] = { b.x, b.y, b.dx, b.dy, b.energy, b.mass, b.birth_mass, b.genes[0], b.genes[1], b.genes[2], b.genes[3], (float)b.reach,
-			b.mutator, b.donor ? 1.0f : 0.0f, b.harm, b.hue, b.sat, b.val, (float)b.mutations, (float)b.divisions };
+		const float body[7] = { b.x, b.y, b.dx, b.dy, b.energy, b.mass, b.birth_mass };
 		put_u32(r, 0, (uint32_t)((uint64_t)b.id & 0xFFFFFFFFULL));
-		for (int k = 0; k < 20; k++) {
-			put_f32(r, 1 + k, words[k]);
+		for (int k = 0; k < 7; k++) {
+			put_f32(r, 1 + k, body[k]);
 		}
+		put_record_genome(r, genome_of(b));
+		put_f32(r, 20, (float)b.divisions);
 		put_u32(r, 21, (uint32_t)((uint64_t)b.id >> 32));
 		put_f32(r, 22, std::isnan(b.px) ? NO_PICTURE : b.px);
 		put_f32(r, 23, std::isnan(b.py) ? NO_PICTURE : b.py);
@@ -1329,6 +1226,36 @@ PackedByteArray BupSim::export_state_bytes() const {
 		put_f32(r, 27, b.tumbling);
 	}
 	return out;
+}
+
+BupSim::Genome BupSim::record_genome(const uint8_t *record) {
+	Genome g;
+	for (int k = 0; k < 4; k++) {
+		g.genes[k] = get_f32(record, 8 + k);
+	}
+	g.reach = (int)(get_f32(record, 12) + 0.5f);
+	g.mutator = get_f32(record, 13);
+	g.donor = get_f32(record, 14) > 0.5f;
+	g.harm = get_f32(record, 15);
+	g.hue = get_f32(record, 16);
+	g.sat = get_f32(record, 17);
+	g.val = get_f32(record, 18);
+	g.mutations = (int)get_f32(record, 19);
+	return g;
+}
+
+void BupSim::put_record_genome(uint8_t *record, const Genome &g) {
+	for (int k = 0; k < 4; k++) {
+		put_f32(record, 8 + k, g.genes[k]);
+	}
+	put_f32(record, 12, (float)g.reach);
+	put_f32(record, 13, g.mutator);
+	put_f32(record, 14, g.donor ? 1.0f : 0.0f);
+	put_f32(record, 15, g.harm);
+	put_f32(record, 16, g.hue);
+	put_f32(record, 17, g.sat);
+	put_f32(record, 18, g.val);
+	put_f32(record, 19, (float)g.mutations);
 }
 
 BupSim::Bup BupSim::bup_from_record(const uint8_t *record) const {
@@ -1341,17 +1268,7 @@ BupSim::Bup BupSim::bup_from_record(const uint8_t *record) const {
 	b.energy = get_f32(record, 5);
 	b.mass = get_f32(record, 6);
 	b.birth_mass = get_f32(record, 7);
-	for (int g = 0; g < 4; g++) {
-		b.genes[g] = get_f32(record, 8 + g);
-	}
-	b.reach = (int)(get_f32(record, 12) + 0.5f);
-	b.mutator = get_f32(record, 13);
-	b.donor = get_f32(record, 14) > 0.5f;
-	b.harm = get_f32(record, 15);
-	b.hue = get_f32(record, 16);
-	b.sat = get_f32(record, 17);
-	b.val = get_f32(record, 18);
-	b.mutations = (int)get_f32(record, 19);
+	set_genome(b, record_genome(record));
 	b.divisions = (int)get_f32(record, 20);
 	float px = get_f32(record, 22), py = get_f32(record, 23);
 	b.px = px >= 1e30f ? std::numeric_limits<float>::quiet_NaN() : px;
@@ -1393,10 +1310,10 @@ Dictionary BupSim::info_from_state(const PackedByteArray &state, int index) cons
 // The family records of a batch of GPU steps (little-endian 32-bit words):
 //   a birth, 16 words: id lo, id hi, parent lo, parent hi, step, divisions, mutations (uints; the low 20 bits, with the bup's reach word in bits 20-29 and its F factor in bit 30), speed, sense, metabolism, size, hue, sat,
 //     val, harm, mutator (floats);
-//   a death, 10 words: id lo, id hi, step, divisions (uint: the low 20 bits, with the bup's reach word in bits 20-29 and its F factor in bit 30), mass, x, y, the nutrient energy it gives back (floats; 0 for one that does not:
-//     a trimmed one), then its own energy and the mass it was born with (floats). With husks on, words 5-7 make the husk.
+//   a death, 14 words: id lo, id hi, step, divisions (uint: the low 20 bits, with the bup's reach word in bits 20-29 and its F factor in bit 30), mass, x, y, the nutrient energy it gives back (floats; 0 for one that does not:
+//     a trimmed one), then its own energy, the mass it was born with and its four genes (floats). With husks on, words 5-7 make the husk.
 // `step` is the step's place in the batch (from 0), and step k ended at first_step_end_seconds + k * step_seconds, which is when its
-// records are stamped. Each list is in the order of its steps. Step by step, the births are recorded and then the deaths (a bup never
+// records are stamped (and a husk made then has been leaking since: it is as old as the dish's clock is past that). Each list is in the order of its steps. Step by step, the births are recorded and then the deaths (a bup never
 // divides and dies in the same step, except one displaced at the limit after dividing, which is held by its daughter either way).
 // The bups themselves are not touched. A birth whose id already has a record (a batch given twice) is passed over. The next id is
 // kept past every id born.
@@ -1425,17 +1342,19 @@ void BupSim::apply_events(const PackedByteArray &births, const PackedByteArray &
 			}
 			b.divisions = (int)get_u32(e, 5);
 			const uint32_t traits = get_u32(e, 6); // the mutations in the low 20 bits, the reach word above them (10 bits), the F factor at bit 30
-			b.mutations = (int)(traits & 0xFFFFFu);
-			b.reach = (int)((traits >> 20) & 0x3FFu);
-			b.donor = ((traits >> 30) & 1u) != 0;
-			for (int g = 0; g < 4; g++) {
-				b.genes[g] = get_f32(e, 7 + g);
+			Genome g;
+			g.mutations = (int)(traits & 0xFFFFFu);
+			g.reach = (int)((traits >> 20) & 0x3FFu);
+			g.donor = ((traits >> 30) & 1u) != 0;
+			for (int k = 0; k < 4; k++) {
+				g.genes[k] = get_f32(e, 7 + k);
 			}
-			b.hue = get_f32(e, 11);
-			b.sat = get_f32(e, 12);
-			b.val = get_f32(e, 13);
-			b.harm = get_f32(e, 14);
-			b.mutator = get_f32(e, 15);
+			g.hue = get_f32(e, 11);
+			g.sat = get_f32(e, 12);
+			g.val = get_f32(e, 13);
+			g.harm = get_f32(e, 14);
+			g.mutator = get_f32(e, 15);
+			set_genome(b, g);
 			make_record(b, get_id(e, 2, 3));
 			next_id = std::max(next_id, b.id + 1); // (a bup added here later never takes a number the GPU has given)
 		}
@@ -1450,9 +1369,12 @@ void BupSim::apply_events(const PackedByteArray &births, const PackedByteArray &
 			b.mass = get_f32(e, 4);
 			b.energy = get_f32(e, 8);
 			b.birth_mass = get_f32(e, 9);
+			for (int g = 0; g < 4; g++) {
+				b.genes[g] = get_f32(e, 10 + g);
+			}
 			record_death(b);
 			if (death_husks && get_f32(e, 7) > 0.0f) {
-				add_husk(get_f32(e, 5), get_f32(e, 6), get_f32(e, 7));
+				add_husk(get_f32(e, 5), get_f32(e, 6), get_f32(e, 7), std::max(now_before - now_seconds, 0.0));
 			}
 		}
 	}
@@ -1789,7 +1711,6 @@ void BupSim::take_acetate(Bup &b, double delta) {
 	b.energy = (float)std::min((double)b.energy + got * b.yield, max_energy(b));
 }
 
-// Only the sources' part of a step (no feed, diffusion, clouds or bups): what the dish's own world does while the GPU runs the rest.
 static const int HUSK_PIECES = 12;
 static const size_t MAX_HUSKS = 200000; // past this a death gives its nutrient back at once (as the clouds past MAX_CLOUDS go to the grid)
 
@@ -1800,12 +1721,12 @@ static double husk_share(int k) {
 	return k == HUSK_PIECES - 1 ? share + std::exp(-0.25 * HUSK_PIECES) : share;
 }
 
-void BupSim::add_husk(float x, float y, float energy) {
+void BupSim::add_husk(float x, float y, float energy, double age) {
 	if (husks.size() >= MAX_HUSKS) {
 		field->add_cloud(Vector2(x, y), 0.0, energy);
 		return;
 	}
-	husks.push_back({ x, y, energy, 0.0, 0 });
+	husks.push_back({ x, y, energy, age, 0 }); // (the pieces its age has passed are let go at the next advance_husks)
 }
 
 void BupSim::advance_husks(double delta) {
@@ -1999,6 +1920,8 @@ void BupSim::conjugate(double delta) {
 	}
 }
 
+// The world's part of a step: the clock, the sources' emissions and the husks' leaks (no feed, diffusion, clouds or bups). `step` begins with it,
+// and it is all the dish's own world does while the GPU runs the rest.
 void BupSim::step_world(double delta, const PackedVector2Array &source_pos, const PackedFloat32Array &source_rates, double sim_time) {
 	if (sim_time >= 0.0) {
 		now_seconds = sim_time;
@@ -2008,11 +1931,7 @@ void BupSim::step_world(double delta, const PackedVector2Array &source_pos, cons
 }
 
 void BupSim::step(double delta, const PackedVector2Array &source_pos, const PackedFloat32Array &source_rates, double feed_per_second, double sim_time) {
-	if (sim_time >= 0.0) {
-		now_seconds = sim_time;
-	}
-	emit_sources(delta, source_pos, source_rates);
-	advance_husks(delta);
+	step_world(delta, source_pos, source_rates, sim_time);
 	feed_concentration += feed_per_second * delta;
 	diffuse_accum += delta;
 	if (diffuse_accum >= G.diffuse_interval) {
@@ -2112,23 +2031,12 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 			double keep_share = std::clamp(0.5 + G.division_spread * gaussian(), 0.35, 0.65);
 			Vector2 daughter = split_off(b, keep_share);
 			double daughter_mass = daughter.x, daughter_energy = daughter.y;
-			Genome parent = { { b.genes[0], b.genes[1], b.genes[2], b.genes[3] }, b.hue, b.sat, b.val, b.harm, b.mutations, false, b.mutator, b.donor, b.reach };
-			Genome child_genome = mutate(parent);
+			Genome child_genome = mutate(genome_of(b));
 			b.divisions += 1; // (the cell left in the parent's place is a product of the division whether or not the daughter lives)
 			if (!child_genome.lethal) { // a lethal daughter is never born; the parent still paid for her
 				Bup child;
 				child.id = next_id++;
-				for (int g = 0; g < 4; g++) {
-					child.genes[g] = child_genome.genes[g];
-				}
-				child.hue = child_genome.hue;
-				child.sat = child_genome.sat;
-				child.val = child_genome.val;
-				child.harm = child_genome.harm;
-				child.mutations = child_genome.mutations;
-				child.mutator = child_genome.mutator;
-				child.donor = child_genome.donor;
-				child.reach = child_genome.reach;
+				set_genome(child, child_genome);
 				derive(child);
 				child.mass = (float)daughter_mass;
 				child.birth_mass = child.mass;

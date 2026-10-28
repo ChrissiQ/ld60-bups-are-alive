@@ -12,28 +12,36 @@ layout(set = 0, binding = 5, std430) buffer B_SURV { uint SURV[]; };
 layout(set = 0, binding = 6, std430) buffer B_KID { uint KID[]; };
 layout(set = 0, binding = 7, std430) buffer B_EXCS { uint EXCS[]; };
 layout(set = 0, binding = 8, std430) buffer B_EXCK { uint EXCK[]; };
+const uint CNT_BUPS = 0u;
+const uint CNT_NEXT_ID_HI = 6u;
+const uint CNT_NEXT_ID_LO = 4u;
+const uint CNT_SURVIVORS = 1u;
+const int P_CAPACITY = 62;
+const uint RECORD_VEC4 = 7u;
+const uint R_ID_HI = 21u;
+const uint R_ID_LO = 0u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
-// One thread per 16 bytes (a bup is seven of them): a kept bup is copied to its new place, a newborn written after the kept ones, with
-// its id (the next id plus the number of newborns before it: 64 bits in words 0 and 21, lo and hi, with the carry).
+// One thread per 16 bytes (a bup is RECORD_VEC4 of them): a kept bup is copied to its new place, a newborn written after the kept ones, with
+// its id (the next id plus the number of newborns before it: 64 bits in words R_ID_LO and R_ID_HI, with the carry).
 void main() {
 	// (a dispatch of more groups than one dimension allows (65,535 on some drivers: Direct3D 12) is a grid: the thread's number counts rows too)
 	uint t = gl_GlobalInvocationID.x + gl_GlobalInvocationID.y * (gl_NumWorkGroups.x * 64u);
-	uint i = t / 7u, part = t % 7u;
-	if (i >= CNT[0]) return;
-	uint c = uint(P[62]);
-	if (SURV[i] == 1u) BUPS2_V4U[EXCS[i] * 7u + part] = BUPS_V4U[i * 7u + part];
+	uint i = t / RECORD_VEC4, part = t % RECORD_VEC4;
+	if (i >= CNT[CNT_BUPS]) return;
+	uint c = uint(P[P_CAPACITY]);
+	if (SURV[i] == 1u) BUPS2_V4U[EXCS[i] * RECORD_VEC4 + part] = BUPS_V4U[i * RECORD_VEC4 + part];
 	if (KID[i] == 1u) {
-		uint slot = CNT[1] + EXCK[i];
+		uint slot = CNT[CNT_SURVIVORS] + EXCK[i];
 		if (slot < c) {
-			uvec4 v = CHILD_V4U[i * 7u + part];
-			uint lo = CNT[4] + EXCK[i];
-			if (part == 0u) v.x = lo;
-			if (part == 5u) v.y = CNT[6] + (lo < CNT[4] ? 1u : 0u);
-			BUPS2_V4U[slot * 7u + part] = v;
+			uvec4 v = CHILD_V4U[i * RECORD_VEC4 + part];
+			uint lo = CNT[CNT_NEXT_ID_LO] + EXCK[i];
+			if (part == R_ID_LO / 4u) v[R_ID_LO % 4u] = lo;
+			if (part == R_ID_HI / 4u) v[R_ID_HI % 4u] = CNT[CNT_NEXT_ID_HI] + (lo < CNT[CNT_NEXT_ID_LO] ? 1u : 0u);
+			BUPS2_V4U[slot * RECORD_VEC4 + part] = v;
 		}
 	}
 }
