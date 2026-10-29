@@ -762,8 +762,14 @@ func _edits() -> void:
 	_ok(answer >= 0 and waited <= 6, "a pick at a new point is answered within 6 frames (%d)" % waited)
 
 	# the steering readout and the debug log
-	if dish.selected.bup < 0 or not dish.has_bup(dish.selected.bup):  # (the picked bup may have died in the 120 frames above: a click picks another)
-		dish.select_at(fresh, slack)
+	# (the picked bup may have died in the frames above, and the outline at `fresh` may still be last frame's plankton: a click takes
+	#  what is outlined, so wait for the hover to settle on a bup, then pick again)
+	var tries := 0
+	while tries < 30 and not (dish.selected.bup >= 0 and dish.has_bup(dish.selected.bup) and not dish.bup_info(dish.selected.bup).is_empty()):
+		if dish.hovered.bup >= 0 or tries % 5 == 4:
+			dish.select_at(fresh, slack)
+		await frame()
+		tries += 1
 	var steer := dish.bup_steering(dish.selected.bup)
 	var steer_bytes := dish.gpu_world.bup_steer_bytes(dish.selected.bup, Dish.STEER_ALPHA)
 	_ok(steer.z >= 0.0 and steer.z <= 1.0 and steer_bytes.size() == dish.field.get_size() * dish.field.get_size() * 4, "the steering readout (z %.3f) and map (%d bytes) of the selected bup" % [steer.z, steer_bytes.size()])
