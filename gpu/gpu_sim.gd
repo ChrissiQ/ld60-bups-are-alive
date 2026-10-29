@@ -36,6 +36,7 @@ const EVENT_SETS := 4  ## the family events of this many batches can be held at 
 ## written again only once its batch's events are in the CPU's records: about 4 frames after it ran)
 const EV_PUFF_FLOATS := GpuLayout.EV_PUFF_FLOATS
 const PUSH_CACHE_MOST := 4096
+const SHADER_DIR := "res://gpu/shaders"
 
 var rd: RenderingDevice
 var is_main := false  ## true: the main RenderingDevice (record only, on the render thread; no submit/sync)
@@ -87,6 +88,20 @@ func device_name() -> String:
 	return rd.get_device_name()
 
 
+## The imported SPIR-V of kernel `kernel_name` (gpu/shaders/<name>.glsl), or null when it is missing or did not compile.
+static func load_spirv(kernel_name: String) -> RDShaderSPIRV:
+	var path := SHADER_DIR.path_join(kernel_name + ".glsl")
+	if not ResourceLoader.exists(path):
+		return null
+	var file := load(path) as RDShaderFile
+	if file == null or file.get_base_error() != "":
+		return null
+	var spirv := file.get_spirv()
+	if spirv == null or spirv.compile_error_compute != "":
+		return null
+	return spirv
+
+
 func _make_kernel(kernel_name: String, def: Dictionary) -> void:
 	var spirv: RDShaderSPIRV
 	if _from_source:
@@ -99,9 +114,8 @@ func _make_kernel(kernel_name: String, def: Dictionary) -> void:
 			print("SHADER ERROR in ", kernel_name, ":\n", spirv.compile_error_compute)
 			assert(false)
 	else:
-		var file := load("res://gpu/shaders/%s.glsl" % kernel_name) as RDShaderFile
-		assert(file != null, "missing shader gpu/shaders/%s.glsl (run tools/gen_gpu_shaders.gd, then --import)" % kernel_name)
-		spirv = file.get_spirv()
+		spirv = load_spirv(kernel_name)
+		assert(spirv != null, "missing or broken shader gpu/shaders/%s.glsl (run tools/gen_gpu_shaders.gd, then --import)" % kernel_name)
 	var shader := rd.shader_create_from_spirv(spirv)
 	assert(shader.is_valid(), "shader %s was not created" % kernel_name)
 	var local: int = def["local_size"]
@@ -408,10 +422,10 @@ func _set_step(step_seconds: float, swim := true) -> void:
 	rd.buffer_update(bufs["P"], 0, pb.size(), pb)
 
 
-## Records one kernel: `threads` threads (in groups of its local size), the push constant (pa, pb, 0, 0), and a barrier after it.
 var _max_groups_x := -1  ## the device's most groups in one dimension of a dispatch (read once)
 
 
+## Records one kernel: `threads` threads (in groups of its local size), the push constant (pa, pb, 0, 0), and a barrier after it.
 func dispatch(cl: int, kernel_name: String, threads: int, pa := 0.0, pb := 0.0) -> void:
 	dispatch3(cl, kernel_name, threads, pa, pb, 0.0)
 
@@ -775,14 +789,32 @@ func release() -> void:
 
 # ---- readbacks (they stall the device: tools, tests, and deliberate stalls only) ------------------------------------------------
 
+## The clouds that are there, 5 floats each (x, y, mass, variance, cut: NutrientField.import_packed's form). A slot whose cloud has
+## gone to the grid or been eaten is not alive and is left out.
+func read_clouds() -> PackedFloat32Array:
+	var slots := rd.buffer_get_data(bufs["PCNT"]).decode_u32(GpuLayout.PCNT_SLOTS * 4)
+	if slots <= 0:
+		return PackedFloat32Array()  # (a size of 0 would read the whole buffer)
+	var raw := rd.buffer_get_data(bufs["PUFF"], 0, slots * 32).to_float32_array()
+	var clouds := PackedFloat32Array()
+	clouds.resize(slots * 5)
+	var kept := 0
+	for k in slots:
+		var o := k * 8
+		if raw[o + 5] > 0.5:
+			var w := kept * 5
+			clouds[w] = raw[o]; clouds[w + 1] = raw[o + 1]; clouds[w + 2] = raw[o + 2]; clouds[w + 3] = raw[o + 3]; clouds[w + 4] = raw[o + 4]
+			kept += 1
+	clouds.resize(kept * 5)
+	return clouds
+
+
 ## The clouds that are there: [x, y, mass, variance, cut] each.
 func read_puffs() -> Array:
-	var raw := rd.buffer_get_data(bufs["PUFF"]).to_float32_array()
-	var slots := rd.buffer_get_data(bufs["PCNT"]).decode_u32(GpuLayout.PCNT_SLOTS * 4)
+	var clouds := read_clouds()
 	var out := []
-	for k in slots:
-		if raw[k * 8 + 5] > 0.5:
-			out.append([raw[k * 8], raw[k * 8 + 1], raw[k * 8 + 2], raw[k * 8 + 3], raw[k * 8 + 4]])
+	for k in clouds.size() / 5:
+		out.append(Array(clouds.slice(k * 5, k * 5 + 5)))
 	return out
 
 
@@ -813,6 +845,11 @@ func read_bups() -> PackedByteArray:
 
 func read_conc() -> PackedFloat32Array:
 	return rd.buffer_get_data(bufs["CONC"]).to_float32_array()
+
+
+## The acetate's grid (n*n concentrations).
+func read_acetate() -> PackedFloat32Array:
+	return rd.buffer_get_data(bufs["CONC2"]).to_float32_array()
 
 
 ## The grid with what waits in DPLO/DPHI added: the nutrient the last step's deaths put on the grid, which the next step's `dep_apply`

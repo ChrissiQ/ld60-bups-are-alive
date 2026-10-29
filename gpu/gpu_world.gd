@@ -26,8 +26,6 @@ extends RefCounted
 ## A stats sample is reduced in groups of 256 and then in one pass of fixed order, so it is the same every run. OUTK keeps each event
 ## set's OUT for finish_pending.
 
-const SHADER_DIR := "res://gpu/shaders"
-
 static var _checked := false
 static var _available := false
 
@@ -112,14 +110,7 @@ static func available() -> bool:
 	var most_buffers := 0
 	var all := GpuKernels.all()
 	for kernel_name: String in all:
-		var path := SHADER_DIR.path_join(kernel_name + ".glsl")
-		if not ResourceLoader.exists(path):
-			return false
-		var file := load(path) as RDShaderFile
-		if file == null or file.get_base_error() != "":
-			return false
-		var spirv := file.get_spirv()
-		if spirv == null or spirv.compile_error_compute != "":
+		if GpuSim.load_spirv(kernel_name) == null:
 			return false
 		most_buffers = maxi(most_buffers, all[kernel_name]["buffers"].size())
 	for limit in [RenderingDevice.LIMIT_MAX_STORAGE_BUFFERS_PER_SHADER_STAGE, RenderingDevice.LIMIT_MAX_STORAGE_BUFFERS_PER_UNIFORM_SET]:
@@ -189,44 +180,26 @@ func load_from_cpu(field: NutrientField, dish_params: Dictionary) -> void:
 	_take_answers(answers)
 
 
-## GPU -> CPU, stalling: reads CNT, the bups, CONC and the live clouds (buffer_get_data), applies every batch's events not yet
-## applied, in order (sim.apply_events), then sim.import_state_bytes(...), field.import_packed(...), sim.set_next_id(the GPU's next
-## id), and turns the field's recording off. Results of those batches that arrive later are ignored (by their sequence number).
+## GPU -> CPU, stalling: reads the bups, the next id, the grid with what the last step's deaths put on it (their sum waits in
+## DPLO/DPHI until the next step's `dep_apply`), the acetate and the live clouds (GpuSim's readbacks), applies every batch's events
+## not yet applied, in order (finish_pending), then sim.import_state_bytes(...), field.import_packed(...), sim.set_next_id(the GPU's
+## next id), and turns the field's recording off. Results of those batches that arrive later are ignored (by their sequence number).
 ##
 ## What the field has recorded since the last batch was queued (a drop or a burst of the dish's own world, not yet sent) is added to
-## the grid and the clouds it reads back, so that nothing the player or the world did is lost; so is what the last step's deaths put
-## on the grid (their sum waits in DPLO/DPHI until the next step's `dep_apply`).
-## The events come from `_take_unapplied_events()` (see there), then `reset_pipeline(bups)` as in load_from_cpu.
+## the grid and the clouds it reads back, so that nothing the player or the world did is lost. Then `reset_pipeline(bups)` as in
+## load_from_cpu.
 func export_to_cpu(field: NutrientField) -> void:
 	assert(gpu != null, "GpuWorld.export_to_cpu: nothing was loaded")
 	var read := {}
 	_transfer_call(func() -> void:
-		var rd := gpu.rd
-		var cnt := rd.buffer_get_data(gpu.buffer("CNT"))
-		var live := cnt.decode_u32(GpuLayout.CNT_BUPS * 4)
-		read["next_id"] = cnt.decode_u32(GpuLayout.CNT_NEXT_ID_LO * 4) | (cnt.decode_u32(GpuLayout.CNT_NEXT_ID_HI * 4) << 32)
-		read["records"] = rd.buffer_get_data(gpu.buffer("BUPS"), 0, live * GpuSim.RECORD_BYTES) if live > 0 else PackedByteArray()  # (a size of 0 would read the whole buffer)
-		read["conc"] = rd.buffer_get_data(gpu.buffer("CONC")).to_float32_array()
-		read["dep_lo"] = rd.buffer_get_data(gpu.buffer("DPLO")).to_int32_array()
-		read["dep_hi"] = rd.buffer_get_data(gpu.buffer("DPHI")).to_int32_array()
-		read["acetate"] = rd.buffer_get_data(gpu.buffer("CONC2")).to_float32_array()
-		var slots := rd.buffer_get_data(gpu.buffer("PCNT")).decode_u32(GpuLayout.PCNT_SLOTS * 4)
-		read["slots"] = rd.buffer_get_data(gpu.buffer("PUFF"), 0, slots * 32).to_float32_array() if slots > 0 else PackedFloat32Array())
-	for batch: Dictionary in _take_unapplied_events():
-		sim.apply_events(batch["births"], batch["deaths"], batch["first_step_end"], batch["step_seconds"])
+		read["next_id"] = gpu.next_id()
+		read["records"] = gpu.read_bups()
+		read["conc"] = gpu.read_conc_settled()
+		read["acetate"] = gpu.read_acetate()
+		read["clouds"] = gpu.read_clouds())
+	finish_pending()
 	var conc: PackedFloat32Array = read["conc"]
-	GpuSim.add_pending_deposits(conc, read["dep_lo"], read["dep_hi"], gpu.spacing)
-	var raw: PackedFloat32Array = read["slots"]
-	var clouds := PackedFloat32Array()
-	clouds.resize(raw.size() / 8 * 5)
-	var kept := 0
-	for k in raw.size() / 8:
-		var o := k * 8
-		if raw[o + 5] > 0.5:  # (a slot whose cloud has gone to the grid is not alive)
-			var w := kept * 5
-			clouds[w] = raw[o]; clouds[w + 1] = raw[o + 1]; clouds[w + 2] = raw[o + 2]; clouds[w + 3] = raw[o + 3]; clouds[w + 4] = raw[o + 4]
-			kept += 1
-	clouds.resize(kept * 5)
+	var clouds: PackedFloat32Array = read["clouds"]
 	_apply_pending_erase(conc, clouds)
 	var late_cells := field.take_recorded_cells()
 	var late_amounts := field.take_recorded_amounts()
@@ -256,10 +229,8 @@ func _answers_from_cpu(records: PackedByteArray, dish_params := {}) -> Dictionar
 		var g := GENE_NAMES.find(pair[0])
 		if g >= 0:
 			_fractions[[g, pair[1]]] = frame
-	while _tracked.size() > GpuLayout.TRACKED:  # (the room QIN has, as track() and fraction_with_gene_at_least() keep it)
-		_tracked.erase(_oldest(_tracked))
-	while _fractions.size() > GpuLayout.FRACTIONS:
-		_fractions.erase(_oldest(_fractions))
+	_keep_newest(_tracked, GpuLayout.TRACKED)  # (the room QIN has, as track() and fraction_with_gene_at_least() keep it)
+	_keep_newest(_fractions, GpuLayout.FRACTIONS)
 	var out :={"stats": sim.population_stats(), "fractions": {}, "records": {}, "near": []}
 	for key: Array in _fractions:
 		out["fractions"][key] = sim.fraction_with_gene_at_least(GENE_NAMES[key[0]], key[1])
@@ -396,8 +367,7 @@ func fraction_with_gene_at_least(gene: String, threshold: float) -> float:
 		return 0.0
 	var key := [g, threshold]
 	_fractions[key] = Engine.get_process_frames()
-	if _fractions.size() > GpuLayout.FRACTIONS:
-		_fractions.erase(_oldest(_fractions))
+	_keep_newest(_fractions, GpuLayout.FRACTIONS)
 	return _fraction_answers.get(key, 0.0)
 
 
@@ -450,8 +420,7 @@ func track(id: int) -> void:
 	if id < 0:
 		return
 	_tracked[id] = Engine.get_process_frames()
-	if _tracked.size() > GpuLayout.TRACKED:
-		_tracked.erase(_oldest(_tracked))
+	_keep_newest(_tracked, GpuLayout.TRACKED)
 
 
 ## BupSim.bup_info for a tracked (or picked) bup, from its last record (sim.info_from_state); {} if it is not known or no longer alive.
@@ -569,9 +538,8 @@ func overflows() -> Dictionary:
 
 
 ## Stalls until every batch queued so far is done, reads their family events and history samples straight from the GPU, and applies
-## them in order (events into `sim`, samples to take_history_samples). Results of those batches that arrive later are ignored. For
-## tools; export_to_cpu takes the events instead with _take_unapplied_events. After it, `sim`'s records are those of the GPU's
-## state.
+## them in order (events into `sim`, samples to take_history_samples; the events from _take_unapplied_events). Results of those
+## batches that arrive later are ignored. After it, `sim`'s records are those of the GPU's state (export_to_cpu, and tools).
 func finish_pending() -> void:
 	for events: Dictionary in _take_unapplied_events():
 		sim.apply_events(events["births"], events["deaths"], events["first_step_end"], events["step_seconds"])
@@ -888,6 +856,7 @@ func _take_answers_from_out(rid: int, data: PackedByteArray, request: Dictionary
 		else:
 			_records[id] = GpuSim.whole_record(data.slice(w, w + GpuSim.ANSWER_BYTES))
 
+
 ## The batch's history samples in an OUT (as _take_out or finish_pending read it).
 func _samples_from(data: PackedByteArray, batch: Dictionary) -> Array:
 	var out := []
@@ -1075,12 +1044,14 @@ func _frame_rate() -> float:
 	return rate if rate > 0.0 else 60.0
 
 
-static func _oldest(asked: Dictionary) -> Variant:
-	var oldest: Variant = null
-	for key: Variant in asked:
-		if oldest == null or asked[key] < asked[oldest]:
-			oldest = key
-	return oldest
+## Drops the least recently asked of `asked` (key -> the frame it was asked) until `most` are left.
+static func _keep_newest(asked: Dictionary, most: int) -> void:
+	while asked.size() > most:
+		var oldest: Variant = null
+		for key: Variant in asked:
+			if oldest == null or asked[key] < asked[oldest]:
+				oldest = key
+		asked.erase(oldest)
 
 
 ## Records the render kernel for this frame: writes `instance_count` instances of the MultiMesh whose RD buffer is `multimesh`
