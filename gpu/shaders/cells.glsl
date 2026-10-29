@@ -21,6 +21,12 @@ uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
+#define ADD64(LO, HI, cell, q_) { uint old_ = atomicAdd(LO[cell], q_); if (old_ + q_ < old_) atomicAdd(HI[cell], 1u); }
+#define ADD_FIXED30(LO, HI, cell, amount) { float rest_ = amount; while (rest_ > 0.0) { float part_ = min(rest_, 3.9); rest_ -= part_; uint q_ = uint(part_ * 1073741824.0 + 0.5); ADD64(LO, HI, cell, q_) } }
+#define ADD_FIXED20(LO, HI, cell, amount) { float rest_ = amount; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); ADD64(LO, HI, cell, q_) } }
+#define FIX30(HI, LO) (float(HI) * 4.0 + float(LO) * 9.313225746154785e-10)
+#define FIX20(HI, LO) (float(HI) * 4096.0 + float(LO) * 9.5367431640625e-7)
+
 float neglog1m(float x) { // -ln(1 - x)
 	if (x < 0.01) return x * (1.0 + x * (0.5 + x * (0.33333333 + x * 0.25)));
 	return -log(1.0 - x);
@@ -28,12 +34,12 @@ float neglog1m(float x) { // -ln(1 - x)
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
 	if (OWNER[i] != int(i)) return;
-	float d = float(DHI[i]) * 4.0 + float(DLO[i]) * 9.313225746154785e-10; // what the bups there wanted
+	float d = FIX30(DHI[i], DLO[i]); // what the bups there wanted
 	SCALE[i] = 0.0;
 	float c0 = CONC[i];
 	if (d <= 0.0 || c0 <= 0.0) return;
-	float rho = (float(RHI[i]) * 4.0 + float(RLO[i]) * 9.313225746154785e-10) / d; // the concentration they read, as a share of this cell's
-	float al = max((float(AHI[i]) * 4.0 + float(ALO[i]) * 9.313225746154785e-10) / d, 0.02); // and how much of what they read is this cell's
+	float rho = FIX30(RHI[i], RLO[i]) / d; // the concentration they read, as a share of this cell's
+	float al = max(FIX30(AHI[i], ALO[i]) / d, 0.02); // and how much of what they read is this cell's
 	float ct = max(rho * c0, 1e-12);
 	float area = P[P_SPACING] * P[P_SPACING];
 	float k = P[P_HALF_SATURATION];

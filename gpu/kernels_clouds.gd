@@ -152,7 +152,7 @@ void main() {
 const K_DEP_APPLY := """
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
-	float m = float(DPHI[i]) * 4096.0 + float(DPLO[i]) * 9.5367431640625e-7;
+	float m = FIX20(DPHI[i], DPLO[i]);
 	if (m > 0.0) CONC[i] += m / (P[P_SPACING] * P[P_SPACING]);
 	DPLO[i] = 0u; DPHI[i] = 0u;
 }
@@ -167,7 +167,7 @@ void main() { uint k = gl_GlobalInvocationID.x; if (k >= uint(P[P_PUFF_CAPACITY]
 const K_PUFF_SCALE := """
 void main() {
 	uint k = gl_GlobalInvocationID.x; if (k >= PCNT[PCNT_SLOTS]) return;
-	float d = float(PDHI[k]) * 4096.0 + float(PDLO[k]) * 9.5367431640625e-7;
+	float d = FIX20(PDHI[k], PDLO[k]);
 	float mass = PUFF[k * 8u + 2u];
 	PSCALE[k] = d > 0.0 ? min(1.0, mass / d) : 0.0;
 }
@@ -176,7 +176,7 @@ void main() {
 const K_PUFF_COMMIT := """
 void main() {
 	uint k = gl_GlobalInvocationID.x; if (k >= PCNT[PCNT_SLOTS]) return;
-	float d = float(PDHI[k]) * 4096.0 + float(PDLO[k]) * 9.5367431640625e-7;
+	float d = FIX20(PDHI[k], PDLO[k]);
 	if (d > 0.0) PUFF[k * 8u + 2u] = max(PUFF[k * 8u + 2u] - d * PSCALE[k], 0.0);
 }
 """
@@ -326,10 +326,10 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "ev_puffs", K_EV_PUFFS, ["P", "PCNT", "PUFF", "EVR", "EVP", "CONC", "INSIDE"])
 	GpuKernels.add(out, "ev_deposits", K_EV_DEPOSITS, ["P", "CONC", "EVR", "EVCC", "EVCA"])
 	GpuKernels.add(out, "puff_advance", K_PUFF_ADVANCE, ["P", "PCNT", "PUFF", "INSIDE", "DPLO", "DPHI"], GpuKernels.FIXED_FUNCS + DEP_FUNCS)
-	GpuKernels.add(out, "dep_apply", K_DEP_APPLY, ["P", "CONC", "DPLO", "DPHI"])
+	GpuKernels.add(out, "dep_apply", K_DEP_APPLY, ["P", "CONC", "DPLO", "DPHI"], GpuKernels.FIXED_FUNCS)
 	GpuKernels.add(out, "puff_clear", K_PUFF_CLEAR, ["P", "PDLO", "PDHI", "PSCALE"])
-	GpuKernels.add(out, "puff_scale", K_PUFF_SCALE, ["PCNT", "PUFF", "PDLO", "PDHI", "PSCALE"])
-	GpuKernels.add(out, "puff_commit", K_PUFF_COMMIT, ["PCNT", "PUFF", "PDLO", "PDHI", "PSCALE"])
+	GpuKernels.add(out, "puff_scale", K_PUFF_SCALE, ["PCNT", "PUFF", "PDLO", "PDHI", "PSCALE"], GpuKernels.FIXED_FUNCS)
+	GpuKernels.add(out, "puff_commit", K_PUFF_COMMIT, ["PCNT", "PUFF", "PDLO", "PDHI", "PSCALE"], GpuKernels.FIXED_FUNCS)
 	GpuKernels.add(out, "bin_clear", K_BIN_CLEAR, ["P", "BINC"])
 	GpuKernels.add(out, "bin_count", K_BIN_COUNT, ["P", "PCNT", "PUFF", "BINC"])
 	GpuKernels.add(out, "bin_cursor", K_BIN_CURSOR, ["P", "BINS", "BCUR"])

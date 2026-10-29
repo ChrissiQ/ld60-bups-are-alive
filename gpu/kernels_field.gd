@@ -280,12 +280,12 @@ float neglog1m(float x) { // -ln(1 - x)
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
 	if (OWNER[i] != int(i)) return;
-	float d = float(DHI[i]) * 4.0 + float(DLO[i]) * 9.313225746154785e-10; // what the bups there wanted
+	float d = FIX30(DHI[i], DLO[i]); // what the bups there wanted
 	SCALE[i] = 0.0;
 	float c0 = CONC[i];
 	if (d <= 0.0 || c0 <= 0.0) return;
-	float rho = (float(RHI[i]) * 4.0 + float(RLO[i]) * 9.313225746154785e-10) / d; // the concentration they read, as a share of this cell's
-	float al = max((float(AHI[i]) * 4.0 + float(ALO[i]) * 9.313225746154785e-10) / d, 0.02); // and how much of what they read is this cell's
+	float rho = FIX30(RHI[i], RLO[i]) / d; // the concentration they read, as a share of this cell's
+	float al = max(FIX30(AHI[i], ALO[i]) / d, 0.02); // and how much of what they read is this cell's
 	float ct = max(rho * c0, 1e-12);
 	float area = P[P_SPACING] * P[P_SPACING];
 	float k = P[P_HALF_SATURATION];
@@ -371,8 +371,8 @@ void main() {
 const K_AC_CELLS := """
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
-	float d = float(AWHI[i]) * 4.0 + float(AWLO[i]) * 9.313225746154785e-10;
-	float dep = float(ADHI[i]) * 4.0 + float(ADLO[i]) * 9.313225746154785e-10;
+	float d = FIX30(AWHI[i], AWLO[i]);
+	float dep = FIX30(ADHI[i], ADLO[i]);
 	float area = P[P_SPACING] * P[P_SPACING];
 	float c = CONC2[i];
 	float s = 0.0;
@@ -430,9 +430,9 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "snapshot", K_SNAPSHOT, ["P", "CONC", "OWNER", "EFF"])
 	GpuKernels.add(out, "swim", K_SWIM, ["P", "CNT", "BUPS", "EFF", "TABLE", "ENTD", "BINS", "BINC"], FIELD_FUNCS + LOOKUP_FUNCS + GpuKernelsClouds.CLOUD_FUNCS)
 	GpuKernels.add(out, "demand", K_DEMAND, ["P", "CNT", "BUPS", "EFF", "OWNER", "CONC", "WANT", "WANTC", "CELLOF", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "ENTD", "BINS", "BINC", "PDLO", "PDHI"], GpuKernels.FIXED_FUNCS + GpuKernelsClouds.CLOUD_FUNCS)
-	GpuKernels.add(out, "cells", K_CELLS, ["P", "CONC", "OWNER", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "SCALE"])
+	GpuKernels.add(out, "cells", K_CELLS, ["P", "CONC", "OWNER", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "SCALE"], GpuKernels.FIXED_FUNCS)
 	GpuKernels.add(out, "apply", K_APPLY, ["P", "CNT", "BUPS", "WANT", "WANTC", "CELLOF", "SCALE", "ENTD", "BINS", "BINC", "PSCALE", "OWNER", "CONC", "CONC2", "WANT2", "CELL2", "AWLO", "AWHI", "ADLO", "ADHI"], GpuKernels.FIXED_FUNCS + GpuKernelsClouds.CLOUD_FUNCS)
-	GpuKernels.add(out, "ac_cells", K_AC_CELLS, ["P", "CONC2", "AWLO", "AWHI", "ADLO", "ADHI", "SCALE2"])
+	GpuKernels.add(out, "ac_cells", K_AC_CELLS, ["P", "CONC2", "AWLO", "AWHI", "ADLO", "ADHI", "SCALE2"], GpuKernels.FIXED_FUNCS)
 	GpuKernels.add(out, "ac_apply", K_AC_APPLY, ["P", "CNT", "BUPS", "WANT2", "CELL2", "SCALE2"])
 	GpuKernels.add(out, "diffuse2_a", K_DIFFUSE.replace("SRC", "CONC2").replace("DST", "CONC2B"), ["P", "INSIDE", "CONC2", "CONC2B"])
 	GpuKernels.add(out, "diffuse2_b", K_DIFFUSE.replace("SRC", "CONC2B").replace("DST", "CONC2"), ["P", "INSIDE", "CONC2B", "CONC2"])
