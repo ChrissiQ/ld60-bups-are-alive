@@ -56,7 +56,6 @@ var origin := 0.0
 var radius := 0.0
 var delta := 20.0  ## the step's length (s) of the last batch: every entry of P that depends on it is set again for each batch
 var diffusion := 0.0  ## the medium's diffusion coefficient (µm²/s)
-var acetate := PackedFloat32Array()  ## the acetate field (n*n concentrations) the next load_state starts from (empty: none)
 var feed_per_second := 0.0  ## the feed (concentration per second)
 var upkeep_scale := 1.0  ## the dish's upkeep factor (P_UPKEEP_SCALE)
 var stationary := false  ## the dish has the stationary phase on (P_STATIONARY; the batch's plan says)
@@ -135,29 +134,23 @@ func buffer(buf_name: String) -> RID:
 	return bufs[buf_name]
 
 
-## Loads a state.
-## - the field: `cells_across`, `cell_spacing` (µm), `conc` (n*n concentrations), `owner` (NutrientField.export_owner()), `fill_weights`
-##   (NutrientField.export_fill_weights(): what a feed adds to each cell per unit of concentration);
-## - `dish_radius` (µm), `bups`: the records (STRIDE words each, BupSim.export_state_bytes()), `constants`: SimConstants.build();
-## - `bup_limit`: the most bups (the buffers hold 5% more and a little; 0: as many as there are), `feed` (concentration per second),
-##   `step_seconds` (the step's length until a batch says otherwise), `diffusion_coeff` (µm²/s, NutrientField.get_diffusion()),
-## - `puffs`: the clouds, an Array of [x, y, mass, variance, cut] or a PackedFloat32Array of 5 floats each (NutrientField.export_packed());
-## - `dish_seed`: the dish's seed, folded into every kernel's random numbers (CNT_SEED); `upkeep`: the dish's upkeep factor (P_UPKEEP_SCALE);
-## - `next_id`: the id the next newborn gets (BupSim.get_next_id(); 0: one past the largest id in `bups`).
-## Every buffer is made afresh, so kernels set up with make_external_kernel must be set up again (`buffers_rebuilt`).
-func load_state(cells_across: int, cell_spacing: float, dish_radius: float, conc: PackedFloat32Array, owner: PackedInt32Array, bups: PackedByteArray, constants: Dictionary, bup_limit := 0, fill_weights := PackedFloat32Array(), feed := 0.0, step_seconds := 20.0, diffusion_coeff := 0.0, puffs: Variant = [], dish_seed := 1, upkeep := 1.0, next_id := 0) -> void:
+## Loads `state` (see State: the field, the bups, the constants and the dish's settings). Every buffer is made afresh, so kernels set
+## up with make_external_kernel must be set up again (`buffers_rebuilt`).
+func load_state(state: State) -> void:
+	var bups := state.bups
+	var owner := state.owner
 	assert(bups.size() % RECORD_BYTES == 0, "bup records are %d bytes each" % RECORD_BYTES)
-	n = cells_across
-	spacing = cell_spacing
-	radius = dish_radius
-	origin = dish_radius
+	n = state.cells_across
+	spacing = state.spacing
+	radius = state.radius
+	origin = state.radius
 	count = bups.size() / RECORD_BYTES
-	consts = constants
-	delta = step_seconds
-	diffusion = diffusion_coeff
-	feed_per_second = feed
-	upkeep_scale = upkeep
-	limit = bup_limit if bup_limit > 0 else count
+	consts = state.constants
+	delta = state.step
+	diffusion = state.diffusion
+	feed_per_second = state.feed
+	upkeep_scale = state.upkeep
+	limit = state.limit if state.limit > 0 else count
 	capacity = ((int(limit * 1.05) + 1024 + 255) / 256) * 256
 	event_capacity = maxi(32768, capacity / 4)
 	var inside := PackedInt32Array()
@@ -165,17 +158,17 @@ func load_state(cells_across: int, cell_spacing: float, dish_radius: float, conc
 	for i in n * n:
 		inside[i] = 1 if owner[i] == i else 0
 	var table := PackedFloat32Array()
-	table.append_array(PackedFloat32Array(constants["motion_drift"]))
-	table.append_array(PackedFloat32Array(constants["motion_d_along"]))
-	table.append_array(PackedFloat32Array(constants["motion_d_across"]))
-	table.append_array(PackedFloat32Array(constants["motion_d_flat"]))
+	table.append_array(PackedFloat32Array(consts["motion_drift"]))
+	table.append_array(PackedFloat32Array(consts["motion_d_along"]))
+	table.append_array(PackedFloat32Array(consts["motion_d_across"]))
+	table.append_array(PackedFloat32Array(consts["motion_d_flat"]))
 	var full := bups.duplicate()
 	full.resize(capacity * RECORD_BYTES)
-	var weights := fill_weights
+	var weights := state.fill_weights
 	if weights.is_empty():
 		weights = PackedFloat32Array()
 		weights.resize(n * n)
-	var first_id := next_id
+	var first_id := state.next_id
 	if first_id <= 0:
 		first_id = 1
 		for i in count:
@@ -184,16 +177,16 @@ func load_state(cells_across: int, cell_spacing: float, dish_radius: float, conc
 	cnt.encode_u32(GpuLayout.CNT_BUPS * 4, count)
 	cnt.encode_u32(GpuLayout.CNT_NEXT_ID_LO * 4, first_id & 0xFFFFFFFF)
 	cnt.encode_u32(GpuLayout.CNT_NEXT_ID_HI * 4, (first_id >> 32) & 0xFFFFFFFF)
-	cnt.encode_u32(GpuLayout.CNT_SEED * 4, (dish_seed ^ (dish_seed >> 32)) & 0xFFFFFFFF)
+	cnt.encode_u32(GpuLayout.CNT_SEED * 4, (state.dish_seed ^ (state.dish_seed >> 32)) & 0xFFFFFFFF)
 	_buf("P", _zeros(GpuLayout.P_WORDS * 4))
 	_buf("BUPS", full)
 	_buf("BUPS2", _zeros(capacity * RECORD_BYTES))
 	_buf("CHILD", _zeros(capacity * RECORD_BYTES))
 	_buf("WANT", _zeros(capacity * 4))
 	_buf("CELLOF", _zeros(capacity * 4))
-	_buf("CONC", conc.to_byte_array())
+	_buf("CONC", state.conc.to_byte_array())
 	_buf("EFF", _zeros(n * n * 4))
-	var acetate_values := acetate if acetate.size() == n * n else PackedFloat32Array()
+	var acetate_values := state.acetate if state.acetate.size() == n * n else PackedFloat32Array()
 	if acetate_values.is_empty():
 		acetate_values.resize(n * n)
 	_buf("CONC2", acetate_values.to_byte_array())
@@ -233,15 +226,15 @@ func load_state(cells_across: int, cell_spacing: float, dish_radius: float, conc
 	var pf := PackedFloat32Array()
 	pf.resize(puff_capacity * 8)
 	var clouds := 0
-	if puffs is PackedFloat32Array:
-		var packed: PackedFloat32Array = puffs
+	if state.clouds is PackedFloat32Array:
+		var packed: PackedFloat32Array = state.clouds
 		clouds = mini(packed.size() / 5, puff_capacity)
 		for k in clouds:
 			for j in 5:
 				pf[k * 8 + j] = packed[k * 5 + j]
 			pf[k * 8 + 5] = 1.0
 	else:
-		var listed: Array = puffs
+		var listed: Array = state.clouds
 		clouds = mini(listed.size(), puff_capacity)
 		for k in clouds:
 			var one: Array = listed[k]
@@ -850,6 +843,49 @@ static func id_of(records: PackedByteArray, i: int) -> int:
 static func set_id(records: PackedByteArray, i: int, id: int) -> void:
 	records.encode_u32(i * RECORD_BYTES + GpuLayout.R_ID_LO * 4, id & 0xFFFFFFFF)
 	records.encode_u32(i * RECORD_BYTES + GpuLayout.R_ID_HI * 4, (id >> 32) & 0xFFFFFFFF)
+
+
+## What load_state loads. `of_grid` and `of_field` fill it from a NutrientField where the caller is (the main thread: a field is not
+## read on the render thread); every other value is set by hand, and what is not set keeps the default below.
+class State:
+	extends RefCounted
+	var cells_across := 0  ## the grid: cells across,
+	var spacing := 0.0  ## a cell's width (µm),
+	var conc := PackedFloat32Array()  ## n*n concentrations,
+	var owner := PackedInt32Array()  ## NutrientField.export_owner(),
+	var fill_weights := PackedFloat32Array()  ## NutrientField.export_fill_weights(): what a feed adds to each cell per unit of concentration (empty: nothing)
+	var diffusion := 0.0  ## the medium's diffusion coefficient (µm²/s, NutrientField.get_diffusion())
+	var clouds: Variant = []  ## an Array of [x, y, mass, variance, cut] or a PackedFloat32Array of 5 floats each (NutrientField.export_packed())
+	var acetate := PackedFloat32Array()  ## the acetate field (n*n concentrations; empty: none)
+	var radius := 0.0  ## the dish's radius (µm)
+	var bups := PackedByteArray()  ## the records (STRIDE words each, BupSim.export_state_bytes())
+	var constants := {}  ## SimConstants.build()
+	var limit := 0  ## the most bups (the buffers hold 5% more and a little; 0: as many as there are)
+	var feed := 0.0  ## the feed (concentration per second)
+	var step := 20.0  ## the step's length (s) until a batch says otherwise
+	var dish_seed := 1  ## folded into every kernel's random numbers (CNT_SEED)
+	var upkeep := 1.0  ## the dish's upkeep factor (P_UPKEEP_SCALE)
+	var next_id := 0  ## the id the next newborn gets (BupSim.get_next_id(); 0: one past the largest id in `bups`)
+
+	## The grid of `field` (its size, spacing, concentrations and owners), with no feed weights, no diffusion and no clouds.
+	static func of_grid(field: NutrientField, dish_radius: float, records: PackedByteArray, constants_now: Dictionary) -> State:
+		var state := State.new()
+		state.cells_across = field.get_size()
+		state.spacing = field.get_spacing()
+		state.conc = field.values()
+		state.owner = field.export_owner()
+		state.radius = dish_radius
+		state.bups = records
+		state.constants = constants_now
+		return state
+
+	## Everything `field` holds: its grid, its feed weights, its diffusion and its clouds.
+	static func of_field(field: NutrientField, dish_radius: float, records: PackedByteArray, constants_now: Dictionary) -> State:
+		var state := of_grid(field, dish_radius, records, constants_now)
+		state.clouds = field.export_packed()["puffs"]
+		state.fill_weights = field.export_fill_weights()
+		state.diffusion = field.get_diffusion()
+		return state
 
 
 ## The clouds and deposits a dish's own world makes (plankton, sources, husks) while the GPU runs its bups, step by step, in the form a

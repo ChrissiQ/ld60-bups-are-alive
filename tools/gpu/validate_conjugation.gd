@@ -61,7 +61,11 @@ func _init() -> void:
 	var count := state.size() / GpuSim.STRIDE
 	for i in count:
 		GpuSim.set_id(records, i, i + 1)
-	gpu.load_state(field.get_size(), field.get_spacing(), dish.radius, zero, field.export_owner(), records, c2, count * 2, PackedFloat32Array(), 0.0, 20.0, 0.0, [], 1, 1.0, count + 1)
+	var loaded := GpuSim.State.of_grid(field, dish.radius, records, c2)
+	loaded.conc = zero
+	loaded.limit = count * 2
+	loaded.next_id = count + 1
+	gpu.load_state(loaded)
 	gpu.run_steps(1)
 	var out := gpu.read_bups().to_float32_array()
 	var gtally := _tally_by_id(gpu.read_bups(), out, state, n)

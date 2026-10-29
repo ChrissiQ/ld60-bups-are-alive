@@ -72,8 +72,12 @@ func _initialize() -> void:
 	var field := sim.get_field()
 	var packed := field.export_packed()
 	var gpu := world.gpu
+	var loaded := GpuSim.State.of_field(field, RADIUS, state, SimConstants.build())
+	loaded.limit = BUPS + 1000
+	loaded.dish_seed = 5
+	loaded.next_id = sim.get_next_id()
 	RenderingServer.call_on_render_thread(func() -> void:
-		gpu.load_state(field.get_size(), field.get_spacing(), RADIUS, packed["conc"], field.export_owner(), state, SimConstants.build(), BUPS + 1000, field.export_fill_weights(), 0.0, 20.0, field.get_diffusion(), packed["puffs"], 5, 1.0, sim.get_next_id()))
+		gpu.load_state(loaded))
 	sim.import_state_bytes(PackedByteArray())
 	copy_field = ref.get_field()
 	copy_field.import_packed(packed["conc"], packed["puffs"])

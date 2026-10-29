@@ -97,7 +97,14 @@ func _init() -> void:
 			print("FINE cpu %d %d %.5f %.2f %.4f" % [seed_value, minute, sum_signal / np, sum_radius / np, float(tumbling) / np])
 	else:
 		var gpu := GpuSim.new()
-		gpu.load_state(n, sp, dish.radius, conc, owner, sim.export_state_bytes(), frozen, 20000, field.export_fill_weights(), 0.0, step, 0.0, [], seed_value, 1.0, sim.get_next_id())
+		var state := GpuSim.State.of_grid(field, dish.radius, sim.export_state_bytes(), frozen)
+		state.conc = conc  # (the patch everywhere, outside the dish too)
+		state.limit = 20000
+		state.fill_weights = field.export_fill_weights()
+		state.step = step
+		state.dish_seed = seed_value
+		state.next_id = sim.get_next_id()
+		gpu.load_state(state)
 		for minute in range(1, minutes + 1):
 			for k in batches:
 				gpu.run_steps(9)

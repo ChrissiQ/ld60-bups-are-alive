@@ -170,21 +170,18 @@ func _init(cpu_sim: BupSim, local_device := false) -> void:
 ## Ends with `reset_pipeline(bups)`.
 func load_from_cpu(field: NutrientField, dish_params: Dictionary) -> void:
 	var records := sim.export_state_bytes()
-	var packed := field.export_packed()
-	var dish_seed := int(dish_params.get("seed", 1)) + int(sim.random_float() * 2147483647.0) * 0x9E3779B1
-	var args := {
-		"conc": packed["conc"], "acetate": sim.get_acetate().export_packed()["conc"], "puffs": packed["puffs"], "owner": field.export_owner(), "weights": field.export_fill_weights(),
-		"n": field.get_size(), "spacing": field.get_spacing(), "diffusion": field.get_diffusion(),
-		"records": records, "consts": SimConstants.build(), "next_id": sim.get_next_id(), "seed": dish_seed,
-		"radius": float(dish_params.get("radius", 0.0)), "limit": int(dish_params.get("limit", 0)),
-		"upkeep": float(dish_params.get("upkeep_scale", 1.0)), "feed": float(dish_params.get("feed_per_second", 0.0)),
-		"step": float(dish_params.get("step_seconds", 20.0)),
-	}
+	var state := GpuSim.State.of_field(field, float(dish_params.get("radius", 0.0)), records, SimConstants.build())
+	state.dish_seed = int(dish_params.get("seed", 1)) + int(sim.random_float() * 2147483647.0) * 0x9E3779B1
+	state.acetate = sim.get_acetate().export_packed()["conc"]
+	state.next_id = sim.get_next_id()
+	state.limit = int(dish_params.get("limit", 0))
+	state.upkeep = float(dish_params.get("upkeep_scale", 1.0))
+	state.feed = float(dish_params.get("feed_per_second", 0.0))
+	state.step = float(dish_params.get("step_seconds", 20.0))
 	_transfer_call(func() -> void:
 		if gpu == null:
 			gpu = GpuSim.new(RenderingServer.get_rendering_device())
-		gpu.acetate = args["acetate"]
-		gpu.load_state(args["n"], args["spacing"], args["radius"], args["conc"], args["owner"], args["records"], args["consts"], args["limit"], args["weights"], args["feed"], args["step"], args["diffusion"], args["puffs"], args["seed"], args["upkeep"], args["next_id"]))
+		gpu.load_state(state))
 	field.set_recording(true)
 	var answers := _answers_from_cpu(records, dish_params)  # (while the CPU still has the bups)
 	sim.import_state_bytes(PackedByteArray())  # (the bups are the GPU's now; the family records stay)

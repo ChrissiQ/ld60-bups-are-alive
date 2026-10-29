@@ -43,7 +43,11 @@ func _init() -> void:
 	var records := bups.to_byte_array()  # (the GPU's records: the ids as integers in words 0 and 21)
 	for i in m:
 		GpuSim.set_id(records, i, i + 1)
-	gpu.load_state(field.get_size(), field.get_spacing(), dish.radius, zero, field.export_owner(), records, c2, m * 2, PackedFloat32Array(), 0.0, 20.0, 0.0, [], 1, 1.0, m + 1)
+	var state := GpuSim.State.of_grid(field, dish.radius, records, c2)
+	state.conc = zero
+	state.limit = m * 2
+	state.next_id = m + 1
+	gpu.load_state(state)
 	gpu.run_steps(1)
 	var raw := gpu.read_bups()
 	var out := raw.to_float32_array()

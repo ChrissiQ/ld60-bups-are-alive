@@ -37,7 +37,12 @@ func _init() -> void:
 		var var_v := pow(randf_range(20.0, 0.45 * spacing), 2.0)
 		puffs.append([r * cos(t), r * sin(t), randf_range(50.0, 5000.0), var_v, 0.001 if randf() < 0.3 else 1.0])
 	field.puffs_import(puffs)
-	gpu.load_state(field.get_size(), spacing, dish.radius, field.values(), field.export_owner(), PackedByteArray(), consts, 1000, field.export_fill_weights(), 0.0, 20.0, field.get_diffusion(), puffs)
+	var state := GpuSim.State.of_grid(field, dish.radius, PackedByteArray(), consts)
+	state.clouds = puffs  # (as made, not as the field took them)
+	state.limit = 1000
+	state.fill_weights = field.export_fill_weights()
+	state.diffusion = field.get_diffusion()
+	gpu.load_state(state)
 	gpu.build_index()
 	var pts := PackedFloat32Array()
 	var probes := 20000
@@ -72,7 +77,12 @@ func _init() -> void:
 	f2.puffs_import(puffs2)
 	var total0: float = f2.total()
 	var g2 := GpuSim.new()
-	g2.load_state(f2.get_size(), sp2, dish2.radius, f2.values(), f2.export_owner(), PackedByteArray(), consts, 1000, f2.export_fill_weights(), 0.0, 20.0, f2.get_diffusion(), puffs2)
+	var state2 := GpuSim.State.of_grid(f2, dish2.radius, PackedByteArray(), consts)
+	state2.clouds = puffs2
+	state2.limit = 1000
+	state2.fill_weights = f2.export_fill_weights()
+	state2.diffusion = f2.get_diffusion()
+	g2.load_state(state2)
 	for step in 6:
 		dish2.step(20.0)
 	g2.run_steps(6)

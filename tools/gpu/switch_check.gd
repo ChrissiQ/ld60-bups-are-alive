@@ -487,8 +487,12 @@ func _bench(reps: int, clouds: int) -> void:
 				var field := dish.field
 				var gpu := GpuSim.new()
 				var records := dish.sim.export_state_bytes()
-				var packed := field.export_packed()
-				gpu.load_state(field.get_size(), field.get_spacing(), dish.radius, packed["conc"], field.export_owner(), records, consts, n, field.export_fill_weights(), 0.0, delta, field.get_diffusion(), packed["puffs"], 3, 1.0, dish.sim.get_next_id())
+				var state := GpuSim.State.of_field(field, dish.radius, records, consts)
+				state.limit = n
+				state.step = delta
+				state.dish_seed = 3
+				state.next_id = dish.sim.get_next_id()
+				gpu.load_state(state)
 				gpu.run_steps(3)
 				var one := []
 				var nine := []

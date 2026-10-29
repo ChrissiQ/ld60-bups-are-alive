@@ -87,7 +87,15 @@ func _init() -> void:
 		var feed_per_second: float = Dish.feed_per_second(start.feed_density)
 		var with_world := scenario in ["D", "E", "F"]  # (plankton and sources: the CPU dish runs their part, recording what it would do to the field)
 		var start_state: PackedByteArray = dish.sim.export_state_bytes()
-		gpu.load_state(field.get_size(), field.get_spacing(), dish.radius, field.values(), field.export_owner(), start_state, consts, start.bup_limit, field.export_fill_weights(), feed_per_second, step, field.get_diffusion(), [], seed_value, 1.0, dish.sim.get_next_id())
+		var state := GpuSim.State.of_grid(field, dish.radius, start_state, consts)
+		state.limit = start.bup_limit
+		state.fill_weights = field.export_fill_weights()
+		state.feed = feed_per_second
+		state.step = step
+		state.diffusion = field.get_diffusion()
+		state.dish_seed = seed_value
+		state.next_id = dish.sim.get_next_id()
+		gpu.load_state(state)
 		if with_world:
 			field.set_recording(true)
 			var zeros := []

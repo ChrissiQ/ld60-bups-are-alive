@@ -69,7 +69,9 @@ func _init() -> void:
 	var s1: PackedFloat32Array = b1.to_float32_array()
 	var gpu := GpuSim.new()
 	print("GPU: ", gpu.device_name(), "  bups ", s0.size() / GpuSim.STRIDE, "  cells across ", nn, "  spacing ", field.get_spacing(), "  moves ", gpu.moves_for(20.0) if false else "")
-	gpu.load_state(nn, field.get_spacing(), dish.radius, conc0, owner, b0, consts)
+	var state := GpuSim.State.of_grid(field, dish.radius, b0, consts)
+	state.conc = conc0  # (the field before the CPU's step)
+	gpu.load_state(state)
 	gpu.run(20.0, 0.0, 0, true)
 	var out := gpu.read_bups().to_float32_array()
 	var idx1 := {}

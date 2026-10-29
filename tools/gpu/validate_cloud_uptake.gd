@@ -51,7 +51,13 @@ func _init() -> void:
 			in_state.encode_float((i * GpuSim.STRIDE + 1) * 4, s1[j * GpuSim.STRIDE + 1])
 			in_state.encode_float((i * GpuSim.STRIDE + 2) * 4, s1[j * GpuSim.STRIDE + 2])
 	var gpu := GpuSim.new()
-	gpu.load_state(field.get_size(), field.get_spacing(), dish.radius, conc0, owner, in_state, consts, 2000000, field.export_fill_weights(), 0.0, 20.0, 0.0, puffs0)
+	var state := GpuSim.State.of_grid(field, dish.radius, in_state, consts)
+	state.conc = conc0  # (the field and the clouds before the CPU's step)
+	state.owner = owner
+	state.clouds = puffs0
+	state.limit = 2000000
+	state.fill_weights = field.export_fill_weights()
+	gpu.load_state(state)
 	gpu.run(20.0, 0.0, 0, false)
 	var out := gpu.read_bups().to_float32_array()
 	var gp := gpu.read_puffs()

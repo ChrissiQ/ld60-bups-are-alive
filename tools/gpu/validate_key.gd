@@ -34,10 +34,14 @@ func _initialize() -> void:
 		var zero := PackedFloat32Array()
 		zero.resize(n * n)
 		var gpu := GpuSim.new()
-		gpu.acetate = acetate
 		var consts := SimConstants.build()
 		consts["death_rate"] = 0.0
-		gpu.load_state(n, field.get_spacing(), dish.radius, zero, field.export_owner(), records, consts, COUNT * 2, PackedFloat32Array(), 0.0, 20.0, 0.0, [], 1, 1.0, COUNT + 1)
+		var state := GpuSim.State.of_grid(field, dish.radius, records, consts)
+		state.conc = zero
+		state.acetate = acetate
+		state.limit = COUNT * 2
+		state.next_id = COUNT + 1
+		gpu.load_state(state)
 		var before := 0.0
 		for v in acetate:
 			before += v

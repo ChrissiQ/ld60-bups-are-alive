@@ -108,8 +108,9 @@ func _moved(rec: PackedByteArray, seed_value: int, far_um: float) -> PackedByteA
 
 func _load(gpu: GpuSim, dish: Dish, rec: PackedByteArray) -> void:
 	var field := dish.field
-	var packed: Dictionary = field.export_packed()
-	gpu.load_state(field.get_size(), field.get_spacing(), dish.radius, packed["conc"], field.export_owner(), rec, SimConstants.build(), maxi(rec.size() / GpuSim.RECORD_BYTES, 1000))
+	var state := GpuSim.State.of_grid(field, dish.radius, rec, SimConstants.build())
+	state.limit = maxi(rec.size() / GpuSim.RECORD_BYTES, 1000)
+	gpu.load_state(state)
 
 
 func _gpu_picture(gpu: GpuSim, cap: int, pixel_um: float) -> PackedFloat32Array:
@@ -322,7 +323,9 @@ func _time_local(live: int, cap: int, slots := 0) -> void:
 	rec.resize(live * GpuSim.RECORD_BYTES)
 	var gpu := GpuSim.new(null, from_source)
 	var field := dish.field
-	gpu.load_state(field.get_size(), field.get_spacing(), dish.radius, field.export_packed()["conc"], field.export_owner(), rec, SimConstants.build(), cap)
+	var state := GpuSim.State.of_grid(field, dish.radius, rec, SimConstants.build())
+	state.limit = cap
+	gpu.load_state(state)
 	var buf := gpu.rd.storage_buffer_create(gpu.capacity * 64)
 	var draw := GpuDraw.of(gpu)
 	var times := []
@@ -356,7 +359,9 @@ func part_c() -> void:
 			if mode == "gpu":
 				var gpu := GpuSim.new(RenderingServer.get_rendering_device(), from_source)
 				var field := dish.field
-				gpu.load_state(field.get_size(), field.get_spacing(), dish.radius, field.export_packed()["conc"], field.export_owner(), rec, SimConstants.build(), 1000000)
+				var state := GpuSim.State.of_grid(field, dish.radius, rec, SimConstants.build())
+				state.limit = 1000000
+				gpu.load_state(state)
 				var world := CountedWorld.new(dish.sim)
 				world.gpu = gpu
 				world.known = live
