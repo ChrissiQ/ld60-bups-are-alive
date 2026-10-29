@@ -100,4 +100,4 @@ static func release(dish: Dish) -> void:
 ## How many bups a dish's to_dict() holds (they are one compressed block of records: see DishCodec.pack_bytes).
 static func saved_count(saved: Dictionary) -> int:
 	var records: Variant = DishCodec.unpack_bytes(saved["cells"])
-	return records.size() / GpuSim.RECORD_BYTES if records != null else -1
+	return records.size() / GpuLayout.RECORD_BYTES if records != null else -1

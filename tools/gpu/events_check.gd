@@ -38,19 +38,19 @@ func _initialize() -> void:
 func _compare(label: String) -> void:
 	var world := dish.gpu_world
 	var state := Tools.read_bups(world.gpu)
-	var count := state.size() / GpuSim.RECORD_BYTES
+	var count := state.size() / GpuLayout.RECORD_BYTES
 	var missing := 0
 	for i in count:
-		if not dish.sim.has_bup(GpuSim.id_of(state, i)):
+		if not dish.sim.has_bup(GpuLayout.id_of(state, i)):
 			missing += 1
 	var wrong := 0  # (the F factor and the reach word a record was born with are the GPU bup's own)
 	var donors := 0
 	var stale := 0
 	var raised := 0
 	for i in count:
-		var info := dish.sim.lineage_info(GpuSim.id_of(state, i))
-		var donor := state.decode_float(i * GpuSim.RECORD_BYTES + 14 * 4) > 0.5
-		var reach := int(state.decode_float(i * GpuSim.RECORD_BYTES + 12 * 4) + 0.5)
+		var info := dish.sim.lineage_info(GpuLayout.id_of(state, i))
+		var donor := state.decode_float(i * GpuLayout.RECORD_BYTES + 14 * 4) > 0.5
+		var reach := int(state.decode_float(i * GpuLayout.RECORD_BYTES + 12 * 4) + 0.5)
 		if info.is_empty() or bool(info["donor"]) != donor:
 			wrong += 1
 		if not info.is_empty() and int(info["reach"]) != reach:

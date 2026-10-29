@@ -261,9 +261,9 @@ func _check_starvation() -> void:
 			survivors["%s_%s" % [setting, metabolism]] = d.population()
 			var total := 0.0
 			var ex: PackedFloat32Array = d.sim.export_state_bytes().to_float32_array()
-			var np: int = ex.size() / GpuSim.STRIDE
+			var np: int = ex.size() / GpuLayout.RECORD_WORDS
 			for i in np:
-				total += ex[i * GpuSim.STRIDE + 6]
+				total += ex[i * GpuLayout.RECORD_WORDS + 6]
 			masses["%s_%s" % [setting, metabolism]] = total / maxf(np, 1)
 			d.free()
 	TestUtil.check(survivors["off_first_1.0"] == 0, "with the stationary phase off every bup with no energy dies in its first step")
@@ -310,8 +310,8 @@ func _check_acetate() -> void:
 		d.sim.step(20.0, none, rates, 0.0, 0.0)
 		var ex: PackedFloat32Array = d.sim.export_state_bytes().to_float32_array()
 		var body := 0.0
-		for i in ex.size() / GpuSim.STRIDE:
-			body += ex[i * GpuSim.STRIDE + 5] + ex[i * GpuSim.STRIDE + 6] * Cell.COST_PER_MASS
+		for i in ex.size() / GpuLayout.RECORD_WORDS:
+			body += ex[i * GpuLayout.RECORD_WORDS + 5] + ex[i * GpuLayout.RECORD_WORDS + 6] * Cell.COST_PER_MASS
 		bodies.append(body)
 		gone = start - d.acetate.total()
 		d.free()
@@ -367,8 +367,8 @@ func _check_key() -> void:
 		g.sim.step(20.0, none, rates, 0.0, 0.0)
 		var ex: PackedFloat32Array = g.sim.export_state_bytes().to_float32_array()
 		var total := 0.0
-		for i in ex.size() / GpuSim.STRIDE:
-			total += ex[i * GpuSim.STRIDE + 6]
+		for i in ex.size() / GpuLayout.RECORD_WORDS:
+			total += ex[i * GpuLayout.RECORD_WORDS + 6]
 		growth[level] = total
 		g.free()
 	TestUtil.check(absf(gains[2] / gains[0] - Genome.KEY_FACTOR) < 0.05 * Genome.KEY_FACTOR and absf(gains[1] / gains[0] - 1.0) < 0.01, "the key takes acetate up %.2f times as fast (expected %.1f), a potentiated bup as fast as any (%.3f)" % [gains[2] / gains[0], Genome.KEY_FACTOR, gains[1] / gains[0]])

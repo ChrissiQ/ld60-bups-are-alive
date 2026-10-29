@@ -74,9 +74,9 @@ func _init() -> void:
 				var st: Dictionary = dish.population_stats()
 				var energy := 0.0
 				var ex: PackedFloat32Array = dish.sim.export_state_bytes().to_float32_array()
-				var np: int = ex.size() / GpuSim.STRIDE
+				var np: int = ex.size() / GpuLayout.RECORD_WORDS
 				for i in np:
-					energy += ex[i * GpuSim.STRIDE + 5]
+					energy += ex[i * GpuLayout.RECORD_WORDS + 5]
 				Tools.sample_line(mode, scenario, seed_value, next_hour, st["count"], [st["speed"], st["sense"], st["metabolism"], st["size"], st["harm"]], energy / maxf(np, 1), field.total())
 				_dump(field.values())
 				next_hour += 1
@@ -127,7 +127,7 @@ func _init() -> void:
 				var sums := [0.0, 0.0, 0.0, 0.0, 0.0]
 				var energy := 0.0
 				for i in np:
-					var o := i * GpuSim.STRIDE
+					var o := i * GpuLayout.RECORD_WORDS
 					sums[0] += bups[o + 8]; sums[1] += bups[o + 9]; sums[2] += bups[o + 10]; sums[3] += bups[o + 11]; sums[4] += 1.0 - exp(-bups[o + 15])
 					energy += bups[o + 5]
 				var conc := gpu.read_conc()

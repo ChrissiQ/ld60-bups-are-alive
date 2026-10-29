@@ -22,16 +22,16 @@ func _init() -> void:
 	sc.spread_founders()
 	dish.strike(sc)
 	var field := dish.field
-	var template: PackedFloat32Array = dish.sim.export_state_bytes().to_float32_array().slice(0, GpuSim.STRIDE)
+	var template: PackedFloat32Array = dish.sim.export_state_bytes().to_float32_array().slice(0, GpuLayout.RECORD_WORDS)
 	# a parent in the middle of every range, with a little harm already (so repairs can happen), the same for every bup
 	var genome := {"speed": 20.0, "sense": 50.0, "metabolism": 1.0, "size": 4.0, "hue": 0.33, "sat": 0.7, "val": 1.0, "harm": 0.2, "mutations": 0, "mutator": parent_mutator, "reach": parent_key << 8}
 	var bups := PackedFloat32Array()
-	bups.resize(m * GpuSim.STRIDE)
+	bups.resize(m * GpuLayout.RECORD_WORDS)
 	for i in m:
-		for k in GpuSim.STRIDE:
-			bups[i * GpuSim.STRIDE + k] = template[k]
-		var o := i * GpuSim.STRIDE
-		bups[o] = 0.0; bups[o + 21] = 0.0; bups[o + 22] = GpuSim.NO_PICTURE; bups[o + 23] = GpuSim.NO_PICTURE  # (the id is set below, as integers)
+		for k in GpuLayout.RECORD_WORDS:
+			bups[i * GpuLayout.RECORD_WORDS + k] = template[k]
+		var o := i * GpuLayout.RECORD_WORDS
+		bups[o] = 0.0; bups[o + 21] = 0.0; bups[o + 22] = GpuLayout.NO_PICTURE; bups[o + 23] = GpuLayout.NO_PICTURE  # (the id is set below, as integers)
 		bups[o + 1] = randf_range(-5000.0, 5000.0) * 0.5; bups[o + 2] = randf_range(-5000.0, 5000.0) * 0.5
 		bups[o + 5] = 50.0; bups[o + 6] = 20.0; bups[o + 7] = 1.0; bups[o + 12] = float(parent_key << 8); bups[o + 13] = parent_mutator  # (mass 20 >= birth 1 + add 4: divides)
 		bups[o + 8] = 20.0; bups[o + 9] = 50.0; bups[o + 10] = 1.0; bups[o + 11] = 4.0; bups[o + 15] = 0.2
@@ -42,7 +42,7 @@ func _init() -> void:
 	c2["uptake_per_size"] = 0.0; c2["death_rate"] = 0.0; c2["base_upkeep"] = 0.0; c2["maintenance_per_mass"] = 0.0; c2["sense_upkeep"] = 0.0; c2["drag_upkeep"] = 0.0; c2["growth_rate"] = 0.0
 	var records := bups.to_byte_array()  # (the GPU's records: the ids as integers in words 0 and 21)
 	for i in m:
-		GpuSim.set_id(records, i, i + 1)
+		GpuLayout.set_id(records, i, i + 1)
 	var state := GpuSim.State.of_grid(field, dish.radius, records, c2)
 	state.conc = zero
 	state.limit = m * 2
@@ -51,7 +51,7 @@ func _init() -> void:
 	gpu.run_steps(1)
 	var raw := gpu.read_bups()
 	var out := raw.to_float32_array()
-	var np := out.size() / GpuSim.STRIDE
+	var np := out.size() / GpuLayout.RECORD_WORDS
 	var gcount := {"n": 0, "lethal_free": 0}
 	var gmut := 0.0
 	var gmut_n := 0
@@ -59,8 +59,8 @@ func _init() -> void:
 	var gkey := [0, 0, 0]
 	var gd := _acc()
 	for i in np:
-		var o := i * GpuSim.STRIDE
-		if GpuSim.id_of(raw, i) <= m:
+		var o := i * GpuLayout.RECORD_WORDS
+		if GpuLayout.id_of(raw, i) <= m:
 			continue  # a parent
 		gmut += out[o + 13]; gmut_n += 1
 		var rl := int(out[o + 12] + 0.5)

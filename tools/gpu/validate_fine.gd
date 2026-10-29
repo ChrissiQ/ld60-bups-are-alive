@@ -87,13 +87,13 @@ func _init() -> void:
 			var sum_signal := 0.0
 			var sum_radius := 0.0
 			var tumbling := 0
-			for i in ex.size() / GpuSim.STRIDE:
-				var o := i * GpuSim.STRIDE
+			for i in ex.size() / GpuLayout.RECORD_WORDS:
+				var o := i * GpuLayout.RECORD_WORDS
 				sum_signal += _signal_at(eff, n, sp, RADIUS, floor_c, ex[o + 1], ex[o + 2])
 				sum_radius += sqrt(ex[o + 1] * ex[o + 1] + ex[o + 2] * ex[o + 2])
 				if ex[o + 27] > 0.0:
 					tumbling += 1
-			var np: int = ex.size() / GpuSim.STRIDE
+			var np: int = ex.size() / GpuLayout.RECORD_WORDS
 			print("FINE cpu %d %d %.5f %.2f %.4f" % [seed_value, minute, sum_signal / np, sum_radius / np, float(tumbling) / np])
 	else:
 		var gpu := GpuSim.new()
@@ -114,7 +114,7 @@ func _init() -> void:
 			var sum_radius := 0.0
 			var tumbling := 0
 			for i in np:
-				var o := i * GpuSim.STRIDE
+				var o := i * GpuLayout.RECORD_WORDS
 				sum_signal += _signal_at(eff, n, sp, RADIUS, floor_c, bups[o + 1], bups[o + 2])
 				sum_radius += sqrt(bups[o + 1] * bups[o + 1] + bups[o + 2] * bups[o + 2])
 				if bups[o + 27] > 0.0:

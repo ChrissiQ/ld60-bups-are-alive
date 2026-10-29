@@ -317,8 +317,8 @@ func _glitch(what: String) -> void:
 
 func _ids(records: PackedByteArray) -> PackedInt64Array:
 	var out := PackedInt64Array()
-	for i in records.size() / GpuSim.RECORD_BYTES:
-		out.append(GpuSim.id_of(records, i))
+	for i in records.size() / GpuLayout.RECORD_BYTES:
+		out.append(GpuLayout.id_of(records, i))
 	return out
 
 
@@ -600,7 +600,7 @@ func _edits() -> void:
 	var inside := true
 	var words: PackedFloat32Array = g["records"].to_float32_array()
 	for i in g["count"]:
-		inside = inside and Vector2(words[i * GpuSim.STRIDE + 1], words[i * GpuSim.STRIDE + 2]).length() <= 60000.0
+		inside = inside and Vector2(words[i * GpuLayout.RECORD_WORDS + 1], words[i * GpuLayout.RECORD_WORDS + 2]).length() <= 60000.0
 	_ok(dish.backend_running() == "gpu" and not dish._gpu_on_cpu and is_equal_approx(dish.gpu_world.gpu.radius, 60000.0) and inside, "resize_to 60 mm on the GPU (%d ms): the GPU holds the smaller dish, %d bups, all inside" % [Time.get_ticks_msec() - t0, g["count"]])
 	var plankton_inside := dish.plankton.all(func(p: Plankton) -> bool: return p.pos.length() <= 60000.0)
 	_ok(plankton_inside, "...the plankton outside it went (%d left)" % dish.plankton.size())
@@ -750,7 +750,7 @@ func _edits() -> void:
 			info_frames += 1
 	_ok(info_frames == 120 or not dish.has_bup(picked), "...and its info is there in every one of 120 frames at x10,000 (%d)" % info_frames)
 	var some: PackedFloat32Array = gpu_side(dish)["records"].to_float32_array()
-	var fresh := dish.global_position + Vector2(some[GpuSim.STRIDE * 7 + 1], some[GpuSim.STRIDE * 7 + 2])  # (a bup's place, never hovered)
+	var fresh := dish.global_position + Vector2(some[GpuLayout.RECORD_WORDS * 7 + 1], some[GpuLayout.RECORD_WORDS * 7 + 2])  # (a bup's place, never hovered)
 	hover_world = fresh  # (the pointer moves there: the select tool hovers it every frame, and a click asks the same point)
 	var answer := dish.cell_at(fresh, slack)
 	var waited := 0

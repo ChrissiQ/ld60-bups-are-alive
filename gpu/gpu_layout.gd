@@ -1,11 +1,12 @@
 class_name GpuLayout
 extends RefCounted
 ## The word layouts of the GPU path, in one place: the bup record, the family events, the counters (CNT, PCNT), the frame's questions
-## (QIN) and answers (OUT), and the slots of P. Every word is a 32-bit word. GpuKernels.add() declares the names a kernel uses at the
-## top of its GLSL (an int constant here as `const uint NAME = value;`, a slot of P as `const int P_<NAME> = slot;`), so the kernels,
-## gpu/gpu_sim.gd and gpu/gpu_world.gd all read these. The C++ side (BupSim's export_state_bytes, bup_from_record, apply_events) has
-## its own literals: tests/gpu_layout_test.gd checks it against this table word by word. Only int constants and P_SLOTS belong here
-## (every int constant becomes a GLSL name), and none may refer to another class.
+## (QIN) and answers (OUT), the slots of P, and the sizes of the buffers they live in. Every word is a 32-bit word. GpuKernels.add()
+## declares the names a kernel uses at the top of its GLSL (an int constant here as `const uint NAME = value;`, a slot of P as
+## `const int P_<NAME> = slot;`), so the kernels, gpu/gpu_sim.gd, gpu/gpu_world.gd and the tools all read these. The C++ side (BupSim's
+## export_state_bytes, bup_from_record, apply_events) has its own literals: tests/gpu_layout_test.gd checks it against this table word
+## by word. What belongs here: int constants (every one becomes a GLSL name), P_SLOTS, the record's one float marker (NO_PICTURE), and
+## the static helpers that read and write a record's words; none of it may refer to another class.
 
 # ---- the bup record (BUPS, BUPS2, CHILD; BupSim.export_state_bytes) ------------------------------------------------------------------
 const RECORD_WORDS := 28
@@ -39,6 +40,9 @@ const R_SLOW := 25  ## ... and over a longer memory
 const R_NOISE := 26  ## its receptor noise
 const R_TUMBLING := 27  ## the seconds of tumble left
 const ANSWER_WORDS := 24  ## the words of a record a pick's or a tracked bup's answer carries: all but the chemotaxis memory
+const RECORD_BYTES := RECORD_WORDS * 4
+const ANSWER_BYTES := ANSWER_WORDS * 4
+const NO_PICTURE := 3e38  ## R_PX, R_PY of a bup with no last picture: no trail (any value >= 1e30 means the same)
 
 # ---- the family events (EVB, EVD; BupSim.apply_events) --------------------------------------------------------------------------------
 const BIRTH_WORDS := 16
@@ -78,6 +82,11 @@ const EV_REACH_SHIFT := 20
 const EV_REACH_MASK := 0x3FF  ## the reach word's ten bits, above the low 20
 const EV_DONOR_SHIFT := 30  ## the F factor's bit
 const EV_PUFF_FLOATS := 6  ## a cloud among the clouds the dish's own world sends (EVP; GpuSim.WorldEvents): x, y, mass, variance, cut, a spare 0
+const EVENT_SETS := 4  ## the family events of this many batches can be held at once (each batch writes set seq % EVENT_SETS; a set is
+## written again only once its batch's events are in the CPU's records: about 4 frames after it ran)
+const MAX_STEPS_PER_BATCH := 1024  ## the steps of one batch (EVR: four ints a step)
+const EV_PUFFS_CAPACITY := 65536  ## the clouds the dish's own world can send in one batch (EVP)
+const EV_CELLS_CAPACITY := 1048576  ## the deposits on cells it can send in one batch (EVCC, EVCA)
 
 # ---- the counters (CNT, PCNT) ---------------------------------------------------------------------------------------------------------
 const CNT_WORDS := 16
@@ -119,6 +128,7 @@ const Q_TRACK_FIRST := 28  ## then 2 words each: the id's lo and hi words
 const NEAR_SLOTS := 4
 const FRACTIONS := 4
 const TRACKED := 8
+const MAX_ERASE := 64  ## eraser discs in one frame (ERASE: x, y, radius, strength each)
 
 # ---- the frame's answers (OUT; uint words, floats by their bits) ----------------------------------------------------------------------
 const OUT_CNT := 0  ## CNT as it was at the end of the frame's work (CNT_WORDS words)
@@ -272,3 +282,22 @@ const P_SLOTS := {
 static func p_slot(slot_name: String) -> int:
 	assert(P_SLOTS.has(slot_name), "GpuLayout: P has no slot %s" % slot_name)
 	return P_SLOTS[slot_name][0]
+
+
+## The id of record `i` in a block of records (R_ID_LO and R_ID_HI).
+static func id_of(records: PackedByteArray, i: int) -> int:
+	return records.decode_u32(i * RECORD_BYTES + R_ID_LO * 4) | (records.decode_u32(i * RECORD_BYTES + R_ID_HI * 4) << 32)
+
+
+## Gives record `i` the id `id`.
+static func set_id(records: PackedByteArray, i: int, id: int) -> void:
+	records.encode_u32(i * RECORD_BYTES + R_ID_LO * 4, id & 0xFFFFFFFF)
+	records.encode_u32(i * RECORD_BYTES + R_ID_HI * 4, (id >> 32) & 0xFFFFFFFF)
+
+
+## A whole record from the first ANSWER_WORDS words of one (what a pick or a tracked bup's answer holds): its chemotaxis memory is none read yet.
+static func whole_record(answer: PackedByteArray) -> PackedByteArray:
+	var record := answer.duplicate()
+	record.resize(RECORD_BYTES)
+	record.encode_float(R_FAST * 4, -1.0)
+	return record

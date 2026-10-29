@@ -21,7 +21,7 @@ extends RefCounted
 ##
 ## Layouts: every word of the family events, the frame's questions (QIN) and answers (OUT) and the stats samples is named in
 ## gpu/gpu_layout.gd (GpuLayout). The family events (BupSim.apply_events) are made by the `events` kernel after `finalize` and before
-## `compact`, in bup-index order, into event set seq % GpuSim.EVENT_SETS (buffers EVB, EVD: room for GpuSim.event_capacity of each per
+## `compact`, in bup-index order, into event set seq % GpuLayout.EVENT_SETS (buffers EVB, EVD: room for GpuSim.event_capacity of each per
 ## set). Picks and nearest points are found by atomicMin on d² bits (they order like the floats, for d² >= 0), ties to the smaller index.
 ## A stats sample is reduced in groups of 256 and then in one pass of fixed order, so it is the same every run. OUTK keeps each event
 ## set's OUT for finish_pending.
@@ -176,7 +176,7 @@ func load_from_cpu(field: NutrientField, dish_params: Dictionary) -> void:
 	field.set_recording(true)
 	var answers := _answers_from_cpu(records, dish_params)  # (while the CPU still has the bups)
 	sim.import_state_bytes(PackedByteArray())  # (the bups are the GPU's now; the family records stay)
-	reset_pipeline(records.size() / GpuSim.RECORD_BYTES)
+	reset_pipeline(records.size() / GpuLayout.RECORD_BYTES)
 	_take_answers(answers)
 
 
@@ -211,7 +211,7 @@ func export_to_cpu(field: NutrientField) -> void:
 	sim.get_acetate().import_packed(read["acetate"], PackedFloat32Array())
 	sim.import_state_bytes(read["records"])
 	sim.set_next_id(maxi(int(read["next_id"]), sim.get_next_id()))
-	reset_pipeline(read["records"].size() / GpuSim.RECORD_BYTES)
+	reset_pipeline(read["records"].size() / GpuLayout.RECORD_BYTES)
 	_take_answers(_answers_from_cpu(read["records"]))  # (the dish may still ask here: a save leaves the GPU running, see Dish._gpu_on_cpu)
 
 
@@ -245,8 +245,8 @@ func _answers_from_cpu(records: PackedByteArray, dish_params := {}) -> Dictionar
 		var ids := sim.bup_ids()  # (in the records' order)
 		for id: int in wanted:
 			var i := ids.find(id) if id >= 0 else -1
-			if i >= 0 and GpuSim.id_of(records, i) == id:
-				out["records"][id] = records.slice(i * GpuSim.RECORD_BYTES, (i + 1) * GpuSim.RECORD_BYTES)
+			if i >= 0 and GpuLayout.id_of(records, i) == id:
+				out["records"][id] = records.slice(i * GpuLayout.RECORD_BYTES, (i + 1) * GpuLayout.RECORD_BYTES)
 	return out
 
 
@@ -516,13 +516,13 @@ func steps_for(wanted: int) -> int:
 		return 0
 	var steps := mini(wanted, int(_steps_cap))
 	steps = mini(steps, maxi(1, int(0.5 * gpu.event_capacity / maxf(1.5 * _event_rate, 1.0))))
-	return clampi(steps, 0, GpuSim.MAX_STEPS_PER_BATCH)
+	return clampi(steps, 0, GpuLayout.MAX_STEPS_PER_BATCH)
 
 
 ## Whether a batch can be queued now: the event set it would write (seq % EVENT_SETS) is free, its last batch applied (or dropped with a
 ## load). (Not merely asked for: the stalling reads of _take_unapplied_events read every pending batch's set again.)
 func can_queue() -> bool:
-	var older := _seq - GpuSim.EVENT_SETS
+	var older := _seq - GpuLayout.EVENT_SETS
 	return older < 0 or not _batches.has(older)
 
 
@@ -656,7 +656,7 @@ func _flush_now(plan: Dictionary) -> void:
 		_seq += 1
 		var history: PackedInt32Array = plan.get("history_steps", PackedInt32Array())
 		assert(history.size() <= GpuLayout.MAX_SAMPLES)
-		var event_set := seq % GpuSim.EVENT_SETS
+		var event_set := seq % GpuLayout.EVENT_SETS
 		var delta: float = plan["delta"]
 		var start: float = plan.get("start_time", 0.0)
 		var times := PackedFloat64Array()
@@ -670,7 +670,7 @@ func _flush_now(plan: Dictionary) -> void:
 		request["plan"] = gpu_plan
 		request["samples"] = history.size()
 		var events: Dictionary = plan.get("events", {})
-		_clouds_sent += (events.get("puffs", PackedFloat32Array()) as PackedFloat32Array).size() / GpuSim.EV_PUFF_FLOATS
+		_clouds_sent += (events.get("puffs", PackedFloat32Array()) as PackedFloat32Array).size() / GpuLayout.EV_PUFF_FLOATS
 		_batch_frame = frame
 		_changed = true
 	elif not _held.is_empty():
@@ -825,8 +825,8 @@ func _take_answers_from_out(rid: int, data: PackedByteArray, request: Dictionary
 		var id := -1
 		if index != 0xFFFFFFFF:
 			var at := o + GpuLayout.QO_RECORD * 4
-			var record := GpuSim.whole_record(data.slice(at, at + GpuSim.ANSWER_BYTES))
-			id = GpuSim.id_of(record, 0)
+			var record := GpuLayout.whole_record(data.slice(at, at + GpuLayout.ANSWER_BYTES))
+			id = GpuLayout.id_of(record, 0)
 			_records[id] = record
 		_pick_answer = {"local": q["pick"][0], "slack": q["pick"][1], "id": id}
 	var near: Array = q["near"]
@@ -847,14 +847,14 @@ func _take_answers_from_out(rid: int, data: PackedByteArray, request: Dictionary
 		_fraction_answers[fractions[f]] = float(data.decode_u32(o + (GpuLayout.QO_FRAC + f) * 4)) / count if count > 0 else 0.0
 	var tracked: Array = q["tracked"]
 	for t in tracked.size():
-		var w := o + (GpuLayout.QO_TRACKED + GpuSim.ANSWER_WORDS * t) * 4
+		var w := o + (GpuLayout.QO_TRACKED + GpuLayout.ANSWER_WORDS * t) * 4
 		var id: int = tracked[t]
 		if data.decode_u32(w + GpuLayout.R_ID_LO * 4) == 0xFFFFFFFF and data.decode_u32(w + GpuLayout.R_ID_HI * 4) == 0xFFFFFFFF:
 			if _records.has(id):
 				_gone[id] = _records[id]  # (not found: no longer alive. Its place is kept: its record says it lives until its death is applied, a few frames on)
 			_records.erase(id)
 		else:
-			_records[id] = GpuSim.whole_record(data.slice(w, w + GpuSim.ANSWER_BYTES))
+			_records[id] = GpuLayout.whole_record(data.slice(w, w + GpuLayout.ANSWER_BYTES))
 
 
 ## The batch's history samples in an OUT (as _take_out or finish_pending read it).
@@ -982,7 +982,7 @@ func _apply_pending_erase(conc: PackedFloat32Array, clouds: PackedFloat32Array) 
 
 
 func _add_erase(x: float, y: float, disc_radius: float, strength: float) -> void:
-	if _erase.size() >= GpuKernels.MAX_ERASE * 4:
+	if _erase.size() >= GpuLayout.MAX_ERASE * 4:
 		return  # (more than a frame's worth: the brush moves a few times a frame at most)
 	_erase.append_array(PackedFloat32Array([x, y, disc_radius, strength]))
 

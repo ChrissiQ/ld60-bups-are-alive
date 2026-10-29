@@ -62,7 +62,7 @@ func _words_within(constants: Dictionary, prefix: String, size: int, what: Strin
 func _parts_apart() -> void:
 	TestUtil.check(L.RECORD_VEC4 * 4 == L.RECORD_WORDS, "RECORD_VEC4 is the record in 16-byte pieces")
 	TestUtil.check(L.ANSWER_WORDS == L.R_FAST and L.R_FAST < L.R_SLOW and L.R_SLOW < L.R_NOISE and L.R_NOISE < L.R_TUMBLING and L.R_TUMBLING == L.RECORD_WORDS - 1,
-		"an answer's record is every word before the chemotaxis memory, which ends the record (GpuSim.whole_record fills the rest)")
+		"an answer's record is every word before the chemotaxis memory, which ends the record (GpuLayout.whole_record fills the rest)")
 	TestUtil.check(L.R_ID_LO < L.ANSWER_WORDS and L.R_ID_HI < L.ANSWER_WORDS, "an answer's record holds the id (a tracked bup not found is told by it)")
 	TestUtil.check(L.R_SPEED + 1 == L.R_SENSE and L.R_SENSE + 1 == L.R_METABOLISM and L.R_METABOLISM + 1 == L.R_SIZE, "the genes are four words in a row (R_SPEED + g)")
 	TestUtil.check(L.EB_SPEED + 3 == L.EB_SIZE and L.ST_SPEED + 3 == L.ST_SIZE, "the genes are in a row in a birth and in a stats sample too")
@@ -81,7 +81,8 @@ func _parts_apart() -> void:
 	TestUtil.check(L.QO_NEAR + 2 <= L.QO_FRAC and L.QO_FRAC + L.FRACTIONS <= L.QO_TRACKED, "QOUT: the first nearest point and the fractions")
 	TestUtil.check(L.QO_TRACKED + L.TRACKED * L.ANSWER_WORDS <= L.QO_NEAR_MORE and L.QO_NEAR_MORE + 2 * (L.NEAR_SLOTS - 1) <= L.QOUT_WORDS, "QOUT: the tracked records and the other nearest points")
 	TestUtil.check(L.OUT_Q + L.QOUT_WORDS <= L.OUT_STATS and L.OUT_WORDS == L.OUT_STATS + L.STATS_WORDS * (1 + L.MAX_SAMPLES), "OUT: the stats samples after the answers")
-	TestUtil.check(GpuSim.STRIDE == L.RECORD_WORDS and GpuSim.RECORD_BYTES == L.RECORD_WORDS * 4 and GpuSim.CNT_WORDS == L.CNT_WORDS and GpuKernels.FRACTIONS == L.FRACTIONS, "the old names are the table's")
+	TestUtil.check(L.RECORD_BYTES == L.RECORD_WORDS * 4 and L.ANSWER_BYTES == L.ANSWER_WORDS * 4, "the record's and an answer's sizes in bytes")
+	TestUtil.check(GpuSim.RECORD_BYTES == L.RECORD_BYTES and GpuKernels.FRACTIONS == L.FRACTIONS, "the names scripts/ reads outside the table are the table's")
 
 
 func _slots(constants: Dictionary) -> void:
@@ -114,7 +115,7 @@ func _slots(constants: Dictionary) -> void:
 	for slot_name: String in GpuLayout.P_SLOTS:
 		if GpuLayout.P_SLOTS[slot_name][1] in ["dish", "batch"]:
 			TestUtil.check(set_names.has(slot_name), "P slot %s (kind %s) is never set in gpu_sim.gd" % [slot_name, GpuLayout.P_SLOTS[slot_name][1]])
-	TestUtil.check(not RegEx.create_from_string("\\bp\\[\\d").search(text), "gpu_sim.gd sets a slot of P by number")
+	TestUtil.check(not RegEx.create_from_string("\\b_?p\\[\\d").search(text), "gpu_sim.gd sets a slot of P by number")
 
 
 func _kernels() -> void:
@@ -145,18 +146,18 @@ func _record_word_by_word() -> void:
 		L.R_PX: 50.0, L.R_PY: 60.0, L.R_FAST: 0.3, L.R_SLOW: 0.2, L.R_NOISE: -0.5, L.R_TUMBLING: 0.05,
 	}
 	var state := PackedByteArray()
-	state.resize(2 * GpuSim.RECORD_BYTES)
+	state.resize(2 * GpuLayout.RECORD_BYTES)
 	for w: int in words:
 		state.encode_float(w * 4, words[w])
-	GpuSim.set_id(state, 0, id)
-	var second := GpuSim.RECORD_BYTES
+	GpuLayout.set_id(state, 0, id)
+	var second := GpuLayout.RECORD_BYTES
 	for w: int in words:
 		state.encode_float(second + w * 4, words[w])
 	state.encode_float(second + L.R_X * 4, -30.0)
 	state.encode_float(second + L.R_PX * 4, 1e31)  # (no picture)
 	state.encode_float(second + L.R_PY * 4, 1e31)
 	state.encode_float(second + L.R_FAST * 4, -5.0)  # (no signal read yet)
-	GpuSim.set_id(state, 1, id + 1)
+	GpuLayout.set_id(state, 1, id + 1)
 	var sim := BupSim.new()
 	sim.reset(1000.0, 3)
 	sim.import_state_bytes(state)
@@ -179,8 +180,8 @@ func _record_word_by_word() -> void:
 	for name: String in record_names:
 		var w: int = record_names[name]
 		TestUtil.check(back.decode_u32(w * 4) == state.decode_u32(w * 4), "export_state_bytes: %s (word %d) of the first bup is %s, not the %s it was given" % [name, w, back.decode_float(w * 4), state.decode_float(w * 4)])
-	TestUtil.check(GpuSim.id_of(back, 1) == id + 1, "the second bup's id comes back in R_ID_LO and R_ID_HI")
-	var none: float = PackedFloat32Array([GpuSim.NO_PICTURE])[0]  # (as a 32-bit float)
+	TestUtil.check(GpuLayout.id_of(back, 1) == id + 1, "the second bup's id comes back in R_ID_LO and R_ID_HI")
+	var none: float = PackedFloat32Array([GpuLayout.NO_PICTURE])[0]  # (as a 32-bit float)
 	TestUtil.check(back.decode_float(second + L.R_PX * 4) == none and back.decode_float(second + L.R_PY * 4) == none, "a bup with no picture comes back with NO_PICTURE in R_PX and R_PY (got %s)" % back.decode_float(second + L.R_PX * 4))
 	TestUtil.check(back.decode_float(second + L.R_FAST * 4) == -1.0, "a bup that has read no signal comes back with -1 in R_FAST (got %s)" % back.decode_float(second + L.R_FAST * 4))
 	TestUtil.check(back.decode_float(second + L.R_X * 4) == -30.0, "the second bup keeps its own R_X")

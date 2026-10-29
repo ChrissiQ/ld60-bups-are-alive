@@ -43,20 +43,20 @@ func _init() -> void:
 	for id in sim.bup_ids():  # a spread of speeds and senses, so that the bins fill
 		pass
 	var s0: PackedFloat32Array = sim.export_state_bytes().to_float32_array()
-	for i in s0.size() / GpuSim.STRIDE:
-		s0[i * GpuSim.STRIDE + 8] = randf_range(10.0, 60.0)   # speed
-		s0[i * GpuSim.STRIDE + 9] = randf_range(15.0, 150.0)  # sense
+	for i in s0.size() / GpuLayout.RECORD_WORDS:
+		s0[i * GpuLayout.RECORD_WORDS + 8] = randf_range(10.0, 60.0)   # speed
+		s0[i * GpuLayout.RECORD_WORDS + 9] = randf_range(15.0, 150.0)  # sense
 	# the CPU needs the same bups: set their genes through the sim (a bup's genes are what it is built from)
 	var ids: PackedInt64Array = sim.bup_ids()
 	for i in ids.size():
 		var info: Dictionary = sim.bup_info(ids[i])
 	dish.clear_bups()
-	for i in s0.size() / GpuSim.STRIDE:
-		var g := {"speed": s0[i * GpuSim.STRIDE + 8], "sense": s0[i * GpuSim.STRIDE + 9], "metabolism": s0[i * GpuSim.STRIDE + 10], "size": s0[i * GpuSim.STRIDE + 11]}
+	for i in s0.size() / GpuLayout.RECORD_WORDS:
+		var g := {"speed": s0[i * GpuLayout.RECORD_WORDS + 8], "sense": s0[i * GpuLayout.RECORD_WORDS + 9], "metabolism": s0[i * GpuLayout.RECORD_WORDS + 10], "size": s0[i * GpuLayout.RECORD_WORDS + 11]}
 		var genome := Genome.founder()
 		genome["speed"] = g["speed"]; genome["sense"] = g["sense"]
-		sim.add_bup(Vector2(s0[i * GpuSim.STRIDE + 1], s0[i * GpuSim.STRIDE + 2]), genome, Dish.FOUNDER_ENERGY, sqrt(s0[i * GpuSim.STRIDE + 6]), s0[i * GpuSim.STRIDE + 7], 0, Vector2.RIGHT)
-	var b0: PackedByteArray = sim.export_state_bytes()  # (the bups as the GPU's records; s0 their words as floats, the ids through GpuSim.id_of)
+		sim.add_bup(Vector2(s0[i * GpuLayout.RECORD_WORDS + 1], s0[i * GpuLayout.RECORD_WORDS + 2]), genome, Dish.FOUNDER_ENERGY, sqrt(s0[i * GpuLayout.RECORD_WORDS + 6]), s0[i * GpuLayout.RECORD_WORDS + 7], 0, Vector2.RIGHT)
+	var b0: PackedByteArray = sim.export_state_bytes()  # (the bups as the GPU's records; s0 their words as floats, the ids through GpuLayout.id_of)
 	s0 = b0.to_float32_array()
 	var conc0: PackedFloat32Array = field.values()
 	var owner: PackedInt32Array = field.export_owner()
@@ -68,29 +68,29 @@ func _init() -> void:
 	var b1: PackedByteArray = sim.export_state_bytes()
 	var s1: PackedFloat32Array = b1.to_float32_array()
 	var gpu := GpuSim.new()
-	print("GPU: ", gpu.device_name(), "  bups ", s0.size() / GpuSim.STRIDE, "  cells across ", nn, "  spacing ", field.get_spacing(), "  moves ", gpu.moves_for(20.0) if false else "")
+	print("GPU: ", gpu.device_name(), "  bups ", s0.size() / GpuLayout.RECORD_WORDS, "  cells across ", nn, "  spacing ", field.get_spacing(), "  moves ", gpu.moves_for(20.0) if false else "")
 	var state := GpuSim.State.of_grid(field, dish.radius, b0, consts)
 	state.conc = conc0  # (the field before the CPU's step)
 	gpu.load_state(state)
 	gpu.run(20.0, 0.0, 0, true)
 	var out := gpu.read_bups().to_float32_array()
 	var idx1 := {}
-	for i in s1.size() / GpuSim.STRIDE:
-		idx1[GpuSim.id_of(b1, i)] = i
+	for i in s1.size() / GpuLayout.RECORD_WORDS:
+		idx1[GpuLayout.id_of(b1, i)] = i
 	var bins := {}
-	for i in s0.size() / GpuSim.STRIDE:
-		var j: int = idx1.get(GpuSim.id_of(b0, i), -1)
+	for i in s0.size() / GpuLayout.RECORD_WORDS:
+		var j: int = idx1.get(GpuLayout.id_of(b0, i), -1)
 		if j < 0:
 			continue
-		var gr := _grad(eff, nn, field.get_spacing(), dish.radius, s0[i * GpuSim.STRIDE + 1], s0[i * GpuSim.STRIDE + 2])
+		var gr := _grad(eff, nn, field.get_spacing(), dish.radius, s0[i * GpuLayout.RECORD_WORDS + 1], s0[i * GpuLayout.RECORD_WORDS + 2])
 		var glen := sqrt(gr.y * gr.y + gr.z * gr.z) / (float(consts["detection_floor"]) + gr.x)
 		if glen < 1e-9:
 			continue
-		var s_val := s0[i * GpuSim.STRIDE + 8] * glen
+		var s_val := s0[i * GpuLayout.RECORD_WORDS + 8] * glen
 		var bin := clampi(int(floor(log(s_val) / log(10.0) * 2.0)), -8, 2)
 		var ux := gr.y / sqrt(gr.y * gr.y + gr.z * gr.z); var uy := gr.z / sqrt(gr.y * gr.y + gr.z * gr.z)
-		var dc := Vector2(s1[j * GpuSim.STRIDE + 1] - s0[i * GpuSim.STRIDE + 1], s1[j * GpuSim.STRIDE + 2] - s0[i * GpuSim.STRIDE + 2])
-		var dg := Vector2(out[i * GpuSim.STRIDE + 1] - s0[i * GpuSim.STRIDE + 1], out[i * GpuSim.STRIDE + 2] - s0[i * GpuSim.STRIDE + 2])
+		var dc := Vector2(s1[j * GpuLayout.RECORD_WORDS + 1] - s0[i * GpuLayout.RECORD_WORDS + 1], s1[j * GpuLayout.RECORD_WORDS + 2] - s0[i * GpuLayout.RECORD_WORDS + 2])
+		var dg := Vector2(out[i * GpuLayout.RECORD_WORDS + 1] - s0[i * GpuLayout.RECORD_WORDS + 1], out[i * GpuLayout.RECORD_WORDS + 2] - s0[i * GpuLayout.RECORD_WORDS + 2])
 		if not bins.has(bin):
 			bins[bin] = {"n": 0, "cu": 0.0, "cu2": 0.0, "cs2": 0.0, "gu": 0.0, "gu2": 0.0, "gs2": 0.0}
 		var b: Dictionary = bins[bin]

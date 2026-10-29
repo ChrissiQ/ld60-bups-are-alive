@@ -30,12 +30,12 @@ class CheckWorld extends GpuWorld:
 		var births := PackedByteArray()
 		var deaths := PackedByteArray()
 		var seen := {}
-		for i in records.size() / GpuSim.RECORD_BYTES:
-			var id := GpuSim.id_of(records, i)
+		for i in records.size() / GpuLayout.RECORD_BYTES:
+			var id := GpuLayout.id_of(records, i)
 			seen[id] = true
 			if known.has(id):
 				continue
-			var o := i * GpuSim.STRIDE
+			var o := i * GpuLayout.RECORD_WORDS
 			var e := PackedByteArray()
 			e.resize(64)
 			e.encode_u32(0, id & 0xFFFFFFFF); e.encode_u32(4, (id >> 32) & 0xFFFFFFFF)
@@ -53,8 +53,8 @@ class CheckWorld extends GpuWorld:
 					e.encode_float((GpuLayout.ED_SPEED + g) * 4, known[id][2 + g])
 				deaths.append_array(e)
 		known.clear()
-		for i in records.size() / GpuSim.RECORD_BYTES:
-			known[GpuSim.id_of(records, i)] = _known_of(words, i)
+		for i in records.size() / GpuLayout.RECORD_BYTES:
+			known[GpuLayout.id_of(records, i)] = _known_of(words, i)
 		if births.size() > 0 or deaths.size() > 0:
 			sets.append({"births": births, "deaths": deaths, "first_step_end": now_seconds, "step_seconds": 0.0})
 
@@ -68,14 +68,14 @@ class CheckWorld extends GpuWorld:
 		sets = []
 		known.clear()
 		if bups > 0 and not gpu.is_main:  # (a main device has no bups changing here, so nothing needs looking at)
-			var records := gpu.rd.buffer_get_data(gpu.buffer("BUPS"), 0, bups * GpuSim.RECORD_BYTES)
+			var records := gpu.rd.buffer_get_data(gpu.buffer("BUPS"), 0, bups * GpuLayout.RECORD_BYTES)
 			var words := records.to_float32_array()
 			for i in bups:
-				known[GpuSim.id_of(records, i)] = _known_of(words, i)
+				known[GpuLayout.id_of(records, i)] = _known_of(words, i)
 
 	## What a death event of record `i` would say: its mass, its divisions, its four genes.
 	static func _known_of(words: PackedFloat32Array, i: int) -> Array:
-		var o := i * GpuSim.STRIDE
+		var o := i * GpuLayout.RECORD_WORDS
 		return [words[o + GpuLayout.R_MASS], int(words[o + GpuLayout.R_DIVISIONS]), words[o + GpuLayout.R_SPEED], words[o + GpuLayout.R_SENSE], words[o + GpuLayout.R_METABOLISM], words[o + GpuLayout.R_SIZE]]
 
 	func bup_count() -> int:
@@ -143,8 +143,8 @@ func _gpu_state(world: CheckWorld) -> Dictionary:
 
 func _ids(records: PackedByteArray) -> PackedInt64Array:
 	var out := PackedInt64Array()
-	for i in records.size() / GpuSim.RECORD_BYTES:
-		out.append(GpuSim.id_of(records, i))
+	for i in records.size() / GpuLayout.RECORD_BYTES:
+		out.append(GpuLayout.id_of(records, i))
 	return out
 
 
@@ -162,7 +162,7 @@ func _record_diff(a: PackedByteArray, b: PackedByteArray) -> String:
 	var worst_word := -1
 	var id_words := 0
 	for i in fa.size():
-		var word := i % GpuSim.STRIDE
+		var word := i % GpuLayout.RECORD_WORDS
 		if a.decode_u32(i * 4) == b.decode_u32(i * 4):
 			continue
 		differ += 1
@@ -208,7 +208,7 @@ func _cpu_snapshot(dish: Dish) -> Dictionary:
 
 
 func _same_snapshot(a: Dictionary, b: Dictionary, label: String) -> void:
-	_ok(a["state"] == b["state"], "%s: the bups' bytes are identical (%d bups, ids included)" % [label, a["state"].size() / GpuSim.RECORD_BYTES])
+	_ok(a["state"] == b["state"], "%s: the bups' bytes are identical (%d bups, ids included)" % [label, a["state"].size() / GpuLayout.RECORD_BYTES])
 	_ok(a["packed"]["conc"] == b["packed"]["conc"] and a["packed"]["puffs"] == b["packed"]["puffs"], "%s: the grid and the clouds are identical (%d clouds)" % [label, a["packed"]["puffs"].size() / 5])
 	_ok(a["next_id"] == b["next_id"] and a["lineage"] == b["lineage"], "%s: next id and every family record are identical" % label)
 

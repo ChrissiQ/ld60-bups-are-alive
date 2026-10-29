@@ -48,25 +48,25 @@ func _initialize() -> void:
 		var energy_before := 0.0
 		var ex0 := dish.sim.export_state_bytes().to_float32_array()
 		for i in COUNT:
-			energy_before += ex0[i * GpuSim.STRIDE + 5]
+			energy_before += ex0[i * GpuLayout.RECORD_WORDS + 5]
 		gpu.run_steps(1)
 		var after := 0.0
 		for v in gpu.rd.buffer_get_data(gpu.buffer("CONC2")).to_float32_array():
 			after += v
 		var out := gpu.read_bups().to_float32_array()
 		var gpu_body := 0.0
-		for i in out.size() / GpuSim.STRIDE:
-			gpu_body += out[i * GpuSim.STRIDE + 5] + out[i * GpuSim.STRIDE + 6] * Cell.COST_PER_MASS
+		for i in out.size() / GpuLayout.RECORD_WORDS:
+			gpu_body += out[i * GpuLayout.RECORD_WORDS + 5] + out[i * GpuLayout.RECORD_WORDS + 6] * Cell.COST_PER_MASS
 		var body0 := 0.0
 		for i in COUNT:
-			body0 += ex0[i * GpuSim.STRIDE + 5] + ex0[i * GpuSim.STRIDE + 6] * Cell.COST_PER_MASS
+			body0 += ex0[i * GpuLayout.RECORD_WORDS + 5] + ex0[i * GpuLayout.RECORD_WORDS + 6] * Cell.COST_PER_MASS
 		gpu_gain[level] = [before - after, gpu_body - body0]
 		var cpu_before: float = dish.acetate.total()
 		dish.sim.step(20.0, PackedVector2Array(), PackedFloat32Array(), 0.0, 0.0)
 		var ex1 := dish.sim.export_state_bytes().to_float32_array()
 		var cpu_body := 0.0
-		for i in ex1.size() / GpuSim.STRIDE:
-			cpu_body += ex1[i * GpuSim.STRIDE + 5] + ex1[i * GpuSim.STRIDE + 6] * Cell.COST_PER_MASS
+		for i in ex1.size() / GpuLayout.RECORD_WORDS:
+			cpu_body += ex1[i * GpuLayout.RECORD_WORDS + 5] + ex1[i * GpuLayout.RECORD_WORDS + 6] * Cell.COST_PER_MASS
 		cpu_gain[level] = [(cpu_before - dish.acetate.total()) * 1.0, cpu_body - body0]
 		gpu.release()
 		dish.free()

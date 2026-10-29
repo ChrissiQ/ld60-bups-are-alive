@@ -987,8 +987,7 @@ void main() {
 
 ## ---- the game's side: family events, the frame's questions and answers, stats, the eraser, the field's copy -------------------
 ## The frame's questions (QIN) and answers (OUT): their words are in gpu/gpu_layout.gd.
-const FRACTIONS := GpuLayout.FRACTIONS  ## (for the dish, which keeps no more fractions asked than QIN has room for)
-const MAX_ERASE := 64  ## eraser discs in one frame
+const FRACTIONS := GpuLayout.FRACTIONS  ## (as scripts/dish.gd reads it: the dish keeps no more fractions asked than QIN has room for)
 
 ## Before a batch: its counts of births and deaths start from 0.
 const K_EV_BEGIN := """

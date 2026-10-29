@@ -58,9 +58,9 @@ func _init() -> void:
 	var c2 := consts.duplicate()
 	c2["uptake_per_size"] = 0.0; c2["death_rate"] = 0.0; c2["growth_rate"] = 0.0; c2["donor_gain"] = 0.0; c2["donor_loss"] = 0.0
 	var records := state.to_byte_array()
-	var count := state.size() / GpuSim.STRIDE
+	var count := state.size() / GpuLayout.RECORD_WORDS
 	for i in count:
-		GpuSim.set_id(records, i, i + 1)
+		GpuLayout.set_id(records, i, i + 1)
 	var loaded := GpuSim.State.of_grid(field, dish.radius, records, c2)
 	loaded.conc = zero
 	loaded.limit = count * 2
@@ -80,7 +80,7 @@ func _init() -> void:
 
 ## Per recipient (the second bup of each pair, in the CPU's order: donor, recipient, donor, recipient, ..., the lone one last).
 func _tally(now: PackedFloat32Array, start: PackedFloat32Array, n: int) -> Array:
-	var s := GpuSim.STRIDE
+	var s := GpuLayout.RECORD_WORDS
 	var taken := [0, 0, 0, 0]
 	var changed_lone := 0
 	var changed_donors := 0
@@ -99,10 +99,10 @@ func _tally(now: PackedFloat32Array, start: PackedFloat32Array, n: int) -> Array
 
 ## The GPU's bups are not in the CPU's order after a step (the ids are): find each by its id (1-based, the order of the records).
 func _tally_by_id(raw: PackedByteArray, out: PackedFloat32Array, start: PackedFloat32Array, n: int) -> Array:
-	var s := GpuSim.STRIDE
+	var s := GpuLayout.RECORD_WORDS
 	var by_id := {}
 	for i in out.size() / s:
-		by_id[GpuSim.id_of(raw, i)] = i
+		by_id[GpuLayout.id_of(raw, i)] = i
 	var now := PackedFloat32Array()
 	now.resize(start.size())
 	for k in start.size() / s:

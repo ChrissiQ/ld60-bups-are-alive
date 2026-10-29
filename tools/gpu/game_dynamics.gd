@@ -53,13 +53,13 @@ func _read_gpu() -> Array:
 		out.append([bytes, conc, puffs, gpu.rd.buffer_get_data(gpu.buffer("CONC2")).to_float32_array()]))
 	var bytes: PackedByteArray = out[0][0]
 	var bups := bytes.to_float32_array()
-	var np := bytes.size() / GpuSim.RECORD_BYTES
+	var np := bytes.size() / GpuLayout.RECORD_BYTES
 	var sums := [0.0, 0.0, 0.0, 0.0, 0.0]
 	var energy := 0.0
 	mutator_mean = 0.0
 	donor_mean = 0.0
 	for i in np:
-		var o := i * GpuSim.STRIDE
+		var o := i * GpuLayout.RECORD_WORDS
 		mutator_mean += bups[o + 13]
 		donor_mean += bups[o + 14]
 		sums[0] += bups[o + 8]; sums[1] += bups[o + 9]; sums[2] += bups[o + 10]; sums[3] += bups[o + 11]; sums[4] += 1.0 - exp(-bups[o + 15])
@@ -89,9 +89,9 @@ func _read_cpu() -> Array:
 	var energy := 0.0
 	acetate_total = dish.acetate.total()
 	var ex: PackedFloat32Array = dish.sim.export_state_bytes().to_float32_array()
-	var np: int = ex.size() / GpuSim.STRIDE
+	var np: int = ex.size() / GpuLayout.RECORD_WORDS
 	for i in np:
-		energy += ex[i * GpuSim.STRIDE + 5]
+		energy += ex[i * GpuLayout.RECORD_WORDS + 5]
 	return [st["count"], [st["speed"], st["sense"], st["metabolism"], st["size"], st["harm"]], energy / maxf(np, 1), dish.field.total()]
 
 

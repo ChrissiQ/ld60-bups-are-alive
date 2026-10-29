@@ -66,10 +66,10 @@ func _make_dish(n: int, rad: float, seed_value: int, bup_limit := 2000000) -> Di
 ## some longer than the longest drawn).
 func _crafted(dish: Dish, rng: RandomNumberGenerator, near_um: float, far_um: float) -> PackedByteArray:
 	var rec := dish.sim.export_state_bytes()
-	var count := rec.size() / GpuSim.RECORD_BYTES
+	var count := rec.size() / GpuLayout.RECORD_BYTES
 	var edges := [0.0, 1.0 / 6.0, 2.0 / 6.0, 0.5, 4.0 / 6.0, 5.0 / 6.0, 0.99999994]
 	for i in count:
-		var o := i * GpuSim.RECORD_BYTES
+		var o := i * GpuLayout.RECORD_BYTES
 		var hue := rng.randf() if i % 50 != 0 else float(edges[(i / 50) % edges.size()])
 		rec.encode_float(o + 16 * 4, hue)
 		rec.encode_float(o + 17 * 4, 0.0 if i % 13 == 0 else rng.randf())
@@ -78,8 +78,8 @@ func _crafted(dish: Dish, rng: RandomNumberGenerator, near_um: float, far_um: fl
 		var y := rec.decode_float(o + 8)
 		match i % 3:
 			0:
-				rec.encode_float(o + 22 * 4, GpuSim.NO_PICTURE)
-				rec.encode_float(o + 23 * 4, GpuSim.NO_PICTURE)
+				rec.encode_float(o + 22 * 4, GpuLayout.NO_PICTURE)
+				rec.encode_float(o + 23 * 4, GpuLayout.NO_PICTURE)
 			1:
 				var a := rng.randf() * TAU
 				rec.encode_float(o + 22 * 4, x + cos(a) * near_um)
@@ -97,8 +97,8 @@ func _moved(rec: PackedByteArray, seed_value: int, far_um: float) -> PackedByteA
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
 	var out := rec.duplicate()
-	for i in out.size() / GpuSim.RECORD_BYTES:
-		var o := i * GpuSim.RECORD_BYTES
+	for i in out.size() / GpuLayout.RECORD_BYTES:
+		var o := i * GpuLayout.RECORD_BYTES
 		var a := rng.randf() * TAU
 		var d := rng.randf() * far_um if i % 4 != 0 else rng.randf() * 0.5  # (a quarter barely move: no trail)
 		out.encode_float(o + 4, out.decode_float(o + 4) + cos(a) * d)
@@ -109,7 +109,7 @@ func _moved(rec: PackedByteArray, seed_value: int, far_um: float) -> PackedByteA
 func _load(gpu: GpuSim, dish: Dish, rec: PackedByteArray) -> void:
 	var field := dish.field
 	var state := GpuSim.State.of_grid(field, dish.radius, rec, SimConstants.build())
-	state.limit = maxi(rec.size() / GpuSim.RECORD_BYTES, 1000)
+	state.limit = maxi(rec.size() / GpuLayout.RECORD_BYTES, 1000)
 	gpu.load_state(state)
 
 
@@ -176,11 +176,11 @@ func compare(label: String, cpu: PackedFloat32Array, gpu: PackedFloat32Array, li
 ## The GPU's notes of where each bup was drawn (words 22, 23) against the CPU's.
 func compare_places(label: String, cpu_rec: PackedByteArray, gpu_rec: PackedByteArray) -> void:
 	var bad := 0
-	var n := mini(cpu_rec.size(), gpu_rec.size()) / GpuSim.RECORD_BYTES
+	var n := mini(cpu_rec.size(), gpu_rec.size()) / GpuLayout.RECORD_BYTES
 	for i in n:
 		for w in [22, 23]:
-			var a := cpu_rec.decode_float(i * GpuSim.RECORD_BYTES + w * 4)
-			var b := gpu_rec.decode_float(i * GpuSim.RECORD_BYTES + w * 4)
+			var a := cpu_rec.decode_float(i * GpuLayout.RECORD_BYTES + w * 4)
+			var b := gpu_rec.decode_float(i * GpuLayout.RECORD_BYTES + w * 4)
 			if a != b:
 				bad += 1
 				if bad <= 3:
@@ -199,7 +199,7 @@ func part_a(n: int) -> void:
 	var gpu := GpuSim.new(null, from_source)
 	print("GPU: ", gpu.device_name(), " | kernels from source: ", from_source)
 	_load(gpu, dish, rec)
-	var count := rec.size() / GpuSim.RECORD_BYTES
+	var count := rec.size() / GpuLayout.RECORD_BYTES
 	# 1: true size (fine pixels), more slots than bups
 	var px1 := 0.05
 	var cap1 := count + 37
@@ -290,7 +290,7 @@ func part_b(n: int) -> void:
 	var reference := dish.sim.render_buffer(pixel, gpu.capacity)
 	var world := CountedWorld.new(dish.sim)
 	world.gpu = gpu
-	world.known = rec.size() / GpuSim.RECORD_BYTES
+	world.known = rec.size() / GpuLayout.RECORD_BYTES
 	dish.gpu_world = world
 	dish.gpu_active = true
 	dish.flash = 0.0
@@ -299,7 +299,7 @@ func part_b(n: int) -> void:
 	var gpu1 := root.get_texture().get_image()
 	var mm := dish.drawing.bups_mesh.multimesh
 	print("  GPU path: MultiMesh instance_count %d (GPU capacity %d), visible %d" % [mm.instance_count, gpu.capacity, mm.visible_instance_count])
-	compare("B: the MultiMesh's buffer after the GPU path's first picture", reference, RenderingServer.multimesh_get_buffer(mm.get_rid()), rec.size() / GpuSim.RECORD_BYTES)
+	compare("B: the MultiMesh's buffer after the GPU path's first picture", reference, RenderingServer.multimesh_get_buffer(mm.get_rid()), rec.size() / GpuLayout.RECORD_BYTES)
 	for f in 2:
 		await process_frame
 		await RenderingServer.frame_post_draw
@@ -318,9 +318,9 @@ func _time_local(live: int, cap: int, slots := 0) -> void:
 	var dish := _make_dish(mini(live, 2000), 45000.0, 5, cap)
 	var one := dish.sim.export_state_bytes()
 	var rec := PackedByteArray()
-	while rec.size() < live * GpuSim.RECORD_BYTES:
+	while rec.size() < live * GpuLayout.RECORD_BYTES:
 		rec.append_array(one)
-	rec.resize(live * GpuSim.RECORD_BYTES)
+	rec.resize(live * GpuLayout.RECORD_BYTES)
 	var gpu := GpuSim.new(null, from_source)
 	var field := dish.field
 	var state := GpuSim.State.of_grid(field, dish.radius, rec, SimConstants.build())
@@ -352,9 +352,9 @@ func part_c() -> void:
 		dish.scale = Vector2.ONE * (340.0 / 45000.0)
 		var one := dish.sim.export_state_bytes()
 		var rec := PackedByteArray()
-		while rec.size() < live * GpuSim.RECORD_BYTES:
+		while rec.size() < live * GpuLayout.RECORD_BYTES:
 			rec.append_array(one)
-		rec.resize(live * GpuSim.RECORD_BYTES)
+		rec.resize(live * GpuLayout.RECORD_BYTES)
 		for mode in ["cpu", "gpu"]:
 			if mode == "gpu":
 				var gpu := GpuSim.new(RenderingServer.get_rendering_device(), from_source)

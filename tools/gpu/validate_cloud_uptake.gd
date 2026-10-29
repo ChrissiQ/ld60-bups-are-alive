@@ -32,7 +32,7 @@ func _init() -> void:
 		sim.add_bup(Vector2(r * cos(t) * 1.0, r * sin(t)), g, Dish.FOUNDER_ENERGY, sqrt(born * 1.5), born, 0, Vector2.RIGHT)
 	for id in sim.bup_ids():
 		sim.set_bup_energy(id, randf() * 0.5 * sim.bup_info(id)["max_energy"])
-	var b0: PackedByteArray = sim.export_state_bytes()  # (the bups as the GPU's records; s0 their words as floats, the ids through GpuSim.id_of)
+	var b0: PackedByteArray = sim.export_state_bytes()  # (the bups as the GPU's records; s0 their words as floats, the ids through GpuLayout.id_of)
 	var s0: PackedFloat32Array = b0.to_float32_array()
 	var conc0: PackedFloat32Array = field.values()
 	var owner: PackedInt32Array = field.export_owner()
@@ -42,14 +42,14 @@ func _init() -> void:
 	var s1: PackedFloat32Array = b1.to_float32_array()
 	var puffs1: Array = field.puffs_export()
 	var idx1 := {}
-	for i in s1.size() / GpuSim.STRIDE:
-		idx1[GpuSim.id_of(b1, i)] = i
+	for i in s1.size() / GpuLayout.RECORD_WORDS:
+		idx1[GpuLayout.id_of(b1, i)] = i
 	var in_state := b0.duplicate()
-	for i in s0.size() / GpuSim.STRIDE:
-		var j: int = idx1.get(GpuSim.id_of(b0, i), -1)
+	for i in s0.size() / GpuLayout.RECORD_WORDS:
+		var j: int = idx1.get(GpuLayout.id_of(b0, i), -1)
 		if j >= 0:
-			in_state.encode_float((i * GpuSim.STRIDE + 1) * 4, s1[j * GpuSim.STRIDE + 1])
-			in_state.encode_float((i * GpuSim.STRIDE + 2) * 4, s1[j * GpuSim.STRIDE + 2])
+			in_state.encode_float((i * GpuLayout.RECORD_WORDS + 1) * 4, s1[j * GpuLayout.RECORD_WORDS + 1])
+			in_state.encode_float((i * GpuLayout.RECORD_WORDS + 2) * 4, s1[j * GpuLayout.RECORD_WORDS + 2])
 	var gpu := GpuSim.new()
 	var state := GpuSim.State.of_grid(field, dish.radius, in_state, consts)
 	state.conc = conc0  # (the field and the clouds before the CPU's step)
@@ -62,14 +62,14 @@ func _init() -> void:
 	var out := gpu.read_bups().to_float32_array()
 	var gp := gpu.read_puffs()
 	var gain_c := 0.0; var gain_g := 0.0; var sum_abs := 0.0; var matched := 0; var skipped := 0
-	for i in s0.size() / GpuSim.STRIDE:
-		var j: int = idx1.get(GpuSim.id_of(b0, i), -1)
-		if j < 0 or s1[j * GpuSim.STRIDE + 6] < out[i * GpuSim.STRIDE + 6] * 0.9:
+	for i in s0.size() / GpuLayout.RECORD_WORDS:
+		var j: int = idx1.get(GpuLayout.id_of(b0, i), -1)
+		if j < 0 or s1[j * GpuLayout.RECORD_WORDS + 6] < out[i * GpuLayout.RECORD_WORDS + 6] * 0.9:
 			skipped += 1
 			continue
-		var e0 := s0[i * GpuSim.STRIDE + 5]
-		var gc := s1[j * GpuSim.STRIDE + 5] - e0
-		var gg := out[i * GpuSim.STRIDE + 5] - e0
+		var e0 := s0[i * GpuLayout.RECORD_WORDS + 5]
+		var gc := s1[j * GpuLayout.RECORD_WORDS + 5] - e0
+		var gg := out[i * GpuLayout.RECORD_WORDS + 5] - e0
 		gain_c += gc; gain_g += gg; sum_abs += absf(gc - gg); matched += 1
 	var m0 := 0.0; var m1 := 0.0; var mg := 0.0; var worst := 0.0; var emptied_c := 0; var emptied_g := 0
 	for k in puffs0.size():
