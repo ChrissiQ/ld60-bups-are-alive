@@ -600,10 +600,10 @@ func _init() -> void:
 	TestUtil.check(m.lineage_panel.visible and not m.info_panel.visible and m.lineage_entries.get_child_count() == 2, "the lineage covers the info and lists the family line (%d entries)" % m.lineage_entries.get_child_count())
 	TestUtil.check(m.lineage_entries.get_child(1).get_child(1).disabled and not m.lineage_entries.get_child(0).get_child(1).disabled, "the bup itself is marked, its ancestors can be clicked")
 	TestUtil.check(m.lineage_back_button.visible and m.lineage_back_button.tooltip_text == "Back", "the lineage panel has a back icon")
-	var stack_before: int = m._stack.size()
+	var stack_before: int = m.lineage.depth()
 	m.lineage_back_button.pressed.emit()
 	await process_frame
-	TestUtil.check(m._stack.size() == stack_before - 1 and not m.lineage_panel.visible and m.info_panel.visible, "the back icon closes the lineage, like Escape, back to the bup's info")
+	TestUtil.check(m.lineage.depth() == stack_before - 1 and not m.lineage_panel.visible and m.info_panel.visible, "the back icon closes the lineage, like Escape, back to the bup's info")
 	m.lineage_button.pressed.emit()
 	await process_frame
 	await process_frame
@@ -623,29 +623,29 @@ func _init() -> void:
 	TestUtil.check(BupPicture.body_length({"max_energy": 0.0, "size_gene": 4.0}) == 4.0 and BupPicture.body_length({"max_energy": 80.0}) == 2.5, "a record without a reserve takes the length its size gene divides at; one with a reserve, its own")
 	TestUtil.check(m.lineage_entries.get_child(0).get_child(1).text.begins_with(m.dish.bup_name(grandmother)), "entries use the bups' names ('%s')" % m.lineage_entries.get_child(0).get_child(1).text)
 	await _drag(m, centre, Vector2(30, 0), MOUSE_BUTTON_MIDDLE)
-	TestUtil.check(m.lineage_panel.visible and m._stack.size() == 2, "panning leaves the lineage as it is")
+	TestUtil.check(m.lineage_panel.visible and m.lineage.depth() == 2, "panning leaves the lineage as it is")
 	m.lineage_entries.get_child(0).get_child(1).pressed.emit()
 	await process_frame
 	await process_frame
-	TestUtil.check(m.dish.selected.bup == grandmother and m.info_panel.visible and not m.lineage_panel.visible and m._stack.size() == 3, "clicking an ancestor shows her info (and selects her), not her lineage")
+	TestUtil.check(m.dish.selected.bup == grandmother and m.info_panel.visible and not m.lineage_panel.visible and m.lineage.depth() == 3, "clicking an ancestor shows her info (and selects her), not her lineage")
 	m.lineage_button.pressed.emit()
 	await process_frame
-	TestUtil.check(m.lineage_panel.visible and m._stack.size() == 4, "her lineage can be opened in turn: the views nest")
+	TestUtil.check(m.lineage_panel.visible and m.lineage.depth() == 4, "her lineage can be opened in turn: the views nest")
 	m.dish.remove_bup(grandmother)  # she dies while all this is open
 	m.dish.remove_bup(mother)
 	TestUtil.check(m.dish.has_record(grandmother) and m.dish.has_record(mother), "the bups on the stack are kept when they die")
 	await _key(KEY_ESCAPE)
 	await process_frame
-	TestUtil.check(m.info_panel.visible and m.dish.selected.bup == grandmother and m.info_text.get_parsed_text().contains("DECEASED") and m._stack.size() == 3, "Escape goes back one step: to her info, now showing she has died")
+	TestUtil.check(m.info_panel.visible and m.dish.selected.bup == grandmother and m.info_text.get_parsed_text().contains("DECEASED") and m.lineage.depth() == 3, "Escape goes back one step: to her info, now showing she has died")
 	await _key(KEY_ESCAPE)
 	await process_frame
-	TestUtil.check(m.lineage_panel.visible and m.dish.selected.bup == mother and m._stack.size() == 2, "...then to the first lineage")
+	TestUtil.check(m.lineage_panel.visible and m.dish.selected.bup == mother and m.lineage.depth() == 2, "...then to the first lineage")
 	await _key(KEY_ESCAPE)
 	await process_frame
-	TestUtil.check(m.info_panel.visible and m.dish.selected.bup == mother and m._stack.size() == 1, "...then to the first info")
+	TestUtil.check(m.info_panel.visible and m.dish.selected.bup == mother and m.lineage.depth() == 1, "...then to the first info")
 	await _key(KEY_ESCAPE)
 	await process_frame
-	TestUtil.check(m.dish.selected.bup == -1 and m._stack.is_empty() and not m.info_panel.visible and not m.menu_open and not m.dish.has_record(grandmother) and not m.dish.has_record(mother), "the next Escape closes it all; nothing is kept now nothing needs it")
+	TestUtil.check(m.dish.selected.bup == -1 and m.lineage.is_empty() and not m.info_panel.visible and not m.menu_open and not m.dish.has_record(grandmother) and not m.dish.has_record(mother), "the next Escape closes it all; nothing is kept now nothing needs it")
 	# Anything outside the stack closes the lot, however deep.
 	var kin_a: int = m.dish.add_bup(m.dish.global_position + Vector2(10, 10), Genome.founder(), 200.0, 4.0, 8.0, 0, Vector2.RIGHT)
 	m.dish.step(1.0)
@@ -661,11 +661,11 @@ func _init() -> void:
 	await process_frame
 	m.lineage_entries.get_child(0).get_child(1).pressed.emit()
 	await process_frame
-	TestUtil.check(m._stack.size() == 3, "(three steps deep)")
+	TestUtil.check(m.lineage.depth() == 3, "(three steps deep)")
 	m.toolbar.select_tool(Toolbar.Tool.NUTRIENT)
 	await process_frame
 	await process_frame
-	TestUtil.check(m._stack.is_empty() and m.dish.selected.bup == -1 and not m.lineage_panel.visible and not m.info_panel.visible, "choosing another tool closes every step and the info")
+	TestUtil.check(m.lineage.is_empty() and m.dish.selected.bup == -1 and not m.lineage_panel.visible and not m.info_panel.visible, "choosing another tool closes every step and the info")
 	m.toolbar.select_tool(Toolbar.Tool.SELECT)
 	m.dish.selected.bup = kin_b
 	await process_frame
@@ -675,10 +675,10 @@ func _init() -> void:
 	m.dish.selected.bup = stranger  # a different bup selected from outside the stack
 	await process_frame
 	await process_frame
-	TestUtil.check(m._stack.size() == 1 and m.dish.selected.bup == stranger and not m.lineage_panel.visible, "selecting another bup starts afresh on that bup")
+	TestUtil.check(m.lineage.depth() == 1 and m.dish.selected.bup == stranger and not m.lineage_panel.visible, "selecting another bup starts afresh on that bup")
 	m.dish.selected.bup = -1
 	await process_frame
-	TestUtil.check(m._stack.is_empty(), "no selection, no stack")
+	TestUtil.check(m.lineage.is_empty(), "no selection, no stack")
 	m.dish.clear_bups()
 
 	# --- Watching: a Watch button in the inspect panel, a list above the graph, a click on an entry opens the bup.

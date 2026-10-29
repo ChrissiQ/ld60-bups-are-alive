@@ -30,8 +30,7 @@ func remove(entry: Dictionary) -> void:
 
 
 func refresh() -> void:
-	for child in flow.get_children():
-		child.queue_free()
+	Nodes.clear_children(flow)
 	for entry in entries:
 		var button := Button.new()
 		button.theme_type_variation = &"PictureButton"

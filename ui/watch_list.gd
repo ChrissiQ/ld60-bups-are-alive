@@ -50,9 +50,7 @@ func refresh() -> void:
 
 
 func _rebuild() -> void:
-	for child in entries.get_children():
-		entries.remove_child(child)
-		child.queue_free()
+	Nodes.clear_children(entries)
 	_buttons.clear()
 	_entries_list = []
 	for d in dishes:
@@ -62,21 +60,11 @@ func _rebuild() -> void:
 	for pair: Array in _entries_list:
 		var d: Dish = pair[0]
 		var id: int = pair[1]
-		var row := HBoxContainer.new()
-		row.theme_type_variation = &"TightRow"
-		var swatch := BupPicture.new()  # the bup itself, in its colour, so a clade can be followed by eye
-		swatch.show_info(d.lineage_info(id))
-		swatch.custom_minimum_size = Vector2(12.0, 12.0)
-		swatch.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		row.add_child(swatch)
 		var entry := Button.new()
 		_style_entry(entry, d, id)
-		entry.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		entry.focus_mode = Control.FOCUS_NONE
-		entry.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		entry.clip_text = true
 		entry.pressed.connect(bup_chosen.emit.bind(d, id))
-		row.add_child(entry)
+		var row := BupListRow.make(d.lineage_info(id), 12.0, entry, &"TightRow")
 		var stop := Button.new()
 		stop.icon = CLOSE_ICON
 		stop.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER

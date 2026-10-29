@@ -23,7 +23,6 @@ const TRAY_RESERVE := 48.0  ## at the top of the stage, room for the tool option
 const TUTORIAL_ZOOM := 6.0  ## how close the tutorial brings the camera to a bup it asks the player to click
 const TUTORIAL_BUP_PIXELS := 18.0  ## the lit square round that bup is this far out on each side
 const MAX_DISHES := 20  ## the most dishes at once (the strip holds that many)
-const LINEAGE_ELSEWHERE_MSEC := 30000  ## how often the lineage panel looks again for a line's bups alive in other dishes
 const DISH_SPACING := 4.0e5  ## µm between the centres of the dishes in the shared world (clear of the largest dish, 90000 µm in radius, either side). They sit in a grid DISH_COLUMNS wide so no coordinate grows large: the renderer's single-precision positions would shake what is drawn far from the origin when zoomed in
 const DISH_COLUMNS := 5
 const VIEW_BITS := 19  ## render layers there are for dishes (the 2D world has twenty and the screen keeps the first): dishes this many places apart share one
@@ -107,8 +106,6 @@ var scheduler: DishScheduler  ## the dishes' world clock and their turns for the
 var holds: PlayHolds  ## what holds the game besides the player: the pipette's timer (&"pipette"), the question about the old dish (&"old_dish"), the tour (&"tour") and the end of the game (&"end")
 var _pipette_hours := 0.0  ## the pipette timer: the game pauses for the pipette every this many simulated hours (0: off)
 var _pipette_clock := 0.0  ## simulated seconds since the last pause for the pipette
-var _elsewhere := {}  ## see _alive_elsewhere, and when it was worked out
-var _elsewhere_stamp := []
 var _pipette_pulse: Tween
 var tool := Toolbar.Tool.SELECT  ## kept in step with the toolbar's selection (see _on_tool_selected)
 var sim_speed := 1.0  ## seconds of simulation per real second (the toolbar sets it)
@@ -120,11 +117,7 @@ var _vitals_width := 0.0  ## the widest the top bar's readout has been (see _upd
 var menu_open: bool:  ## the Escape menu is up: the game is frozen behind it and takes no input
 	get:
 		return pause_menu.visible
-## The views the player has opened on bups, oldest first: each is {"view": "info" or "lineage", "id": a bup}.
-## Escape takes the newest away; anything outside the stack (another selection, a tool) closes it all. Every bup on
-## it is pinned in the simulation, so its record isn't dropped (even if it dies) while it is on the stack.
-var _stack: Array[Dictionary] = []
-var _lineage_shown := {}  ## what the lineage list was last built from, so it is only rebuilt when that changes
+var lineage := LineageView.new()  ## the views opened on bups (info, lineage) and the lineage list
 var _pointer_stamp := []  ## what the hover and placement preview were last worked out from
 var _point_stamp := []  ## the same for the nutrient readout under the pointer
 var _tutorial_bup := -1  ## the bup the tour asked the player to pick, once it has set the view up for that (-1: it has not)
@@ -185,7 +178,13 @@ func _ready() -> void:
 	delete_source_button.focus_mode = Control.FOCUS_NONE
 	follow_button.pressed.connect(_toggle_follow)
 	watch_button.pressed.connect(_toggle_watch)
-	lineage_back_button.pressed.connect(_step_back)
+	lineage.dishes = dishes
+	lineage.numbers = _dish_numbers
+	lineage.dish = dish
+	lineage.title = lineage_title
+	lineage.entries = lineage_entries
+	lineage.info_opened.connect(func() -> void: following_id = -1)
+	lineage_back_button.pressed.connect(lineage.step_back)
 	watch_button.focus_mode = Control.FOCUS_NONE
 	watch_list.dishes = dishes
 	watch_list.numbers = _dish_numbers
@@ -193,7 +192,7 @@ func _ready() -> void:
 		for d in dishes:
 			d.show_layer(layer, shown))
 	watch_list.bup_chosen.connect(_open_watched)
-	lineage_button.pressed.connect(_open_lineage)
+	lineage_button.pressed.connect(lineage.open_lineage)
 	follow_button.focus_mode = Control.FOCUS_NONE
 	stage.resized.connect(_on_stage_resized)
 	get_viewport().size_changed.connect(_adapt_layout)
@@ -410,7 +409,7 @@ func _update_info_panel() -> void:
 	if bup_id >= 0 and alive_info.is_empty() and dish.has_bup(bup_id):
 		alive_info = dish.lineage_info(bup_id)  # (alive, but on the GPU its record has not come back yet: its family record stands in, rather than showing it as deceased)
 	var dead := bup_id >= 0 and alive_info.is_empty()  # a selected bup that has died stays up, as a record
-	var lineage_open: bool = bup_id >= 0 and bup_id == dish.selected.bup and _stack.size() > 0 and _stack.back()["view"] == "lineage"
+	var lineage_open := lineage.is_open_on(bup_id)
 	var something := bup_id >= 0 or source != null or floating != null or not husk.is_empty()
 	var target: RichTextLabel = info_text if pinned else hover_text
 	info_panel.visible = pinned and something and not lineage_open
@@ -441,7 +440,7 @@ func _update_info_panel() -> void:
 	if bup_id < 0:
 		name_row.cancel_editing()
 	if lineage_open:
-		_show_lineage(bup_id)
+		lineage.show(bup_id)
 	if bup_id >= 0:
 		_point_stamp = []
 		var record := dish.lineage_info(bup_id) if dead else alive_info
@@ -650,7 +649,7 @@ func _on_pick_mode_selected(mode: Dish.PickMode) -> void:
 
 
 func _on_tool_selected(new_tool: Toolbar.Tool) -> void:
-	if new_tool != Toolbar.Tool.SELECT and (not _stack.is_empty() or dish.has_selected_thing()):
+	if new_tool != Toolbar.Tool.SELECT and (not lineage.is_empty() or dish.has_selected_thing()):
 		_clear_selection()  # using another tool closes whatever was open on a bup or source
 	tool = new_tool
 	tool_options.show_for(tool)
@@ -676,7 +675,7 @@ func debug_state() -> Dictionary:
 		"tool": Toolbar.Tool.keys()[tool],
 		"zoom": camera.zoom.x,
 		"following": following_id,
-		"views_open": _stack.size(),
+		"views_open": lineage.depth(),
 		"camera_position": [camera.position.x, camera.position.y],
 		"camera_follow_precision_um": absf(camera.position.x) * 6.0e-8,  # (the single-precision step of the renderer's coordinates at the camera: a zoomed-in view shakes by it times the zoom)
 		"stage_size": [stage.size.x, stage.size.y],
@@ -754,7 +753,7 @@ func _on_key(event: InputEventKey) -> void:
 		if dish.selected.bup >= 0 and dish.has_record(dish.selected.bup):
 			_toggle_watch()
 	elif KeyBindings.matches("lineage", event):
-		_open_lineage()
+		lineage.open_lineage()
 	elif layers_panel.toggle_for_key(event):
 		pass
 	elif KeyBindings.matches("slower", event):
@@ -765,129 +764,19 @@ func _on_key(event: InputEventKey) -> void:
 
 ## Escape lets go of a selection first, and only with nothing selected opens the menu.
 func _escape() -> void:
-	if _stack.size() > 1:  # a lineage (or a bup reached through one) is open: back one step
-		_step_back()
+	if lineage.depth() > 1:  # a lineage (or a bup reached through one) is open: back one step
+		lineage.step_back()
 	elif dish.has_selection():
 		_clear_selection()
 	else:
 		_open_menu()
 
 
-## One step back through the views opened on a bup (a lineage, or a bup reached through one): what Escape does, and the
-## back icon of the lineage panel.
-func _step_back() -> void:
-	if _stack.size() > 1:
-		_set_stack(_stack.slice(0, _stack.size() - 1))
-		dish.selected.bup = _stack.back()["id"]
-
-
 ## Lets go of everything selected: the bup (with whatever views were opened on it) and any source.
 func _clear_selection() -> void:
-	_set_stack([])
+	lineage.clear()
 	dish.clear_selection()
 	following_id = -1
-
-
-## The selection changed: one made anywhere else (a click in the dish, say) starts the stack afresh, and none closes it.
-## (A change the stack itself made leaves its top as the selection, so nothing happens.)
-func _on_selection_changed() -> void:
-	var top_id: int = _stack.back()["id"] if not _stack.is_empty() else -1
-	if dish.selected.bup == top_id:
-		return
-	if dish.selected.bup >= 0:
-		_set_stack([{"view": "info", "id": dish.selected.bup}])
-	else:
-		_set_stack([])
-
-
-## Every step holds a pin on its bup (pins are counted, so a bup on two steps holds two). The new steps are pinned
-## before the old are let go, so a bup staying on the stack is never unpinned in between.
-func _set_stack(new_stack: Array) -> void:
-	for step in new_stack:
-		dish.pin_bup(step["id"])
-	for step in _stack:
-		dish.unpin_bup(step["id"])  # (that may drop its record, if nothing needs it now)
-	_stack.assign(new_stack)
-
-
-## The lineage icon: the family line of the bup on show, over its info.
-func _open_lineage() -> void:
-	if _stack.is_empty() or dish.selected.bup < 0:
-		return
-	_set_stack(_stack + [{"view": "lineage", "id": dish.selected.bup}])
-
-
-## A name in a lineage was clicked: that bup's info, a step further on (and the bup is selected, if it is alive).
-func _open_info_of(id: int) -> void:
-	if not dish.has_record(id):
-		return
-	_set_stack(_stack + [{"view": "info", "id": id}])
-	dish.selected.bup = id
-	following_id = -1
-
-
-## Lists the family line that led to a bup (oldest first). It is rebuilt only when the line, or who in it is
-## still alive, changes.
-## Who of a lineage is alive in the other dishes: ancestor id -> [[how many, the dish's number], ...]. Worked out when the lineage is first shown and then at most every
-## LINEAGE_ELSEWHERE_MSEC (a pass over a dish's records), and only for dishes that hold a record of someone in the line (the ones a pipette took bups into).
-func _alive_elsewhere(chain: PackedInt64Array) -> Dictionary:
-	if dishes.size() < 2 or chain.is_empty():
-		return {}
-	var stamp := [chain[-1], Time.get_ticks_msec() / LINEAGE_ELSEWHERE_MSEC]
-	if _elsewhere_stamp == stamp:
-		return _elsewhere
-	_elsewhere_stamp = stamp
-	_elsewhere = {}
-	for other in dishes:
-		if other == dish or not other.has_record(chain[0]):
-			continue
-		var counts := other.living_descendants(chain)
-		for k in chain.size():
-			if counts[k] > 0:
-				if not _elsewhere.has(chain[k]):
-					_elsewhere[chain[k]] = []
-				_elsewhere[chain[k]].append([counts[k], _dish_numbers[other]])
-	return _elsewhere
-
-
-func _show_lineage(id: int) -> void:
-	var chain := dish.lineage_chain(id)
-	var elsewhere := _alive_elsewhere(chain)
-	var key := [elsewhere]
-	for ancestor in chain:
-		key.append([ancestor, dish.has_bup(ancestor), dish.bup_custom_name(ancestor)])  # (a name changes only by being given or taken away: the default one comes from the record, which never changes)
-	if _lineage_shown.get("id") == id and _lineage_shown.get("key") == key:
-		return
-	_lineage_shown = {"id": id, "key": key}
-	lineage_title.text = Strings.t("panel.lineage_title", [dish.bup_name(id)])
-	for child in lineage_entries.get_children():
-		lineage_entries.remove_child(child)
-		child.queue_free()
-	for k in chain.size():
-		var ancestor: int = chain[k]
-		var info := dish.lineage_info(ancestor)
-		var line := Strings.t("panel.lineage_entry", [dish.bup_name(ancestor), SimClock.format_minutes(info["born"])])  # (the times on a second row, so nothing is cut off)
-		if not info["alive"]:
-			line += Strings.t("panel.lineage_died", [SimClock.format_minutes(info["died"])])
-		for place: Array in elsewhere.get(ancestor, []):
-			line += Strings.t("panel.lineage_elsewhere", [place[0], place[1]])
-		var row := HBoxContainer.new()
-		var swatch := BupPicture.new()  # the bup itself, in its colour, so a clade can be followed by eye
-		swatch.show_info(info)
-		swatch.custom_minimum_size = Vector2(14.0, 14.0)
-		swatch.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		row.add_child(swatch)
-		var entry := Button.new()
-		entry.text = line
-		entry.theme_type_variation = &"ListButton"
-		entry.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		entry.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		entry.focus_mode = Control.FOCUS_NONE
-		entry.disabled = ancestor == id  # the bup itself: you are looking at its line
-		entry.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		entry.pressed.connect(_open_info_of.bind(ancestor))
-		row.add_child(entry)
-		lineage_entries.add_child(row)
 
 
 func _open_menu() -> void:
@@ -975,7 +864,7 @@ func _register_dish(d: Dish, number := -1) -> void:
 	d.extinct.connect(_on_dish_extinct.bind(d))
 	d.selection_changed.connect(func() -> void:
 		if d == dish:
-			_on_selection_changed())
+			lineage.on_selection_changed())
 	dish_strip.add(d, number, get_world_2d(), _view_bit(d))
 	if is_new:
 		_next_dish_number += 1
@@ -1035,7 +924,7 @@ func _remove_dish(d: Dish) -> void:
 	dish_strip.remove(d)
 	dish_strip.light(dish)
 	d.queue_free()
-	_elsewhere_stamp = []
+	lineage.forget_elsewhere()
 
 
 ## Puts a dish in the freezer: its whole state is kept as a save keeps it, and it leaves the running dishes. It does not advance (the world's clock, the machine's
@@ -1168,6 +1057,7 @@ func set_main_dish(d: Dish) -> void:
 	dish.view_zoom = camera.zoom.x  # (where it was being looked at, for when the view comes back)
 	dish.view_position = camera.position
 	dish = d
+	lineage.dish = d
 	_apply_view_mask()
 	d.clear_hover()  # (what it was hovering when last in view is stale)
 	_set_picture_scales()
@@ -1429,8 +1319,7 @@ func _retire_extinct() -> void:
 ## The last dish died out and the player chose to begin again: the same beginning as the game screen's own.
 func _start_again() -> void:
 	holds.release(&"end", PlayHolds.Then.STAY)
-	_stack.clear()
-	_lineage_shown = {}
+	lineage.reset()
 	_end_pipette_wait(false)
 	_pipette_clock = 0.0
 	dish.selected.bup = -1
@@ -1535,8 +1424,8 @@ func _start_tutorial() -> void:
 	steps.append(_tour("genome", func() -> Rect2: return _in_tray(info_genome)))
 	steps.append(_tour("watch", func() -> Rect2: return _in_tray(watch_button), func() -> bool: return dish.is_watched(dish.selected.bup)))
 	steps.append(_tour("watched", func() -> Rect2: return _in_tray(watch_section)))
-	steps.append(_tour("lineage_open", func() -> Rect2: return _in_tray(lineage_button), _lineage_is_open, _tutorial_close_lineage))
-	steps.append(_tour("lineage", func() -> Rect2: return lineage_panel.get_global_rect(), func() -> bool: return not _lineage_is_open(), _tutorial_open_lineage))
+	steps.append(_tour("lineage_open", func() -> Rect2: return _in_tray(lineage_button), lineage.is_open, _tutorial_close_lineage))
+	steps.append(_tour("lineage", func() -> Rect2: return lineage_panel.get_global_rect(), func() -> bool: return not lineage.is_open(), _tutorial_open_lineage))
 	steps.back()["escape_passes"] = true  # (Escape closes a lineage, which is what that step asks for)
 	steps.append(_tour("finish"))
 	tutorial.start(steps)
@@ -1561,17 +1450,13 @@ func _tutorial_show_bup() -> void:
 
 ## The lineage step comes with the lineage open, and the step that asks for it with it shut, whichever way they are reached.
 func _tutorial_open_lineage() -> void:
-	if not _lineage_is_open():
-		_open_lineage()
+	if not lineage.is_open():
+		lineage.open_lineage()
 
 
 func _tutorial_close_lineage() -> void:
-	if _lineage_is_open():
-		_step_back()
-
-
-func _lineage_is_open() -> bool:
-	return not _stack.is_empty() and _stack.back()["view"] == "lineage"
+	if lineage.is_open():
+		lineage.step_back()
 
 
 func _tutorial_bup_rect() -> Rect2:

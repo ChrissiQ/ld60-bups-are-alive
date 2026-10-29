@@ -69,11 +69,11 @@ func _init() -> void:
 			elif "eye" in key:
 				m._toggle_watch()
 			elif "family tree" in key:
-				m._open_lineage()
+				m.lineage.open_lineage()
 			elif "back arrow" in key:
 				TestUtil.check(step.get("escape_passes", false), "the lineage step lets Escape through to close it")
-				TestUtil.check(m._lineage_is_open(), "the lineage step has the lineage open")
-				m._step_back()
+				TestUtil.check(m.lineage.is_open(), "the lineage step has the lineage open")
+				m.lineage.step_back()
 			await process_frame
 			await process_frame
 			TestUtil.check(tour.index == before + 1, "doing what step %d asks goes straight on to the next" % (before + 1))
@@ -88,7 +88,7 @@ func _init() -> void:
 	TestUtil.check(m.paused and m.dish.selected.bup < 0 and not m.dish.is_watched(m._tutorial_bup) and m.camera.zoom.is_equal_approx(was_zoom) and m.camera.position.distance_to(was_position) < 4.0, "afterwards it is paused as before, with nothing selected or watched and the camera where it was (%s %s, was %s %s)" % [m.camera.zoom, m.camera.position, was_zoom, was_position])
 	await process_frame
 	await process_frame
-	TestUtil.check(m.dish.watched.is_empty() and m._stack.is_empty() and m.watch_list.empty_note.visible and not m.info_panel.visible, "and the panels the tour opened are shut again")
+	TestUtil.check(m.dish.watched.is_empty() and m.lineage.is_empty() and m.watch_list.empty_note.visible and not m.info_panel.visible, "and the panels the tour opened are shut again")
 	m.queue_free()
 
 	# Space, Enter and Back; and what a step asks for cannot be spoiled by clicks or keys elsewhere.

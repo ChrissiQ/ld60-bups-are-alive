@@ -185,7 +185,7 @@ func _run() -> void:
 	await process_frame
 	TestUtil.check(m.dish_strip.get_global_rect().position.y >= m.get_node("%TopBar").get_global_rect().position.y and m.get_node("%TopBar").get_global_rect().encloses(m.dish_strip.get_global_rect()), "the tabs of the dishes sit inside the top bar (%s in %s)" % [m.dish_strip.get_global_rect(), m.get_node("%TopBar").get_global_rect()])
 	m.set_main_dish(first)
-	var elsewhere: Dictionary = m._alive_elsewhere(first.lineage_chain(parent))
+	var elsewhere: Dictionary = m.lineage.alive_elsewhere(first.lineage_chain(parent))
 	TestUtil.check(elsewhere.get(parent, []) == [[1, m.dishes.find(made) + 1]], "a lineage entry says how many bups of that line are alive in another dish (%s)" % [elsewhere])
 	TestUtil.check(m.pipette(first.global_position + Vector2(5000.0, 5000.0), 30.0) == null and m.dishes.size() == 3, "a circle with no bups makes no dish")
 	# The pipette timer: the game pauses for the pipette after the set hours, Space cannot resume, and a pipette that moves something does.
