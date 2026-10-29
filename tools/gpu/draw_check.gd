@@ -269,7 +269,7 @@ func part_b(n: int) -> void:
 	var rec := _crafted(dish, rng, 0.3, 250.0)
 	# the CPU path
 	dish.sim.import_state_bytes(rec)
-	dish._render_stale = true
+	dish.drawing.stale = true
 	dish.flash = 0.0  # (the new dish's lightning: it fades in real time, so it would differ between the two screenshots)
 	await process_frame
 	await RenderingServer.frame_post_draw
@@ -296,7 +296,7 @@ func part_b(n: int) -> void:
 	await process_frame
 	await RenderingServer.frame_post_draw
 	var gpu1 := root.get_texture().get_image()
-	var mm := dish._bups_mesh.multimesh
+	var mm := dish.drawing.bups_mesh.multimesh
 	print("  GPU path: MultiMesh instance_count %d (GPU capacity %d), visible %d" % [mm.instance_count, gpu.capacity, mm.visible_instance_count])
 	compare("B: the MultiMesh's buffer after the GPU path's first picture", reference, RenderingServer.multimesh_get_buffer(mm.get_rid()), rec.size() / GpuSim.RECORD_BYTES)
 	for f in 2:
@@ -366,7 +366,7 @@ func part_c() -> void:
 				dish.sim.import_state_bytes(rec)
 			var times := []
 			for f in 60:
-				dish._render_stale = true  # (a new picture every frame, as when time moves)
+				dish.drawing.stale = true  # (a new picture every frame, as when time moves)
 				await process_frame
 				var t0 := Time.get_ticks_usec()
 				await RenderingServer.frame_post_draw
@@ -374,7 +374,7 @@ func part_c() -> void:
 				times.append(Time.get_ticks_usec() - t0)
 			times = times.slice(10)
 			times.sort()
-			print("  dish frame, %s path, %d bups, MultiMesh %d slots (%d drawn): median %d us, min %d, max %d (frame to frame, vsync off)" % [mode, live, dish._bups_mesh.multimesh.instance_count, dish._bups_mesh.multimesh.visible_instance_count, times[times.size() / 2], times[0], times[-1]])
+			print("  dish frame, %s path, %d bups, MultiMesh %d slots (%d drawn): median %d us, min %d, max %d (frame to frame, vsync off)" % [mode, live, dish.drawing.bups_mesh.multimesh.instance_count, dish.drawing.bups_mesh.multimesh.visible_instance_count, times[times.size() / 2], times[0], times[-1]])
 		dish.gpu_active = false
 		dish.gpu_world = null
 		dish.queue_free()

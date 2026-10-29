@@ -184,13 +184,7 @@ var place_preview_marker := false  ## the preview marks a single point (a source
 var history := DishHistory.new()  ## what the graph shows of this dish
 
 var edit_count := 0  ## bumped by every change made to the dish by hand (a bup or source added or removed, nutrient dropped or erased), so screens can tell when to look again
-var _render_stamp := []  ## what the bups' picture was last built from
-var _render_stale := true  ## the bups were changed by hand (added, removed, a new dish), so the picture must be rebuilt
-var _trails_may_show := false  ## the last picture was made as time moved, so bups in it may be drawn with trails
 var _extinct_signalled := false
-var _bups_mesh: MultiMeshInstance2D = null  ## all the bups, drawn in one go
-var _husks_mesh: MultiMeshInstance2D = null  ## every husk, as one instance each
-var _overlay: Node2D = null  ## the selection and hover rings, drawn above the bups
 ## The GPU path (gpu/gpu_world.gd): while `gpu_active`, the GPU runs the bups and answers for them; everything the dish asks the
 ## simulation about the bups goes to `gpu_world` (through `_bups`, or a branch on `runs_on_gpu` where the two answer differently),
 ## and the CPU's BupSim keeps the records, names and pins.
@@ -809,8 +803,6 @@ func show_layer(layer: Layer, shown: bool) -> void:
 		_layers_hidden[layer] = true
 	match layer:
 		Layer.BUPS:
-			_bups_mesh.visible = shown
-			_render_stale = true  # (what was not drawn while hidden is drawn afresh)
 			if not shown:
 				hovered_id = -1
 		Layer.SOURCES:
@@ -820,11 +812,9 @@ func show_layer(layer: Layer, shown: bool) -> void:
 			if not shown:
 				hovered_plankton = null
 		Layer.HUSKS:
-			_husks_mesh.visible = shown
 			if not shown:
 				hovered_husk = NO_HUSK
-	queue_redraw()
-	_overlay.queue_redraw()
+	drawing.layer_changed(layer, shown)
 
 
 ## Whether the readout of the medium under the pointer is wanted: when looking at everything (where nothing else is
@@ -1239,12 +1229,12 @@ func _choose_backend(step_delta: float, steps := 0) -> void:
 				gpu_world = GpuWorld.new(sim)
 			_load_gpu()
 			gpu_active = true
-			_render_stale = true
+			drawing.stale = true
 		DishBackend.Action.TO_CPU:
 			_to_cpu_for_edit()  # (its state, brought over unless an edit has just done so)
 			gpu_active = false
 			_gpu_on_cpu = false
-			_render_stale = true
+			drawing.stale = true
 		DishBackend.Action.RELOAD:
 			_load_gpu()
 
@@ -1292,7 +1282,7 @@ func _to_cpu_for_edit() -> void:
 
 ## A hand edit was made (what `edit_count` counts), and the bups' picture is out of date.
 func _edited() -> void:
-	_render_stale = true
+	drawing.stale = true
 	edit_count += 1
 
 

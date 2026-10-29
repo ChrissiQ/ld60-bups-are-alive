@@ -23,7 +23,7 @@ func _run() -> void:
 	TestUtil.check(m.dishes.size() == 2 and m.dish == first and m.dish_strip.visible and m.dish_strip.count() == 2, "a second dish joins the set and shows in the strip; the main view stays")
 	TestUtil.check(other.global_position.distance_to(first.global_position) >= m.DISH_SPACING, "it is far from the first in the shared world")
 	TestUtil.check(first.visibility_layer != other.visibility_layer and (m.get_viewport().canvas_cull_mask & other.visibility_layer) == 0 and (m.get_viewport().canvas_cull_mask & first.visibility_layer) != 0 and (m.get_viewport().canvas_cull_mask & 1) != 0, "the main view shows its own dish and the screen, and no other dish, however far it is zoomed out")
-	TestUtil.check(first._overlay.visibility_layer == first.visibility_layer and first._bups_mesh.visibility_layer == first.visibility_layer, "everything a dish draws is on its layer")
+	TestUtil.check(first.drawing.overlay.visibility_layer == first.visibility_layer and first.drawing.bups_mesh.visibility_layer == first.visibility_layer, "everything a dish draws is on its layer")
 	var t0 := other.time
 	var t1 := first.time
 	for i in 30:

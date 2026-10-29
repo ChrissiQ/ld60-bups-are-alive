@@ -1002,11 +1002,11 @@ func _init() -> void:
 	var kept: int = g.dish.bup_ids()[0]
 	g.dish.selected_id = kept
 	layers.bups_button.button_pressed = false
-	TestUtil.check(not g.dish._bups_mesh.visible and not g.dish.looks_at_bups(), "hiding the bups hides their picture and they can no longer be pointed at")
+	TestUtil.check(not g.dish.drawing.bups_mesh.visible and not g.dish.looks_at_bups(), "hiding the bups hides their picture and they can no longer be pointed at")
 	TestUtil.check(g.dish.selected_id == kept and g.dish.layer_shown(Dish.Layer.STEERING), "but the selected bup stays selected, so its steering map can still be looked at with them hidden")
 	layers.bups_button.button_pressed = true
 	layers.plankton_button.button_pressed = true
-	TestUtil.check(g.dish._bups_mesh.visible and g.dish.looks_at_plankton(), "showing them again restores both")
+	TestUtil.check(g.dish.drawing.bups_mesh.visible and g.dish.looks_at_plankton(), "showing them again restores both")
 	g.dish.plankton.clear()
 	g.queue_free()
 	Session.mode = Session.Mode.GOALS

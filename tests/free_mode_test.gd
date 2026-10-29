@@ -218,11 +218,11 @@ func _init() -> void:
 	picture_start.bups = 4
 	picture.strike(picture_start)
 	picture._process(0.0)
-	TestUtil.check(picture._bups_mesh.multimesh.instance_count <= 1024, "with a 100,000 limit but 4 bups the picture holds %d, not 100,000" % picture._bups_mesh.multimesh.instance_count)
+	TestUtil.check(picture.drawing.bups_mesh.multimesh.instance_count <= 1024, "with a 100,000 limit but 4 bups the picture holds %d, not 100,000" % picture.drawing.bups_mesh.multimesh.instance_count)
 	for i in 3000:
 		picture.add_bup(picture.global_position + Vector2(i % 50, i / 50), Genome.founder(), 30.0)
 	picture._process(0.0)
-	TestUtil.check(picture._bups_mesh.multimesh.instance_count >= picture.population() and picture._bups_mesh.multimesh.visible_instance_count == picture.population(), "...and grows with the colony (%d of %d)" % [picture._bups_mesh.multimesh.instance_count, picture.population()])
+	TestUtil.check(picture.drawing.bups_mesh.multimesh.instance_count >= picture.population() and picture.drawing.bups_mesh.multimesh.visible_instance_count == picture.population(), "...and grows with the colony (%d of %d)" % [picture.drawing.bups_mesh.multimesh.instance_count, picture.population()])
 	picture.scale = Vector2.ONE * 0.02
 	picture._process(0.0)
 	var small_picture: PackedFloat32Array = picture.sim.render_buffer(picture.pixel(), 1)
@@ -715,10 +715,10 @@ func _init() -> void:
 	bloom._process(0.0)
 	bloom.step(5.0)
 	bloom._process(0.0)
-	TestUtil.check(bloom._trails_may_show, "a picture made as time moved may carry trails")
-	var stamp_then: Array = bloom._render_stamp
+	TestUtil.check(bloom.drawing.trails_may_show, "a picture made as time moved may carry trails")
+	var stamp_then: Array = bloom.drawing.render_stamp
 	bloom._process(0.0)
-	TestUtil.check(not bloom._trails_may_show and bloom._render_stamp == stamp_then, "the next picture, with nothing moving, is made once more, and then no trails remain")
+	TestUtil.check(not bloom.drawing.trails_may_show and bloom.drawing.render_stamp == stamp_then, "the next picture, with nothing moving, is made once more, and then no trails remain")
 	bloom.bloom_density = 0.0
 	bloom.plankton.clear()
 	bloom.advance(600.0)

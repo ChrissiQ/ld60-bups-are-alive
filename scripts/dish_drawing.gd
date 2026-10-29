@@ -3,10 +3,15 @@ extends RefCounted
 ## How a dish is drawn: the bups' picture (one multimesh, built from the CPU's simulation or written by the GPU), the husks' picture,
 ## the dish itself with the nutrient haze, the steering map, the sources and the plankton (`draw`, for Dish._draw), and the rings, the
 ## placement preview and the flash above the bups (`draw_overlay`, for the dish's DishOverlay). Nothing here changes the simulation.
-## It is a part of its Dish: the dish keeps the nodes it draws with and the bups' picture's flags (`_render_stale` and the rest, which
-## the dish's edits set) and the constants, and this keeps the rest of what the drawing needs between frames.
+## It is a part of its Dish, and holds the nodes it draws with and the bups' picture's flags between frames; the dish's edits set `stale`.
 
 var dish: Dish
+var bups_mesh: MultiMeshInstance2D = null  ## all the bups, drawn in one go
+var husks_mesh: MultiMeshInstance2D = null  ## every husk, as one instance each
+var overlay: Node2D = null  ## the selection and hover rings, drawn above the bups
+var render_stamp := []  ## what the bups' picture was last built from
+var stale := true  ## the bups were changed by hand (added, removed, a new dish), so the picture must be rebuilt
+var trails_may_show := false  ## the last picture was made as time moved, so bups in it may be drawn with trails
 var _draw_key := []  ## what the dish was last drawn from (see `refresh`)
 var _haze: ImageTexture = null
 var _haze_built := 0
@@ -22,6 +27,18 @@ var _husk_built_msec := 0
 
 func _init(for_dish: Dish) -> void:
 	dish = for_dish
+
+
+## A layer was shown or hidden: the bups' and the husks' pictures follow it, and the rings and the dish are drawn again.
+func layer_changed(layer: Dish.Layer, shown: bool) -> void:
+	match layer:
+		Dish.Layer.BUPS:
+			bups_mesh.visible = shown
+			stale = true  # (what was not drawn while hidden is drawn afresh)
+		Dish.Layer.HUSKS:
+			husks_mesh.visible = shown
+	dish.queue_redraw()
+	overlay.queue_redraw()
 
 
 ## Makes the dish's children that draw: the husks' and the bups' multimeshes (the husks under the bups) and the overlay above them.
@@ -42,17 +59,16 @@ func build_children() -> void:
 	var husks := MultiMesh.new()
 	husks.transform_format = MultiMesh.TRANSFORM_2D
 	husks.mesh = husk_mesh
-	dish._husks_mesh = MultiMeshInstance2D.new()  # (under the bups: one instance for every husk there is, drawn by the graphics card, so there is no limit on how many are shown)
-	dish._husks_mesh.multimesh = husks
-	dish._husks_mesh.self_modulate = Dish.HUSK_COLOR
-	dish.add_child(dish._husks_mesh)
-	dish._bups_mesh = MultiMeshInstance2D.new()
-	dish._bups_mesh.multimesh = multimesh
-	dish._bups_mesh.material = material
-	dish.add_child(dish._bups_mesh)
-	var overlay := DishOverlay.new()
+	husks_mesh = MultiMeshInstance2D.new()  # (under the bups: one instance for every husk there is, drawn by the graphics card, so there is no limit on how many are shown)
+	husks_mesh.multimesh = husks
+	husks_mesh.self_modulate = Dish.HUSK_COLOR
+	dish.add_child(husks_mesh)
+	bups_mesh = MultiMeshInstance2D.new()
+	bups_mesh.multimesh = multimesh
+	bups_mesh.material = material
+	dish.add_child(bups_mesh)
+	overlay = DishOverlay.new()
 	overlay.dish = dish
-	dish._overlay = overlay
 	dish.add_child(overlay)
 	sync_render_capacity()
 
@@ -71,18 +87,18 @@ func refresh() -> void:
 func fit_render_capacity(needed: int) -> void:
 	if dish.runs_on_gpu():
 		return  # (on the GPU path the picture is made once at the GPU's capacity: see draw_bups_gpu)
-	var multimesh := dish._bups_mesh.multimesh
+	var multimesh := bups_mesh.multimesh
 	var wanted := mini(dish.bup_limit, maxi(Dish.RENDER_MIN_CAPACITY, nearest_po2(needed + needed / 2)))
 	if needed > multimesh.instance_count or wanted * 4 <= multimesh.instance_count or multimesh.instance_count > dish.bup_limit:
 		multimesh.instance_count = wanted
-		dish._render_stale = true  # (a resized multimesh starts empty)
+		stale = true  # (a resized multimesh starts empty)
 
 
 ## Fits the bups' picture to the bups there are and to the dish's size (once the dish has built its children).
 func sync_render_capacity() -> void:
-	if dish._bups_mesh == null:
+	if bups_mesh == null:
 		return
-	var multimesh := dish._bups_mesh.multimesh
+	var multimesh := bups_mesh.multimesh
 	fit_render_capacity(dish.sim.bup_count())
 	# The bounds the renderer culls by: the whole dish. Left to itself it works the bounds out from
 	# the instances once, so a buffer written every frame can leave them stale, and the bups are
@@ -94,21 +110,21 @@ func sync_render_capacity() -> void:
 ## or the GPU.
 func process() -> void:
 	refresh_husks()
-	if dish._bups_mesh != null and dish.runs_on_gpu():
+	if bups_mesh != null and dish.runs_on_gpu():
 		for id in [dish.selected_id, dish.hovered_id]:  # (the bups the overlay shows: their records come back every frame)
 			if id >= 0:
 				dish.gpu_world.track(id)
 		draw_bups_gpu()
-		dish._overlay.queue_redraw()
-	elif dish._bups_mesh != null:
+		overlay.queue_redraw()
+	elif bups_mesh != null:
 		if dish.picture_scale <= 0.0:  # (a dish out of the main view is drawn only for the strip's small picture, which asks for it: `prepare_picture`)
 			build_cpu_picture(dish.pixel())
-		dish._overlay.queue_redraw()
+		overlay.queue_redraw()
 
 
 ## Makes the bups' picture for the strip's small one of this dish, `scale` pixels to the µm, just before the strip has it drawn (the GPU's dishes are drawn every frame).
 func prepare_picture(scale: float) -> void:
-	if dish._bups_mesh != null and not dish.runs_on_gpu():
+	if bups_mesh != null and not dish.runs_on_gpu():
 		build_cpu_picture(1.0 / scale)
 
 
@@ -116,15 +132,15 @@ func prepare_picture(scale: float) -> void:
 func build_cpu_picture(pixel_um: float) -> void:
 	var sim := dish.sim
 	fit_render_capacity(sim.bup_count())
-	var multimesh := dish._bups_mesh.multimesh
+	var multimesh := bups_mesh.multimesh
 	# The picture is rebuilt only when what it shows may have changed: time has passed, or the bups, the zoom or
 	# the pixel size have. (While paused nothing has, however many bups there are.)
 	var stamp := [dish.time, sim.bup_count(), pixel_um]
-	var changed: bool = stamp != dish._render_stamp
-	if dish._render_stale or changed or dish._trails_may_show:
-		dish._render_stamp = stamp
-		dish._render_stale = false
-		dish._trails_may_show = changed  # (a picture made as time moved may carry trails; the next one, when nothing has moved since, clears them: so a paused dish shows none)
+	var changed: bool = stamp != render_stamp
+	if stale or changed or trails_may_show:
+		render_stamp = stamp
+		stale = false
+		trails_may_show = changed  # (a picture made as time moved may carry trails; the next one, when nothing has moved since, clears them: so a paused dish shows none)
 		multimesh.visible_instance_count = mini(sim.bup_count(), multimesh.instance_count)
 		multimesh.buffer = sim.render_buffer(pixel_um, multimesh.instance_count)
 
@@ -137,10 +153,10 @@ func draw_bups_gpu() -> void:
 	var gpu := dish.gpu_world.gpu
 	if gpu == null or gpu.capacity <= 0 or not gpu.is_main:
 		return  # (only the main device can write the picture's buffer: a world on a local device, as tools make, is not drawn)
-	var multimesh := dish._bups_mesh.multimesh
+	var multimesh := bups_mesh.multimesh
 	if multimesh.instance_count != gpu.capacity:
 		multimesh.instance_count = gpu.capacity  # (a new RD buffer, all zero: the render kernel is set up again for it)
-		dish._render_stale = true
+		stale = true
 	# The slots drawn: room for the bups there are, as on the CPU path (from the last count read back, which lags a few frames, or the
 	# count loaded while none has come back), not for all the GPU holds: every slot drawn costs, an empty one too (about 2 ms a frame
 	# for a million on an M1 Pro). The render kernel writes the slots past the live count as nothing; those past `slots` are not drawn.
@@ -153,18 +169,18 @@ func draw_bups_gpu() -> void:
 	var target := RenderingServer.multimesh_get_buffer_rd_rid(multimesh.get_rid())
 	# Never multimesh.buffer or the per-instance setters here: a CPU copy of the instances would be uploaded over the GPU's.
 	var stamp := [dish.time, dish.pixel(), target, slots, GpuDraw.of(gpu).generation]  # (a load of the GPU's state is a new picture too)
-	var changed: bool = stamp != dish._render_stamp
-	if dish._render_stale or changed or dish._trails_may_show:
-		dish._render_stamp = stamp
-		dish._render_stale = false
-		dish._trails_may_show = changed  # (as on the CPU: a picture made as time moved may carry trails, the next still one clears them)
+	var changed: bool = stamp != render_stamp
+	if stale or changed or trails_may_show:
+		render_stamp = stamp
+		stale = false
+		trails_may_show = changed  # (as on the CPU: a picture made as time moved may carry trails, the next still one clears them)
 		dish.gpu_world.draw_bups(target, slots, dish.pixel())
 
 
 ## Builds the husks' picture again when time has moved, the husks are different or the zoom has changed (and not oftener than HUSK_REFRESH_MSEC while only time moves).
 func refresh_husks() -> void:
 	var shown := dish.layer_shown(Dish.Layer.HUSKS)
-	dish._husks_mesh.visible = shown
+	husks_mesh.visible = shown
 	if not shown:
 		_husk_stamp = []  # (built afresh when it is shown again)
 		return
@@ -179,7 +195,7 @@ func refresh_husks() -> void:
 		return
 	_husk_stamp = stamp
 	_husk_built_msec = now
-	var husks := dish._husks_mesh.multimesh
+	var husks := husks_mesh.multimesh
 	var capacity := maxi(Dish.HUSK_MIN_CAPACITY, nearest_po2(count))
 	if husks.instance_count != capacity:
 		husks.instance_count = capacity
