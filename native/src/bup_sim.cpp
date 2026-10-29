@@ -184,6 +184,23 @@ void BupSim::grow(double new_radius) {
 	acetate->resize(new_radius);
 }
 
+// Removes the bups `goes` says yes to (each as a death, in order), keeping the others in their order.
+template <typename F>
+void BupSim::remove_where(F goes) {
+	size_t keep = 0;
+	for (size_t i = 0; i < bups.size(); i++) {
+		if (goes(bups[i])) {
+			record_death(bups[i]);
+			continue;
+		}
+		if (keep != i) {
+			bups[keep] = bups[i];
+		}
+		keep++;
+	}
+	bups.resize(keep);
+}
+
 // The dish shrinks about its centre. A bup whose centre is past the new edge dies like any other death (so its family
 // record is freed unless a living descendant or an open view still needs it); one straddling the edge is moved inside.
 int BupSim::shrink(double new_radius) {
@@ -194,21 +211,15 @@ int BupSim::shrink(double new_radius) {
 	field->resize(new_radius);
 	acetate->resize(new_radius);
 	husks.erase(std::remove_if(husks.begin(), husks.end(), [new_radius](const Husk &h) { return std::sqrt((double)h.x * h.x + (double)h.y * h.y) > new_radius; }), husks.end());
-	size_t keep = 0;
 	int culled = 0;
-	for (size_t i = 0; i < bups.size(); i++) {
-		if (std::sqrt((double)bups[i].x * bups[i].x + (double)bups[i].y * bups[i].y) > new_radius) {
-			record_death(bups[i]);
-			culled++;
-			continue;
-		}
-		if (keep != i) {
-			bups[keep] = bups[i];
-		}
-		keep_inside(bups[keep]);
-		keep++;
+	remove_where([&](const Bup &b) {
+		bool outside = std::sqrt((double)b.x * b.x + (double)b.y * b.y) > new_radius;
+		culled += outside ? 1 : 0;
+		return outside;
+	});
+	for (Bup &b : bups) {
+		keep_inside(b);
 	}
-	bups.resize(keep);
 	return culled;
 }
 
@@ -449,21 +460,15 @@ PackedInt32Array BupSim::living_descendants_of(const PackedInt64Array &ids) cons
 // as a record, with the place where it was (relative to `center`, so that the disc is a droplet when it lands in another dish).
 PackedByteArray BupSim::take_disc(const Vector2 &center, double disc_radius) {
 	std::vector<Bup> taken;
-	size_t keep = 0;
 	const double r2 = disc_radius * disc_radius;
-	for (size_t i = 0; i < bups.size(); i++) {
-		const double dx = bups[i].x - center.x, dy = bups[i].y - center.y;
-		if (dx * dx + dy * dy <= r2) {
-			taken.push_back(bups[i]);
-			record_death(bups[i]);
-		} else {
-			if (keep != i) {
-				bups[keep] = bups[i];
-			}
-			keep++;
+	remove_where([&](const Bup &b) {
+		const double dx = b.x - center.x, dy = b.y - center.y;
+		if (dx * dx + dy * dy > r2) {
+			return false;
 		}
-	}
-	bups.resize(keep);
+		taken.push_back(b);
+		return true;
+	});
 	std::vector<Bup> saved = bups;
 	bups = taken;
 	for (Bup &b : bups) {
@@ -643,24 +648,18 @@ void BupSim::swim_by_runs(Bup &b, double delta, Rng &r) {
 		b.tumbling -= (float)delta;
 		return;
 	}
-	double dx = b.dx, dy = b.dy;
+	double turn; // a tumble turns it by a random angle, a run only drifts round (rotational diffusion)
 	if (r.uniform() < rate * delta) {
 		b.tumbling = (float)G.tumble_seconds;
-		double turn = r.gaussian() * G.tumble_turn_spread + G.tumble_turn_mean;
+		turn = r.gaussian() * G.tumble_turn_spread + G.tumble_turn_mean;
 		if (r.uniform() >= 0.5) {
 			turn = -turn;
 		}
-		double cs = std::cos(turn), sn = std::sin(turn);
-		double nx = dx * cs - dy * sn, ny = dx * sn + dy * cs;
-		dx = nx;
-		dy = ny;
 	} else {
-		double turn = r.gaussian() * G.rotational_diffusion * std::sqrt(delta);
-		double cs = std::cos(turn), sn = std::sin(turn);
-		double nx = dx * cs - dy * sn, ny = dx * sn + dy * cs;
-		dx = nx;
-		dy = ny;
+		turn = r.gaussian() * G.rotational_diffusion * std::sqrt(delta);
 	}
+	double cs = std::cos(turn), sn = std::sin(turn);
+	double dx = b.dx * cs - b.dy * sn, dy = b.dx * sn + b.dy * cs;
 	double len = std::sqrt(dx * dx + dy * dy);
 	if (len > 0.0) {
 		dx /= len;
@@ -891,18 +890,12 @@ void BupSim::swim_chunk(const SwimJob &job, uint32_t chunk) {
 	}
 	if (job.fine) {
 		for (size_t i = first; i < last; i++) {
-			Bup &b = bups[i];
-			swim_by_runs(b, job.sub, r);
-			keep_inside(b, r);
-			pay_upkeep_and_grow(b, job.delta);
-			if (clouds_now) {
-				field->cloud_share_xy(b.x, b.y, shares[i]);
-			}
-			note_uptake(chunk, i);
+			swim_by_runs(bups[i], job.sub, r);
+			keep_inside(bups[i], r);
 		}
-		return;
+	} else {
+		drift_chunk(job, first, last, r);
 	}
-	drift_chunk(job, first, last, r);
 	for (size_t i = first; i < last; i++) {
 		pay_upkeep_and_grow(bups[i], job.delta);
 		if (clouds_now) {
@@ -1099,14 +1092,6 @@ void BupSim::drift_chunk(const SwimJob &job, size_t first, size_t last, Rng &r) 
 	}
 }
 
-
-// How many sub-steps a step of the coarse motion is cut into (each reads the nutrient where the bup is, and moves it). The
-// longest sub-step is MOTION_STEP on a fine grid. The nutrient has no structure finer than a grid cell, or than a plankton
-// cloud (motion_structure), so on a coarser grid a bup that moves a short way across a cell learns nothing from a
-// second look, and the sub-step may grow as the square of the cell (a bup's displacement goes as the square root of
-// time): the same distance moved, in the field's own units, as on the fine grid. Measured against the shorter sub-steps
-// in a field of plankton clouds, that leaves the nutrient the bups end up in within 0.4% (none lost at 90 mm; the same
-// sub-step length at 40 mm cost 1.1%, at 20 mm 5%, which is why it is not simply longer).
 // How many pieces a long stretch of diffusion is solved in. The solver is implicit and stable at any length, but a long
 // piece spreads a sharp patch a little less faithfully, by an amount that goes with D dt / cell^2 (how far the
 // nutrient spreads in the piece, in cells): measured against pieces of 5 s, that is 0.3-0.5% of a plankton cloud's peak
@@ -1119,6 +1104,13 @@ int BupSim::diffuse_pieces(double seconds) const {
 	return std::min(by_interval, by_accuracy);
 }
 
+// How many sub-steps a step of the coarse motion is cut into (each reads the nutrient where the bup is, and moves it). The
+// longest sub-step is MOTION_STEP on a fine grid. The nutrient has no structure finer than a grid cell, or than a plankton
+// cloud (motion_structure), so on a coarser grid a bup that moves a short way across a cell learns nothing from a
+// second look, and the sub-step may grow as the square of the cell (a bup's displacement goes as the square root of
+// time): the same distance moved, in the field's own units, as on the fine grid. Measured against the shorter sub-steps
+// in a field of plankton clouds, that leaves the nutrient the bups end up in within 0.4% (none lost at 90 mm; the same
+// sub-step length at 40 mm cost 1.1%, at 20 mm 5%, which is why it is not simply longer).
 int BupSim::moves_for(double delta) const {
 	return moves_for_structure(delta, field->get_spacing());
 }

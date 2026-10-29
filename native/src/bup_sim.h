@@ -137,6 +137,8 @@ class BupSim : public RefCounted {
 	void finish_lineage_import(const PackedInt64Array &pinned); // after the records of a save are in: counts, pins and pruning
 	static constexpr int LINEAGE_BYTES = 88;
 	void record_death(const Bup &b);
+	template <typename F>
+	void remove_where(F goes); // takes out the bups `goes` says yes to, each as a death
 	void free_if_unused(int64_t id);
 	Dictionary record_info(int64_t id, const Record &r) const;
 

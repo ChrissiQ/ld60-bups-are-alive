@@ -7,7 +7,7 @@ extends RefCounted
 ## native/src/params.h). The two hashes say what it was measured from; MotionFingerprint and the tests compare them.
 ## Row-major: the value for S_AXIS[i] and E_AXIS[j] is at index i * E_AXIS.size() + j.
 const CONSTANTS_HASH := "4b9d349b386b9ab1364f6abe709ce2c92466abe2fae2e27143d5f607f6052a28"
-const CODE_HASH := "3e5d1d7428d7efa8a450f786f1146d3580ef69a012c663cc1876168bfaeace73"
+const CODE_HASH := "c7fcf1412b9c48ec625029258f0625a752dca8031ffaaedfbf914fa50fc0b0f4"
 const S_AXIS := [
 	0.002, 0.002700628, 0.003646696, 0.004924185, 0.006649196, 0.008978503, 0.012124, 0.016371,
 	0.022106, 0.02985, 0.040307, 0.054427, 0.073493, 0.099239, 0.134004, 0.180947,
