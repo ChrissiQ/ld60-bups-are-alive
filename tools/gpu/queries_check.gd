@@ -21,7 +21,6 @@ var round_index := 0
 var frame_in_round := 0
 var pick_q := []  ## [point, slack, pixel]
 var near_q := []  ## [[point, near], ...]
-var failures := 0
 var checked := {"pick": 0, "pick_hit": 0, "near": 0, "fraction": 0}
 var fractions := []  ## [gene, threshold]
 var finishing := 0
@@ -32,10 +31,9 @@ var copy_field: NutrientField
 
 
 func _check(ok: bool, what: String) -> void:
-	if not ok:
-		failures += 1
-		if failures <= 20:
-			print("FAIL " + what)
+	TestUtil.check(ok, what)
+	if not ok and TestUtil.failures.size() <= 20:
+		print("FAIL " + what)
 
 
 func _initialize() -> void:
@@ -219,7 +217,7 @@ func _process(_delta: float) -> bool:
 		_compare_totals()
 		print("checked %s" % str(checked))
 		_check(checked["pick_hit"] > 0 and checked["fraction"] == fractions.size(), "some picks hit a bup (%d) and every fraction was compared" % checked["pick_hit"])
-		print("QUERIES CHECK " + ("OK" if failures == 0 else "FAILED (%d)" % failures))
+		print("QUERIES CHECK " + ("OK" if TestUtil.failures.is_empty() else "FAILED (%d)" % TestUtil.failures.size()))
 		finishing = 1
 		return false
 	if phase != "rounds":

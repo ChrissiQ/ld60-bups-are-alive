@@ -86,14 +86,6 @@ class CheckWorld extends GpuWorld:
 		return count[0]
 
 
-var _checks := 0
-
-
-func _ok(ok: bool, what: String) -> void:
-	_checks += 1
-	TestUtil.show(ok, what)
-
-
 func _init() -> void:
 	var a := OS.get_cmdline_user_args()
 	var mode: String = a[0] if a.size() > 0 else "check"
@@ -182,19 +174,19 @@ func _record_diff(a: PackedByteArray, b: PackedByteArray) -> String:
 ## and a record of each living bup (and, with these events, no other).
 func _same_as_gpu(dish: Dish, g: Dictionary, label: String, ancestors := false) -> void:
 	var cpu := dish.sim.export_state_bytes()
-	_ok(dish.sim.bup_count() == g["count"], "%s: population %d = GPU's %d" % [label, dish.sim.bup_count(), g["count"]])
-	_ok(_ids(cpu) == _ids(g["records"]), "%s: the ids are the GPU's, in order" % label)
-	_ok(dish.sim.get_next_id() == g["next_id"], "%s: next id %d = GPU's %d" % [label, dish.sim.get_next_id(), g["next_id"]])
+	TestUtil.show(dish.sim.bup_count() == g["count"], "%s: population %d = GPU's %d" % [label, dish.sim.bup_count(), g["count"]])
+	TestUtil.show(_ids(cpu) == _ids(g["records"]), "%s: the ids are the GPU's, in order" % label)
+	TestUtil.show(dish.sim.get_next_id() == g["next_id"], "%s: next id %d = GPU's %d" % [label, dish.sim.get_next_id(), g["next_id"]])
 	var relative := absf(dish.field.total() - g["total"]) / maxf(absf(g["total"]), 1e-30)
-	_ok(relative < 1e-9, "%s: field total (grid and clouds) %.6f vs GPU's %.6f, relative %s" % [label, dish.field.total(), g["total"], String.num_scientific(relative)])
-	_ok(dish.field.puff_count() == g["clouds"], "%s: %d clouds = GPU's %d" % [label, dish.field.puff_count(), g["clouds"]])
+	TestUtil.show(relative < 1e-9, "%s: field total (grid and clouds) %.6f vs GPU's %.6f, relative %s" % [label, dish.field.total(), g["total"], String.num_scientific(relative)])
+	TestUtil.show(dish.field.puff_count() == g["clouds"], "%s: %d clouds = GPU's %d" % [label, dish.field.puff_count(), g["clouds"]])
 	var alive := dish.sim.alive_ids()
-	_ok(_sorted(alive) == _sorted(_ids(g["records"])), "%s: every living bup has a living record, and no other does (%d records alive)" % [label, alive.size()])
+	TestUtil.show(_sorted(alive) == _sorted(_ids(g["records"])), "%s: every living bup has a living record, and no other does (%d records alive)" % [label, alive.size()])
 	var records_held: int = dish.sim.lineage_export().size()
 	if ancestors:  # (a dish that came from a save has dead ancestors of living bups: records of their own)
-		_ok(records_held >= g["count"] and records_held - g["count"] < 100, "%s: lineage_export() has %d records for the GPU's population %d (the saved ancestors are kept)" % [label, records_held, g["count"]])
+		TestUtil.show(records_held >= g["count"] and records_held - g["count"] < 100, "%s: lineage_export() has %d records for the GPU's population %d (the saved ancestors are kept)" % [label, records_held, g["count"]])
 	else:
-		_ok(records_held == g["count"], "%s: lineage_export() has %d records = the GPU's population %d (these events give each bup a record and no ancestors)" % [label, records_held, g["count"]])
+		TestUtil.show(records_held == g["count"], "%s: lineage_export() has %d records = the GPU's population %d (these events give each bup a record and no ancestors)" % [label, records_held, g["count"]])
 	print("     record words, CPU against GPU: ", _record_diff(cpu, g["records"]))
 
 
@@ -210,9 +202,9 @@ func _cpu_snapshot(dish: Dish) -> Dictionary:
 
 
 func _same_snapshot(a: Dictionary, b: Dictionary, label: String) -> void:
-	_ok(a["state"] == b["state"], "%s: the bups' bytes are identical (%d bups, ids included)" % [label, a["state"].size() / GpuLayout.RECORD_BYTES])
-	_ok(a["packed"]["conc"] == b["packed"]["conc"] and a["packed"]["puffs"] == b["packed"]["puffs"], "%s: the grid and the clouds are identical (%d clouds)" % [label, a["packed"]["puffs"].size() / 5])
-	_ok(a["next_id"] == b["next_id"] and a["lineage"] == b["lineage"], "%s: next id and every family record are identical" % label)
+	TestUtil.show(a["state"] == b["state"], "%s: the bups' bytes are identical (%d bups, ids included)" % [label, a["state"].size() / GpuLayout.RECORD_BYTES])
+	TestUtil.show(a["packed"]["conc"] == b["packed"]["conc"] and a["packed"]["puffs"] == b["packed"]["puffs"], "%s: the grid and the clouds are identical (%d clouds)" % [label, a["packed"]["puffs"].size() / 5])
+	TestUtil.show(a["next_id"] == b["next_id"] and a["lineage"] == b["lineage"], "%s: next id and every family record are identical" % label)
 
 
 func _check() -> void:
@@ -223,9 +215,9 @@ func _check() -> void:
 	var world := CheckWorld.new(dish.sim, true)
 	dish.feed_density = 0.0
 	world.load_from_cpu(dish.field, dish._gpu_params())
-	_ok(dish.sim.bup_count() == 0 and dish.sim.alive_ids().size() == 250 and dish.field.puff_count() == 0, "load_from_cpu: the CPU's bups are gone, the 250 records stay")
+	TestUtil.show(dish.sim.bup_count() == 0 and dish.sim.alive_ids().size() == 250 and dish.field.puff_count() == 0, "load_from_cpu: the CPU's bups are gone, the 250 records stay")
 	var loaded := world.bup_count()
-	_ok(loaded == 250, "...and the GPU holds the 250 founders (%d)" % loaded)
+	TestUtil.show(loaded == 250, "...and the GPU holds the 250 founders (%d)" % loaded)
 	world.look(dish.time)
 	var started := Time.get_ticks_msec()
 	_gpu_batches(dish, world, 180)  # (one sim-hour)
@@ -233,7 +225,7 @@ func _check() -> void:
 
 	# 1. GPU -> CPU after an hour: the CPU holds what the GPU's last readback says.
 	var g1 := _gpu_state(world)
-	_ok(g1["count"] > 250 and g1["clouds"] > 0, "scenario D after 1 sim-hour: %d bups, %d clouds on the GPU (it has divided, and holds clouds)" % [g1["count"], g1["clouds"]])
+	TestUtil.show(g1["count"] > 250 and g1["clouds"] > 0, "scenario D after 1 sim-hour: %d bups, %d clouds on the GPU (it has divided, and holds clouds)" % [g1["count"], g1["clouds"]])
 	world.export_to_cpu(dish.field)
 	_same_as_gpu(dish, g1, "export after 1 h")
 	var first := _cpu_snapshot(dish)
@@ -241,7 +233,7 @@ func _check() -> void:
 	# 2. Back to the GPU and out again: byte-identical to the first export.
 	world.load_from_cpu(dish.field, dish._gpu_params())
 	var g2 := _gpu_state(world)
-	_ok(g2["records"] == first["state"] and g2["count"] == g1["count"] and g2["next_id"] == g1["next_id"], "load_from_cpu: the GPU holds exactly the bytes the CPU exported (%s)" % _record_diff(first["state"], g2["records"]))
+	TestUtil.show(g2["records"] == first["state"] and g2["count"] == g1["count"] and g2["next_id"] == g1["next_id"], "load_from_cpu: the GPU holds exactly the bytes the CPU exported (%s)" % _record_diff(first["state"], g2["records"]))
 	world.export_to_cpu(dish.field)
 	_same_snapshot(first, _cpu_snapshot(dish), "second export")
 
@@ -254,8 +246,8 @@ func _check() -> void:
 		var snap := _cpu_snapshot(dish)
 		identical = identical and snap["state"] == first["state"] and snap["packed"]["conc"] == first["packed"]["conc"] and snap["packed"]["puffs"] == first["packed"]["puffs"] and snap["lineage"] == first["lineage"] and snap["next_id"] == first["next_id"]
 		worst_total = maxf(worst_total, absf(snap["total"] - first["total"]) / first["total"])
-	_ok(identical, "10 rapid switches: every bup, every record, the grid, the clouds and the next id as they were")
-	_ok(worst_total < 1e-6, "10 rapid switches: field total conserved (worst relative change %s)" % String.num_scientific(worst_total))
+	TestUtil.show(identical, "10 rapid switches: every bup, every record, the grid, the clouds and the next id as they were")
+	TestUtil.show(worst_total < 1e-6, "10 rapid switches: field total conserved (worst relative change %s)" % String.num_scientific(worst_total))
 
 	# 3b. What the dish's world did since the last batch went to the GPU (a drop, a burst: recorded by the field, not yet sent) is not lost
 	# on the way back: it is added to what the GPU holds.
@@ -264,7 +256,7 @@ func _check() -> void:
 	dish.field.add_cloud(Vector2(12000.0, -8000.0), 150.0, 300.0)  # (a cloud: recorded, as the field is recording)
 	dish.field.add_cloud(Vector2(-3000.0, 2000.0), 5.0, 80.0)  # (a drop too small to be a cloud: deposited on the grid cells, recorded as cells)
 	world.export_to_cpu(dish.field)
-	_ok(absf(dish.field.total() - (before_drop + 380.0)) < 1e-6 * before_drop and dish.field.take_recorded_puffs().is_empty(), "export_to_cpu keeps what the field recorded after the last batch: total %.3f = %.3f + 380" % [dish.field.total(), before_drop])
+	TestUtil.show(absf(dish.field.total() - (before_drop + 380.0)) < 1e-6 * before_drop and dish.field.take_recorded_puffs().is_empty(), "export_to_cpu keeps what the field recorded after the last batch: total %.3f = %.3f + 380" % [dish.field.total(), before_drop])
 
 	# 4. Ten switches with time between them, as x1 and x100 alternate: the processor runs 20 fine steps with the bups, the GPU 27 steps.
 	var pop_before := dish.sim.bup_count()
@@ -285,27 +277,27 @@ func _check() -> void:
 		world.export_to_cpu(dish.field)
 		all_good = all_good and dish.sim.bup_count() == g_out["count"] and _ids(dish.sim.export_state_bytes()) == _ids(g_out["records"]) and _sorted(dish.sim.alive_ids()) == _sorted(_ids(g_out["records"]))
 		worst_gap = maxf(worst_gap, absf(dish.field.total() - g_out["total"]) / g_out["total"])
-	_ok(all_good, "10 switches with 20 fine steps on the CPU and 27 on the GPU between them: no bup lost going either way, and a living record for each of the %d that live now (%d before)" % [dish.sim.bup_count(), pop_before])
-	_ok(worst_gap < 1e-6, "...field total across each switch within 1e-6 relative (worst %s)" % String.num_scientific(worst_gap))
+	TestUtil.show(all_good, "10 switches with 20 fine steps on the CPU and 27 on the GPU between them: no bup lost going either way, and a living record for each of the %d that live now (%d before)" % [dish.sim.bup_count(), pop_before])
+	TestUtil.show(worst_gap < 1e-6, "...field total across each switch within 1e-6 relative (worst %s)" % String.num_scientific(worst_gap))
 
 	# 5. Save with the bups on the GPU, load, go on.
 	dish.gpu_world = world
 	dish.gpu_active = true
 	dish._gpu_on_cpu = true
 	dish._mark_gpu_dirty()  # (as an edit would: the CPU's bups go to the GPU)
-	_ok(not dish._gpu_on_cpu and world.bup_count() == dish.population() and dish.sim.bup_count() == 0, "_mark_gpu_dirty loads the GPU at once (%d bups)" % world.bup_count())
+	TestUtil.show(not dish._gpu_on_cpu and world.bup_count() == dish.population() and dish.sim.bup_count() == 0, "_mark_gpu_dirty loads the GPU at once (%d bups)" % world.bup_count())
 	_gpu_batches(dish, world, 4)
 	var g_save := _gpu_state(world)
 	var saved := dish.to_dict()
-	_ok(Tools.saved_count(saved) == g_save["count"] and dish._gpu_on_cpu and dish.sim.bup_count() == g_save["count"], "to_dict in GPU mode saves the GPU's %d bups (the state came over first)" % g_save["count"])
+	TestUtil.show(Tools.saved_count(saved) == g_save["count"] and dish._gpu_on_cpu and dish.sim.bup_count() == g_save["count"], "to_dict in GPU mode saves the GPU's %d bups (the state came over first)" % g_save["count"])
 	dish.gpu_active = false
 	var saved_cpu := dish.to_dict()
-	_ok(JSON.stringify(saved) == JSON.stringify(saved_cpu), "the saved dictionary equals the one the CPU path saves for the same exported state")
+	TestUtil.show(JSON.stringify(saved) == JSON.stringify(saved_cpu), "the saved dictionary equals the one the CPU path saves for the same exported state")
 	var baseline := Dish.new()
 	root.add_child(baseline)
 	baseline.set_seed(2)
-	_ok(baseline.from_dict(JSON.parse_string(JSON.stringify(saved))), "a CPU dish loads it")
-	_ok(baseline.sim.alive_ids().size() == Tools.saved_count(saved), "...with a living record for each of its %d bups (the records it has: %d)" % [Tools.saved_count(saved), baseline.sim.alive_ids().size()])
+	TestUtil.show(baseline.from_dict(JSON.parse_string(JSON.stringify(saved))), "a CPU dish loads it")
+	TestUtil.show(baseline.sim.alive_ids().size() == Tools.saved_count(saved), "...with a living record for each of its %d bups (the records it has: %d)" % [Tools.saved_count(saved), baseline.sim.alive_ids().size()])
 	var baseline_saved := JSON.stringify(baseline.to_dict())
 	var reloaded := Dish.new()
 	root.add_child(reloaded)
@@ -313,10 +305,10 @@ func _check() -> void:
 	reloaded.gpu_world = CheckWorld.new(reloaded.sim, true)
 	reloaded.gpu_active = true
 	reloaded._gpu_on_cpu = true
-	_ok(reloaded.from_dict(JSON.parse_string(JSON.stringify(saved))), "a dish that is on the GPU loads it")
+	TestUtil.show(reloaded.from_dict(JSON.parse_string(JSON.stringify(saved))), "a dish that is on the GPU loads it")
 	var reloaded_world: CheckWorld = reloaded.gpu_world
-	_ok(not reloaded._gpu_on_cpu and reloaded_world.bup_count() == g_save["count"] and reloaded.sim.bup_count() == 0, "...and the GPU holds its %d bups at once" % reloaded_world.bup_count())
-	_ok(JSON.stringify(reloaded.to_dict()) == baseline_saved, "saving it again from the GPU's copy gives the dictionary the CPU path gives (the round trip through the GPU changes nothing)")
+	TestUtil.show(not reloaded._gpu_on_cpu and reloaded_world.bup_count() == g_save["count"] and reloaded.sim.bup_count() == 0, "...and the GPU holds its %d bups at once" % reloaded_world.bup_count())
+	TestUtil.show(JSON.stringify(reloaded.to_dict()) == baseline_saved, "saving it again from the GPU's copy gives the dictionary the CPU path gives (the round trip through the GPU changes nothing)")
 	reloaded._load_gpu()  # (the save above brought the bups to the CPU: the next coarse frame would take them back, as this does)
 	_gpu_batches(reloaded, reloaded_world, 3)
 	var g_after := _gpu_state(reloaded_world)
@@ -328,7 +320,7 @@ func _check() -> void:
 		_dish_switching()
 	else:
 		print("     (the main device cannot run the GPU path here: the dish's own switching was not run)")
-	print("%d checks" % _checks)
+	print("%d checks" % TestUtil.checks)
 	TestUtil.finish(self, "SWITCH CHECK OK", "SWITCH CHECK FAILED:")
 
 
@@ -346,42 +338,42 @@ func _dish_switching() -> void:
 	dish.gpu_world = world
 	var pop := dish.sim.bup_count()
 	dish._choose_backend(1.67)
-	_ok(dish.gpu_active and world.gpu != null and world.gpu.is_main and dish.sim.bup_count() == 0 and world.bup_count() == pop, "main device, setting On: a dish just made goes to the GPU at the first frame, with its %d bups (main device: %s)" % [pop, world.device_name()])
+	TestUtil.show(dish.gpu_active and world.gpu != null and world.gpu.is_main and dish.sim.bup_count() == 0 and world.bup_count() == pop, "main device, setting On: a dish just made goes to the GPU at the first frame, with its %d bups (main device: %s)" % [pop, world.device_name()])
 	dish.set_backend_setting(StartConditions.BACKEND_CPU)
 	dish._choose_backend(1.67)
-	_ok(not dish.gpu_active and dish.sim.bup_count() == pop, "Off brings them back at once")
+	TestUtil.show(not dish.gpu_active and dish.sim.bup_count() == pop, "Off brings them back at once")
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
 	for i in BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS) - 1:
 		dish._choose_backend(1.67)
-	_ok(not dish.gpu_active and dish.sim.bup_count() == pop, "On again (the dish is no longer fresh): %d frames in a row, still the processor" % (BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS) - 1))
+	TestUtil.show(not dish.gpu_active and dish.sim.bup_count() == pop, "On again (the dish is no longer fresh): %d frames in a row, still the processor" % (BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS) - 1))
 	dish._choose_backend(1.67)
-	_ok(dish.gpu_active and dish.sim.bup_count() == 0 and world.bup_count() == pop, "...the next one moves the %d bups to the GPU" % pop)
+	TestUtil.show(dish.gpu_active and dish.sim.bup_count() == 0 and world.bup_count() == pop, "...the next one moves the %d bups to the GPU" % pop)
 	dish._choose_backend(0.1)
-	_ok(dish.gpu_active and world.bup_count() == pop, "a fine step (x1) stays on the GPU (it has a fine path)")
+	TestUtil.show(dish.gpu_active and world.bup_count() == pop, "a fine step (x1) stays on the GPU (it has a fine path)")
 	dish.set_backend_setting(StartConditions.BACKEND_CPU)
 	dish._choose_backend(1.67)
-	_ok(not dish.gpu_active and dish.sim.bup_count() == pop and dish.backend.gpu_wanted_seconds == 0.0, "the setting Off brings them back at once: %d bups on the CPU" % dish.sim.bup_count())
+	TestUtil.show(not dish.gpu_active and dish.sim.bup_count() == pop and dish.backend.gpu_wanted_seconds == 0.0, "the setting Off brings them back at once: %d bups on the CPU" % dish.sim.bup_count())
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
 	for i in BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS):
 		dish._choose_backend(1.67)
-	_ok(dish.gpu_active, "...and On sends them out again after %d frames" % BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS))
+	TestUtil.show(dish.gpu_active, "...and On sends them out again after %d frames" % BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS))
 	# Edits while on the GPU.
 	var radius_before := dish.radius
 	dish.resize_to(radius_before * 1.5)
-	_ok(dish.gpu_active and not dish._gpu_on_cpu and world.bup_count() == pop and absf(dish.radius - radius_before * 1.5) < 1.0 and world.gpu.radius == dish.radius, "resize_to on the GPU: a round trip through the CPU, the GPU reloaded with the new dish (radius %.0f)" % world.gpu.radius)
+	TestUtil.show(dish.gpu_active and not dish._gpu_on_cpu and world.bup_count() == pop and absf(dish.radius - radius_before * 1.5) < 1.0 and world.gpu.radius == dish.radius, "resize_to on the GPU: a round trip through the CPU, the GPU reloaded with the new dish (radius %.0f)" % world.gpu.radius)
 	dish.change_limit(5000)
-	_ok(dish.bup_limit == 5000 and world.gpu.limit == 5000 and world.bup_count() == pop, "change_limit on the GPU: the limit is the GPU's too (%d)" % world.gpu.limit)
+	TestUtil.show(dish.bup_limit == 5000 and world.gpu.limit == 5000 and world.bup_count() == pop, "change_limit on the GPU: the limit is the GPU's too (%d)" % world.gpu.limit)
 	var id := dish.add_bup(Vector2(100.0, 100.0), Genome.founder(), Dish.FOUNDER_ENERGY, 1.0)
-	_ok(world.bup_count() == pop + 1 and dish.has_bup(id), "add_bup on the GPU: the new bup is in the GPU's %d" % world.bup_count())
+	TestUtil.show(world.bup_count() == pop + 1 and dish.has_bup(id), "add_bup on the GPU: the new bup is in the GPU's %d" % world.bup_count())
 	dish.remove_bup(id)
-	_ok(world.bup_count() == pop, "remove_bup on the GPU: gone again (%d)" % world.bup_count())
+	TestUtil.show(world.bup_count() == pop, "remove_bup on the GPU: gone again (%d)" % world.bup_count())
 	var saved := dish.to_dict()
-	_ok(Tools.saved_count(saved) == pop and dish._gpu_on_cpu, "to_dict on the GPU: %d bups saved, the CPU holds them until the GPU takes them back" % Tools.saved_count(saved))
+	TestUtil.show(Tools.saved_count(saved) == pop and dish._gpu_on_cpu, "to_dict on the GPU: %d bups saved, the CPU holds them until the GPU takes them back" % Tools.saved_count(saved))
 	dish._choose_backend(1.67)
-	_ok(dish.gpu_active and not dish._gpu_on_cpu and world.bup_count() == pop, "the next coarse frame reloads the GPU")
+	TestUtil.show(dish.gpu_active and not dish._gpu_on_cpu and world.bup_count() == pop, "the next coarse frame reloads the GPU")
 	dish.set_backend_setting(StartConditions.BACKEND_CPU)
 	dish._choose_backend(1.67)
-	_ok(not dish.gpu_active and dish.sim.bup_count() == pop, "the setting set to Off moves them back at the next frame")
+	TestUtil.show(not dish.gpu_active and dish.sim.bup_count() == pop, "the setting set to Off moves them back at the next frame")
 	# Auto at x10,000: the rule's two thresholds (the GPU takes over above AUTO_CPU_UP_USEC, hands back below AUTO_CPU_DOWN_USEC), so a
 	# dish whose estimate lies between them stays where it is. Each side is asked of the rule with where the dish is.
 	var top := BackendRule.frame_costs(18.5, dish.field.get_size(), dish.sim.moves_for(18.5), pop, 0, dish.field.puff_count())
@@ -389,40 +381,40 @@ func _dish_switching() -> void:
 	for i in 40:
 		dish._choose_backend(18.5)
 	var takes_over := BackendRule.wants_gpu(StartConditions.BACKEND_AUTO, 18.5, dish.sim.moves_for(18.5), dish.field.get_size(), pop, false, true, 0, dish.field.puff_count())
-	_ok(dish.gpu_active == takes_over, "Auto with %d bups at x10,000, from the processor (its frame estimated at %.0f µs, the GPU's %.0f; the GPU takes over above %.0f): %s" % [pop, top.x, top.y, BackendRule.AUTO_CPU_UP_USEC, "the GPU" if takes_over else "the processor"])
+	TestUtil.show(dish.gpu_active == takes_over, "Auto with %d bups at x10,000, from the processor (its frame estimated at %.0f µs, the GPU's %.0f; the GPU takes over above %.0f): %s" % [pop, top.x, top.y, BackendRule.AUTO_CPU_UP_USEC, "the GPU" if takes_over else "the processor"])
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
 	for i in BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS):
 		dish._choose_backend(1.67)
-	_ok(dish.gpu_active, "On again: the GPU after %d coarse frames" % BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS))
+	TestUtil.show(dish.gpu_active, "On again: the GPU after %d coarse frames" % BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS))
 	dish.set_backend_setting(StartConditions.BACKEND_AUTO)
 	for i in BackendRule.AUTO_DOWN_FRAMES:
 		dish._choose_backend(18.5)
 	var keeps := BackendRule.wants_gpu(StartConditions.BACKEND_AUTO, 18.5, dish.sim.moves_for(18.5), dish.field.get_size(), pop, true, true, 0, dish.field.puff_count())
-	_ok(dish.gpu_active == keeps, "...and from the GPU (it hands back below %.0f µs): %s after %d frames" % [BackendRule.AUTO_CPU_DOWN_USEC, "the GPU" if keeps else "the processor", BackendRule.AUTO_DOWN_FRAMES])
+	TestUtil.show(dish.gpu_active == keeps, "...and from the GPU (it hands back below %.0f µs): %s after %d frames" % [BackendRule.AUTO_CPU_DOWN_USEC, "the GPU" if keeps else "the processor", BackendRule.AUTO_DOWN_FRAMES])
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
 	for i in BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS):
 		dish._choose_backend(1.67)
 	# Auto's hand-back, at x100, where the rule wants the processor even from the GPU.
 	var x100 := BackendRule.frame_costs(1.67, dish.field.get_size(), dish.sim.moves_for(1.67), pop, 0, dish.field.puff_count())
-	_ok(dish.gpu_active and not BackendRule.wants_gpu(StartConditions.BACKEND_AUTO, 1.67, dish.sim.moves_for(1.67), dish.field.get_size(), pop, true, true, 0, dish.field.puff_count()), "on the GPU, and Auto's rule wants the processor for %d bups at x100 (its frame estimated at %.0f µs, below %.0f)" % [pop, x100.x, BackendRule.AUTO_CPU_DOWN_USEC])
+	TestUtil.show(dish.gpu_active and not BackendRule.wants_gpu(StartConditions.BACKEND_AUTO, 1.67, dish.sim.moves_for(1.67), dish.field.get_size(), pop, true, true, 0, dish.field.puff_count()), "on the GPU, and Auto's rule wants the processor for %d bups at x100 (its frame estimated at %.0f µs, below %.0f)" % [pop, x100.x, BackendRule.AUTO_CPU_DOWN_USEC])
 	dish.set_backend_setting(StartConditions.BACKEND_AUTO)
 	for i in BackendRule.AUTO_DOWN_FRAMES - 1:
 		dish._choose_backend(1.67)
-	_ok(dish.gpu_active, "the setting changed to Auto, whose rule wants the processor: %d frames, the GPU still holds them (its count may be late)" % (BackendRule.AUTO_DOWN_FRAMES - 1))
+	TestUtil.show(dish.gpu_active, "the setting changed to Auto, whose rule wants the processor: %d frames, the GPU still holds them (its count may be late)" % (BackendRule.AUTO_DOWN_FRAMES - 1))
 	dish._choose_backend(1.67)
-	_ok(not dish.gpu_active and dish.sim.bup_count() == pop, "...the next one (%d in a row) brings them back" % BackendRule.AUTO_DOWN_FRAMES)
+	TestUtil.show(not dish.gpu_active and dish.sim.bup_count() == pop, "...the next one (%d in a row) brings them back" % BackendRule.AUTO_DOWN_FRAMES)
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
 	for i in BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS):
 		dish._choose_backend(1.67)
 	dish.set_backend_setting(StartConditions.BACKEND_AUTO)
 	for i in 5:
 		dish._choose_backend(1.67)
-	_ok(dish.gpu_active and dish.backend.cpu_votes == 5, "Auto again, wanting the processor: 5 frames counted (%d), the GPU still holds them" % dish.backend.cpu_votes)
+	TestUtil.show(dish.gpu_active and dish.backend.cpu_votes == 5, "Auto again, wanting the processor: 5 frames counted (%d), the GPU still holds them" % dish.backend.cpu_votes)
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
 	dish._choose_backend(18.5)
-	_ok(dish.gpu_active and dish.backend.cpu_votes == 0, "...and the rule's wait starts again whenever it wants the GPU")
+	TestUtil.show(dish.gpu_active and dish.backend.cpu_votes == 0, "...and the rule's wait starts again whenever it wants the GPU")
 	dish._choose_backend(0.1)
-	_ok(dish.gpu_active, "...and a fine step keeps it there (setting On)")
+	TestUtil.show(dish.gpu_active, "...and a fine step keeps it there (setting On)")
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
 	for i in BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS):
 		dish._choose_backend(1.67)
@@ -431,8 +423,8 @@ func _dish_switching() -> void:
 	for i in BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS):
 		dish._choose_backend(1.67)
 	var fresh_pop := dish.sim.bup_count()
-	_ok(dish.gpu_active and world.bup_count() == 40, "a new dish while on the GPU (strike): the GPU holds the new dish's %d bups" % world.bup_count())
-	_ok(fresh_pop == 0, "...and the CPU holds none of them")
+	TestUtil.show(dish.gpu_active and world.bup_count() == 40, "a new dish while on the GPU (strike): the GPU holds the new dish's %d bups" % world.bup_count())
+	TestUtil.show(fresh_pop == 0, "...and the CPU holds none of them")
 
 
 # ---- bench -------------------------------------------------------------------------------------------------------------------

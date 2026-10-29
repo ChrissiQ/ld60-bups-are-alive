@@ -10,7 +10,6 @@ const COUNT := 400
 
 func _initialize() -> void:
 	SimConstants.apply()
-	var failures := 0
 	var cpu_gain := {}
 	var gpu_gain := {}
 	for level in [0, 1, 2]:
@@ -77,7 +76,6 @@ func _initialize() -> void:
 	var rg: float = gpu_gain[2][0] / gpu_gain[0][0]
 	var rc: float = cpu_gain[2][0] / cpu_gain[0][0]
 	print("key / none, acetate taken: GPU %.3f CPU %.3f (expected %.2f)" % [rg, rc, Genome.KEY_FACTOR])
-	if absf(rg - Genome.KEY_FACTOR) > 0.1 or absf(rc - Genome.KEY_FACTOR) > 0.1:
-		failures += 1
-	print("VALIDATE KEY %s" % ("OK" if failures == 0 else "FAILED"))
-	quit(failures)
+	TestUtil.check(absf(rg - Genome.KEY_FACTOR) <= 0.1 and absf(rc - Genome.KEY_FACTOR) <= 0.1, "the key multiplies the acetate taken by KEY_FACTOR on both backends")
+	print("VALIDATE KEY %s" % ("OK" if TestUtil.failures.is_empty() else "FAILED"))
+	quit(TestUtil.failures.size())

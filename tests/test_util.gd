@@ -3,9 +3,11 @@ extends RefCounted
 ## What the test scripts share.
 
 static var failures: Array = []  ## what has gone wrong so far in this run (a test script's `check` adds to it)
+static var checks := 0  ## how many checks have been made so far in this run
 
 
 static func check(ok: bool, what: String) -> void:
+	checks += 1
 	if not ok:
 		failures.append(what)
 

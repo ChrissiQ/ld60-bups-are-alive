@@ -84,8 +84,6 @@ class CheckWorld extends GpuWorld:
 
 var dish: CheckDish
 var camera: Camera2D
-var _checks := 0
-var _fails := 0
 var achieved := 1.0
 var _last_usec := 0
 var frame_ms := PackedFloat64Array()
@@ -103,13 +101,6 @@ var quiet_until := 0  ## jumps before this frame are an edit's own (a load, a ne
 var selected_at := 0  ## the frame the harness last chose a bup to select (by id, as the watch list does)
 var _died_lag := 0  ## frames a selected bup that died on the GPU was still alive in its record (its last place shown)
 var _glitch_late := 0  ## frames a bup chosen by id had no record yet (its first readback is on its way)
-
-
-func _ok(ok: bool, what: String) -> void:
-	_checks += 1
-	if not ok:
-		_fails += 1
-	TestUtil.show(ok, what)
 
 
 func _initialize() -> void:
@@ -159,7 +150,7 @@ func _finish() -> void:
 			await process_frame
 	for i in 3:
 		await process_frame
-	print("%d checks, %d failed" % [_checks, _fails])
+	print("%d checks, %d failed" % [TestUtil.checks, TestUtil.failures.size()])
 	TestUtil.finish(self, "GAME CHECK OK", "GAME CHECK FAILED:")
 
 
@@ -376,7 +367,7 @@ func transfer_checked(label: String, before: Dictionary, after: Dictionary, d: C
 	if label == "to the GPU" and before["records"] != after["records"]:
 		ok = false
 		what += ", record bytes DIFFER"
-	_ok(ok and history_ok, what)
+	TestUtil.show(ok and history_ok, what)
 
 
 ## The history samples: sample k was taken at a time in [120 k, 120 k + MAX_STEP] (the first step to end past each 120 s), in order,
@@ -406,10 +397,10 @@ func _smoke() -> void:
 	make_dish(scenario_d(StartConditions.BACKEND_GPU, 2000), 1)
 	set_speed(10000.0)
 	await frames(400)
-	_ok(dish.backend_running() == "gpu", "smoke: setting On at x10,000 runs on the GPU (%d switches)" % switches.size())
+	TestUtil.show(dish.backend_running() == "gpu", "smoke: setting On at x10,000 runs on the GPU (%d switches)" % switches.size())
 	set_speed(1.0)
 	await frames(3)
-	_ok(dish.backend_running() == "gpu", "smoke: setting On, x1 stays on the GPU (fine path)")
+	TestUtil.show(dish.backend_running() == "gpu", "smoke: setting On, x1 stays on the GPU (fine path)")
 	_report_glitches()
 	_report_frames("smoke")
 
@@ -418,7 +409,7 @@ func _report_glitches() -> void:
 	for key: String in glitches:
 		print("     glitch count: %s: %d frames" % [key, glitches[key]])
 	print("     frames a bup chosen by id waited for its first record: %d; frames a selected bup that had died was still alive in its record: %d" % [_glitch_late, _died_lag])
-	_ok(glitches.is_empty(), "no jumps in what the screen shows (%s)" % str(glitches))
+	TestUtil.show(glitches.is_empty(), "no jumps in what the screen shows (%s)" % str(glitches))
 
 
 static func _pct(values: PackedFloat64Array, share: float) -> float:
@@ -467,12 +458,12 @@ func _auto(seed_value: int, setting: String) -> void:
 				break
 		print("     leg x%.0f done: %s, %d bups, %.2f sim-h, achieved x%.0f" % [leg[0], dish.backend_running(), dish.population(), dish.time / 3600.0, achieved])
 		if leg[0] < 10000.0 and setting == StartConditions.BACKEND_AUTO:
-			_ok(dish.backend_running() == "cpu", "Auto at x%.0f with %d bups: the CPU" % [leg[0], dish.population()])
+			TestUtil.show(dish.backend_running() == "cpu", "Auto at x%.0f with %d bups: the CPU" % [leg[0], dish.population()])
 	if setting != StartConditions.BACKEND_AUTO:
 		_report_frames("auto-" + setting)
 		return
-	_ok(dish.backend_running() == "gpu", "Auto at x10,000 with %d bups: the GPU (switched at %s)" % [dish.population(), str(switches)])
-	_ok(switches.size() == 1, "Auto at x10,000: one switch on the way up, no flapping (%d)" % switches.size())
+	TestUtil.show(dish.backend_running() == "gpu", "Auto at x10,000 with %d bups: the GPU (switched at %s)" % [dish.population(), str(switches)])
+	TestUtil.show(switches.size() == 1, "Auto at x10,000: one switch on the way up, no flapping (%d)" % switches.size())
 	# the cost model at the switch
 	if not switches.is_empty():
 		var pop_at: int = switches[0][3]
@@ -484,13 +475,13 @@ func _auto(seed_value: int, setting: String) -> void:
 	set_speed(1.0)
 	for i in BackendRule.AUTO_DOWN_FRAMES - 1:
 		await frame()
-	_ok(dish.backend_running() == "gpu" and switches.size() == before, "x1: no hand-back before %d frames of the rule saying so" % BackendRule.AUTO_DOWN_FRAMES)
+	TestUtil.show(dish.backend_running() == "gpu" and switches.size() == before, "x1: no hand-back before %d frames of the rule saying so" % BackendRule.AUTO_DOWN_FRAMES)
 	await frames(40)
 	var costs1 := BackendRule.frame_costs(0.0167, dish.field.get_size(), dish.sim.moves_for(0.0167), dish.population(), 1, dish.field.puff_count())
 	print("     x1 with %d bups: the rule's costs CPU %.0f GPU %.0f us/frame; running %s" % [dish.population(), costs1.x, costs1.y, dish.backend_running()])
 	set_speed(10000.0)
 	await frames(BackendRule.wait_frames(1.0 / 120.0) + 2)
-	_ok(dish.backend_running() == "gpu", "x10,000 again: the GPU")
+	TestUtil.show(dish.backend_running() == "gpu", "x10,000 again: the GPU")
 	await frames(60)
 	# x100: one step a frame: Auto's rule may hand back to the CPU (after AUTO_DOWN_FRAMES frames)
 	set_speed(100.0)
@@ -501,7 +492,7 @@ func _auto(seed_value: int, setting: String) -> void:
 			down_at = i + 1
 	var costs100 := BackendRule.frame_costs(1.667, dish.field.get_size(), dish.sim.moves_for(1.667), dish.population(), 1, dish.field.puff_count())
 	print("     x100 with %d bups: the rule's costs CPU %.0f GPU %.0f us/frame; running %s (back to the CPU at frame %d)" % [dish.population(), costs100.x, costs100.y, dish.backend_running(), down_at])
-	_ok(down_at < 0 or down_at >= BackendRule.AUTO_DOWN_FRAMES, "x100: a hand-back by Auto's rule waits %d frames (it took %d)" % [BackendRule.AUTO_DOWN_FRAMES, down_at])
+	TestUtil.show(down_at < 0 or down_at >= BackendRule.AUTO_DOWN_FRAMES, "x100: a hand-back by Auto's rule waits %d frames (it took %d)" % [BackendRule.AUTO_DOWN_FRAMES, down_at])
 	# On / Off at x100
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
 	var up_at := -1
@@ -509,14 +500,14 @@ func _auto(seed_value: int, setting: String) -> void:
 		await frame()
 		if up_at < 0 and dish.backend_running() == "gpu":
 			up_at = i + 1
-	_ok(dish.backend_running() == "gpu", "On at x100: the GPU (from frame %d)" % up_at)
+	TestUtil.show(dish.backend_running() == "gpu", "On at x100: the GPU (from frame %d)" % up_at)
 	dish.set_backend_setting(StartConditions.BACKEND_CPU)
 	await frame()
-	_ok(dish.backend_running() == "cpu", "Off: the CPU at the next frame")
+	TestUtil.show(dish.backend_running() == "cpu", "Off: the CPU at the next frame")
 	set_speed(10000.0)
 	await frames(100)
-	_ok(dish.backend_running() == "cpu", "Off at x10,000: still the CPU")
-	_ok(dish.transfers >= 2, "%d transfers checked as they happened" % dish.transfers)
+	TestUtil.show(dish.backend_running() == "cpu", "Off at x10,000: still the CPU")
+	TestUtil.show(dish.transfers >= 2, "%d transfers checked as they happened" % dish.transfers)
 	_report_glitches()
 	_report_frames("auto")
 
@@ -545,7 +536,7 @@ func _flap(population_wanted: int) -> void:
 		await frame()
 	var extra := switches.size() - before
 	print("     switches while held: %d (%s)" % [extra, str(switches.slice(before))])
-	_ok(extra <= 1, "Auto held at the threshold for 2,400 frames with hitches: %d switches (no flapping)" % extra)
+	TestUtil.show(extra <= 1, "Auto held at the threshold for 2,400 frames with hitches: %d switches (no flapping)" % extra)
 	# A small colony on a loaded machine: the GPU's frames are short, the processor's long (each 40 ms more here, as a switch's own
 	# transfer makes one): the rule must not judge the processor by the length of its own frames, or it switches every few frames.
 	dish.strike(scenario_d(StartConditions.BACKEND_GPU, 1500))
@@ -561,7 +552,7 @@ func _flap(population_wanted: int) -> void:
 		await frame()
 	extra = switches.size() - before
 	print("     switches: %d (%s)" % [extra, str(switches.slice(before, before + 6))])
-	_ok(extra <= 1, "Auto with a small colony, the processor's frames slow: %d switches in 600 frames (no flapping)" % extra)
+	TestUtil.show(extra <= 1, "Auto with a small colony, the processor's frames slow: %d switches in 600 frames (no flapping)" % extra)
 	_report_frames("flap")
 
 
@@ -575,7 +566,7 @@ func consistent(label: String) -> Dictionary:
 	var g := gpu_side(dish)
 	var ids := _sorted(_ids(g["records"]))
 	var alive := _sorted(dish.sim.alive_ids())
-	_ok(_unique(ids) and ids == alive, "%s: %d bups on the GPU, ids unique, living records = bups (%d)" % [label, ids.size(), alive.size()])
+	TestUtil.show(_unique(ids) and ids == alive, "%s: %d bups on the GPU, ids unique, living records = bups (%d)" % [label, ids.size(), alive.size()])
 	return g
 
 
@@ -591,7 +582,7 @@ func _edits() -> void:
 	set_speed(10000.0)
 	while dish.population() < 20000 and frames_run < 3000:
 		await frame()
-	_ok(dish.backend_running() == "gpu", "edits: on the GPU with %d bups at %.2f sim-h" % [dish.population(), dish.time / 3600.0])
+	TestUtil.show(dish.backend_running() == "gpu", "edits: on the GPU with %d bups at %.2f sim-h" % [dish.population(), dish.time / 3600.0])
 	consistent("start")
 
 	# resize smaller, then bigger
@@ -602,13 +593,13 @@ func _edits() -> void:
 	var words: PackedFloat32Array = g["records"].to_float32_array()
 	for i in g["count"]:
 		inside = inside and Vector2(words[i * GpuLayout.RECORD_WORDS + 1], words[i * GpuLayout.RECORD_WORDS + 2]).length() <= 60000.0
-	_ok(dish.backend_running() == "gpu" and not dish._gpu_on_cpu and is_equal_approx(dish.gpu_world.gpu.radius, 60000.0) and inside, "resize_to 60 mm on the GPU (%d ms): the GPU holds the smaller dish, %d bups, all inside" % [Time.get_ticks_msec() - t0, g["count"]])
+	TestUtil.show(dish.backend_running() == "gpu" and not dish._gpu_on_cpu and is_equal_approx(dish.gpu_world.gpu.radius, 60000.0) and inside, "resize_to 60 mm on the GPU (%d ms): the GPU holds the smaller dish, %d bups, all inside" % [Time.get_ticks_msec() - t0, g["count"]])
 	var plankton_inside := dish.plankton.all(func(p: Plankton) -> bool: return p.pos.length() <= 60000.0)
-	_ok(plankton_inside, "...the plankton outside it went (%d left)" % dish.plankton.size())
+	TestUtil.show(plankton_inside, "...the plankton outside it went (%d left)" % dish.plankton.size())
 	await frames(60)
 	consistent("after 60 frames on the smaller dish")
 	dish.resize_to(90000.0)
-	_ok(dish.backend_running() == "gpu" and is_equal_approx(dish.gpu_world.gpu.radius, 90000.0), "resize_to 90 mm on the GPU: the bigger dish (%d cells across)" % dish.gpu_world.gpu.n)
+	TestUtil.show(dish.backend_running() == "gpu" and is_equal_approx(dish.gpu_world.gpu.radius, 90000.0), "resize_to 90 mm on the GPU: the bigger dish (%d cells across)" % dish.gpu_world.gpu.n)
 	await frames(60)
 	consistent("after 60 frames on the bigger dish")
 
@@ -616,29 +607,29 @@ func _edits() -> void:
 	var mb := buffer_mb()
 	t0 = Time.get_ticks_msec()
 	dish.change_limit(1000000)
-	_ok(dish.bup_limit == 1000000 and dish.gpu_world.gpu.limit == 1000000 and dish.gpu_world.gpu.capacity >= 1000000, "change_limit 1,000,000 on the GPU (%d ms): capacity %d, buffers %.0f MB -> %.0f MB" % [Time.get_ticks_msec() - t0, dish.gpu_world.gpu.capacity, mb, buffer_mb()])
+	TestUtil.show(dish.bup_limit == 1000000 and dish.gpu_world.gpu.limit == 1000000 and dish.gpu_world.gpu.capacity >= 1000000, "change_limit 1,000,000 on the GPU (%d ms): capacity %d, buffers %.0f MB -> %.0f MB" % [Time.get_ticks_msec() - t0, dish.gpu_world.gpu.capacity, mb, buffer_mb()])
 	await frames(60)
 	consistent("after 60 frames at limit 1,000,000")
 	var pop := dish.population()
 	dish.change_limit(1000)
-	_ok(dish.bup_limit >= pop and dish.bup_limit == dish.gpu_world.gpu.limit, "change_limit 1,000 with %d bups: the limit is the population (%d), the GPU's too" % [pop, dish.bup_limit])
+	TestUtil.show(dish.bup_limit >= pop and dish.bup_limit == dish.gpu_world.gpu.limit, "change_limit 1,000 with %d bups: the limit is the population (%d), the GPU's too" % [pop, dish.bup_limit])
 	await frames(60)
 	consistent("after 60 frames at that limit")
-	_ok(dish.population() <= int(dish.bup_limit * 1.01) + 10, "...the population stays at the limit (%d of %d)" % [dish.population(), dish.bup_limit])
+	TestUtil.show(dish.population() <= int(dish.bup_limit * 1.01) + 10, "...the population stays at the limit (%d of %d)" % [dish.population(), dish.bup_limit])
 	dish.change_limit(100000)
 	await frames(30)
 
 	# the setting while the GPU runs
 	dish.set_backend_setting(StartConditions.BACKEND_CPU)
 	await frame()
-	_ok(dish.backend_running() == "cpu", "setting Off while on the GPU: the CPU at the next frame")
+	TestUtil.show(dish.backend_running() == "cpu", "setting Off while on the GPU: the CPU at the next frame")
 	dish.set_backend_setting(StartConditions.BACKEND_AUTO)
 	await frames(BackendRule.wait_frames(1.0 / 120.0) + 2)
 	var costs := BackendRule.frame_costs(83.3 / 5.0, dish.field.get_size(), dish.sim.moves_for(83.3 / 5.0), dish.population(), 5, dish.field.puff_count())
 	print("     Auto with %d bups, %d clouds: model CPU %.0f GPU %.0f us/frame; running %s" % [dish.population(), dish.field.puff_count(), costs.x, costs.y, dish.backend_running()])
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
 	await frames(BackendRule.wait_frames(1.0 / 120.0) + 2)
-	_ok(dish.backend_running() == "gpu", "setting On again: the GPU")
+	TestUtil.show(dish.backend_running() == "gpu", "setting On again: the GPU")
 
 	# the speed across the fine threshold, again and again (the GPU has a fine path: setting On, it stays)
 	var good := true
@@ -650,7 +641,7 @@ func _edits() -> void:
 		set_speed(10000.0)
 		await frames(BackendRule.wait_frames(1.0 / 120.0))
 		good = good and dish.backend_running() == "gpu"
-	_ok(good, "5 times x1 then x10,000: the GPU keeps the bups across the fine threshold")
+	TestUtil.show(good, "5 times x1 then x10,000: the GPU keeps the bups across the fine threshold")
 	for k in 10:
 		set_speed(1.0 if k % 2 == 0 else 10000.0)
 		await frames(3)
@@ -669,67 +660,67 @@ func _edits() -> void:
 	dish.drop_nutrients(spot, 50)
 	await frames(5)
 	var g1 := gpu_side(dish)
-	_ok(absf(g1["total"] - g0["total"] - 50 * Dish.NUTRIENT_ENERGY) < 1e-3 * 50 * Dish.NUTRIENT_ENERGY, "paused: a drop of 50 reaches the GPU's field (+%.3f, expected +%.0f)" % [g1["total"] - g0["total"], 50 * Dish.NUTRIENT_ENERGY])
+	TestUtil.show(absf(g1["total"] - g0["total"] - 50 * Dish.NUTRIENT_ENERGY) < 1e-3 * 50 * Dish.NUTRIENT_ENERGY, "paused: a drop of 50 reaches the GPU's field (+%.3f, expected +%.0f)" % [g1["total"] - g0["total"], 50 * Dish.NUTRIENT_ENERGY])
 	var erased := dish.erase_nutrient(dish.global_position + Vector2(-20000.0, 0.0), 3000.0)
 	await frames(5)
 	var g2 := gpu_side(dish)
-	_ok(absf((g1["total"] - g2["total"]) - erased * Dish.NUTRIENT_ENERGY) < 0.1 * maxf(erased * Dish.NUTRIENT_ENERGY, 1.0), "paused: the eraser takes from the GPU's field about what it reports (%.1f, reported %.1f: the report is from the field's copy, up to a refresh behind)" % [g1["total"] - g2["total"], erased * Dish.NUTRIENT_ENERGY])
+	TestUtil.show(absf((g1["total"] - g2["total"]) - erased * Dish.NUTRIENT_ENERGY) < 0.1 * maxf(erased * Dish.NUTRIENT_ENERGY, 1.0), "paused: the eraser takes from the GPU's field about what it reports (%.1f, reported %.1f: the report is from the field's copy, up to a refresh behind)" % [g1["total"] - g2["total"], erased * Dish.NUTRIENT_ENERGY])
 	await frames(20)
-	_ok(absf(dish.field.total() - g2["total"]) < 1e-6 * g2["total"], "paused: the field's copy shows it (%.1f vs the GPU's %.1f)" % [dish.field.total(), g2["total"]])
-	_ok(dish.has_bup(sel) and not dish.bup_info(sel).is_empty() and dish.bup_world_pos(sel) == pos0 and g2["count"] == g0["count"], "paused 35 frames: the selected bup stays, still, with its info; the population as it was (alive %s, info %s, moved %s, count %d -> %d)" % [dish.has_bup(sel), not dish.bup_info(sel).is_empty(), dish.bup_world_pos(sel) != pos0, g0["count"], g2["count"]])
+	TestUtil.show(absf(dish.field.total() - g2["total"]) < 1e-6 * g2["total"], "paused: the field's copy shows it (%.1f vs the GPU's %.1f)" % [dish.field.total(), g2["total"]])
+	TestUtil.show(dish.has_bup(sel) and not dish.bup_info(sel).is_empty() and dish.bup_world_pos(sel) == pos0 and g2["count"] == g0["count"], "paused 35 frames: the selected bup stays, still, with its info; the population as it was (alive %s, info %s, moved %s, count %d -> %d)" % [dish.has_bup(sel), not dish.bup_info(sel).is_empty(), dish.bup_world_pos(sel) != pos0, g0["count"], g2["count"]])
 	held = false
 
 	# a save leaves the bups on the CPU while the GPU runs (goal completion saves and pauses): drops and erasing then
 	await frame()
 	held = true
 	var saved_mid := dish.to_dict()
-	_ok(dish._gpu_on_cpu, "to_dict on the GPU: the CPU holds the state now (%d bups saved)" % Tools.saved_count(saved_mid))
+	TestUtil.show(dish._gpu_on_cpu, "to_dict on the GPU: the CPU holds the state now (%d bups saved)" % Tools.saved_count(saved_mid))
 	var c0 := dish.field.total()
 	dish.drop_nutrients(spot, 40)
 	await frames(3)
 	var erased2 := dish.erase_nutrient(dish.global_position + Vector2(-30000.0, 10000.0), 3000.0)
 	await frames(20)
 	var expected := c0 + 40 * Dish.NUTRIENT_ENERGY - erased2 * Dish.NUTRIENT_ENERGY
-	_ok(absf(dish.field.total() - expected) < 1e-6 * expected, "after the save, paused: a drop and then the eraser, 20 frames: the field holds both (%.1f, expected %.1f)" % [dish.field.total(), expected])
+	TestUtil.show(absf(dish.field.total() - expected) < 1e-6 * expected, "after the save, paused: a drop and then the eraser, 20 frames: the field holds both (%.1f, expected %.1f)" % [dish.field.total(), expected])
 	held = false
 	await frame()
 	var g3 := gpu_side(dish)
-	_ok(absf(g3["total"] - expected) < 1e-2 * expected, "...and the GPU takes it over at the next frame (%.1f; the frame's own feed, plankton bursts and uptake aside: a frame at x10,000 holds up to 9 steps of them, and a window that is not paced holds more than a game's)" % g3["total"])
+	TestUtil.show(absf(g3["total"] - expected) < 1e-2 * expected, "...and the GPU takes it over at the next frame (%.1f; the frame's own feed, plankton bursts and uptake aside: a frame at x10,000 holds up to 9 steps of them, and a window that is not paced holds more than a game's)" % g3["total"])
 	await frames(30)
 
 	# sources
-	_ok(dish.place_source(dish.global_position + Vector2(-10000.0, -10000.0), 30.0), "place_source on the GPU")
+	TestUtil.show(dish.place_source(dish.global_position + Vector2(-10000.0, -10000.0), 30.0), "place_source on the GPU")
 	var source: NutrientSource = dish.sources[-1]
 	await frames(120)
-	_ok(source.emitted > 0.0, "...it emits (%.1f units so far)" % source.emitted)
+	TestUtil.show(source.emitted > 0.0, "...it emits (%.1f units so far)" % source.emitted)
 	hover_world = source.pos
 	await frames(4)
-	_ok(dish.hovered.source == source, "...hovering it finds it")
+	TestUtil.show(dish.hovered.source == source, "...hovering it finds it")
 	var details := dish.source_details(source)
 	await frames(4)
 	details = dish.source_details(source)
-	_ok(details["nearest_bup"] >= 0.0, "...its details answer the nearest bup from the GPU (%.0f µm, %d nearby)" % [details["nearest_bup"], details["nearby"]])
+	TestUtil.show(details["nearest_bup"] >= 0.0, "...its details answer the nearest bup from the GPU (%.0f µm, %d nearby)" % [details["nearest_bup"], details["nearby"]])
 	dish.remove_source(source)
-	_ok(dish.sources.is_empty(), "remove_source on the GPU")
+	TestUtil.show(dish.sources.is_empty(), "remove_source on the GPU")
 
 	# the plankton tool and a drop while the GPU runs
 	var floating_before := dish.plankton.size()
-	_ok(dish.place_plankton(dish.global_position + Vector2(-15000.0, 12000.0)), "place_plankton on the GPU (%d floating before)" % floating_before)
+	TestUtil.show(dish.place_plankton(dish.global_position + Vector2(-15000.0, 12000.0)), "place_plankton on the GPU (%d floating before)" % floating_before)
 	var g_run := gpu_side(dish)
 	dish.drop_nutrients(spot, 60)
 	await frame()
 	var g_run2 := gpu_side(dish)
 	var change: float = g_run2["total"] - g_run["total"]
 	print("     a drop of 60 while running: the GPU's nutrient changed by %.1f in that frame (the drop is 960, the frame's feed, bursts and uptake change it too)" % change)
-	_ok(change > 960.0 - 0.02 * g_run["total"], "...the running GPU takes a drop (no loss beyond what a frame eats)")
+	TestUtil.show(change > 960.0 - 0.02 * g_run["total"], "...the running GPU takes a drop (no loss beyond what a frame eats)")
 	# plankton: hover, details
 	if not dish.plankton.is_empty():
 		var floating: Plankton = dish.plankton[-1]  # (the newest: the oldest may burst within the frames this takes)
 		hover_world = dish.global_position + floating.pos
 		await frames(4)
 		var pd := dish.plankton_details(floating)
-		_ok(dish.hovered.plankton == floating or dish.hovered.bup >= 0, "hovering a plankton finds it (or a bup over it)")
-		_ok(pd["nearest_bup"] >= 0.0, "...its details answer the nearest bup (%.0f µm)" % pd["nearest_bup"])
+		TestUtil.show(dish.hovered.plankton == floating or dish.hovered.bup >= 0, "hovering a plankton finds it (or a bup over it)")
+		TestUtil.show(pd["nearest_bup"] >= 0.0, "...its details answer the nearest bup (%.0f µm)" % pd["nearest_bup"])
 
 	# picking and hovering bups at x10,000
 	var target := dish.bup_world_pos(dish.selected.bup)
@@ -742,14 +733,14 @@ func _edits() -> void:
 			hovered_frames += 1
 	print("     hovering a fixed point in the colony at x10,000: a bup under it in %d of 60 frames" % hovered_frames)
 	dish.select_at(hover_world, slack)
-	_ok(dish.selected.bup >= 0, "a click where the pointer rests selects at once (%d)" % dish.selected.bup)
+	TestUtil.show(dish.selected.bup >= 0, "a click where the pointer rests selects at once (%d)" % dish.selected.bup)
 	var picked := dish.selected.bup
 	var info_frames := 0
 	for i in 120:
 		await frame()
 		if dish.selected.bup == picked and dish.has_bup(picked) and not dish.bup_info(picked).is_empty():
 			info_frames += 1
-	_ok(info_frames == 120 or not dish.has_bup(picked), "...and its info is there in every one of 120 frames at x10,000 (%d)" % info_frames)
+	TestUtil.show(info_frames == 120 or not dish.has_bup(picked), "...and its info is there in every one of 120 frames at x10,000 (%d)" % info_frames)
 	var some: PackedFloat32Array = gpu_side(dish)["records"].to_float32_array()
 	var fresh := dish.global_position + Vector2(some[GpuLayout.RECORD_WORDS * 7 + 1], some[GpuLayout.RECORD_WORDS * 7 + 2])  # (a bup's place, never hovered)
 	hover_world = fresh  # (the pointer moves there: the select tool hovers it every frame, and a click asks the same point)
@@ -760,7 +751,7 @@ func _edits() -> void:
 		waited += 1
 		answer = dish.cell_at(fresh, slack)
 	print("     the pointer moved onto a bup: a click there picks nothing for %d frames, then %d" % [waited, answer])
-	_ok(answer >= 0 and waited <= 6, "a pick at a new point is answered within 6 frames (%d)" % waited)
+	TestUtil.show(answer >= 0 and waited <= 6, "a pick at a new point is answered within 6 frames (%d)" % waited)
 
 	# the steering readout and the debug log
 	# (the picked bup may have died in the frames above, and the outline at `fresh` may still be last frame's plankton: a click takes
@@ -773,22 +764,22 @@ func _edits() -> void:
 		tries += 1
 	var steer := dish.bup_steering(dish.selected.bup)
 	var steer_bytes := dish.gpu_world.bup_steer_bytes(dish.selected.bup, Dish.STEER_ALPHA)
-	_ok(steer.z >= 0.0 and steer.z <= 1.0 and steer_bytes.size() == dish.field.get_size() * dish.field.get_size() * 4, "the steering readout (z %.3f) and map (%d bytes) of the selected bup" % [steer.z, steer_bytes.size()])
+	TestUtil.show(steer.z >= 0.0 and steer.z <= 1.0 and steer_bytes.size() == dish.field.get_size() * dish.field.get_size() * 4, "the steering readout (z %.3f) and map (%d bytes) of the selected bup" % [steer.z, steer_bytes.size()])
 	var text := DebugLog.report(dish, null, {"sim_speed": speed, "achieved_speed": achieved})
 	var data: Variant = JSON.parse_string(text)
-	_ok(data is Dictionary and data["backend"]["running"] == "gpu" and data["backend"]["gpu_device"] != "" and data["backend"]["gpu_overflows"] is Dictionary and data["selected"].has("bup"), "the debug log's backend section: %s" % (JSON.stringify(data["backend"]) if data is Dictionary else "not JSON"))
+	TestUtil.show(data is Dictionary and data["backend"]["running"] == "gpu" and data["backend"]["gpu_device"] != "" and data["backend"]["gpu_overflows"] is Dictionary and data["selected"].has("bup"), "the debug log's backend section: %s" % (JSON.stringify(data["backend"]) if data is Dictionary else "not JSON"))
 	DebugLog.directory = OS.get_environment("GAME_CHECK_LOGS") if OS.get_environment("GAME_CHECK_LOGS") != "" else "user://game_check_logs"
 	var log_path := DebugLog.write(text)
-	_ok(log_path != "" and FileAccess.file_exists(log_path), "the debug log is written (to %s)" % log_path)
+	TestUtil.show(log_path != "" and FileAccess.file_exists(log_path), "the debug log is written (to %s)" % log_path)
 
 	# bups by hand
 	pop = gpu_side(dish)["count"]
 	var added := dish.add_bup(dish.global_position + Vector2(1000.0, 1000.0), Genome.founder(), Dish.FOUNDER_ENERGY, 1.5)
 	g = gpu_side(dish)
-	_ok(g["count"] == pop + 1 and _ids(g["records"]).has(added) and dish.has_bup(added), "add_bup on the GPU: %d -> %d, the new one there" % [pop, g["count"]])
+	TestUtil.show(g["count"] == pop + 1 and _ids(g["records"]).has(added) and dish.has_bup(added), "add_bup on the GPU: %d -> %d, the new one there" % [pop, g["count"]])
 	dish.remove_bup(added)
 	g = gpu_side(dish)
-	_ok(g["count"] == pop and not _ids(g["records"]).has(added), "remove_bup on the GPU: gone")
+	TestUtil.show(g["count"] == pop and not _ids(g["records"]).has(added), "remove_bup on the GPU: gone")
 	await frames(30)
 
 	# save and load
@@ -797,9 +788,9 @@ func _edits() -> void:
 	await frames(60)
 	t0 = Time.get_ticks_msec()
 	quiet_until = frames_run + 5
-	_ok(dish.from_dict(saved), "from_dict on the GPU (%d ms)" % (Time.get_ticks_msec() - t0))
+	TestUtil.show(dish.from_dict(saved), "from_dict on the GPU (%d ms)" % (Time.get_ticks_msec() - t0))
 	g = gpu_side(dish)
-	_ok(g["count"] == saved_pop and dish.population() == saved_pop and is_equal_approx(dish.time, float(saved["time"])) and dish.backend_running() == "gpu", "...the GPU holds the saved %d bups at the saved time %.2f h" % [g["count"], dish.time / 3600.0])
+	TestUtil.show(g["count"] == saved_pop and dish.population() == saved_pop and is_equal_approx(dish.time, float(saved["time"])) and dish.backend_running() == "gpu", "...the GPU holds the saved %d bups at the saved time %.2f h" % [g["count"], dish.time / 3600.0])
 	await frames(120)
 	consistent("120 frames after the load")
 	var cpu_dish := Dish.new()
@@ -813,8 +804,8 @@ func _edits() -> void:
 	cpu_saved["backend"] = StartConditions.BACKEND_GPU  # (a save keeps its dish's setting: this one is to stay on the GPU)
 	cpu_dish.queue_free()
 	quiet_until = frames_run + 5
-	_ok(dish.from_dict(cpu_saved), "a save made on the CPU loads into the dish on the GPU")
-	_ok(gpu_side(dish)["count"] == Tools.saved_count(cpu_saved) and dish.backend_running() == "gpu", "...its %d bups on the GPU" % Tools.saved_count(cpu_saved))
+	TestUtil.show(dish.from_dict(cpu_saved), "a save made on the CPU loads into the dish on the GPU")
+	TestUtil.show(gpu_side(dish)["count"] == Tools.saved_count(cpu_saved) and dish.backend_running() == "gpu", "...its %d bups on the GPU" % Tools.saved_count(cpu_saved))
 	await frames(120)
 	consistent("120 frames after loading the CPU's save")
 
@@ -822,17 +813,17 @@ func _edits() -> void:
 	quiet_until = frames_run + 5
 	dish.strike(scenario_d(StartConditions.BACKEND_GPU, 1500))
 	g = gpu_side(dish)
-	_ok(g["count"] == 1500 and dish.time == 0.0 and dish.history.fine["pop"].is_empty() and dish.population() == 1500, "strike on the GPU: the new dish's 1,500 bups, time 0, no history")
+	TestUtil.show(g["count"] == 1500 and dish.time == 0.0 and dish.history.fine["pop"].is_empty() and dish.population() == 1500, "strike on the GPU: the new dish's 1,500 bups, time 0, no history")
 	await frames(120)
 	consistent("120 frames into the new dish")
 
 	quiet_until = frames_run + 5
 	dish.clear_bups()
-	_ok(gpu_side(dish)["count"] == 0 and dish.population() == 0, "clear_bups on the GPU")
+	TestUtil.show(gpu_side(dish)["count"] == 0 and dish.population() == 0, "clear_bups on the GPU")
 	var gone := [false]
 	dish.extinct.connect(func() -> void: gone[0] = true)
 	await frames(10)
-	_ok(gone[0], "...extinct is signalled")
+	TestUtil.show(gone[0], "...extinct is signalled")
 	_report_glitches()
 	_report_frames("edits")
 
@@ -872,7 +863,7 @@ func _long(hours: float, founders: int, limit: int, feed: float, bloom: float) -
 	print("     %.1f sim-hours in %.0f s of real time" % [hours, (Time.get_ticks_msec() - started) / 1000.0])
 	consistent("after %.0f sim-hours" % hours)
 	var ov: Dictionary = dish.gpu_world.overflows()
-	_ok(int(ov.get("clouds_to_grid", -1)) == 0 and int(ov.get("list_entries_cut", -1)) == 0 and int(ov.get("births_lost", -1)) == 0 and int(ov.get("deaths_lost", -1)) == 0, "nothing lost for want of room on the GPU in %.0f sim-hours (%s; the clouds' slots are freed as clouds go to the grid: %d clouds in the dish)" % [hours, str(ov), dish.field.puff_count()])
+	TestUtil.show(int(ov.get("clouds_to_grid", -1)) == 0 and int(ov.get("list_entries_cut", -1)) == 0 and int(ov.get("births_lost", -1)) == 0 and int(ov.get("deaths_lost", -1)) == 0, "nothing lost for want of room on the GPU in %.0f sim-hours (%s; the clouds' slots are freed as clouds go to the grid: %d clouds in the dish)" % [hours, str(ov), dish.field.puff_count()])
 	_report_frames("long")
 
 
@@ -899,7 +890,7 @@ func _perf(bups: int, radius: float, setting: String, run_speed: float, count: i
 	for i in count:
 		await frame()
 	if dish.backend_running() == "gpu":
-		_ok(_pct(frame_ms, 0.5) < 3.0 * 1000.0 / DisplayServer.screen_get_refresh_rate() + 1000.0 / 60.0, "the GPU's budget keeps the frame near the display's (p50 %.1f ms)" % _pct(frame_ms, 0.5))
+		TestUtil.show(_pct(frame_ms, 0.5) < 3.0 * 1000.0 / DisplayServer.screen_get_refresh_rate() + 1000.0 / 60.0, "the GPU's budget keeps the frame near the display's (p50 %.1f ms)" % _pct(frame_ms, 0.5))
 	print("PERF bups=%d (%d at the end) radius=%.0f setting=%s running=%s speed=x%.0f: frame ms mean %.2f p50 %.2f p95 %.2f p99 %.2f max %.2f, advance ms mean %.3f p95 %.3f, record_usec %d, apply ms/frame %.3f, achieved x%.0f, buffers %.0f MB (%.0f bytes a bup slot)" % [bups, dish.population(), radius, setting, dish.backend_running(), run_speed, _mean(frame_ms), _pct(frame_ms, 0.5), _pct(frame_ms, 0.95), _pct(frame_ms, 0.99), _pct(frame_ms, 1.0), _mean(advance_ms), _pct(advance_ms, 0.95), dish.gpu_world.record_usec, dish.gpu_world.apply_usec / 1000.0 / maxf(count, 1), achieved, mb, (mb * 1048576.0) / maxf(dish.gpu_world.gpu.capacity if dish.gpu_world.gpu != null else 1, 1)])
 
 

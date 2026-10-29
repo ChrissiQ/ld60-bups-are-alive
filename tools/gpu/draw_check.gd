@@ -17,7 +17,6 @@ extends SceneTree
 const REL := 2e-5
 const COLOUR_TOL := 1.0 / 255.0
 
-var fails := 0
 var out_dir := ""
 var from_source := OS.get_environment("GPU_FROM_SOURCE") == "1"
 
@@ -34,15 +33,9 @@ func _initialize() -> void:
 	_run.call_deferred()
 
 
-var passes := 0
-
-
 func check(ok: bool, what: String) -> void:
 	print(("PASS " if ok else "FAIL ") + what)
-	if ok:
-		passes += 1
-	if not ok:
-		fails += 1
+	TestUtil.check(ok, what)
 
 
 func _make_dish(n: int, rad: float, seed_value: int, bup_limit := 2000000) -> Dish:
@@ -398,8 +391,9 @@ func _run() -> void:
 	if args.size() > 2 and args[2] == "time":
 		await part_c()
 	const EXPECTED := 11  # (the checks parts A and B make: fewer means a part stopped on an error)
-	if passes + fails < EXPECTED:
-		fails += 1
-		print("FAIL only %d of the %d checks ran" % [passes + fails - 1, EXPECTED])
-	print("SUMMARY draw_check: %s (%d passed)" % ["OK" if fails == 0 else "%d FAILED" % fails, passes])
+	if TestUtil.checks < EXPECTED:
+		print("FAIL only %d of the %d checks ran" % [TestUtil.checks, EXPECTED])
+		TestUtil.check(false, "only %d of the %d checks ran" % [TestUtil.checks, EXPECTED])
+	var fails := TestUtil.failures.size()
+	print("SUMMARY draw_check: %s (%d passed)" % ["OK" if fails == 0 else "%d FAILED" % fails, TestUtil.checks - fails])
 	quit(0 if fails == 0 else 1)

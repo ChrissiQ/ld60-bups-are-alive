@@ -24,7 +24,7 @@ func _init() -> void:
 	var t2 := GoalTracker.new()
 	t2.from_dict(parsed["goals"])
 
-	var failures := []
+	var failures := TestUtil.failures
 	if not ok: failures.append("from_dict returned false")
 	if a.population() != b.population(): failures.append("cell count %d vs %d" % [a.population(), b.population()])
 	if absf(a.time - b.time) > 0.001: failures.append("time")
@@ -78,8 +78,4 @@ func _init() -> void:
 	if SaveGame.VERSION < 2: failures.append("the save version was not raised with the format")
 
 	print("cells=%d nutrient=%.0f history=%d goal_index=%d" % [a.population(), a.field.total() / Dish.NUTRIENT_ENERGY, a.history.fine["pop"].size(), tracker.index])
-	if failures.is_empty():
-		print("SAVE ROUNDTRIP OK")
-	else:
-		print("FAILED: ", failures)
-	quit(0 if failures.is_empty() else 1)
+	TestUtil.finish(self, "SAVE ROUNDTRIP OK")
