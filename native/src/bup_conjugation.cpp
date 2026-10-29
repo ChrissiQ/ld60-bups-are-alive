@@ -21,7 +21,7 @@ using namespace godot;
 void BupSim::conjugate(double delta) {
 	std::vector<int> donors;
 	for (size_t i = 0; i < bups.size(); i++) {
-		if (bups[i].donor) {
+		if (bups[i].g.donor) {
 			donors.push_back((int)i);
 		}
 	}
@@ -65,7 +65,7 @@ void BupSim::conjugate(double delta) {
 	}
 	for (size_t r = 0; r < bups.size(); r++) {
 		const Bup &b = bups[r];
-		if (b.donor) {
+		if (b.g.donor) {
 			continue;
 		}
 		const uint64_t key = cell_key(std::floor(b.x * per_cell), std::floor(b.y * per_cell));
@@ -95,7 +95,7 @@ void BupSim::conjugate(double delta) {
 		std::sort(candidates.begin(), candidates.end());
 		for (int r : candidates) {
 			Bup &to = bups[r];
-			if (to.donor || taken[r]) {
+			if (to.g.donor || taken[r]) {
 				continue;
 			}
 			double dx = (double)to.x - from.x, dy = (double)to.y - from.y, range = reach + body_radius(to);
@@ -103,14 +103,14 @@ void BupSim::conjugate(double delta) {
 				continue;
 			}
 			int run = 1;
-			while (run < 4 && uniform() < G.conj_continue) {
+			while (run < GENE_COUNT && uniform() < G.conj_continue) {
 				run++;
 			}
 			for (int g = 0; g < run; g++) {
-				to.genes[g] = from.genes[g];
+				to.g.genes[g] = from.g.genes[g];
 			}
-			int mask = (1 << (2 * run)) - 1; // (the raised ceilings of the genes that moved go with them)
-			to.reach = (to.reach & ~mask) | (from.reach & mask);
+			int mask = reach_mask(run); // (the raised ceilings of the genes that moved go with them)
+			to.g.reach = (to.g.reach & ~mask) | (from.g.reach & mask);
 			derive(to);
 			taken[r] = 1;
 			transfers++;

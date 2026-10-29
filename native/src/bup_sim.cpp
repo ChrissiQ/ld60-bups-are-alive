@@ -234,17 +234,17 @@ void BupSim::note_mutation(Genome &g) {
 
 // Each raise of a gene's ceiling multiplies the bound the gene was given (see Genome.REACH_*): once, twice, three times.
 double BupSim::gene_ceiling(int gene, int reach) const {
-	int level = (reach >> (2 * gene)) & 3;
+	int level = reach_level(reach, gene);
 	return G.gene_max[gene] * (level == 0 ? 1.0 : (level == 1 ? G.reach_factor_1 : (level == 2 ? G.reach_factor_2 : G.reach_factor_3)));
 }
 
-BupSim::Genome BupSim::mutate(const Genome &parent) {
+BupSim::Daughter BupSim::mutate(const Genome &parent) {
 	Genome g = parent;
-	g.lethal = false;
+	bool lethal = false;
 	const double rate = parent.mutator; // (the mutation rate of the parent: the daughter is made with it)
 	int traits = poisson(G.trait_mutations * rate);
 	for (int i = 0; i < traits; i++) {
-		int gene = (int)(uniform() * 4.0) % 4;
+		int gene = (int)(uniform() * (double)GENE_COUNT) % GENE_COUNT;
 		double changed = std::clamp((double)g.genes[gene] + gaussian() * G.gene_step[gene], G.gene_min[gene], gene_ceiling(gene, g.reach));
 		if ((float)changed != g.genes[gene]) { // a push against a bound changes nothing and is not counted
 			g.genes[gene] = (float)changed;
@@ -254,7 +254,7 @@ BupSim::Genome BupSim::mutate(const Genome &parent) {
 	int harmful = poisson(G.harmful_mutations * rate);
 	for (int i = 0; i < harmful; i++) {
 		if (uniform() < G.lethal_fraction) {
-			g.lethal = true;
+			lethal = true;
 		} else {
 			g.harm = (float)std::min((double)g.harm + gamma(G.harm_shape) * G.mean_harm / G.harm_shape, G.max_harm);
 		}
@@ -285,25 +285,25 @@ BupSim::Genome BupSim::mutate(const Genome &parent) {
 		g.donor = !g.donor;
 	}
 	// The acetate key (see Genome.KEY_*): a line is potentiated, rarely and at no cost, and a potentiated line rarely makes the key.
-	int key = (g.reach >> 8) & 3;
-	if (key == 0 ? uniform() < G.key_potentiation_rate : (key == 1 && uniform() < G.key_rate)) {
-		g.reach += 1 << 8;
+	int key = key_level(g.reach);
+	if (key == 0 ? uniform() < G.key_potentiation_rate : (key == REACH_KEY_POTENTIATED && uniform() < G.key_rate)) {
+		g.reach += 1 << REACH_KEY_SHIFT;
 		note_mutation(g);
 	}
 	// Rarely a mutation raises the ceiling of one gene (a regulatory change such as an insertion that makes a gene's product more abundant), up to three times.
 	if (uniform() < G.reach_rate) {
-		int gene = (int)(uniform() * 4.0) % 4;
-		if (((g.reach >> (2 * gene)) & 3) < 3) {
-			g.reach += 1 << (2 * gene);
+		int gene = (int)(uniform() * (double)GENE_COUNT) % GENE_COUNT;
+		if (reach_level(g.reach, gene) < REACH_MAX_LEVEL) {
+			g.reach += reach_unit(gene);
 			note_mutation(g);
 		}
 	}
-	return g;
+	return { g, lethal };
 }
 
 BupSim::Genome BupSim::genome_from_dict(const Dictionary &d) {
 	Genome g;
-	for (int i = 0; i < 4; i++) {
+	for (int i = 0; i < GENE_COUNT; i++) {
 		g.genes[i] = (float)(double)d.get(GENE_NAMES[i], 0.0);
 	}
 	g.hue = (float)(double)d.get("hue", G.founder_hue);
@@ -318,8 +318,8 @@ BupSim::Genome BupSim::genome_from_dict(const Dictionary &d) {
 }
 
 void BupSim::put_genome(Dictionary &out, const Genome &g, bool info_keys) {
-	for (int i = 0; i < 4; i++) {
-		out[i == 3 && info_keys ? "size_gene" : GENE_NAMES[i]] = g.genes[i];
+	for (int i = 0; i < GENE_COUNT; i++) {
+		out[i == GENE_COUNT - 1 && info_keys ? "size_gene" : GENE_NAMES[i]] = g.genes[i];
 	}
 	out["hue"] = g.hue;
 	out["sat"] = g.sat;
@@ -332,9 +332,9 @@ void BupSim::put_genome(Dictionary &out, const Genome &g, bool info_keys) {
 }
 
 Dictionary BupSim::mutate_genome(const Dictionary &genome) {
-	Genome child = mutate(genome_from_dict(genome));
+	Daughter child = mutate(genome_from_dict(genome));
 	Dictionary out;
-	put_genome(out, child, false);
+	put_genome(out, child.genome, false);
 	out["lethal"] = child.lethal;
 	return out;
 }
@@ -346,10 +346,10 @@ double BupSim::sample_gamma(double shape) {
 // ---- bup bookkeeping ------------------------------------------------------------------------
 
 void BupSim::derive(Bup &b) const {
-	double size_gene = b.genes[3];
+	double size_gene = b.g.genes[3];
 	b.add_mass = (float)(G.add_mass_factor * size_gene * size_gene);
-	b.yield = (float)(std::exp(-(double)b.harm) / std::sqrt((double)b.genes[2]));
-	b.drag_upkeep = (float)(G.drag_upkeep * (double)b.genes[0] * b.genes[0]);
+	b.yield = (float)(std::exp(-(double)b.g.harm) / std::sqrt((double)b.g.genes[2]));
+	b.drag_upkeep = (float)(G.drag_upkeep * (double)b.g.genes[0] * b.g.genes[0]);
 }
 
 // A bup only moves towards the front of `bups` (those before it die and the rest close up; one displaced at the limit takes the last
@@ -397,7 +397,7 @@ int64_t BupSim::add_bup(const Vector2 &pos, const Dictionary &genome, double ene
 	Vector2 d = dir.length() > 1e-6f ? dir.normalized() : Vector2(1, 0);
 	b.dx = d.x;
 	b.dy = d.y;
-	set_genome(b, genome_from_dict(genome));
+	b.g = genome_from_dict(genome);
 	b.divisions = divisions;
 	derive(b);
 	b.birth_mass = (float)(birth_mass < 0.0 ? b.add_mass : birth_mass);
@@ -549,10 +549,10 @@ Dictionary BupSim::info_of(const Bup &b) const {
 	out["size"] = size_of(b);
 	out["length"] = b.mass * G.mass_um;
 	out["divisions"] = b.divisions;
-	put_genome(out, genome_of(b), true);
+	put_genome(out, b.g, true);
 	out["upkeep"] = upkeep(b);
 	out["sense_range"] = sense_range(b);
-	out["steering"] = steering_of(b.x, b.y, b.genes[0], sense_range(b)).z;
+	out["steering"] = steering_of(b.x, b.y, b.g.genes[0], sense_range(b)).z;
 	return out;
 }
 
@@ -563,7 +563,7 @@ double BupSim::size_of(const Bup &b) const {
 }
 
 double BupSim::sense_range(const Bup &b) const {
-	return b.genes[1] * std::sqrt(size_of(b) / G.reference_size);
+	return b.g.genes[1] * std::sqrt(size_of(b) / G.reference_size);
 }
 
 bool BupSim::ready_to_divide(const Bup &b) const {
@@ -597,7 +597,7 @@ double BupSim::drawn_width(double pixel_um) const {
 }
 
 double BupSim::upkeep(const Bup &b) const {
-	return upkeep_scale * (G.base_upkeep + G.maintenance_per_mass * b.mass) + b.drag_upkeep * size_of(b) + G.sense_upkeep * b.genes[1];
+	return upkeep_scale * (G.base_upkeep + G.maintenance_per_mass * b.mass) + b.drag_upkeep * size_of(b) + G.sense_upkeep * b.g.genes[1];
 }
 
 double BupSim::max_energy(const Bup &b) const {
@@ -605,7 +605,7 @@ double BupSim::max_energy(const Bup &b) const {
 }
 
 double BupSim::uptake_wanted(const Bup &b, double concentration, double delta) const {
-	double wanted = G.uptake_per_size * size_of(b) * b.genes[2] * concentration / (G.half_saturation + concentration) * delta;
+	double wanted = G.uptake_per_size * size_of(b) * b.g.genes[2] * concentration / (G.half_saturation + concentration) * delta;
 	return std::min(wanted, std::max(max_energy(b) - b.energy, 0.0) / b.yield);
 }
 
@@ -636,7 +636,7 @@ bool BupSim::starved_to_death(const Bup &b, double delta) {
 	if (b.mass < G.starve_min_mass_share * b.birth_mass) {
 		return true;
 	}
-	double rate = G.starve_death_rate * std::exp(G.starve_death_exponent * b.genes[2]);
+	double rate = G.starve_death_rate * std::exp(G.starve_death_exponent * b.g.genes[2]);
 	return uniform() < 1.0 - std::exp(-rate * delta);
 }
 
@@ -653,7 +653,7 @@ void BupSim::pay_upkeep_and_grow(Bup &b, double delta) {
 	if (b.energy <= G.maintenance_floor) {
 		return;
 	}
-	double grow = std::min(G.growth_rate * b.genes[2] * b.mass * delta * (b.donor ? 1.0 - G.donor_cost : 1.0) * std::max(0.2, 1.0 - G.reach_cost * reach_levels(b.reach)) * (((b.reach >> 8) & 3) == 2 ? 1.0 - G.key_cost : 1.0), (b.energy - G.maintenance_floor) / G.cost_per_mass);
+	double grow = std::min(G.growth_rate * b.g.genes[2] * b.mass * delta * (b.g.donor ? 1.0 - G.donor_cost : 1.0) * std::max(0.2, 1.0 - G.reach_cost * reach_levels(b.g.reach)) * (key_level(b.g.reach) == REACH_KEY_MADE ? 1.0 - G.key_cost : 1.0), (b.energy - G.maintenance_floor) / G.cost_per_mass);
 	b.energy -= (float)(grow * G.cost_per_mass);
 	b.mass += (float)grow;
 }
@@ -693,8 +693,8 @@ void BupSim::swim_by_runs(Bup &b, double delta, Rng &r) {
 	}
 	b.dx = (float)dx;
 	b.dy = (float)dy;
-	b.x += (float)(dx * b.genes[0] * delta);
-	b.y += (float)(dy * b.genes[0] * delta);
+	b.x += (float)(dx * b.g.genes[0] * delta);
+	b.y += (float)(dy * b.g.genes[0] * delta);
 }
 
 // The wall: a swimmer that reaches it is turned along it, and slides until a tumble frees it.
@@ -737,7 +737,7 @@ double BupSim::bup_estimate_error(int64_t id, double concentration) const { WITH
 // up to 1.
 Vector3 BupSim::bup_steering(int64_t id) const {
 	WITH_BUP(id, Vector3(0, 0, 0.5))
-	return steering_of(b.x, b.y, b.genes[0], sense_range(b));
+	return steering_of(b.x, b.y, b.g.genes[0], sense_range(b));
 }
 
 // The same for any swimmer of this speed and sense range at a point (for a bup that lives on the GPU).
@@ -755,7 +755,7 @@ Vector3 BupSim::steering_of(double x, double y, double speed, double sense_range
 
 PackedByteArray BupSim::bup_steer_bytes(int64_t id, double max_alpha) const {
 	WITH_BUP(id, PackedByteArray())
-	return field->steer_bytes(b.genes[0], sense_range(b), max_alpha);
+	return field->steer_bytes(b.g.genes[0], sense_range(b), max_alpha);
 }
 double BupSim::bup_radius(int64_t id, double pixel_um) const { WITH_BUP(id, 0.0) return 0.5 * drawn_length(b, pixel_um); }
 bool BupSim::bup_ready(int64_t id) const { WITH_BUP(id, false) return ready_to_divide(b); }
@@ -788,22 +788,22 @@ double BupSim::bup_tumble_rate(int64_t id, double concentration, double delta, d
 // ---- statistics and picking ----------------------------------------------------------------
 
 Dictionary BupSim::population_stats() const {
-	double genes[4] = { 0, 0, 0, 0 }, harm = 0.0, mutations = 0.0, mutator = 0.0, donors = 0.0, keys = 0.0, divisions = 0.0;
+	double genes[GENE_COUNT] = {}, harm = 0.0, mutations = 0.0, mutator = 0.0, donors = 0.0, keys = 0.0, divisions = 0.0;
 	for (const Bup &b : bups) {
-		mutator += b.mutator;
-		keys += ((b.reach >> 8) & 3) == 2 ? 1.0 : 0.0;
-		donors += b.donor ? 1.0 : 0.0;
-		for (int g = 0; g < 4; g++) {
-			genes[g] += b.genes[g];
+		mutator += b.g.mutator;
+		keys += key_level(b.g.reach) == REACH_KEY_MADE ? 1.0 : 0.0;
+		donors += b.g.donor ? 1.0 : 0.0;
+		for (int g = 0; g < GENE_COUNT; g++) {
+			genes[g] += b.g.genes[g];
 		}
-		harm += 1.0 - std::exp(-(double)b.harm); // the share of food yield lost to harm
-		mutations += b.mutations;
+		harm += 1.0 - std::exp(-(double)b.g.harm); // the share of food yield lost to harm
+		mutations += b.g.mutations;
 		divisions += b.divisions;
 	}
 	double n = bups.empty() ? 1.0 : (double)bups.size();
 	Dictionary out;
 	out["count"] = (int)bups.size();
-	for (int g = 0; g < 4; g++) {
+	for (int g = 0; g < GENE_COUNT; g++) {
 		out[GENE_NAMES[g]] = genes[g] / n;
 	}
 	out["harm"] = harm / n;
@@ -822,7 +822,7 @@ double BupSim::fraction_with_gene_at_least(const String &name, double threshold)
 	}
 	int n = 0;
 	for (const Bup &b : bups) {
-		n += b.genes[g] >= threshold ? 1 : 0;
+		n += b.g.genes[g] >= threshold ? 1 : 0;
 	}
 	return (double)n / bups.size();
 }
@@ -922,7 +922,7 @@ void BupSim::note_uptake(uint32_t chunk, size_t i) {
 			e.cell = cell;
 			e.x = b.x;
 			e.y = b.y;
-			e.rate = G.uptake_per_size * size_of(b) * b.genes[2];
+			e.rate = G.uptake_per_size * size_of(b) * b.g.genes[2];
 			e.room = std::max(full - b.energy, 0.0) / b.yield;
 			e.clouds = clouds_now ? shares[i].total : 0.0;
 			uptake_lists[(size_t)chunk * uptake_blocks + (cell / field->get_size()) / uptake_rows].push_back(e);
@@ -1014,7 +1014,7 @@ void BupSim::drift_chunk(const SwimJob &job, size_t first, size_t last, Rng &r) 
 		l.x = b.x;
 		l.y = b.y;
 		l.sense_k = G.gradient_noise * (G.reference_sense / sense_range(b));
-		l.speed = b.genes[0];
+		l.speed = b.g.genes[0];
 		double limit = radius - body_radius(b);
 		l.near_wall2 = limit > 0.0 ? limit * limit * (1.0 - 1e-9) : -1.0; // (any bup nearer the wall than this gets the exact test)
 		l.hx = l.hy = l.hl = 0.0;
@@ -1165,7 +1165,7 @@ void BupSim::take_acetate(Bup &b, double delta) {
 	}
 	int glucose_cell = field->uptake_cell_xy(b.x, b.y);
 	double cg = glucose_cell >= 0 ? field->cell_concentration(glucose_cell) : 0.0;
-	double rate = G.acetate_uptake * (((b.reach >> 8) & 3) == 2 ? G.key_factor : 1.0) * G.uptake_per_size * std::sqrt((double)b.mass) * b.genes[2];
+	double rate = G.acetate_uptake * (key_level(b.g.reach) == REACH_KEY_MADE ? G.key_factor : 1.0) * G.uptake_per_size * std::sqrt((double)b.mass) * b.g.genes[2];
 	double want = std::min(rate * ca / (G.half_saturation + ca) * (G.half_saturation / (G.half_saturation + std::max(cg, 0.0))) * delta, room / b.yield);
 	double got = acetate->take_cell(cell, want);
 	b.energy = (float)std::min((double)b.energy + got * b.yield, max_energy(b));
@@ -1267,12 +1267,12 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 			double keep_share = std::clamp(0.5 + G.division_spread * gaussian(), 0.35, 0.65);
 			Vector2 daughter = split_off(b, keep_share);
 			double daughter_mass = daughter.x, daughter_energy = daughter.y;
-			Genome child_genome = mutate(genome_of(b));
+			Daughter born = mutate(b.g);
 			b.divisions += 1; // (the cell left in the parent's place is a product of the division whether or not the daughter lives)
-			if (!child_genome.lethal) { // a lethal daughter is never born; the parent still paid for her
+			if (!born.lethal) { // a lethal daughter is never born; the parent still paid for her
 				Bup child;
 				child.id = next_id++;
-				set_genome(child, child_genome);
+				child.g = born.genome;
 				derive(child);
 				child.mass = (float)daughter_mass;
 				child.birth_mass = child.mass;
@@ -1377,7 +1377,7 @@ PackedFloat32Array BupSim::render_buffer(double pixel_um, int capacity) {
 		p[5] = (float)(ux * quad_width);
 		p[7] = (float)(b.y - uy * trail * 0.5);
 		// colour: the bup's own hue, saturation and value
-		Color c = Color::from_hsv(b.hue, b.sat, b.val);
+		Color c = Color::from_hsv(b.g.hue, b.g.sat, b.g.val);
 		p[8] = c.r;
 		p[9] = c.g;
 		p[10] = c.b;

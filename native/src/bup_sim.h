@@ -18,6 +18,7 @@
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 
+#include <array>
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
@@ -65,66 +66,33 @@ struct Rng {
 class BupSim : public RefCounted {
 	GDCLASS(BupSim, RefCounted)
 
+	// What a bup inherits (and what its family record keeps): a new heritable field is added here, and in the GPU's record and events.
+	struct Genome {
+		std::array<float, GENE_COUNT> genes = {}; // speed, sense, metabolism, size
+		float hue = 0, sat = 0, val = 0, harm = 0; // colour is hue, saturation and value (0..1 each)
+		int mutations = 0;
+		float mutator = 1; // how many times the usual mutation rate it makes daughters at (the GPU's record keeps it in word 13)
+		bool donor = false; // carries the F factor in its chromosome: it can pass its genes on to a bup it touches (the GPU's record keeps it in word 14, as 0 or 1)
+		int reach = 0; // how far each gene's ceiling has been raised, two bits a gene (0-3), speed the lowest, and the acetate key's level above them (see `reach_level`; the GPU's record keeps it in word 12)
+	};
 	struct Bup {
 		int64_t id = 0;
 		float x = 0, y = 0, dx = 1, dy = 0;
 		float px = std::numeric_limits<float>::quiet_NaN(), py = std::numeric_limits<float>::quiet_NaN(); // where it was in the last picture (none yet: NaN), for its trail
 		float energy = 0, mass = 0, birth_mass = 0;
 		int divisions = 0;
-		float genes[4] = { 0, 0, 0, 0 }; // speed, sense, metabolism, size
-		float hue = 0, sat = 0, val = 0, harm = 0; // colour is hue, saturation and value (0..1 each)
-		int mutations = 0;
+		Genome g;
 		// derived from the genome
 		float yield = 1, add_mass = 8, drag_upkeep = 0;
-		int reach = 0; // how far each gene's ceiling has been raised: two bits a gene (0-3), speed the lowest (the GPU's record keeps it in word 12)
-		bool donor = false; // carries the F factor in its chromosome: it can pass its genes on to a bup it touches (the GPU's record keeps it in word 14, as 0 or 1)
-		float mutator = 1; // how many times the usual mutation rate it makes daughters at (the GPU's record keeps it in word 13)
 		// chemotaxis state (slow playback)
 		float fast = 0, slow = 0, noise = 0, tumbling = 0;
 		bool primed = false;
 	};
-	// What a bup inherits: Bup and Record each hold these fields under the same names, and they are copied between the two, a
-	// dictionary and the GPU's record only through the helpers below (a new heritable field is added here and there, and in the
-	// GPU's record and events).
-	struct Genome {
-		float genes[4] = { 0, 0, 0, 0 };
-		float hue = 0, sat = 0, val = 0, harm = 0;
-		int mutations = 0;
-		bool lethal = false; // (made by `mutate` only: a lethal daughter is never born, so no bup or record has it)
-		float mutator = 1;
-		bool donor = false;
-		int reach = 0;
+	// A daughter's genome as `mutate` makes it: a lethal daughter is never born, so no bup or record has the flag.
+	struct Daughter {
+		Genome genome;
+		bool lethal = false;
 	};
-	template <typename T>
-	static Genome genome_of(const T &b) {
-		Genome g;
-		for (int i = 0; i < 4; i++) {
-			g.genes[i] = b.genes[i];
-		}
-		g.hue = b.hue;
-		g.sat = b.sat;
-		g.val = b.val;
-		g.harm = b.harm;
-		g.mutations = b.mutations;
-		g.mutator = b.mutator;
-		g.donor = b.donor;
-		g.reach = b.reach;
-		return g;
-	}
-	template <typename T>
-	static void set_genome(T &to, const Genome &g) {
-		for (int i = 0; i < 4; i++) {
-			to.genes[i] = g.genes[i];
-		}
-		to.hue = g.hue;
-		to.sat = g.sat;
-		to.val = g.val;
-		to.harm = g.harm;
-		to.mutations = g.mutations;
-		to.mutator = g.mutator;
-		to.donor = g.donor;
-		to.reach = g.reach;
-	}
 	// A genome as a dictionary has it (the keys of mutate_genome and add_bup; what is missing is a founder's), and the genome into a
 	// dictionary: with the size gene as "size" (a genome) or "size_gene" (bup_info and lineage_info, where "size" is the body's).
 	static Genome genome_from_dict(const Dictionary &d);
@@ -140,13 +108,9 @@ class BupSim : public RefCounted {
 		int64_t parent = 0; // 0: a founder
 		int born = 0, died = -1;
 		int holds = 0; // records that name this one as their parent, plus pins: while any, a dead record stays
-		int divisions = 0, mutations = 0;
-		float genes[4] = { 0, 0, 0, 0 }; // as it was born, and as it was when it died (a conjugation can change them in between)
-		float hue = 0, sat = 0, val = 0, harm = 0;
-		float mutator = 1;
+		int divisions = 0;
+		Genome g; // as it was born, and its genes, raised ceilings and F factor as they were when it died (a conjugation can change them in between)
 		float max_energy = 0; // the reserve it could hold, as it was when it died
-		int reach = 0; // its raised ceilings and its acetate key (`Bup::reach`), as the genes are
-		bool donor = false; // whether it carried the F factor
 		float mass = 0, energy = 0, birth_mass = 0; // what it was when it died: its body, its reserve and the mass it was born with (a living bup's are its own)
 		String name; // what the player called it, if anything: it lives and goes with the record
 		bool alive = true;
@@ -189,7 +153,7 @@ class BupSim : public RefCounted {
 	int poisson(double mean);
 	double gamma(double shape);
 	void note_mutation(Genome &g);
-	Genome mutate(const Genome &parent);
+	Daughter mutate(const Genome &parent);
 	void derive(Bup &b) const;
 	// The GPU simulation's bup record (gpu/kernels.gd): STATE_WORDS 32-bit words, see export_state_bytes.
 	static constexpr int STATE_WORDS = 28;
@@ -288,10 +252,16 @@ public:
 	int64_t transfers = 0; // conjugation events so far (for the tools that measure how often they happen)
 	int64_t transfer_count() const { return transfers; }
 	double gene_ceiling(int gene, int reach) const; // the highest value the gene can have for a bup whose ceilings are raised so far
-	static int reach_levels(int reach) { return (reach & 3) + ((reach >> 2) & 3) + ((reach >> 4) & 3) + ((reach >> 6) & 3); }
+	static int reach_levels(int reach) {
+		int total = 0;
+		for (int gene = 0; gene < GENE_COUNT; gene++) {
+			total += reach_level(reach, gene);
+		}
+		return total;
+	}
 	double acetate_share(const Bup &b, double got, double delta) const; // the share of what a bup took in that it lets go of as acetate
 	void take_acetate(Bup &b, double delta); // a bup with room takes what it can of the acetate where it is
-	void conjugate(double delta); // donors that touch a bup that is not one pass on a run of genes (see Genome.DONOR_*) // a starving bup's chance of dying this step, drawn
+	void conjugate(double delta); // donors that touch a bup that is not one pass on a run of genes (see Genome.DONOR_*)
 	int husk_count() const { return (int)husks.size(); }
 	PackedFloat64Array husks_export() const; // 5 numbers each: x, y, energy, age, the next piece
 	PackedFloat64Array husk_near(const Vector2 &at, double radius) const; // the nearest husk within radius of a point, as husks_export gives one (5 numbers); empty if none

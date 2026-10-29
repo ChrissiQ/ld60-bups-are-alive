@@ -12,6 +12,17 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+// The genes (speed, sense, metabolism, size, in this order everywhere), and a bup's reach word: REACH_BITS bits for each gene, speed the
+// lowest, holding how many times that gene's ceiling has been raised (0 to REACH_MAX_LEVEL), and above the genes the acetate key's level
+// (0 none, 1 potentiated, REACH_KEY_MADE the key). The GPU keeps the same word (see Genome.REACH_* and Genome.KEY_* in scripts/genome.gd).
+inline constexpr int GENE_COUNT = 4;
+inline constexpr int REACH_BITS = 2, REACH_MAX_LEVEL = (1 << REACH_BITS) - 1;
+inline constexpr int REACH_KEY_SHIFT = GENE_COUNT * REACH_BITS, REACH_KEY_POTENTIATED = 1, REACH_KEY_MADE = 2;
+inline int reach_level(int reach, int gene) { return (reach >> (REACH_BITS * gene)) & REACH_MAX_LEVEL; }
+inline int reach_unit(int gene) { return 1 << (REACH_BITS * gene); } // what one raise of the gene adds to the word
+inline int reach_mask(int genes) { return (1 << (REACH_BITS * genes)) - 1; } // the levels of the first `genes` genes
+inline int key_level(int reach) { return (reach >> REACH_KEY_SHIFT) & REACH_MAX_LEVEL; }
+
 #define BUP_PARAMS(X) \
 	X(diffusion) X(field_target_spacing) X(field_min_across) X(field_max_across) \
 	X(nutrient_energy) X(max_cells) X(motion_step) X(motion_structure) X(cloud_handover) X(cloud_cut) X(steering_window) X(fine_step) X(diffuse_interval) X(diffuse_accuracy) \
@@ -134,7 +145,7 @@ struct Params {
 #define X(n) double n = 0.0;
 	BUP_PARAMS(X)
 #undef X
-	double gene_min[4] = { 0, 0, 0, 0 }, gene_max[4] = { 0, 0, 0, 0 }, gene_step[4] = { 0, 0, 0, 0 };
+	double gene_min[GENE_COUNT] = {}, gene_max[GENE_COUNT] = {}, gene_step[GENE_COUNT] = {};
 	MotionTable motion;
 	bool loaded = false;
 
@@ -146,8 +157,8 @@ struct Params {
 		BUP_PARAMS(X)
 #undef X
 		Array mins = d.get("gene_min", Array()), maxs = d.get("gene_max", Array()), steps = d.get("gene_step", Array());
-		if (mins.size() == 4 && maxs.size() == 4 && steps.size() == 4) {
-			for (int i = 0; i < 4; i++) {
+		if (mins.size() == GENE_COUNT && maxs.size() == GENE_COUNT && steps.size() == GENE_COUNT) {
+			for (int i = 0; i < GENE_COUNT; i++) {
 				gene_min[i] = mins[i];
 				gene_max[i] = maxs[i];
 				gene_step[i] = steps[i];

@@ -27,7 +27,7 @@ void BupSim::make_record(const Bup &b, int64_t parent) {
 	}
 	r.born = now_minutes();
 	r.divisions = b.divisions;
-	set_genome(r, genome_of(b));
+	r.g = b.g;
 	records[b.id] = r;
 }
 
@@ -42,11 +42,10 @@ void BupSim::record_death(const Bup &b) {
 	r.died = now_minutes();
 	r.divisions = b.divisions;
 	r.max_energy = (float)max_energy(b);
-	for (int g = 0; g < 4; g++) { // (the genes and their raised ceilings as they were when it died: a conjugation can have changed them since it was born)
-		r.genes[g] = b.genes[g];
-	}
-	r.reach = b.reach;
-	r.donor = b.donor;
+	// (the genes and their raised ceilings as they were when it died: a conjugation can have changed them since it was born; the rest of a genome is as it was born)
+	r.g.genes = b.g.genes;
+	r.g.reach = b.g.reach;
+	r.g.donor = b.g.donor;
 	r.mass = b.mass;
 	r.energy = b.energy;
 	r.birth_mass = b.birth_mass;
@@ -95,12 +94,12 @@ Dictionary BupSim::record_info(int64_t id, const Record &r) const {
 	out["born"] = r.born;
 	out["died"] = r.alive ? -1 : r.died;
 	out["divisions"] = r.divisions;
-	put_genome(out, genome_of(r), true);
+	put_genome(out, r.g, true);
 	out["max_energy"] = r.max_energy;
 	out["mass"] = r.mass;
 	out["energy"] = r.energy;
 	out["birth_mass"] = r.birth_mass;
-	out["div_mass"] = r.birth_mass + (float)(G.add_mass_factor * (double)r.genes[3] * (double)r.genes[3]);  // (the mass it divides at: what it was born with and what it adds)
+	out["div_mass"] = r.birth_mass + (float)(G.add_mass_factor * (double)r.g.genes[3] * (double)r.g.genes[3]);  // (the mass it divides at: what it was born with and what it adds)
 	out["name"] = r.name;
 	return out;
 }
@@ -213,17 +212,17 @@ PackedByteArray BupSim::lineage_export_bytes() const {
 		put<int32_t>(at, r.born);
 		put<int32_t>(at, r.died);
 		put<int32_t>(at, r.divisions);
-		put<int32_t>(at, r.mutations);
-		for (int g = 0; g < 4; g++) {
-			put<float>(at, r.genes[g]);
+		put<int32_t>(at, r.g.mutations);
+		for (int g = 0; g < GENE_COUNT; g++) {
+			put<float>(at, r.g.genes[g]);
 		}
-		put<float>(at, r.hue);
-		put<float>(at, r.sat);
-		put<float>(at, r.val);
-		put<float>(at, r.harm);
-		put<float>(at, r.mutator);
+		put<float>(at, r.g.hue);
+		put<float>(at, r.g.sat);
+		put<float>(at, r.g.val);
+		put<float>(at, r.g.harm);
+		put<float>(at, r.g.mutator);
 		put<float>(at, r.max_energy);
-		put<uint32_t>(at, (uint32_t)r.reach | (r.donor ? 1u << 31 : 0u));
+		put<uint32_t>(at, (uint32_t)r.g.reach | (r.g.donor ? 1u << 31 : 0u));
 		put<float>(at, r.mass);
 		put<float>(at, r.energy);
 		put<float>(at, r.birth_mass);
@@ -262,19 +261,19 @@ void BupSim::lineage_import_bytes(const PackedByteArray &data, const PackedInt64
 		r.born = take<int32_t>(at);
 		r.died = take<int32_t>(at);
 		r.divisions = take<int32_t>(at);
-		r.mutations = take<int32_t>(at);
-		for (int g = 0; g < 4; g++) {
-			r.genes[g] = take<float>(at);
+		r.g.mutations = take<int32_t>(at);
+		for (int g = 0; g < GENE_COUNT; g++) {
+			r.g.genes[g] = take<float>(at);
 		}
-		r.hue = take<float>(at);
-		r.sat = take<float>(at);
-		r.val = take<float>(at);
-		r.harm = take<float>(at);
-		r.mutator = take<float>(at);
+		r.g.hue = take<float>(at);
+		r.g.sat = take<float>(at);
+		r.g.val = take<float>(at);
+		r.g.harm = take<float>(at);
+		r.g.mutator = take<float>(at);
 		r.max_energy = take<float>(at);
 		uint32_t traits = take<uint32_t>(at);
-		r.reach = (int)(traits & 0x7FFFFFFFu);
-		r.donor = (traits >> 31) != 0;
+		r.g.reach = (int)(traits & 0x7FFFFFFFu);
+		r.g.donor = (traits >> 31) != 0;
 		r.mass = take<float>(at);
 		r.energy = take<float>(at);
 		r.birth_mass = take<float>(at);

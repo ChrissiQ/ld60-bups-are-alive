@@ -34,7 +34,7 @@ PackedByteArray BupSim::export_state_bytes() const {
 		for (int k = 0; k < 7; k++) {
 			put_f32(r, 1 + k, body[k]);
 		}
-		put_record_genome(r, genome_of(b));
+		put_record_genome(r, b.g);
 		put_f32(r, 20, (float)b.divisions);
 		put_u32(r, 21, (uint32_t)((uint64_t)b.id >> 32));
 		put_f32(r, 22, std::isnan(b.px) ? NO_PICTURE : b.px);
@@ -49,7 +49,7 @@ PackedByteArray BupSim::export_state_bytes() const {
 
 BupSim::Genome BupSim::record_genome(const uint8_t *record) {
 	Genome g;
-	for (int k = 0; k < 4; k++) {
+	for (int k = 0; k < GENE_COUNT; k++) {
 		g.genes[k] = get_f32(record, 8 + k);
 	}
 	g.reach = (int)(get_f32(record, 12) + 0.5f);
@@ -64,7 +64,7 @@ BupSim::Genome BupSim::record_genome(const uint8_t *record) {
 }
 
 void BupSim::put_record_genome(uint8_t *record, const Genome &g) {
-	for (int k = 0; k < 4; k++) {
+	for (int k = 0; k < GENE_COUNT; k++) {
 		put_f32(record, 8 + k, g.genes[k]);
 	}
 	put_f32(record, 12, (float)g.reach);
@@ -87,7 +87,7 @@ BupSim::Bup BupSim::bup_from_record(const uint8_t *record) const {
 	b.energy = get_f32(record, 5);
 	b.mass = get_f32(record, 6);
 	b.birth_mass = get_f32(record, 7);
-	set_genome(b, record_genome(record));
+	b.g = record_genome(record);
 	b.divisions = (int)get_f32(record, 20);
 	float px = get_f32(record, 22), py = get_f32(record, 23);
 	b.px = px >= 1e30f ? std::numeric_limits<float>::quiet_NaN() : px;
@@ -165,7 +165,7 @@ void BupSim::apply_events(const PackedByteArray &births, const PackedByteArray &
 			g.mutations = (int)(traits & 0xFFFFFu);
 			g.reach = (int)((traits >> 20) & 0x3FFu);
 			g.donor = ((traits >> 30) & 1u) != 0;
-			for (int k = 0; k < 4; k++) {
+			for (int k = 0; k < GENE_COUNT; k++) {
 				g.genes[k] = get_f32(e, 7 + k);
 			}
 			g.hue = get_f32(e, 11);
@@ -173,7 +173,7 @@ void BupSim::apply_events(const PackedByteArray &births, const PackedByteArray &
 			g.val = get_f32(e, 13);
 			g.harm = get_f32(e, 14);
 			g.mutator = get_f32(e, 15);
-			set_genome(b, g);
+			b.g = g;
 			make_record(b, get_id(e, 2, 3));
 			next_id = std::max(next_id, b.id + 1); // (a bup added here later never takes a number the GPU has given)
 		}
@@ -183,13 +183,13 @@ void BupSim::apply_events(const PackedByteArray &births, const PackedByteArray &
 			b.id = get_id(e, 0, 1);
 			const uint32_t traits = get_u32(e, 3); // the divisions in the low 20 bits, the reach word above them, the F factor at bit 30 (as the bup was when it died)
 			b.divisions = (int)(traits & 0xFFFFFu);
-			b.reach = (int)((traits >> 20) & 0x3FFu);
-			b.donor = ((traits >> 30) & 1u) != 0;
+			b.g.reach = (int)((traits >> 20) & 0x3FFu);
+			b.g.donor = ((traits >> 30) & 1u) != 0;
 			b.mass = get_f32(e, 4);
 			b.energy = get_f32(e, 8);
 			b.birth_mass = get_f32(e, 9);
-			for (int g = 0; g < 4; g++) {
-				b.genes[g] = get_f32(e, 10 + g);
+			for (int g = 0; g < GENE_COUNT; g++) {
+				b.g.genes[g] = get_f32(e, 10 + g);
 			}
 			record_death(b);
 			if (death_husks && get_f32(e, 7) > 0.0f) {

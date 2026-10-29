@@ -1,5 +1,7 @@
 #pragma once
 
+#include "params.h"
+
 #include <godot_cpp/variant/string.hpp>
 
 #include <cmath>
@@ -8,10 +10,10 @@
 
 // What the files of BupSim (bup_sim.cpp and its parts: bup_lineage.cpp, bup_gpu_io.cpp, bup_husks.cpp, bup_conjugation.cpp) share beyond the class.
 
-inline const char *const GENE_NAMES[4] = { "speed", "sense", "metabolism", "size" };
+inline const char *const GENE_NAMES[GENE_COUNT] = { "speed", "sense", "metabolism", "size" };
 
 inline int gene_index(const godot::String &name) {
-	for (int i = 0; i < 4; i++) {
+	for (int i = 0; i < GENE_COUNT; i++) {
 		if (name == GENE_NAMES[i]) {
 			return i;
 		}
