@@ -97,14 +97,11 @@ func _eps_at_c0() -> float:
 ## One ramp: [eps of the crowd at the start of the window, drift / speed, D along / speed², D across / speed², s.e. of the drift / speed].
 func _measure(gradient_percent: float) -> Array:
 	var length := 100.0 / gradient_percent
-	var d := Dish.new()
-	root.add_child(d)
-	d.set_seed(SEED)
 	var start := StartConditions.new()
 	start.dish_radius = RADIUS
 	start.bup_limit = 2 * BUPS  # (more than the crowd, so none is displaced)
 	start.nutrient_density = 0.0
-	d.strike(start)
+	var d := TestUtil.dish_from(self, start, SEED)
 	d.clear_bups()
 	d.feed_density = 0.0
 	var values := []

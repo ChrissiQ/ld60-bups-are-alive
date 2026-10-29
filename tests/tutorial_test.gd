@@ -96,26 +96,18 @@ func _init() -> void:
 	var nt: Tutorial = n.tutorial
 	TestUtil.check(not nt.back_button.visible, "there is no Back on the first step")
 	for code in [KEY_SPACE, KEY_ENTER, KEY_RIGHT]:
-		var press := InputEventKey.new()
-		press.keycode = code
-		press.pressed = true
 		var before := nt.index
-		nt._input(press)
+		nt._input(TestUtil.key_event(code))
 		TestUtil.check(nt.index == before + 1, "key %s goes on a step" % OS.get_keycode_string(code))
 	TestUtil.check(nt.back_button.visible and nt.back_button.text == "Back", "later steps have Back")
 	nt.back_button.pressed.emit()
 	TestUtil.check(nt.index == 2, "Back goes one step back")
-	var left := InputEventKey.new()
-	left.keycode = KEY_LEFT
-	left.pressed = true
-	nt._input(left)
+	nt._input(TestUtil.key_event(KEY_LEFT))
 	TestUtil.check(nt.index == 1, "so does the left arrow")
 	while nt.index < 9:
 		nt.next()
 	TestUtil.check(not nt.blocking, "on the click step")
-	var tool_key := InputEventKey.new()
-	tool_key.keycode = KEY_H
-	tool_key.pressed = true
+	var tool_key := TestUtil.key_event(KEY_H)
 	nt._input(tool_key)
 	TestUtil.check(n.tool == Toolbar.Tool.SELECT, "a tool key does nothing while the tour waits for a click (the tool stays Inspect)")
 	TestUtil.check(nt.index == 9 and nt.next_button.disabled, "Next is shut until the click is made")
@@ -169,10 +161,7 @@ func _init() -> void:
 		t.tutorial.next()
 	await process_frame
 	TestUtil.check(t.camera.zoom.x > was_zoom.x, "on the step that asks for a click the camera is close")
-	var escape := InputEventKey.new()
-	escape.keycode = KEY_ESCAPE
-	escape.pressed = true
-	t.tutorial._input(escape)
+	t.tutorial._input(TestUtil.key_event(KEY_ESCAPE))
 	await process_frame
 	TestUtil.check(not t.tutorial.active and t.camera.zoom.is_equal_approx(was_zoom) and t.dish.selected.bup < 0, "Escape skips it from there, and the camera goes back")
 	TestUtil.check(not t.menu_open, "and does not also open the menu")

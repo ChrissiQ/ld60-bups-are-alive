@@ -4,10 +4,7 @@ extends SceneTree
 ## (never touches the real user:// save).
 
 func _init() -> void:
-	var a := Dish.new()
-	root.add_child(a)
-	a.set_seed(7)
-	a.strike()
+	var a := TestUtil.dish_from(self, null, 7)
 	a.feed_density = 9.0
 	a.place_source(a.global_position + Vector2(50, 30), 4.0)
 	var tracker := GoalTracker.new()

@@ -142,10 +142,7 @@ func _init() -> void:
 	TestUtil.check(sim.bup_info(_cell(1.0, 8.0))["sense_range"] > sim.bup_info(small_body)["sense_range"], "a bigger body senses further")
 
 	# --- Moran cap: births at the limit displace bups instead of being blocked.
-	var dish := Dish.new()
-	root.add_child(dish)
-	dish.set_seed(3)
-	dish.strike(TestUtil.small_start())
+	var dish := TestUtil.dish_from(self, TestUtil.small_start(), 3)
 	dish.clear_bups()
 	for i in Dish.MAX_CELLS:  # fully grown (size 4: mass 16, born at 8), so each is ready to divide
 		dish.add_bup(dish.global_position + Vector2(rng.randf_range(-100, 100), rng.randf_range(-100, 100)), Genome.founder(), 200.0, 4.0)
@@ -250,10 +247,7 @@ func _init() -> void:
 		TestUtil.check(not inside_rim or centroid.distance_to(spot) < 0.5, "a point source is centred on its point at %s (centroid %s)" % [spot, centroid])
 
 	# --- A swimmer reaching the wall is turned along it rather than bounced straight back.
-	var wall_dish := Dish.new()
-	root.add_child(wall_dish)
-	wall_dish.set_seed(4)
-	wall_dish.strike(TestUtil.small_start())
+	var wall_dish := TestUtil.dish_from(self, TestUtil.small_start(), 4)
 	wall_dish.clear_bups()
 	var wall_id := wall_dish.add_bup(wall_dish.global_position + Vector2(wall_dish.radius - 3.0, 0.0), Genome.founder(), 90.0, -1.0, -1.0, 0, Vector2.RIGHT)
 	wall_dish.step(0.2)
@@ -281,9 +275,7 @@ func _init() -> void:
 	TestUtil.check(keen_gap > 0.15 and keen_gap > 1.4 * dull_gap, "keen bups tell a shallow gradient from none far better than dull ones (gap %.2f vs %.2f tumbles per second)" % [keen_gap, dull_gap])
 
 	# --- Steering: how surely a bup's drift goes up the slope where it is (halfway from a coin toss to certain), and the map of where it could.
-	var steer_dish := Dish.new()
-	root.add_child(steer_dish)
-	steer_dish.strike(TestUtil.small_start())
+	var steer_dish := TestUtil.dish_from(self, TestUtil.small_start())
 	steer_dish.clear_bups()
 	var ramp := []
 	for i in steer_dish.field.size * steer_dish.field.size:
@@ -309,9 +301,7 @@ func _init() -> void:
 	steer_dish.free()
 
 	# --- A bup that moves far between two pictures is drawn with a trail back to where it was; a still one, or a new one, has none.
-	var trail_dish := Dish.new()
-	root.add_child(trail_dish)
-	trail_dish.strike(TestUtil.small_start())
+	var trail_dish := TestUtil.dish_from(self, TestUtil.small_start())
 	trail_dish.clear_bups()
 	trail_dish.sim.add_bup(Vector2.ZERO, Genome.founder(), 60.0, 3.0, 5000.0, 0, Vector2.RIGHT)
 	var first_picture: PackedFloat32Array = trail_dish.sim.render_buffer(1.0, 4)
@@ -438,10 +428,7 @@ func _init() -> void:
 	TestUtil.check(sim.bup_info(typical)["max_energy"] / sim.bup_info(typical)["upkeep"] > 10.0 * 3600.0, "a full reserve lasts more than ten hours of starvation (%.0f h)" % (sim.bup_info(typical)["max_energy"] / sim.bup_info(typical)["upkeep"] / 3600.0))
 
 	# --- Playback: advance() covers the time asked for, in steps, and with a budget gives up early.
-	var clock_dish := Dish.new()
-	root.add_child(clock_dish)
-	clock_dish.set_seed(9)
-	clock_dish.strike(TestUtil.small_start())
+	var clock_dish := TestUtil.dish_from(self, TestUtil.small_start(), 9)
 	var covered := clock_dish.advance(100.0)
 	TestUtil.check(is_equal_approx(covered, 100.0) and is_equal_approx(clock_dish.time, 100.0), "advance covers the time asked for (%.1f s)" % covered)
 	var short := clock_dish.advance(10000.0, 1)  # a one-microsecond budget: stops after its first step
@@ -511,14 +498,11 @@ func _mean_tumble_rate(sense: float, slope: float) -> float:
 func _drift_speed(coarse: bool, gradient: bool, sense: float, long_step := 1.5) -> Vector2:
 	var moved := []
 	for seed_ in 2:
-		var d := Dish.new()
-		root.add_child(d)
-		d.set_seed(700 + seed_)
 		var start := StartConditions.new()
 		start.dish_radius = 1500.0  # wide: a wall in reach cuts the drift short, and it does so more the longer the steps
 		start.bup_limit = Dish.cap_for(1500.0)
 		start.nutrient_density = 0  # (the field is loaded below; nothing else should be in it)
-		d.strike(start)
+		var d := TestUtil.dish_from(self, start, 700 + seed_)
 		d.clear_bups()
 		d.feed_density = 0.0
 		var values := []

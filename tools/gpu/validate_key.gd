@@ -13,12 +13,9 @@ func _initialize() -> void:
 	var cpu_gain := {}
 	var gpu_gain := {}
 	for level in [0, 1, 2]:
-		var dish := Dish.new()
-		root.add_child(dish)
-		dish.set_seed(1)
 		var sc := StartConditions.new()
 		sc.bups = 1; sc.bup_limit = 100000; sc.dish_radius = 20000.0; sc.nutrient_density = 0.0
-		dish.strike(sc)
+		var dish := TestUtil.dish_from(self, sc, 1)
 		dish.clear_bups()
 		var mass := 12.0
 		var genome := Genome.founder()

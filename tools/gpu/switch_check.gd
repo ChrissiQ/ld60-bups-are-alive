@@ -208,10 +208,7 @@ func _same_snapshot(a: Dictionary, b: Dictionary, label: String) -> void:
 
 
 func _check() -> void:
-	var dish := Dish.new()
-	root.add_child(dish)
-	dish.set_seed(1)
-	dish.strike(_scenario_d())
+	var dish := TestUtil.dish_from(self, _scenario_d(), 1)
 	var world := CheckWorld.new(dish.sim, true)
 	dish.feed_density = 0.0
 	world.load_from_cpu(dish.field, dish._gpu_params())
@@ -326,14 +323,11 @@ func _check() -> void:
 
 ## Dish._choose_backend and the edits, with a GpuWorld on the main RenderingDevice (the pipeline's hooks as in CheckWorld).
 func _dish_switching() -> void:
-	var dish := Dish.new()
-	root.add_child(dish)
-	dish.set_seed(4)
 	var sc := _scenario_d()
 	sc.bups = 40
 	sc.dish_radius = 20000.0
 	sc.sim_backend = StartConditions.BACKEND_GPU
-	dish.strike(sc)
+	var dish := TestUtil.dish_from(self, sc, 4)
 	var world := CheckWorld.new(dish.sim)
 	dish.gpu_world = world
 	var pop := dish.sim.bup_count()
@@ -431,9 +425,6 @@ func _dish_switching() -> void:
 
 ## A dish with `n` bups spread over most of it (limit = n: the crowd stays about that size).
 func _bench_dish(n: int, radius: float, detail: int, clouds: int) -> Dish:
-	var dish := Dish.new()
-	root.add_child(dish)
-	dish.set_seed(3)
 	var sc := StartConditions.new()
 	sc.bups = 4
 	sc.bup_limit = n
@@ -441,7 +432,7 @@ func _bench_dish(n: int, radius: float, detail: int, clouds: int) -> Dish:
 	sc.nutrient_resolution = detail
 	sc.nutrient_density = 32.0
 	sc.spread_founders()
-	dish.strike(sc)
+	var dish := TestUtil.dish_from(self, sc, 3)
 	var born_with := Cell.mass_to_add(Genome.founder())
 	for i in n - 4:
 		var grown := born_with * (1.0 + dish.sim.random_float())

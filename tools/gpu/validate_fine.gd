@@ -40,13 +40,10 @@ func _init() -> void:
 	for key in ["diffusion", "uptake_per_size", "death_rate", "base_upkeep", "maintenance_per_mass", "sense_upkeep", "growth_rate", "drag_upkeep", "trait_mutations", "harmful_mutations"]:
 		frozen[key] = 0.0
 	BupSim.configure(frozen)
-	var dish := Dish.new()
-	root.add_child(dish)
-	dish.set_seed(seed_value)
 	var sc := StartConditions.new()
 	sc.bups = 250; sc.bup_limit = 20000; sc.dish_radius = RADIUS; sc.nutrient_density = 0.0; sc.feed_density = 0.0
 	sc.spread_founders()
-	dish.strike(sc)
+	var dish := TestUtil.dish_from(self, sc, seed_value)
 	dish.clear_bups()
 	var sim := dish.sim
 	var field := dish.field

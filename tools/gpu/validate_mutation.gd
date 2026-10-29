@@ -16,13 +16,10 @@ func _init() -> void:
 			consts["key_potentiation_rate"] = float(OS.get_cmdline_user_args()[3])
 			consts["key_rate"] = float(OS.get_cmdline_user_args()[4])
 		BupSim.configure(consts)  # (the processor's side too, after apply)
-	var dish := Dish.new()
-	root.add_child(dish)
-	dish.set_seed(1)
 	var sc := StartConditions.new()
 	sc.bups = 250; sc.bup_limit = 2000000; sc.dish_radius = 10000.0
 	sc.spread_founders()
-	dish.strike(sc)
+	var dish := TestUtil.dish_from(self, sc, 1)
 	var field := dish.field
 	var template: PackedFloat32Array = dish.sim.export_state_bytes().to_float32_array().slice(0, GpuLayout.RECORD_WORDS)
 	# a parent in the middle of every range, with a little harm already (so repairs can happen), the same for every bup

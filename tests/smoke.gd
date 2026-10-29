@@ -17,10 +17,7 @@ func _init() -> void:
 		for pair in OS.get_environment("SMOKE_CONSTS").split(","):
 			consts[pair.get_slice("=", 0)] = float(pair.get_slice("=", 1))
 		BupSim.configure(consts)
-	var dish := Dish.new()
-	root.add_child(dish)
-	dish.set_seed(int(OS.get_environment("SMOKE_SEED")) if OS.get_environment("SMOKE_SEED") != "" else 1)
-	dish.strike()
+	var dish := TestUtil.dish_from(self, null, int(OS.get_environment("SMOKE_SEED")) if OS.get_environment("SMOKE_SEED") != "" else 1)
 	var tracker := GoalTracker.new()
 	tracker.goal_completed.connect(func(g: Goal) -> void:
 		print("COMPLETE '%s' at %s pop=%d sense=%.0f" % [g.title, SimClock.format(dish.time), dish.population(), dish.population_stats()["sense"]])

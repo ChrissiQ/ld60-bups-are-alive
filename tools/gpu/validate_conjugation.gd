@@ -19,13 +19,10 @@ func _init() -> void:
 	var consts := SimConstants.build()
 	consts["conj_rate"] = 1000.0
 	BupSim.configure(consts)  # (after apply: the dish's creation would not undo it)
-	var dish := Dish.new()
-	root.add_child(dish)
-	dish.set_seed(1)
 	var sc := StartConditions.new()
 	sc.bups = 4; sc.bup_limit = 4 * n + 1000; sc.dish_radius = 10000.0
 	sc.spread_founders()
-	dish.strike(sc)
+	var dish := TestUtil.dish_from(self, sc, 1)
 	dish.stationary_phase = false
 	dish.clear_bups()
 	var side := int(ceil(sqrt(float(n))))

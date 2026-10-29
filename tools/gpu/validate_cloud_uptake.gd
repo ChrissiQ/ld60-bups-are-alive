@@ -12,13 +12,10 @@ func _init() -> void:
 	var frozen := consts.duplicate()
 	frozen["diffusion"] = 0.0
 	BupSim.configure(frozen)
-	var dish := Dish.new()
-	root.add_child(dish)
-	dish.set_seed(5)
 	var sc := StartConditions.new()
 	sc.bups = 250; sc.bup_limit = 2000000; sc.dish_radius = 90000.0; sc.nutrient_resolution = 100; sc.nutrient_density = 0.0
 	sc.spread_founders()
-	dish.strike(sc)
+	var dish := TestUtil.dish_from(self, sc, 5)
 	var field := dish.field
 	field.set_patchiness(0.0, 1000.0, 1)
 	var sim := dish.sim

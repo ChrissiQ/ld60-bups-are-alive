@@ -47,11 +47,8 @@ func _init() -> void:
 	var mode := a[0]; var scenario := a[1]; var seed_value := int(a[2])
 	SimConstants.apply()
 	var consts := SimConstants.build()
-	var dish := Dish.new()
-	root.add_child(dish)
-	dish.set_seed(seed_value)
 	var start := Tools.start_conditions(scenario)
-	dish.strike(start)
+	var dish := TestUtil.dish_from(self, start, seed_value)
 	if OS.get_environment("NO_BUPS") == "1":
 		dish.clear_bups()  # (NO_BUPS=1: the field alone, feed, plankton and sources, to compare what goes into it)
 	Tools.place_sources(dish, scenario)

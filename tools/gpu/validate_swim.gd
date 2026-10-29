@@ -27,13 +27,10 @@ func _init() -> void:
 	frozen["diffusion"] = 0.0
 	frozen["uptake_per_size"] = 0.0
 	BupSim.configure(frozen)
-	var dish := Dish.new()
-	root.add_child(dish)
-	dish.set_seed(9)
 	var sc := StartConditions.new()
 	sc.bups = 250; sc.bup_limit = 2000000; sc.dish_radius = rad; sc.nutrient_resolution = res; sc.nutrient_density = 32.0
 	sc.spread_founders()
-	dish.strike(sc)
+	var dish := TestUtil.dish_from(self, sc, 9)
 	var sim := dish.sim
 	var field := dish.field
 	if blob > 0.0:

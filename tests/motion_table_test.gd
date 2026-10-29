@@ -88,14 +88,11 @@ func _check_table_shape() -> void:
 ## The nutrient frozen and no eating, so that nothing but the motion changes between the runs.
 ## A dish with the given field and `bups` identical swimmers placed within `reach` of the origin; returns [dish, ids, start positions].
 func _crowd(radius: float, seed_: int, bups: int, speed: float, sense: float, reach: float, field: Callable) -> Array:
-	var d := Dish.new()
-	root.add_child(d)
-	d.set_seed(seed_)
 	var start := StartConditions.new()
 	start.dish_radius = radius
 	start.bup_limit = 2 * bups + 100
 	start.nutrient_density = 0.0
-	d.strike(start)
+	var d := TestUtil.dish_from(self, start, seed_)
 	d.clear_bups()
 	d.feed_density = 0.0
 	var values := []

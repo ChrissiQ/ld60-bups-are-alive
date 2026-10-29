@@ -196,10 +196,7 @@ func _run() -> void:
 	for i in 20:
 		await process_frame
 	TestUtil.check(m.holds.has(&"pipette") and m.paused and m.toolbar.resume_locked and m.vitals.get_parsed_text().contains(Strings.t("hud.pipette_paused")), "after the hours the game pauses and says so in the top bar")
-	var space := InputEventKey.new()
-	space.keycode = KEY_SPACE
-	space.pressed = true
-	m.toolbar._shortcut_input(space)
+	m.toolbar._shortcut_input(TestUtil.key_event(KEY_SPACE))
 	m.toolbar.speed_1000_button.button_pressed = true
 	TestUtil.check(m.paused, "neither Space nor a speed button resumes while it waits")
 	m.pipette(first.global_position + Vector2(5000.0, 5000.0), 30.0)
@@ -229,9 +226,7 @@ func _run() -> void:
 	TestUtil.check(sized.radius == 2000.0 and viewed.radius == viewed_radius, "a size chosen for one dish does not resize the one in view")
 	# A layer's key flips it with the layer buttons hidden (a shortcut does not reach a hidden button).
 	m.layers_panel.get_parent().get_parent().visible = false
-	var key := InputEventKey.new()
-	key.keycode = KeyBindings.key("layer_medium")
-	key.pressed = true
+	var key := TestUtil.key_event(KeyBindings.key("layer_medium"))
 	var shown := viewed.layer_shown(Dish.Layer.MEDIUM)
 	m._on_key(key)
 	TestUtil.check(viewed.layer_shown(Dish.Layer.MEDIUM) == not shown, "a layer key works with its buttons hidden")

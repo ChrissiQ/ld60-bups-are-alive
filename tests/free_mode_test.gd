@@ -1009,11 +1009,7 @@ func _init() -> void:
 	TestUtil.check(row.value_field.text == "17.3", "clicking the number shows the bare number to edit ('%s')" % row.value_field.text)
 	# Up and Down step the number while it is being edited.
 	var press := func(key: Key, shift := false) -> void:
-		var e := InputEventKey.new()
-		e.keycode = key
-		e.pressed = true
-		e.shift_pressed = shift
-		row.value_field.gui_input.emit(e)
+		row.value_field.gui_input.emit(TestUtil.key_event(key, true, false, shift))
 	row.value_field.release_focus()
 	row.configure(0, 100000, 1, 4)
 	row.value = 40
@@ -1214,9 +1210,7 @@ func _backend_rule_tests() -> void:
 	chosen.death_husks = true
 	TestUtil.check(StartConditions.from_dict(chosen.to_dict()).death_husks and chosen.copy().death_husks and not StartConditions.new().death_husks and not StartConditions.from_dict({"death_husks": 1}).death_husks, "the husks setting is saved and loaded with the rest, starts off, and anything but a boolean is off")
 	chosen.death_husks = false
-	var goal_dish := Dish.new()
-	root.add_child(goal_dish)
-	goal_dish.strike(null)
+	var goal_dish := TestUtil.dish_from(self, null)
 	var fresh := StartConditions.new()
 	var differs := []
 	if not (goal_dish.bup_limit == fresh.bup_limit):

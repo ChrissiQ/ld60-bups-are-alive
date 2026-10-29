@@ -92,9 +92,7 @@ func _init() -> void:
 	var shorter := StartConditions.new()
 	shorter.bups = 5
 	shorter.founders = [{"name": "A"}, {"color": "#00ff00"}]
-	var shorter_dish := Dish.new()
-	root.add_child(shorter_dish)
-	shorter_dish.strike(shorter)
+	var shorter_dish := TestUtil.dish_from(self, shorter)
 	TestUtil.check(shorter_dish.bup_name(1) == "A" and shorter_dish.bup_name(2).ends_with("#2") and shorter_dish.bup_name(5).ends_with("#5") and absf(shorter_dish.bup_info(2)["hue"] - Color.html("#00ff00").h) < 0.01 and absf(shorter_dish.bup_info(3)["hue"] - Genome.founder()["hue"]) < 0.001, "with fewer saved than founders the first ones get theirs and the rest the defaults")
 	shorter_dish.free()
 	var squeezed := StartConditions.from_dict({"bups": 50, "bup_limit": 10})

@@ -793,11 +793,8 @@ func _edits() -> void:
 	TestUtil.show(g["count"] == saved_pop and dish.population() == saved_pop and is_equal_approx(dish.time, float(saved["time"])) and dish.backend_running() == "gpu", "...the GPU holds the saved %d bups at the saved time %.2f h" % [g["count"], dish.time / 3600.0])
 	await frames(120)
 	consistent("120 frames after the load")
-	var cpu_dish := Dish.new()
-	root.add_child(cpu_dish)
-	cpu_dish.set_seed(9)
 	var cpu_sc := scenario_d(StartConditions.BACKEND_CPU, 500)
-	cpu_dish.strike(cpu_sc)
+	var cpu_dish := TestUtil.dish_from(self, cpu_sc, 9)
 	for i in 200:
 		cpu_dish.advance(160.0, 0)
 	var cpu_saved := JSON.parse_string(JSON.stringify(cpu_dish.to_dict())) as Dictionary
@@ -998,12 +995,10 @@ func _gpu_fit(bups: int, radius: float, nutrient := 32.0, feed := 3.0) -> void:
 ## 10 mm and 90 mm dishes (100 cells), x1,000 and x10,000 (at 60 Hz: one step of 16.7 s, nine of 18.5 s), with 0, 2,000 and 10,000 clouds.
 func _thresholds() -> void:
 	for r: float in [10000.0, 90000.0]:
-		var d := Dish.new()
-		root.add_child(d)
 		var sc := StartConditions.new()
 		sc.bups = 4; sc.dish_radius = r; sc.sim_backend = StartConditions.BACKEND_CPU
 		sc.spread_founders()
-		d.strike(sc)
+		var d := TestUtil.dish_from(self, sc)
 		for cfg: Array in [[1000.0, 1, 16.667], [10000.0, 9, 18.519], [1000.0, 2, 8.333], [10000.0, 10, 16.667]]:  # ([speed, steps for a 60 Hz frame, step length]: the first two at 60 Hz, the last two as a 120 Hz display gives them: two 8.3 s steps, ten of 16.7 s, as _choose_backend scales them)
 			for clouds: int in [0, 2000, 10000]:
 				var moves := d.sim.moves_for(cfg[2])
