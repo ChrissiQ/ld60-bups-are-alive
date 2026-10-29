@@ -79,10 +79,6 @@ const FIELD_TARGET_SPACING := 25.0  ## µm: plumes at the real diffusion are 50-
 const FIELD_MIN_ACROSS := 48  ## small dishes keep a fine grid (a 300 µm dish gets 12.5 µm cells)
 const FIELD_MAX_ACROSS := 100  ## a cost limit: the solve takes time in proportion to the cells (about 0.1 ms for this grid, once per step), and top playback speed depends on it
 const RENDER_MIN_CAPACITY := 256  ## the fewest bups the picture has room for
-const HISTORY_INTERVAL := 120.0  ## seconds between samples of the history graph
-const HISTORY_LEN := 5040  ## 168 hours (a week) of samples: the longest span of the fine history the graph shows
-const HISTORY_ALL_LEN := 1024  ## how many samples the whole-run history holds before its neighbours are merged in pairs (see `history_all`)
-const HISTORY_SERIES := ["pop", "speed", "sense", "metabolism", "size", "harm", "mutator", "donor", "key", "generation"]  ## population, each gene's mean, mean harm (%) and the mean mutation rate (a multiple of the usual)
 
 const BUP_SHADER := """
 shader_type canvas_item;
@@ -185,27 +181,13 @@ var place_preview_radius := -1.0  ## < 0 hides the placement preview
 var place_preview_erases := false  ## the preview is the eraser's brush
 var place_preview_marker := false  ## the preview marks a single point (a source about to be placed): drawn as a GUI ring, like a selection
 
-## Sampled every HISTORY_INTERVAL sim-seconds; oldest samples drop off the front.
-var history := {}
-## The whole run, in no more than HISTORY_ALL_LEN samples: each is the mean of `history_all_factor` samples of `history`,
-## and when it fills up the neighbours are merged in pairs and the factor doubles. So a run of any length is kept, thinner
-## the longer it gets. Sample i ends at (i + 1) * history_all_factor * HISTORY_INTERVAL.
-var history_all := {}
-var history_all_factor := 1
-var _all_sums := {}  ## the running sums for the next whole-run sample
-var _all_count := 0  ## how many samples of `history` are in them
-
-## Bumped whenever the history gains or loses a sample, so views can redraw only on change.
-var history_version := 0
-## The world time this dish's history began at (a dish that joins a running world begins at its time): the graph shows a dish's own time from here.
-var history_origin := 0.0
+var history := DishHistory.new()  ## what the graph shows of this dish
 
 var edit_count := 0  ## bumped by every change made to the dish by hand (a bup or source added or removed, nutrient dropped or erased), so screens can tell when to look again
 var _render_stamp := []  ## what the bups' picture was last built from
 var _render_stale := true  ## the bups were changed by hand (added, removed, a new dish), so the picture must be rebuilt
 var _trails_may_show := false  ## the last picture was made as time moved, so bups in it may be drawn with trails
 var _extinct_signalled := false
-var _history_accum := 0.0
 var _bups_mesh: MultiMeshInstance2D = null  ## all the bups, drawn in one go
 var _husks_mesh: MultiMeshInstance2D = null  ## every husk, as one instance each
 var _overlay: Node2D = null  ## the selection and hover rings, drawn above the bups
@@ -277,18 +259,7 @@ func _reset_runtime_state() -> void:
 
 
 func _reset_history() -> void:
-	history = {}
-	history_all = {}
-	_all_sums = {}
-	for series in HISTORY_SERIES:
-		history[series] = []
-		history_all[series] = []
-		_all_sums[series] = 0.0
-	history_all_factor = 1
-	_all_count = 0
-	_history_accum = 0.0
-	history_origin = 0.0
-	history_version += 1
+	history.reset()
 
 
 ## Abiogenesis: founders appear near the centre, part-way through their first growth (no divisions in their line: nothing precedes them).
@@ -308,8 +279,7 @@ func strike(start: StartConditions = null) -> void:
 	set_backend_setting(start.sim_backend)
 	backend.fresh = true
 	flash = 1.0
-	_render_stale = true
-	edit_count += 1
+	_edited()
 	time = 0.0
 	nutrients_placed = 0
 	sources.clear()
@@ -372,8 +342,7 @@ func resize_to(new_radius: float) -> void:
 						hovered_plankton = null
 					plankton.remove_at(i)
 		radius = new_radius
-		edit_count += 1
-		_render_stale = true
+		_edited()
 		queue_redraw())
 
 
@@ -447,12 +416,7 @@ func _step_world(delta: float) -> Dictionary:
 		positions.append(source.pos - global_position)
 		rates.append(source.rate)
 		source.emitted += source.rate / 60.0 * delta
-	var sample := false
-	_history_accum += delta
-	if _history_accum >= HISTORY_INTERVAL:
-		_history_accum -= HISTORY_INTERVAL
-		sample = true
-	return {"positions": positions, "rates": rates, "sample": sample}
+	return {"positions": positions, "rates": rates, "sample": history.tick(delta)}
 
 
 ## Emits `extinct` once, on the way down (not on every step after), when `count` bups are left and that is none.
@@ -469,44 +433,7 @@ func _record_history() -> void:
 ## One sample of the history graph from these figures (BupSim.population_stats' keys). The GPU path records its samples, taken on
 ## the GPU at the steps they belong to, through this too.
 func _record_history_from(stats: Dictionary) -> void:
-	history["pop"].append(stats["count"])
-	if stats["count"] == 0 and not history["harm"].is_empty():  # (nobody left to average: the traits stay as they last were)
-		for series in HISTORY_SERIES:
-			if series != "pop":
-				history[series].append(history[series][-1])
-	else:
-		for gene in Genome.GENES:
-			history[gene].append(stats[gene])
-		history["harm"].append(stats["harm"] * 100.0)
-		history["mutator"].append(stats["mutator"])
-		history["donor"].append(stats["donor"] * 100.0)
-		history["key"].append(stats["key"] * 100.0)
-		history["generation"].append(stats["generation"])
-	if history["pop"].size() > HISTORY_LEN:
-		for series in history.values():
-			series.pop_front()
-	for series in HISTORY_SERIES:
-		_all_sums[series] += history[series][-1]
-	_all_count += 1
-	if _all_count >= history_all_factor:
-		for series in HISTORY_SERIES:
-			history_all[series].append(_all_sums[series] / _all_count)
-			_all_sums[series] = 0.0
-		_all_count = 0
-		if history_all["pop"].size() >= HISTORY_ALL_LEN:
-			_thin_history_all()
-	history_version += 1
-
-
-## Merges the whole-run history's neighbours in pairs (each the mean of two), so it holds twice the time in half the samples.
-func _thin_history_all() -> void:
-	for series in HISTORY_SERIES:
-		var samples: Array = history_all[series]
-		var merged := []
-		for i in range(0, samples.size() - 1, 2):
-			merged.append((samples[i] + samples[i + 1]) * 0.5)
-		history_all[series] = merged
-	history_all_factor *= 2
+	history.record(stats)
 
 
 # --- The bups --------------------------------------------------------------------------------
@@ -585,7 +512,7 @@ func set_view_layer(bit: int) -> void:
 ## A dish that joins a world already under way begins at the world's time, and its bloom begins then too (not catching up on the time before).
 func begin_at(world_time: float) -> void:
 	time = world_time
-	history_origin = world_time
+	history.origin = world_time
 	_bloom_due = time
 
 
@@ -593,8 +520,7 @@ func begin_at(world_time: float) -> void:
 ## its mass); negative means a newborn of this genome.
 func add_bup(world_pos: Vector2, genome: Dictionary, energy: float, size := -1.0, birth_mass := -1.0, divisions := 0, dir := Vector2.RIGHT, id := -1) -> int:
 	return _edit_on_cpu(func() -> int:
-		_render_stale = true
-		edit_count += 1
+		_edited()
 		return sim.add_bup(world_pos - global_position, genome, energy, size, birth_mass, divisions, dir, id))
 
 
@@ -658,8 +584,7 @@ func lineage_info(id: int) -> Dictionary:
 ## point, to be dropped into another dish with `add_transferred`). A hand edit (`_edit_on_cpu`).
 func take_in_disc(world_pos: Vector2, disc_radius: float) -> PackedByteArray:
 	return _edit_on_cpu(func() -> PackedByteArray:
-		edit_count += 1
-		_render_stale = true
+		_edited()
 		taken_lineage = sim.lineage_export_bytes()  # (the family records as they are before the bups leave, for the dish they go to)
 		return sim.take_disc(world_pos - global_position, disc_radius))
 
@@ -670,8 +595,7 @@ func add_transferred(records: PackedByteArray, lineage: PackedByteArray) -> Pack
 	return _edit_on_cpu(func() -> PackedInt64Array:
 		var ids := sim.add_state_bytes(records, Vector2.ZERO, true)
 		sim.lineage_import_bytes(lineage, PackedInt64Array())
-		edit_count += 1
-		_render_stale = true
+		_edited()
 		return ids)
 
 
@@ -732,15 +656,13 @@ func unpin_bup(id: int) -> void:
 
 func remove_bup(id: int) -> void:
 	_edit_on_cpu(func() -> void:
-		_render_stale = true
-		edit_count += 1
+		_edited()
 		sim.remove_bup(id))
 
 
 func clear_bups() -> void:
 	_edit_on_cpu(func() -> void:
-		_render_stale = true
-		edit_count += 1
+		_edited()
 		sim.clear_bups())
 
 
@@ -1151,8 +1073,7 @@ func from_dict(d: Dictionary) -> bool:
 	sim.reset(radius, -1)
 	bup_limit = loaded["limit"]
 	loaded_bups = loaded_bups.slice(0, mini(loaded_bups.size(), StartConditions.MAX_BUP_LIMIT * GpuSim.RECORD_BYTES))  # (not the dish's limit: a save made on the GPU at the limit can hold a step's births more, which the next step takes back, as in play)
-	_render_stale = true
-	edit_count += 1
+	_edited()
 	sim.import_state_bytes(loaded_bups)
 	if loaded.has("next_id"):
 		sim.set_next_id(loaded["next_id"])  # so the next bup born doesn't take a number already used
@@ -1180,20 +1101,11 @@ func from_dict(d: Dictionary) -> bool:
 	_reset_runtime_state()
 	moved_out = loaded["moved_out"]
 	set_backend_setting(loaded["backend"])
-	var loaded_history: Dictionary = loaded["history"]
-	for key in loaded_history:
-		history[key] = loaded_history[key]
-	history_all = loaded["history_all"]
-	history_all_factor = loaded["history_all_factor"]
-	while history_all["pop"].size() >= HISTORY_ALL_LEN:
-		_thin_history_all()
+	history.load(loaded["history"], time)
 	for id in loaded_watched:  # (the import pinned them, oldest first, so the newest ends up on top again)
 		if has_record(id) and not watched.has(id):
 			watched.push_front(id)
 	watch_version += 1
-	# Samples are taken on multiples of the interval, so resume the timer part-way through one.
-	history_origin = loaded["history_origin"]
-	_history_accum = fposmod(time - history_origin, HISTORY_INTERVAL)
 	_mark_gpu_dirty()  # (a loaded dish: what the GPU held is gone)
 	return true
 
@@ -1376,6 +1288,12 @@ func _to_cpu_for_edit() -> void:
 	for sample: Dictionary in gpu_world.take_history_samples():  # (the history samples of the batches the stall finished: recorded, in order, before any CPU step)
 		_record_history_from(sample["stats"])
 	_gpu_on_cpu = true
+
+
+## A hand edit was made (what `edit_count` counts), and the bups' picture is out of date.
+func _edited() -> void:
+	_render_stale = true
+	edit_count += 1
 
 
 ## After an edit made by hand, a new dish or a load: the CPU's state is the true one, so the GPU loads it (now, so that the picture and

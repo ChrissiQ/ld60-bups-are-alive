@@ -158,7 +158,7 @@ func _run() -> void:
 	TestUtil.check(made.is_watched(child) and not first.is_watched(child) and m.watch_list.dishes.has(made), "...and so does its place on the watch list")
 	TestUtil.check(made != null and m.dishes.size() == 2 and m.dish == made, "the pipette makes a second dish and the main view moves to it")
 	TestUtil.check(absf(made.time - first.time) < 1.0, "the new dish is at the world's time (%.1f and %.1f s)" % [made.time, first.time])
-	TestUtil.check(is_equal_approx(made.history_origin, first.time) or absf(made.history_origin - first.time) < 1.0, "the new dish's history begins at the world's time (%.1f s)" % made.history_origin)
+	TestUtil.check(is_equal_approx(made.history.origin, first.time) or absf(made.history.origin - first.time) < 1.0, "the new dish's history begins at the world's time (%.1f s)" % made.history.origin)
 	m.graph.dish = made
 	m.graph.dishes = m.dishes
 	m.graph.all_dishes = false

@@ -821,12 +821,12 @@ func _init() -> void:
 	gone.strike(TestUtil.small_start())
 	for i in 40:
 		gone.step(20.0)
-	var recorded: int = gone.history["pop"].size()
-	var sense_then: float = gone.history["sense"][-1]
+	var recorded: int = gone.history.fine["pop"].size()
+	var sense_then: float = gone.history.fine["sense"][-1]
 	gone.clear_bups()
 	for i in 40:
 		gone.step(20.0)
-	TestUtil.check(gone.history["pop"].size() > recorded and gone.history["pop"][-1] == 0 and gone.history["sense"][-1] == sense_then and gone.history["pop"].size() == int(gone.time / Dish.HISTORY_INTERVAL), "the history keeps its time after the colony dies out (%d samples for %.0f s)" % [gone.history["pop"].size(), gone.time])
+	TestUtil.check(gone.history.fine["pop"].size() > recorded and gone.history.fine["pop"][-1] == 0 and gone.history.fine["sense"][-1] == sense_then and gone.history.fine["pop"].size() == int(gone.time / DishHistory.INTERVAL), "the history keeps its time after the colony dies out (%d samples for %.0f s)" % [gone.history.fine["pop"].size(), gone.time])
 	gone.free()
 	var whole := _make_dish()
 	whole.strike(TestUtil.small_start())
@@ -836,19 +836,19 @@ func _init() -> void:
 	var sum_pop := 0.0
 	for i in samples:
 		whole._record_history()
-		sum_pop += whole.history["pop"][-1]
-	var whole_n: int = whole.history_all["pop"].size()
-	TestUtil.check(whole_n < Dish.HISTORY_ALL_LEN and whole.history_all_factor == 8 and whole_n * whole.history_all_factor <= samples and (whole_n + 1) * whole.history_all_factor > samples, "the whole-run history stays under its limit by merging pairs (%d samples, each of %d)" % [whole_n, whole.history_all_factor])
-	TestUtil.check(whole.history["pop"].size() == Dish.HISTORY_LEN, "the fine history keeps its week")
+		sum_pop += whole.history.fine["pop"][-1]
+	var whole_n: int = whole.history.whole["pop"].size()
+	TestUtil.check(whole_n < DishHistory.ALL_LEN and whole.history.whole_factor == 8 and whole_n * whole.history.whole_factor <= samples and (whole_n + 1) * whole.history.whole_factor > samples, "the whole-run history stays under its limit by merging pairs (%d samples, each of %d)" % [whole_n, whole.history.whole_factor])
+	TestUtil.check(whole.history.fine["pop"].size() == DishHistory.LEN, "the fine history keeps its week")
 	var mean_all := 0.0
-	for v in whole.history_all["pop"]:
+	for v in whole.history.whole["pop"]:
 		mean_all += v
 	TestUtil.check(absf(mean_all / whole_n - sum_pop / samples) < 0.01, "...and its samples are means, so they keep the average")
 	var whole_copy := _make_dish()
-	TestUtil.check(whole_copy.from_dict(TestUtil.saved(whole)) and whole_copy.history_all["pop"].size() == whole_n and whole_copy.history_all_factor == whole.history_all_factor, "the whole-run history survives save and load")
+	TestUtil.check(whole_copy.from_dict(TestUtil.saved(whole)) and whole_copy.history.whole["pop"].size() == whole_n and whole_copy.history.whole_factor == whole.history.whole_factor, "the whole-run history survives save and load")
 	whole.free()
 	whole_copy.free()
-	TestUtil.check(Dish.HISTORY_LEN * Dish.HISTORY_INTERVAL == 168.0 * 3600.0, "the dish keeps a week of samples")
+	TestUtil.check(DishHistory.LEN * DishHistory.INTERVAL == 168.0 * 3600.0, "the dish keeps a week of samples")
 	TestUtil.check(HistoryGraph.harm_axis_max([]) == 10.0 and HistoryGraph.harm_axis_max([4.0, 9.9]) == 10.0 and HistoryGraph.harm_axis_max([12.0]) == 20.0 and HistoryGraph.harm_axis_max([35.0]) == 50.0 and HistoryGraph.harm_axis_max([5.0, 99.0]) == 100.0, "the harm axis grows to hold the data, up to 100%")
 	TestUtil.check(HistoryGraph.tick_text(0.4, 2.0) == "0.4" and HistoryGraph.tick_text(10.0, 120.0) == "10" and HistoryGraph.tick_text(150.0, 150.0) == "150", "trait ticks use sensible decimals")
 	var graph := HistoryGraph.new()
@@ -883,15 +883,15 @@ func _init() -> void:
 	var run := _make_dish()
 	run.strike(TestUtil.small_start())
 	run.place_source(run.global_position + Vector2(30, 30), 3.0)  # so there is a source to save and to corrupt
-	while run.time < 1.25 * Dish.HISTORY_INTERVAL:
+	while run.time < 1.25 * DishHistory.INTERVAL:
 		run.step(0.5)
 	var reloaded := _make_dish()
 	TestUtil.check(reloaded.from_dict(TestUtil.saved(run)), "a dish mid-run reloads")
-	var samples_before: int = reloaded.history["pop"].size()
-	while reloaded.history["pop"].size() == samples_before:
+	var samples_before: int = reloaded.history.fine["pop"].size()
+	while reloaded.history.fine["pop"].size() == samples_before:
 		reloaded.step(0.05)
-	var drift := absf(reloaded.time - Dish.HISTORY_INTERVAL * round(reloaded.time / Dish.HISTORY_INTERVAL))
-	TestUtil.check(drift < 0.06, "the first sample after a load falls on a multiple of %.0fs (t=%.2f)" % [Dish.HISTORY_INTERVAL, reloaded.time])
+	var drift := absf(reloaded.time - DishHistory.INTERVAL * round(reloaded.time / DishHistory.INTERVAL))
+	TestUtil.check(drift < 0.06, "the first sample after a load falls on a multiple of %.0fs (t=%.2f)" % [DishHistory.INTERVAL, reloaded.time])
 
 	# --- A bad save is rejected whole and leaves the dish exactly as it was.
 	var good: Dictionary = TestUtil.saved(run)

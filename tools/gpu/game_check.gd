@@ -41,7 +41,7 @@ class CheckDish extends Dish:
 		super()
 		sample_times.clear()
 		gpu_sample_times.clear()
-		history_start = floor(time / Dish.HISTORY_INTERVAL + 1e-9) * Dish.HISTORY_INTERVAL
+		history_start = floor(time / DishHistory.INTERVAL + 1e-9) * DishHistory.INTERVAL
 
 	func _record_history() -> void:
 		_cpu_sample_time = time
@@ -337,7 +337,7 @@ static func _unique(sorted_ids: PackedInt64Array) -> bool:
 
 func cpu_side(d: Dish) -> Dictionary:
 	var records := d.sim.export_state_bytes()
-	return {"records": records, "count": d.sim.bup_count(), "next_id": d.sim.get_next_id(), "total": d.field.total(), "alive": _sorted(d.sim.alive_ids()), "time": d.time, "samples": d.history["pop"].size()}
+	return {"records": records, "count": d.sim.bup_count(), "next_id": d.sim.get_next_id(), "total": d.field.total(), "alive": _sorted(d.sim.alive_ids()), "time": d.time, "samples": d.history.fine["pop"].size()}
 
 
 ## The GPU's state read now (stalls; on the render thread).
@@ -384,11 +384,11 @@ func _history_ok(d: CheckDish) -> bool:
 	var times := d.sample_times
 	var start := d.history_start
 	for k in times.size():
-		var due := start + (k + 1) * Dish.HISTORY_INTERVAL
+		var due := start + (k + 1) * DishHistory.INTERVAL
 		if times[k] < due - 1e-3 or times[k] > due + Dish.MAX_STEP + 1e-3:
 			print("     history sample %d at %.3f s, due %.3f" % [k, times[k], due])
 			return false
-	var expected := int(floor((d.time - start) / Dish.HISTORY_INTERVAL + 1e-9))
+	var expected := int(floor((d.time - start) / DishHistory.INTERVAL + 1e-9))
 	if d.backend_running() == "cpu" or d._gpu_on_cpu:
 		if times.size() != expected:
 			print("     history: %d samples, %d periods have passed" % [times.size(), expected])
@@ -523,7 +523,7 @@ func _auto(seed_value: int, setting: String) -> void:
 ## One line per sim-hour: what a CPU run and an Auto run of the same seed are compared by.
 func _series(hour: float) -> void:
 	var stats := dish.population_stats()
-	print("SERIES h=%d backend=%s pop=%d nutrient=%.1f clouds=%d speed=%.4f sense=%.4f metabolism=%.5f size=%.4f samples=%d" % [int(hour), dish.backend_running(), dish.population(), dish.field.total(), dish.field.puff_count(), stats["speed"], stats["sense"], stats["metabolism"], stats["size"], dish.history["pop"].size()])
+	print("SERIES h=%d backend=%s pop=%d nutrient=%.1f clouds=%d speed=%.4f sense=%.4f metabolism=%.5f size=%.4f samples=%d" % [int(hour), dish.backend_running(), dish.population(), dish.field.total(), dish.field.puff_count(), stats["speed"], stats["sense"], stats["metabolism"], stats["size"], dish.history.fine["pop"].size()])
 
 
 ## Auto with the population held where the rule switched (the limit set to it): over 2,400 frames at x10,000, with a hitch of 60 ms every
@@ -815,7 +815,7 @@ func _edits() -> void:
 	quiet_until = frames_run + 5
 	dish.strike(scenario_d(StartConditions.BACKEND_GPU, 1500))
 	g = gpu_side(dish)
-	_ok(g["count"] == 1500 and dish.time == 0.0 and dish.history["pop"].is_empty() and dish.population() == 1500, "strike on the GPU: the new dish's 1,500 bups, time 0, no history")
+	_ok(g["count"] == 1500 and dish.time == 0.0 and dish.history.fine["pop"].is_empty() and dish.population() == 1500, "strike on the GPU: the new dish's 1,500 bups, time 0, no history")
 	await frames(120)
 	consistent("120 frames into the new dish")
 
@@ -838,7 +838,7 @@ func _mem_line(label: String, window: PackedFloat64Array) -> void:
 	var t0 := Time.get_ticks_usec()
 	var alive := dish.sim.alive_ids().size()
 	var alive_ms := (Time.get_ticks_usec() - t0) / 1000.0
-	print("MEM %s: %.1f sim-h, bups %d, clouds %d, plankton %d, frames %d: frame ms p50 %.2f p95 %.2f p99 %.2f max %.2f, achieved x%.0f, advance ms mean %.3f, record_usec %d, buffers %.1f MB, video %.1f MB, static %.1f MB, history %d/%d, records %d (alive_ids %d in %.1f ms), overflows %s" % [label, dish.time / 3600.0, dish.population(), dish.field.puff_count(), dish.plankton.size(), frames_run, _pct(window, 0.5), _pct(window, 0.95), _pct(window, 0.99), _pct(window, 1.0), achieved, _mean(advance_ms.slice(maxi(0, advance_ms.size() - window.size()))), w.record_usec if w != null else 0, buffer_mb(), Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0, OS.get_static_memory_usage() / 1048576.0, dish.history["pop"].size(), dish.history_all["pop"].size(), dish.sim.record_count(), alive, alive_ms, str(ov)])
+	print("MEM %s: %.1f sim-h, bups %d, clouds %d, plankton %d, frames %d: frame ms p50 %.2f p95 %.2f p99 %.2f max %.2f, achieved x%.0f, advance ms mean %.3f, record_usec %d, buffers %.1f MB, video %.1f MB, static %.1f MB, history %d/%d, records %d (alive_ids %d in %.1f ms), overflows %s" % [label, dish.time / 3600.0, dish.population(), dish.field.puff_count(), dish.plankton.size(), frames_run, _pct(window, 0.5), _pct(window, 0.95), _pct(window, 0.99), _pct(window, 1.0), achieved, _mean(advance_ms.slice(maxi(0, advance_ms.size() - window.size()))), w.record_usec if w != null else 0, buffer_mb(), Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0, OS.get_static_memory_usage() / 1048576.0, dish.history.fine["pop"].size(), dish.history.whole["pop"].size(), dish.sim.record_count(), alive, alive_ms, str(ov)])
 
 
 ## Scenario D at x10,000 (setting On) for `hours` sim-hours, drawing: frame times, memory, the population; a MEM line every 1,200 frames.

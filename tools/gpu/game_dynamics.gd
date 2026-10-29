@@ -96,7 +96,7 @@ func _read_cpu() -> Array:
 
 
 func _history_values(index: int) -> Array:
-	var h := dish.history
+	var h := dish.history.fine
 	return [h["pop"][index], h["speed"][index], h["sense"][index], h["metabolism"][index], h["size"][index], h["harm"][index] / 100.0]
 
 
@@ -108,7 +108,7 @@ func _flush_chk() -> void:
 	while not chk_pending.is_empty():
 		var item: Array = chk_pending[0]
 		var index: int = item[0] * 30 - 1
-		if dish.history["pop"].size() <= index:
+		if dish.history.fine["pop"].size() <= index:
 			return
 		chk_pending.pop_front()
 		var rb: Array = item[1]

@@ -77,10 +77,10 @@ func _compare(label: String) -> void:
 	TestUtil.show(alive.size() == count, "%s: living records %d = GPU bups %d" % [label, alive.size(), count])
 	var over := Tools.overflows(world.gpu)
 	TestUtil.show(over["births_lost"] == 0 and over["deaths_lost"] == 0 and over["clouds_to_grid"] == 0 and over["list_entries_cut"] == 0, "%s: no overflow %s" % [label, str(over)])
-	var samples: int = dish.history["pop"].size()
-	var expected := roundi((dish.time - dish._history_accum) / Dish.HISTORY_INTERVAL)  # (the samples the dish's history clock has taken)
-	TestUtil.show(samples == expected, "%s: %d history samples for %.0f s (%d expected); last pop %d, GPU %d" % [label, samples, dish.time, expected, dish.history["pop"][-1] if samples > 0 else -1, count])
-	print("%s: records kept %d, time %.1f s, history clock %.6f s, frames %d" % [label, dish.sim.record_count(), dish.time, dish._history_accum, frames])
+	var samples: int = dish.history.fine["pop"].size()
+	var expected := roundi((dish.time - dish.history.accum) / DishHistory.INTERVAL)  # (the samples the dish's history clock has taken)
+	TestUtil.show(samples == expected, "%s: %d history samples for %.0f s (%d expected); last pop %d, GPU %d" % [label, samples, dish.time, expected, dish.history.fine["pop"][-1] if samples > 0 else -1, count])
+	print("%s: records kept %d, time %.1f s, history clock %.6f s, frames %d" % [label, dish.sim.record_count(), dish.time, dish.history.accum, frames])
 
 
 func _process(_delta: float) -> bool:

@@ -7,7 +7,7 @@ extends Control
 ## Colours and text sizes come from the theme type "HistoryGraph" (see scenes/menu_theme.tres),
 ## like any other widget; nothing about its look is decided here.
 
-const TRAITS := ["speed", "sense", "metabolism", "size", "harm", "mutator", "donor", "key", "generation"]  ## harm is the average % of food yield lost to mutation; mutator the average mutation rate as a multiple of the usual
+const TRAITS := DishHistory.TRAITS
 const MUTATOR_STEPS := [2.0, 5.0, 20.0, 150.0]  ## the mutator axis (from 1, the usual rate) tops out at the first of these that holds the data
 const HARM_STEPS := [10.0, 20.0, 50.0, 100.0]  ## the harm axis tops out at the first of these that holds the data (mean harm can reach about 99%)
 const THEME_TYPE := "HistoryGraph"
@@ -46,9 +46,9 @@ func refresh() -> void:
 	var version := 0
 	if combined():
 		for d: Dish in dishes:
-			version += d.history_version
+			version += d.history.version
 	elif dish != null:
-		version = dish.history_version
+		version = dish.history.version
 	var key := [version, trait_index, shown_span(), size, combined(), dishes.size()]
 	if key == _drawn_key:
 		return
@@ -76,7 +76,7 @@ func _now() -> float:
 		for d: Dish in dishes:
 			latest = maxf(latest, d.time)
 		return latest
-	return dish.time - dish.history_origin
+	return dish.time - dish.history.origin
 
 
 func set_all_dishes(value: bool) -> void:
@@ -198,7 +198,7 @@ static func tick_step(window: float, min_hours := 1.0) -> float:
 
 ## The time of the newest sample.
 static func last_sample_time(sim_time: float) -> float:
-	return floorf(sim_time / Dish.HISTORY_INTERVAL) * Dish.HISTORY_INTERVAL
+	return floorf(sim_time / DishHistory.INTERVAL) * DishHistory.INTERVAL
 
 
 ## Seconds shown at the left edge: the window starts at zero and follows the newest sample once
@@ -299,7 +299,7 @@ func _draw() -> void:
 
 
 ## The samples of a series as (time, value), the ones from `x_min` on. In the whole-run view they are the whole run's (thinned: see
-## Dish.history_all), each at the end of the stretch it is the mean of, with the newest sample of the fine history after them.
+## Dish.history.whole), each at the end of the stretch it is the mean of, with the newest sample of the fine history after them.
 ## Otherwise sample i was recorded at (newest sample time) - (samples after it) * interval.
 func _points(name: String, x_min: float, mode: Span) -> PackedVector2Array:
 	return _points_of(dish, name, x_min, mode, 0.0)
@@ -308,18 +308,18 @@ func _points(name: String, x_min: float, mode: Span) -> PackedVector2Array:
 ## `shift` moves the dish's own times (from the start of its history) on to the shown clock: its history's origin when every dish is shown together, nothing otherwise.
 func _points_of(d: Dish, name: String, x_min: float, mode: Span, shift: float) -> PackedVector2Array:
 	var out := PackedVector2Array()
-	var last_sample := last_sample_time(d.time - d.history_origin)
-	var fine: Array = d.history[name]
+	var last_sample := last_sample_time(d.time - d.history.origin)
+	var fine: Array = d.history.fine[name]
 	if mode == Span.ALL:
-		var whole: Array = d.history_all[name]
-		var step := d.history_all_factor * Dish.HISTORY_INTERVAL
+		var whole: Array = d.history.whole[name]
+		var step := d.history.whole_factor * DishHistory.INTERVAL
 		for i in whole.size():
 			out.append(Vector2((i + 1) * step + shift, whole[i]))
 		if not fine.is_empty() and (out.is_empty() or last_sample + shift > out[-1].x):
 			out.append(Vector2(last_sample + shift, fine[-1]))
 		return out
 	for i in fine.size():
-		var t := last_sample - (fine.size() - 1 - i) * Dish.HISTORY_INTERVAL + shift
+		var t := last_sample - (fine.size() - 1 - i) * DishHistory.INTERVAL + shift
 		if t >= x_min:
 			out.append(Vector2(t, fine[i]))
 	return out
@@ -330,7 +330,7 @@ func _pops_per_dish(x_min: float, mode: Span) -> Array:
 	var out: Array = []
 	if combined():
 		for d: Dish in dishes:
-			out.append(_points_of(d, "pop", x_min, mode, d.history_origin))
+			out.append(_points_of(d, "pop", x_min, mode, d.history.origin))
 	return out
 
 
@@ -346,7 +346,7 @@ func _series(name: String, x_min: float, mode: Span, dish_pops: Array = []) -> P
 	var grid := PackedVector2Array()
 	for k in dishes.size():
 		var pop: PackedVector2Array = pops[k]
-		vals.append(pop if name == "pop" else _points_of(dishes[k], name, x_min, mode, dishes[k].history_origin))
+		vals.append(pop if name == "pop" else _points_of(dishes[k], name, x_min, mode, dishes[k].history.origin))
 		if pop.size() > grid.size():
 			grid = pop
 	var pop_cursor := []

@@ -19,7 +19,7 @@ static func write(dish: Dish, bloom_due: float) -> Dictionary:
 	var saved_plankton := []
 	for cell in dish.plankton:
 		saved_plankton.append({"pos": _vec_to_array(cell.pos), "born_at": cell.born_at, "burst_at": cell.burst_at, "units": cell.units, "shape": cell.shape})
-	return {
+	var out := {
 		"next_id": dish.sim.get_next_id(),
 		"lineage": pack_bytes(dish.sim.lineage_export_bytes()),
 		"radius": dish.radius,
@@ -43,14 +43,12 @@ static func write(dish: Dish, bloom_due: float) -> Dictionary:
 		"bloom_due": bloom_due,
 		"upkeep_factor": dish.upkeep_factor,
 		"plankton": saved_plankton,
-		"history": dish.history,
-		"history_all": dish.history_all,
 		"watched": dish.watched,
-		"history_all_factor": dish.history_all_factor,
-		"history_origin": dish.history_origin,
 		"backend": dish.backend.setting,
 		"moved_out": saved_moved_out,
 	}
+	out.merge(dish.history.write())
+	return out
 
 
 ## The save's two blocks of bytes, [the bups' records, the family records], or [] if either is missing or unreadable or the bups' block
@@ -123,25 +121,9 @@ static func read(d: Dictionary, field: NutrientField, origin: Vector2) -> Dictio
 	for cloud in saved_clouds:
 		if not (cloud is Array) or cloud.size() != 5 or not Validate.all_numbers(cloud):
 			return {}
-	var saved_history = d.get("history", {})
-	if not (saved_history is Dictionary):
+	var loaded_history := DishHistory.read(d)
+	if loaded_history.is_empty():
 		return {}
-	var loaded_history := {}
-	for key in Dish.HISTORY_SERIES:
-		var series = saved_history.get(key)
-		if not (series is Array) or not Validate.all_numbers(series):
-			return {}
-		loaded_history[key] = series.slice(maxi(0, series.size() - Dish.HISTORY_LEN))
-	var saved_all = d.get("history_all")
-	if not (saved_all is Dictionary) or not Validate.is_number(d.get("history_all_factor")) or float(d["history_all_factor"]) < 1.0:
-		return {}
-	var loaded_all := {}
-	for key in Dish.HISTORY_SERIES:
-		var series = saved_all.get(key)
-		if not (series is Array) or not Validate.all_numbers(series):
-			return {}
-		loaded_all[key] = series
-
 	var loaded_watched := PackedInt64Array()  # the watch list, oldest first
 	var saved_watched = d.get("watched", [])
 	if saved_watched is Array:
@@ -182,9 +164,6 @@ static func read(d: Dictionary, field: NutrientField, origin: Vector2) -> Dictio
 		"patch_seed": int(d["patch_seed"]) if Validate.is_number(d.get("patch_seed")) else 0,
 		"backend": str(d.get("backend", "")),  # (anything but one of the three is Auto)
 		"history": loaded_history,
-		"history_all": loaded_all,
-		"history_all_factor": int(d["history_all_factor"]),
-		"history_origin": float(d["history_origin"]) if Validate.is_number(d.get("history_origin")) else 0.0,
 		"watched": loaded_watched,
 		"moved_out": loaded_moved_out,
 	}

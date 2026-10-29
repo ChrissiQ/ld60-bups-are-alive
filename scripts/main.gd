@@ -693,7 +693,7 @@ func debug_state() -> Dictionary:
 		"dish_strip": {"visible": dish_strip.visible, "main_zoomed_in": dish_strip.main_zoomed_in},
 		"watched_total": dishes.reduce(func(n: int, d: Dish) -> int: return n + d.watched.size(), 0),
 		"world_time": scheduler.world_time(),
-		"dishes": dishes.map(func(d: Dish) -> Dictionary: return {"number": _dish_numbers[d], "bups": d.population(), "time": d.time, "history_origin": d.history_origin, "position": [d.global_position.x, d.global_position.y], "backend": d.backend_running(), "husks": d.sim.husk_count(), "behind_s": maxf(dishes.reduce(func(m: float, o: Dish) -> float: return maxf(m, o.time), 0.0) - d.time, 0.0), "rule": DebugLog.rule(d)}),
+		"dishes": dishes.map(func(d: Dish) -> Dictionary: return {"number": _dish_numbers[d], "bups": d.population(), "time": d.time, "history_origin": d.history.origin, "position": [d.global_position.x, d.global_position.y], "backend": d.backend_running(), "husks": d.sim.husk_count(), "behind_s": maxf(dishes.reduce(func(m: float, o: Dish) -> float: return maxf(m, o.time), 0.0) - d.time, 0.0), "rule": DebugLog.rule(d)}),
 		"switch_turn": scheduler._turn,
 		"frame_budget_usec": DishScheduler.FRAME_BUDGET_USEC,
 		"freezer": freezer_shelf.entries.map(func(entry: Dictionary) -> Dictionary: return {"number": entry["number"], "bups": entry["bups"], "frozen_at": entry["data"].get("time", 0.0)}),
@@ -1099,21 +1099,7 @@ static func _move_saved_dish_to(data: Dictionary, world: float) -> void:
 			for key in ["born_at", "burst_at"]:
 				if Validate.is_number(saved.get(key)):
 					saved[key] = float(saved[key]) + gap
-	var history: Variant = data.get("history")
-	if history is Dictionary:
-		_pad_series(history, mini(int(gap / Dish.HISTORY_INTERVAL), Dish.HISTORY_LEN))
-	var whole: Variant = data.get("history_all")
-	if whole is Dictionary and Validate.is_number(data.get("history_all_factor")):
-		_pad_series(whole, mini(int(gap / (float(data["history_all_factor"]) * Dish.HISTORY_INTERVAL)), Dish.HISTORY_ALL_LEN))
-
-
-static func _pad_series(series_by_name: Dictionary, count: int) -> void:
-	for key in series_by_name:
-		var series: Variant = series_by_name[key]
-		if series is Array and not series.is_empty():
-			var last: Variant = series[-1]
-			for i in count:
-				series.append(last)
+	DishHistory.pad(data, gap)
 
 
 ## After a pipette: the dish the bups came from is what the player decides about, and nothing else can be done until they have. The game holds meanwhile.

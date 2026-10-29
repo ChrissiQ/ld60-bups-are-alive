@@ -39,7 +39,7 @@ func _init() -> void:
 	var b_ids := b.bup_ids()
 	for i in mini(a_ids.size(), b_ids.size()):
 		if absf(a.bup_info(a_ids[i])["mass"] - b.bup_info(b_ids[i])["mass"]) > 0.0001: failures.append("body size of cell %d" % i)
-	if a.history["pop"].size() != b.history["pop"].size(): failures.append("history length")
+	if a.history.fine["pop"].size() != b.history.fine["pop"].size(): failures.append("history length")
 	if tracker.index != t2.index: failures.append("goal index")
 	# A restored dish must keep running.
 	b.advance(300.0)
@@ -77,7 +77,7 @@ func _init() -> void:
 	# A save of another version is no save at all.
 	if SaveGame.VERSION < 2: failures.append("the save version was not raised with the format")
 
-	print("cells=%d nutrient=%.0f history=%d goal_index=%d" % [a.population(), a.field.total() / Dish.NUTRIENT_ENERGY, a.history["pop"].size(), tracker.index])
+	print("cells=%d nutrient=%.0f history=%d goal_index=%d" % [a.population(), a.field.total() / Dish.NUTRIENT_ENERGY, a.history.fine["pop"].size(), tracker.index])
 	if failures.is_empty():
 		print("SAVE ROUNDTRIP OK")
 	else:

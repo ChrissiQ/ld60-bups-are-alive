@@ -180,15 +180,15 @@ static func _husks(dish: Dish) -> Dictionary:
 ## The dish's graph history: where it began, how many samples each part holds, and the newest figures.
 static func _history(dish: Dish) -> Dictionary:
 	var newest := {}
-	for series: String in dish.history:
-		if not (dish.history[series] as Array).is_empty():
-			newest[series] = dish.history[series][-1]
+	for series: String in dish.history.fine:
+		if not (dish.history.fine[series] as Array).is_empty():
+			newest[series] = dish.history.fine[series][-1]
 	return {
-		"origin_s": dish.history_origin,
-		"samples": dish.history["pop"].size(),
-		"whole_run_samples": dish.history_all["pop"].size(),
-		"whole_run_factor": dish.history_all_factor,
-		"version": dish.history_version,
+		"origin_s": dish.history.origin,
+		"samples": dish.history.fine["pop"].size(),
+		"whole_run_samples": dish.history.whole["pop"].size(),
+		"whole_run_factor": dish.history.whole_factor,
+		"version": dish.history.version,
 		"newest": newest,
 	}
 

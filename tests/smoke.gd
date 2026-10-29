@@ -33,5 +33,5 @@ func _init() -> void:
 		tracker.update(dish, CHUNK)
 		if dish.population() == 0 or tracker.all_done():
 			break
-	print("history samples=%d goals_done=%d/%d pop=%d at %s (%.0f s real)" % [dish.history["pop"].size(), tracker.index, tracker.goals.size(), dish.population(), SimClock.format(dish.time), (Time.get_ticks_msec() - started) / 1000.0])
+	print("history samples=%d goals_done=%d/%d pop=%d at %s (%.0f s real)" % [dish.history.fine["pop"].size(), tracker.index, tracker.goals.size(), dish.population(), SimClock.format(dish.time), (Time.get_ticks_msec() - started) / 1000.0])
 	quit(0 if tracker.all_done() else 1)
