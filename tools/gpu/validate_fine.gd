@@ -46,8 +46,8 @@ func _init() -> void:
 	sc.spread_founders()
 	dish.strike(sc)
 	dish.clear_bups()
-	var sim = dish.sim
-	var field = dish.field
+	var sim := dish.sim
+	var field := dish.field
 	var n: int = field.get_size()
 	var sp: float = field.get_spacing()
 	var owner: PackedInt32Array = field.export_owner()

@@ -28,7 +28,7 @@ func _init() -> void:
 
 	# ---- (1) reading
 	var dish := _dish(rad, res, 1, 0.0, 0.0)
-	var field = dish.field
+	var field := dish.field
 	field.set_patchiness(0.0, 1000.0, 1)
 	var spacing: float = field.get_spacing()
 	var puffs := []
@@ -62,7 +62,7 @@ func _init() -> void:
 
 	# ---- (2) spreading, handover and being eaten: no bups, 6 steps
 	var dish2 := _dish(rad, res, 2, 0.0, 0.0)
-	var f2 = dish2.field
+	var f2 := dish2.field
 	f2.set_patchiness(0.0, 1000.0, 1)
 	var sp2: float = f2.get_spacing()
 	var puffs2 := []

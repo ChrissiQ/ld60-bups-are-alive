@@ -32,8 +32,8 @@ func _init() -> void:
 	sc.bups = 250; sc.bup_limit = 2000000; sc.dish_radius = rad; sc.nutrient_resolution = res; sc.nutrient_density = 32.0
 	sc.spread_founders()
 	dish.strike(sc)
-	var sim = dish.sim
-	var field = dish.field
+	var sim := dish.sim
+	var field := dish.field
 	if blob > 0.0:
 		field.deposit_disc(Vector2.ZERO, rad * 0.15, blob)
 	while dish.population() < n:

@@ -1,6 +1,7 @@
 #include "bup_sim.h"
 
-#include <godot_cpp/classes/worker_thread_pool.hpp>
+#include "parallel.h"
+
 
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/error_macros.hpp>
@@ -66,7 +67,6 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_stationary_phase", "on"), &BupSim::set_stationary_phase);
 	ClassDB::bind_method(D_METHOD("conjugate", "delta"), &BupSim::conjugate);
 	ClassDB::bind_method(D_METHOD("get_acetate"), &BupSim::get_acetate);
-	ClassDB::bind_method(D_METHOD("sync_acetate"), &BupSim::sync_acetate);
 	ClassDB::bind_method(D_METHOD("transfer_count"), &BupSim::transfer_count);
 	ClassDB::bind_method(D_METHOD("husk_count"), &BupSim::husk_count);
 	ClassDB::bind_method(D_METHOD("husks_export"), &BupSim::husks_export);
@@ -105,30 +105,27 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("bup_info", "id"), &BupSim::bup_info);
 	ClassDB::bind_method(D_METHOD("remove_bup", "id"), &BupSim::remove_bup);
 	ClassDB::bind_method(D_METHOD("take_disc", "center", "radius"), &BupSim::take_disc);
-	ClassDB::bind_method(D_METHOD("ids_in_disc", "center", "radius"), &BupSim::ids_in_disc);
 	ClassDB::bind_method(D_METHOD("living_descendants_of", "ids"), &BupSim::living_descendants_of);
 	ClassDB::bind_method(D_METHOD("add_state_bytes", "state", "shift", "keep_ids"), &BupSim::add_state_bytes, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("clear_bups"), &BupSim::clear_bups);
 	ClassDB::bind_method(D_METHOD("set_bup_energy", "id", "energy"), &BupSim::set_bup_energy);
 	ClassDB::bind_method(D_METHOD("set_bup_pos", "id", "pos"), &BupSim::set_bup_pos);
-	ClassDB::bind_method(D_METHOD("bup_upkeep", "id"), &BupSim::bup_upkeep);
-	ClassDB::bind_method(D_METHOD("bup_max_energy", "id"), &BupSim::bup_max_energy);
+	ClassDB::bind_method(D_METHOD("bup_steering", "id"), &BupSim::bup_steering);
+	ClassDB::bind_method(D_METHOD("bup_steer_bytes", "id", "max_alpha"), &BupSim::bup_steer_bytes);
+	ClassDB::bind_method(D_METHOD("bup_radius", "id", "pixel_um"), &BupSim::bup_radius);
+	ClassDB::bind_method(D_METHOD("bup_pos", "id"), &BupSim::bup_pos);
+	ClassDB::bind_method(D_METHOD("moves_for", "delta"), &BupSim::moves_for);
+	ClassDB::bind_method(D_METHOD("diffuse_pieces", "seconds"), &BupSim::diffuse_pieces);
+	ClassDB::bind_method(D_METHOD("set_custom_name", "id", "name"), &BupSim::set_custom_name);
+	ClassDB::bind_method(D_METHOD("custom_name", "id"), &BupSim::custom_name);
+	// Single-bup hooks for the tests that pin the biology (not used by the game).
 	ClassDB::bind_method(D_METHOD("bup_uptake", "id", "concentration", "delta"), &BupSim::bup_uptake);
 	ClassDB::bind_method(D_METHOD("bup_pay_upkeep_and_grow", "id", "delta"), &BupSim::bup_pay_upkeep_and_grow);
 	ClassDB::bind_method(D_METHOD("bup_eat", "id", "food_energy"), &BupSim::bup_eat);
 	ClassDB::bind_method(D_METHOD("bup_ready", "id"), &BupSim::bup_ready);
 	ClassDB::bind_method(D_METHOD("bup_split", "id", "keep"), &BupSim::bup_split);
 	ClassDB::bind_method(D_METHOD("bup_tumble_rate", "id", "concentration", "delta", "noise"), &BupSim::bup_tumble_rate);
-	ClassDB::bind_method(D_METHOD("moves_for", "delta"), &BupSim::moves_for);
-	ClassDB::bind_method(D_METHOD("diffuse_pieces", "seconds"), &BupSim::diffuse_pieces);
-	ClassDB::bind_method(D_METHOD("bup_sense_range", "id"), &BupSim::bup_sense_range);
 	ClassDB::bind_method(D_METHOD("bup_estimate_error", "id", "concentration"), &BupSim::bup_estimate_error);
-	ClassDB::bind_method(D_METHOD("bup_steering", "id"), &BupSim::bup_steering);
-	ClassDB::bind_method(D_METHOD("bup_steer_bytes", "id", "max_alpha"), &BupSim::bup_steer_bytes);
-	ClassDB::bind_method(D_METHOD("bup_radius", "id", "pixel_um"), &BupSim::bup_radius);
-	ClassDB::bind_method(D_METHOD("bup_pos", "id"), &BupSim::bup_pos);
-	ClassDB::bind_method(D_METHOD("set_custom_name", "id", "name"), &BupSim::set_custom_name);
-	ClassDB::bind_method(D_METHOD("custom_name", "id"), &BupSim::custom_name);
 	ClassDB::bind_method(D_METHOD("mutate_genome", "genome"), &BupSim::mutate_genome);
 	ClassDB::bind_method(D_METHOD("sample_gamma", "shape"), &BupSim::sample_gamma);
 	ClassDB::bind_method(D_METHOD("population_stats"), &BupSim::population_stats);
@@ -781,18 +778,6 @@ PackedInt32Array BupSim::living_descendants_of(const PackedInt64Array &ids) cons
 	return counts;
 }
 
-PackedInt64Array BupSim::ids_in_disc(const Vector2 &center, double disc_radius) const {
-	PackedInt64Array out;
-	const double r2 = disc_radius * disc_radius;
-	for (const Bup &b : bups) {
-		const double dx = b.x - center.x, dy = b.y - center.y;
-		if (dx * dx + dy * dy <= r2) {
-			out.push_back(b.id);
-		}
-	}
-	return out;
-}
-
 // The pipette's two halves. Taking: each bup in the disc is removed as a death (its family record is kept while anything holds it) and written out
 // as a record, with the place where it was (relative to `center`, so that the disc is a droplet when it lands in another dish).
 PackedByteArray BupSim::take_disc(const Vector2 &center, double disc_radius) {
@@ -887,6 +872,7 @@ Dictionary BupSim::info_of(const Bup &b) const {
 	out["divisions"] = b.divisions;
 	put_genome(out, genome_of(b), true);
 	out["upkeep"] = upkeep(b);
+	out["sense_range"] = sense_range(b);
 	out["steering"] = steering_of(b.x, b.y, b.genes[0], sense_range(b)).z;
 	return out;
 }
@@ -1064,10 +1050,7 @@ void BupSim::keep_inside(Bup &b, Rng &r) {
 	} \
 	const Bup &b = bups[_i];
 
-double BupSim::bup_upkeep(int64_t id) const { WITH_BUP(id, 0.0) return upkeep(b); }
-double BupSim::bup_max_energy(int64_t id) const { WITH_BUP(id, 0.0) return max_energy(b); }
 double BupSim::bup_uptake(int64_t id, double concentration, double delta) const { WITH_BUP(id, 0.0) return uptake_wanted(b, concentration, delta); }
-double BupSim::bup_sense_range(int64_t id) const { WITH_BUP(id, 0.0) return sense_range(b); }
 double BupSim::bup_estimate_error(int64_t id, double concentration) const { WITH_BUP(id, 0.0) return estimate_error(b, concentration); }
 
 // Which way this bup's drift tends (the unit vector up the gradient where it is) and how surely it goes that way: the
@@ -1967,24 +1950,9 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 	uptake_lists.resize((size_t)chunks * uptake_blocks);
 	grid_got.resize(bups.size());
 	cloud_want.resize(bups.size());
-	WorkerThreadPool *pool = WorkerThreadPool::get_singleton();
-	if (threads == 1 || chunks <= 1 || pool == nullptr) {
-		for (int chunk = 0; chunk < chunks; chunk++) {
-			swim_chunk(job, (uint32_t)chunk);
-		}
-	} else {
-		WorkerThreadPool::GroupID group = pool->add_native_group_task(&BupSim::run_swim_chunk, &job, chunks, threads > 1 ? threads : -1, true, "bups swim");
-		pool->wait_for_group_task_completion(group);
-	}
+	parallel_for(&BupSim::run_swim_chunk, &job, chunks, threads, true, "bups swim");
 	UptakeJob uptake_job = { this, delta };
-	if (threads == 1 || uptake_blocks <= 1 || pool == nullptr || bups.size() < 4000) {
-		for (int block = 0; block < uptake_blocks; block++) {
-			uptake_block(delta, (uint32_t)block);
-		}
-	} else {
-		WorkerThreadPool::GroupID group = pool->add_native_group_task(&BupSim::run_uptake_block, &uptake_job, uptake_blocks, threads > 1 ? threads : -1, true, "bups eat");
-		pool->wait_for_group_task_completion(group);
-	}
+	parallel_for(&BupSim::run_uptake_block, &uptake_job, uptake_blocks, threads, bups.size() >= 4000, "bups eat");
 
 	conjugate(delta);
 	size_t keep = 0;

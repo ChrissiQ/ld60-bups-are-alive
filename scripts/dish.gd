@@ -424,6 +424,8 @@ func advance(seconds: float, budget_usec := 0) -> float:
 	return done
 
 
+## One step of exactly `delta` simulated seconds: no splitting into MAX_STEP pieces, no time budget and no choice of backend (a dish already on the GPU
+## steps there). `advance` is the playback entry point; this is for the title screen's backdrop and for tests and tools that pin the step length.
 func step(delta: float) -> void:
 	if runs_on_gpu():
 		_advance_gpu(delta)

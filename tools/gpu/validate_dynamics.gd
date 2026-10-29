@@ -84,7 +84,7 @@ func _init() -> void:
 	if OS.get_environment("NO_BUPS") == "1":
 		dish.clear_bups()  # (NO_BUPS=1: the field alone, feed, plankton and sources, to compare what goes into it)
 	_place_sources(dish, scenario)
-	var field = dish.field
+	var field := dish.field
 	var hours := _hours(scenario)
 	var step := _step_seconds()
 	var per_hour := roundi(3600.0 / step)  # (steps in an hour: counted, so that rounding in the clock never moves a sample)

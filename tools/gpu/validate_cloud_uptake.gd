@@ -17,9 +17,9 @@ func _init() -> void:
 	sc.bups = 250; sc.bup_limit = 2000000; sc.dish_radius = 90000.0; sc.nutrient_resolution = 100; sc.nutrient_density = 0.0
 	sc.spread_founders()
 	dish.strike(sc)
-	var field = dish.field
+	var field := dish.field
 	field.set_patchiness(0.0, 1000.0, 1)
-	var sim = dish.sim
+	var sim := dish.sim
 	var puffs := []
 	for i in np:
 		var r := randf_range(0.0, 3000.0); var t := randf() * TAU
@@ -31,7 +31,7 @@ func _init() -> void:
 		var r := reach * sqrt(randf()); var t := randf() * TAU
 		sim.add_bup(Vector2(r * cos(t) * 1.0, r * sin(t)), g, Dish.FOUNDER_ENERGY, sqrt(born * 1.5), born, 0, Vector2.RIGHT)
 	for id in sim.bup_ids():
-		sim.set_bup_energy(id, randf() * 0.5 * sim.bup_max_energy(id))
+		sim.set_bup_energy(id, randf() * 0.5 * sim.bup_info(id)["max_energy"])
 	var b0: PackedByteArray = sim.export_state_bytes()  # (the bups as the GPU's records; s0 their words as floats, the ids through GpuSim.id_of)
 	var s0: PackedFloat32Array = b0.to_float32_array()
 	var conc0: PackedFloat32Array = field.values()

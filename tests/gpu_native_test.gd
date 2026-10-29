@@ -92,7 +92,7 @@ func _records_round_trip() -> void:
 		if sim.info_from_state(state, i) == sim.bup_info(ids[i]):
 			info_ok += 1
 		var info := sim.bup_info(ids[i])
-		if sim.steering_at(info["pos"], info["speed"], sim.bup_sense_range(ids[i])) == sim.bup_steering(ids[i]):
+		if sim.steering_at(info["pos"], info["speed"], info["sense_range"]) == sim.bup_steering(ids[i]):
 			steer_ok += 1
 	check(info_ok == ids.size(), "info_from_state gives bup_info's dictionary for every record (%d of %d)" % [info_ok, ids.size()])
 	check(steer_ok == ids.size(), "steering_at gives bup_steering for a bup's place, speed and sense range (%d of %d)" % [steer_ok, ids.size()])

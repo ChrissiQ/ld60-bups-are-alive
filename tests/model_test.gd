@@ -139,11 +139,11 @@ func _init() -> void:
 	var daughter := sim.bup_split(body, 0.5)
 	check(absf(_mass(body) * 2.0 - big_mass) < 0.001 and absf(_energy(body) - before * 0.5) < 0.001 and absf(daughter.x - _mass(body)) < 0.001 and absf(daughter.y - _energy(body)) < 0.001, "dividing shares the mass and the reserve")
 	sim.bup_eat(body, 1000.0)
-	check(_energy(body) <= sim.bup_max_energy(body) + 0.001, "the reserve can't hold more than the body allows")
+	check(_energy(body) <= sim.bup_info(body)["max_energy"] + 0.001, "the reserve can't hold more than the body allows")
 	var small_body := _cell(1.0, 2.0)
-	check(sim.bup_upkeep(_cell(1.0, 8.0)) > sim.bup_upkeep(_cell(1.0, 2.0)), "a bigger body costs more to keep")
-	check(sim.bup_upkeep(_cell(1.0, 8.0, 18.0)) - sim.bup_upkeep(_cell(1.0, 8.0, 4.0)) > sim.bup_upkeep(_cell(1.0, 2.0, 18.0)) - sim.bup_upkeep(_cell(1.0, 2.0, 4.0)), "swimming fast costs more for a bigger body (drag)")
-	check(sim.bup_sense_range(_cell(1.0, 8.0)) > sim.bup_sense_range(small_body), "a bigger body senses further")
+	check(sim.bup_info(_cell(1.0, 8.0))["upkeep"] > sim.bup_info(_cell(1.0, 2.0))["upkeep"], "a bigger body costs more to keep")
+	check(sim.bup_info(_cell(1.0, 8.0, 18.0))["upkeep"] - sim.bup_info(_cell(1.0, 8.0, 4.0))["upkeep"] > sim.bup_info(_cell(1.0, 2.0, 18.0))["upkeep"] - sim.bup_info(_cell(1.0, 2.0, 4.0))["upkeep"], "swimming fast costs more for a bigger body (drag)")
+	check(sim.bup_info(_cell(1.0, 8.0))["sense_range"] > sim.bup_info(small_body)["sense_range"], "a bigger body senses further")
 
 	# --- Moran cap: births at the limit displace bups instead of being blocked.
 	var dish := Dish.new()
@@ -437,9 +437,9 @@ func _init() -> void:
 		sim.bup_pay_upkeep_and_grow(grower, 60.0)
 	check(_mass(grower) / grown_from > 1.9 and _mass(grower) / grown_from < 2.1, "a fed bup doubles its mass in about 40 minutes (x%.2f)" % (_mass(grower) / grown_from))
 	var typical := sim.add_bup(Vector2.ZERO, Genome.founder(), 50.0, sqrt(Cell.REFERENCE_MASS), -1.0, 0, Vector2.RIGHT)
-	var upkeep_share := sim.bup_upkeep(typical) / Cell.FAST_BUDGET
+	var upkeep_share: float = sim.bup_info(typical)["upkeep"] / Cell.FAST_BUDGET
 	check(upkeep_share > 0.06 and upkeep_share < 0.11, "upkeep is under a tenth of the fast-growth budget (%.3f)" % upkeep_share)
-	check(sim.bup_max_energy(typical) / sim.bup_upkeep(typical) > 10.0 * 3600.0, "a full reserve lasts more than ten hours of starvation (%.0f h)" % (sim.bup_max_energy(typical) / sim.bup_upkeep(typical) / 3600.0))
+	check(sim.bup_info(typical)["max_energy"] / sim.bup_info(typical)["upkeep"] > 10.0 * 3600.0, "a full reserve lasts more than ten hours of starvation (%.0f h)" % (sim.bup_info(typical)["max_energy"] / sim.bup_info(typical)["upkeep"] / 3600.0))
 
 	# --- Playback: advance() covers the time asked for, in steps, and with a budget gives up early.
 	var clock_dish := Dish.new()

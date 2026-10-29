@@ -13,7 +13,7 @@ func _init() -> void:
 	sc.bups = 250; sc.bup_limit = 4200000; sc.dish_radius = rad; sc.nutrient_resolution = res; sc.nutrient_density = 32.0; sc.feed_density = 0.0
 	sc.spread_founders()
 	dish.strike(sc)
-	var field = dish.field
+	var field := dish.field
 	var template: PackedFloat32Array = dish.sim.export_state_bytes().to_float32_array().slice(0, GpuSim.STRIDE)
 	var bups := PackedFloat32Array()
 	bups.resize(n * GpuSim.STRIDE)

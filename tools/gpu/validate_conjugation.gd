@@ -53,7 +53,7 @@ func _init() -> void:
 	var cpu := _tally(dish.sim.export_state_bytes().to_float32_array(), state, n)
 	# --- the GPU, from the same records
 	var gpu := GpuSim.new()
-	var field = dish.field
+	var field := dish.field
 	var zero := PackedFloat32Array(); zero.resize(field.get_size() * field.get_size())
 	var c2 := consts.duplicate()
 	c2["uptake_per_size"] = 0.0; c2["death_rate"] = 0.0; c2["growth_rate"] = 0.0; c2["donor_gain"] = 0.0; c2["donor_loss"] = 0.0

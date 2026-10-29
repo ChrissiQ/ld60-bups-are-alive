@@ -334,7 +334,6 @@ public:
 	Dictionary bup_info(int64_t id) const;
 	void remove_bup(int64_t id);
 	PackedInt32Array living_descendants_of(const PackedInt64Array &ids) const; // for each id, how many living bups have it in their family line (itself included)
-	PackedInt64Array ids_in_disc(const Vector2 &center, double disc_radius) const; // the ids of the bups whose centres are in the disc, in the order take_disc writes them
 	PackedByteArray take_disc(const Vector2 &center, double disc_radius); // the pipette: every bup whose centre is in the disc leaves this dish; they come back as records (export_state_bytes' layout)
 	PackedInt64Array add_state_bytes(const PackedByteArray &state, const Vector2 &shift, bool keep_ids = false); // takes such records in as bups moved by `shift`: with new ids and each a founder with a family record of its own, or (`keep_ids`) with the ids they had and no family records (lineage_import_bytes brings them); their ids
 	void clear_bups() {
@@ -360,15 +359,12 @@ public:
 	void set_bup_pos(int64_t id, const Vector2 &pos);
 
 	// single-bup operations, for the tests that pin the biology
-	double bup_upkeep(int64_t id) const;
-	double bup_max_energy(int64_t id) const;
 	double bup_uptake(int64_t id, double concentration, double delta) const;
 	void bup_pay_upkeep_and_grow(int64_t id, double delta);
 	void bup_eat(int64_t id, double food_energy);
 	bool bup_ready(int64_t id) const;
 	Vector2 bup_split(int64_t id, double keep);
 	double bup_tumble_rate(int64_t id, double concentration, double delta, double noise);
-	double bup_sense_range(int64_t id) const;
 	double bup_estimate_error(int64_t id, double concentration) const;
 	Vector3 bup_steering(int64_t id) const;
 	PackedByteArray bup_steer_bytes(int64_t id, double max_alpha) const;

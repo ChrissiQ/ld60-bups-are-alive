@@ -108,37 +108,29 @@ static func read(d: Dictionary, field: NutrientField, origin: Vector2) -> Dictio
 		saved_field = []  # the radius had to be clamped, so the saved grid no longer fits the dish: start with a clear medium
 	if not (saved_field is Array) or (not saved_field.is_empty() and saved_field.size() != field_size * field_size):
 		return {}
-	for v in saved_field:
-		if not Validate.is_number(v):
-			return {}
+	if not Validate.all_numbers(saved_field):
+		return {}
 	var saved_acetate = d.get("acetate", [])
 	if saved_field.is_empty():
 		saved_acetate = []  # (a clear medium has no acetate either)
 	if not (saved_acetate is Array) or (not saved_acetate.is_empty() and saved_acetate.size() != field_size * field_size):
 		return {}
-	for v in saved_acetate:
-		if not Validate.is_number(v):
-			return {}
+	if not Validate.all_numbers(saved_acetate):
+		return {}
 	var saved_clouds = d.get("clouds")  # the plankton's nutrient not yet given to the grid: five numbers a cloud (NutrientField.puffs_export)
 	if not (saved_clouds is Array):
 		return {}
 	for cloud in saved_clouds:
-		if not (cloud is Array) or cloud.size() != 5:
+		if not (cloud is Array) or cloud.size() != 5 or not Validate.all_numbers(cloud):
 			return {}
-		for v in cloud:
-			if not Validate.is_number(v):
-				return {}
 	var saved_history = d.get("history", {})
 	if not (saved_history is Dictionary):
 		return {}
 	var loaded_history := {}
 	for key in Dish.HISTORY_SERIES:
 		var series = saved_history.get(key)
-		if not (series is Array):
+		if not (series is Array) or not Validate.all_numbers(series):
 			return {}
-		for v in series:
-			if not Validate.is_number(v):
-				return {}
 		loaded_history[key] = series.slice(maxi(0, series.size() - Dish.HISTORY_LEN))
 	var saved_all = d.get("history_all")
 	if not (saved_all is Dictionary) or not Validate.is_number(d.get("history_all_factor")) or float(d["history_all_factor"]) < 1.0:
@@ -146,11 +138,8 @@ static func read(d: Dictionary, field: NutrientField, origin: Vector2) -> Dictio
 	var loaded_all := {}
 	for key in Dish.HISTORY_SERIES:
 		var series = saved_all.get(key)
-		if not (series is Array):
+		if not (series is Array) or not Validate.all_numbers(series):
 			return {}
-		for v in series:
-			if not Validate.is_number(v):
-				return {}
 		loaded_all[key] = series
 
 	var loaded_watched := PackedInt64Array()  # the watch list, oldest first

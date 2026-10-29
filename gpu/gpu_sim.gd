@@ -734,26 +734,6 @@ func build_index() -> void:
 	_submit()
 
 
-## For timing: the kernels in this order (a name with "chain:" in front is a scan chain: "chain:bn", "chain:pf"), `reps` times in one submit; microseconds per round.
-func time_sequence(names: Array, reps := 10) -> float:
-	_set_step(delta)
-	var sizes := {"bin_clear": bins, "bin_cursor": bins, "bin_sort": bins, "dep_apply": n * n, "snapshot": n * n, "clear": n * n, "cells": n * n, "feed": n * n, "diffuse_a": n * n, "diffuse_b": n * n}
-	var cl := rd.compute_list_begin()
-	var t0 := Time.get_ticks_usec()
-	for r in reps:
-		for nm in names:
-			if nm.begins_with("chain:"):
-				_record_scan_chain(cl, nm.substr(6), _bin_sizes if nm == "chain:bn" else _puff_sizes)
-			else:
-				var threads: int = sizes.get(nm, 0)
-				if threads == 0:
-					threads = capacity if nm in ["swim", "demand", "apply", "life"] else puff_capacity
-				dispatch(cl, nm, threads)
-	rd.compute_list_end()
-	_submit()
-	return float(Time.get_ticks_usec() - t0) / reps
-
-
 ## [entries in all lists, most in one square, squares with any]: how crowded the lists of clouds by place are.
 func bin_stats() -> Array:
 	var counts_by_bin := rd.buffer_get_data(bufs["BINC"]).to_int32_array()

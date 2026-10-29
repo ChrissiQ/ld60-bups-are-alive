@@ -1,6 +1,7 @@
 #include "nutrient_field.h"
 
-#include <godot_cpp/classes/worker_thread_pool.hpp>
+#include "parallel.h"
+
 #include <godot_cpp/core/class_db.hpp>
 
 #include <algorithm>
@@ -177,15 +178,7 @@ static const int LINE_BLOCK = 16;
 static const int PARALLEL_CELLS = 30000;
 
 void NutrientField::run_blocks(void (*fn)(void *, uint32_t), void *job, int blocks) {
-	WorkerThreadPool *pool = WorkerThreadPool::get_singleton();
-	if (threads == 1 || blocks <= 1 || pool == nullptr || n * n < PARALLEL_CELLS) {
-		for (int block = 0; block < blocks; block++) {
-			fn(job, (uint32_t)block);
-		}
-		return;
-	}
-	WorkerThreadPool::GroupID group = pool->add_native_group_task(fn, job, blocks, threads > 1 ? threads : -1, true, "nutrient grid");
-	pool->wait_for_group_task_completion(group);
+	parallel_for(fn, job, blocks, threads, n * n >= PARALLEL_CELLS, "nutrient grid");
 }
 
 void NutrientField::snapshot_rows(int first_row, int last_row) {
@@ -400,31 +393,19 @@ void NutrientField::add_to_cell(int cell, float amount) {
 }
 
 PackedFloat32Array NutrientField::take_recorded_puffs() {
-	PackedFloat32Array out;
-	out.resize((int64_t)rec_puffs.size());
-	if (!rec_puffs.empty()) {
-		memcpy(out.ptrw(), rec_puffs.data(), rec_puffs.size() * sizeof(float));
-	}
+	PackedFloat32Array out = to_packed<PackedFloat32Array>(rec_puffs);
 	rec_puffs.clear();
 	return out;
 }
 
 PackedInt32Array NutrientField::take_recorded_cells() {
-	PackedInt32Array out;
-	out.resize((int64_t)rec_cells.size());
-	if (!rec_cells.empty()) {
-		memcpy(out.ptrw(), rec_cells.data(), rec_cells.size() * sizeof(int));
-	}
+	PackedInt32Array out = to_packed<PackedInt32Array>(rec_cells);
 	rec_cells.clear();
 	return out;
 }
 
 PackedFloat32Array NutrientField::take_recorded_amounts() {
-	PackedFloat32Array out;
-	out.resize((int64_t)rec_amounts.size());
-	if (!rec_amounts.empty()) {
-		memcpy(out.ptrw(), rec_amounts.data(), rec_amounts.size() * sizeof(float));
-	}
+	PackedFloat32Array out = to_packed<PackedFloat32Array>(rec_amounts);
 	rec_amounts.clear();
 	return out;
 }
@@ -564,10 +545,10 @@ void NutrientField::puffs_import(const Array &saved) {
 			continue;
 		}
 		Array one = v;
-		if (one.size() != 4 && one.size() != 5) { // (a save from before the sources' clouds has four)
+		if (one.size() != 5) {
 			continue;
 		}
-		Puff p = { (double)one[0], (double)one[1], (double)one[2], (double)one[3], one.size() == 5 ? (double)one[4] : 1.0 };
+		Puff p = { (double)one[0], (double)one[1], (double)one[2], (double)one[3], (double)one[4] };
 		if (p.var > 0.0 && p.mass > 0.0 && p.x * p.x + p.y * p.y <= radius * radius) {
 			puffs.push_back(p);
 		}
@@ -1058,12 +1039,7 @@ double NutrientField::total() const {
 }
 
 PackedFloat32Array NutrientField::values() const {
-	PackedFloat32Array out;
-	out.resize((int64_t)conc.size());
-	if (!conc.empty()) {
-		memcpy(out.ptrw(), conc.data(), conc.size() * sizeof(float));
-	}
-	return out;
+	return to_packed<PackedFloat32Array>(conc);
 }
 
 Dictionary NutrientField::export_packed() const {
@@ -1105,12 +1081,7 @@ void NutrientField::import_packed(const PackedFloat32Array &new_conc, const Pack
 }
 
 PackedInt32Array NutrientField::export_owner() const {
-	PackedInt32Array out;
-	out.resize((int64_t)owner.size());
-	if (!owner.empty()) {
-		memcpy(out.ptrw(), owner.data(), owner.size() * sizeof(int));
-	}
-	return out;
+	return to_packed<PackedInt32Array>(owner);
 }
 
 // An amber haze, fainter where there is less nutrient (nothing at all below `visible_above`).
