@@ -1,8 +1,9 @@
 extends SceneTree
 ## Switch checks (windowed: they need a RenderingDevice).
 ##   godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/switch_check.gd -- bench [reps [clouds]]
-##       CPU against GPU, time per step at 2k-50k bups (with `clouds` plankton clouds in the dish, 0 by default): what the Auto rule's
-##       costs (Dish.CPU_STEP_MODEL, GPU_STEP_MODEL) were fitted to.
+##       CPU against GPU, time per step at 2k-50k bups (with `clouds` plankton clouds in the dish, 0 by default), the GPU's alone (a submit and
+##       wait on a bare GpuSim, not the game's frame: Dish.GPU_STEP_MODEL is fitted by game_check.gd gpufit), and a check of the processor's model (Dish.CPU_STEP_MODEL, fitted to the whole
+##       `Dish.advance`) at the sizes it reaches.
 ##       BENCH_COUNTS=100000,500000 overrides the crowd sizes; BENCH_CPU_ONLY=1 times the processor alone (for the sizes past what the fit covers).
 ##   godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/switch_check.gd -- check
 ##       the state transfer: GPU -> CPU -> GPU round trips, rapid switches, and the saved dictionary.

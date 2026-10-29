@@ -1269,30 +1269,30 @@ func _backend_rule_tests() -> void:
 	check(Dish.rule_step(0.18, 0, 0.0018, usual) == 0.18 and Dish.rule_step(0.18, 3, 0.0018, usual) == 0.18 and Dish.rule_step(0.18, 1, 0.0, usual) == 0.18, "without the frame's steps or length, the step is taken as given")
 	check(not Dish.backend_wants_gpu(off, 18.5, 7, 400, 1000000, true, true), "Off: never")
 	# Several dishes share the frame: a dish the processor could manage alone goes to the GPU when the processor's whole load (what the others on it take) is too much.
-	var own := Dish.backend_frame_costs(2.0, 400, 1, 40000, 1, 0)
-	check(own.x < Dish.AUTO_CPU_UP_USEC and own.y < own.x, "(a 40,000-bup dish: the processor manages it alone, %.0f µs, and the GPU would be quicker, %.0f µs)" % [own.x, own.y])
-	check(not Dish.backend_wants_gpu(auto, 2.0, 1, 400, 40000, false, true, 1, 0, 0.0), "Auto: alone, the processor keeps it")
-	check(Dish.backend_wants_gpu(auto, 2.0, 1, 400, 40000, false, true, 1, 0, Dish.AUTO_CPU_UP_USEC), "Auto: with the other dishes' processor load added, it goes to the GPU")
-	check(Dish.backend_wants_gpu(auto, 2.0, 1, 400, 40000, true, true, 1, 0, Dish.AUTO_CPU_DOWN_USEC), "Auto: and stays there while the processor's total would still be too much")
+	var own := Dish.backend_frame_costs(2.0, 400, 1, 100000, 1, 0)
+	check(own.x < Dish.AUTO_CPU_UP_USEC and own.y < own.x, "(a 100,000-bup dish: the processor manages it alone, %.0f µs, and the GPU would be quicker, %.0f µs)" % [own.x, own.y])
+	check(not Dish.backend_wants_gpu(auto, 2.0, 1, 400, 100000, false, true, 1, 0, 0.0), "Auto: alone, the processor keeps it")
+	check(Dish.backend_wants_gpu(auto, 2.0, 1, 400, 100000, false, true, 1, 0, Dish.AUTO_CPU_UP_USEC), "Auto: with the other dishes' processor load added, it goes to the GPU")
+	check(Dish.backend_wants_gpu(auto, 2.0, 1, 400, 100000, true, true, 1, 0, Dish.AUTO_CPU_DOWN_USEC), "Auto: and stays there while the processor's total would still be too much")
 	check(Dish.backend_wants_gpu(on, 1.67, 1, 100, 4, false, true) and Dish.backend_wants_gpu(on, 16.7, 1, 100, 4, false, true), "On: at x100 and up, whatever the crowd")
 	check(not Dish.backend_wants_gpu(on, 1.67, 1, 100, 4, false, false), "On, but no usable GPU: the processor")
 	check(not Dish.backend_wants_gpu(auto, 18.5, 7, 400, 0, false, true) and not Dish.backend_wants_gpu(auto, 18.5, 7, 400, 0, true, true), "Auto: an empty dish stays on the processor, whatever the grid costs")
 	check(Dish.backend_wants_gpu(auto, 18.5, 7, 400, 50, false, true), "Auto: a few bups on a grid that costs the processor most of a frame go to the GPU at x10,000")
-	# Auto at x10,000 on a 10 mm dish with the usual grid: the processor's nine steps are 6 ms at about 1,900 bups (the bench: 2,000 bups at m=6 took 622 µs a step, m=7 about 680 µs).
+	# Auto at x10,000 on a 10 mm dish with the usual grid: the processor's nine steps are 6 ms at about 3,200 bups (the model: 196 + 0.093 n + 0.2355 n / (1 + n / 1000) µs a step at m=7; measured, 1,000 bups took 4.6 ms a frame and 10,000 took 11.8 ms).
 	var up := 0
 	for n in range(1000, 20001, 100):
 		if Dish.backend_wants_gpu(auto, 18.5, 7, 100, n, false, true):
 			up = n
 			break
-	check(up >= 1700 and up <= 2200, "Auto at x10,000 on a 10 mm dish goes to the GPU from about 1,900 bups (the processor's frame passes AUTO_CPU_UP_USEC): %d" % up)
+	check(up >= 2900 and up <= 3500, "Auto at x10,000 on a 10 mm dish goes to the GPU from about 3,200 bups (the processor's frame passes AUTO_CPU_UP_USEC): %d" % up)
 	check(Dish.backend_wants_gpu(auto, 18.5, 7, 100, up - 100, true, true) and not Dish.backend_wants_gpu(auto, 18.5, 7, 100, up - 100, false, true), "...and just below that it keeps the GPU once there (the processor's frame is still above AUTO_CPU_DOWN_USEC), without having gone to it")
-	# Hysteresis where one step is a whole frame (x1,000 on a fine grid: 668 + 0.044 n microseconds): between 3 ms and 6 ms, the answer is where it is.
-	check(not Dish.backend_wants_gpu(auto, 16.7, 6, 400, 80000, false, true) and Dish.backend_wants_gpu(auto, 16.7, 6, 400, 80000, true, true), "Auto: 80,000 bups at x1,000 on a fine grid is between the thresholds: the processor stays, the GPU stays")
-	check(Dish.backend_wants_gpu(auto, 16.7, 6, 400, 130000, false, true) and not Dish.backend_wants_gpu(auto, 16.7, 6, 400, 40000, true, true), "...130,000 sends it to the GPU, 40,000 sends it back")
-	# At x1,000 and x100 the processor keeps up with 100,000 bups on every grid: Auto stays on it.
-	for fit: Array in [[100, 1], [400, 6]]:  # (cells across, motion sub-steps of a 16.7 s step on that grid)
+	# Hysteresis where one step is a whole frame (x1,000 on a fine grid: about 1,100 + 0.084 n microseconds): between 3 ms and 6 ms, the answer is where it is.
+	check(not Dish.backend_wants_gpu(auto, 16.7, 6, 400, 40000, false, true) and Dish.backend_wants_gpu(auto, 16.7, 6, 400, 40000, true, true), "Auto: 40,000 bups at x1,000 on a fine grid is between the thresholds: the processor stays, the GPU stays")
+	check(Dish.backend_wants_gpu(auto, 16.7, 6, 400, 80000, false, true) and not Dish.backend_wants_gpu(auto, 16.7, 6, 400, 15000, true, true), "...80,000 sends it to the GPU, 15,000 sends it back")
+	# At x100 the processor keeps up with 100,000 bups on every grid, and at x1,000 with 100,000 on the coarse grid and 40,000 on the fine one: Auto stays on it.
+	for fit: Array in [[100, 1, 100000], [400, 6, 40000]]:  # (cells across, motion sub-steps of a 16.7 s step on that grid, the crowd at x1,000)
 		check(not Dish.backend_wants_gpu(auto, 1.67, 1, fit[0], 100000, false, true), "Auto at x100, %d cells, 100,000 bups: the processor" % fit[0])
-		check(not Dish.backend_wants_gpu(auto, 16.7, fit[1], fit[0], 100000, false, true), "Auto at x1,000, %d cells, 100,000 bups: the processor" % fit[0])
+		check(not Dish.backend_wants_gpu(auto, 16.7, fit[1], fit[0], fit[2], false, true), "Auto at x1,000, %d cells, %d bups: the processor" % [fit[0], fit[2]])
 	# Re-evaluated after anything that changes it, by the same call: speed down, a bigger grid, a new setting.
 	check(Dish.backend_wants_gpu(auto, 18.5, 7, 100, 5000, false, true), "5,000 bups at x10,000: the GPU")
 	check(not Dish.backend_wants_gpu(auto, 1.67, 1, 100, 5000, true, true), "...the speed drops to x100: the processor, at once")
@@ -1302,8 +1302,8 @@ func _backend_rule_tests() -> void:
 	# A frame of several steps shorter than TOP_SPEED_STEP (x10,000 on a 120 Hz screen: 5 steps of 16.7 s): said by the caller, not guessed from the length.
 	check(not Dish.backend_wants_gpu(auto, 16.7, 6, 400, 15000, false, true) and Dish.backend_wants_gpu(auto, 16.7, 6, 400, 15000, false, true, 5), "a frame of 5 steps of 16.7 s (x10,000 at 120 Hz) is the GPU's at 15,000 bups on a fine grid, where one such step (x1,000) is not")
 	check(Dish.backend_frame_costs(16.7, 400, 6, 15000, 5).x > 4.9 * Dish.backend_frame_costs(16.7, 400, 6, 15000, 1).x, "...the frame's cost goes with the steps it holds")
-	# Plankton clouds slow both backends (the processor more): 10,000 of them send 10,000 bups at x10,000 on a coarse grid to the GPU.
-	check(not Dish.backend_wants_gpu(auto, 18.5, 1, 100, 10000, false, true, 0, 0) and Dish.backend_wants_gpu(auto, 18.5, 1, 100, 10000, false, true, 0, 10000), "10,000 bups at x10,000 on a 90 mm dish: the processor, until 10,000 clouds are floating")
+	# Plankton clouds slow both backends (the processor more): 10,000 of them send 4,000 bups at x10,000 on a coarse grid to the GPU.
+	check(not Dish.backend_wants_gpu(auto, 18.5, 1, 100, 4000, false, true, 0, 0) and Dish.backend_wants_gpu(auto, 18.5, 1, 100, 4000, false, true, 0, 10000), "4,000 bups at x10,000 on a 90 mm dish: the processor, until 10,000 clouds are floating")
 	# The device's room: a dish whose limit the GPU cannot hold stays on the processor (GpuWorld.most_bups).
 	check(Dish.backend_usable(true, 1000000, 5000000) and not Dish.backend_usable(true, 1000000, 700000) and not Dish.backend_usable(false, 10, 1000000000), "the GPU is used only where it exists and holds the limit")
 	# The costs the rule goes by rise with the crowd and with the grid, and the GPU's rise slower.

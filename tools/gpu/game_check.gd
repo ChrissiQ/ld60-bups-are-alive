@@ -15,7 +15,8 @@ extends SceneTree
 ##   flap [population]             Auto with the limit held near its threshold at x10,000: how often the backend changes
 ##   long [hours] [founders] [limit] [feed] [bloom]   scenario D at x10,000 (setting On) for `hours` sim-hours: frame times, memory
 ##   perf [bups] [radius] [setting] [speed] [frames] [nutrient] [feed]  a dish filled with `bups` bups at `speed`, drawing: frame times, achieved speed
-##   frame [bups] [radius] [nutrient] [feed]  the GPU frame's fixed cost (Dish.GPU_FRAME_USEC): vsync off, frame time against steps per frame
+##   frame [bups] [radius] [nutrient] [feed]  the GPU frame's cost beside its steps, from one to eight steps: vsync off, frame time against steps per frame (a frame inside the engine's own ~3 ms hides the GPU's work: gpufit is the check of the cost model)
+##   gpufit [bups] [radius] [nutrient] [feed]  what Dish.GPU_STEP_MODEL and Dish.GPU_FRAME_USEC were fitted to: vsync off, frames of 9 to 72 steps (the GPU bounds them), their time against the steps by least squares (the frame's fixed cost and each step's), beside the model's. GAME_CHECK_DETAIL=400 for a fine grid
 ##   thresholds                    where Auto's rule switches (the cost model, bisected), 10 mm and 90 mm, x1,000 and x10,000
 ##   editcost [bups] [radius]      what one edit by hand (add_bup, remove_bup) costs while the GPU runs: time and buffer memory
 ## GAME_CHECK_FPS=60 caps the frame rate (Engine.max_fps), for a 60 Hz display on a faster one. GAME_CHECK_LOGS is where `edits` writes its debug log.
@@ -137,6 +138,8 @@ func _run() -> void:
 			await _perf(int(a[1]) if a.size() > 1 else 100000, float(a[2]) if a.size() > 2 else 90000.0, a[3] if a.size() > 3 else StartConditions.BACKEND_GPU, float(a[4]) if a.size() > 4 else 10000.0, int(a[5]) if a.size() > 5 else 600, float(a[6]) if a.size() > 6 else 32.0, float(a[7]) if a.size() > 7 else 3.0)
 		"frame":
 			await _frame_cost(int(a[1]) if a.size() > 1 else 100000, float(a[2]) if a.size() > 2 else 90000.0, float(a[3]) if a.size() > 3 else 32.0, float(a[4]) if a.size() > 4 else 3.0)
+		"gpufit":
+			await _gpu_fit(int(a[1]) if a.size() > 1 else 10000, float(a[2]) if a.size() > 2 else 90000.0, float(a[3]) if a.size() > 3 else 32.0, float(a[4]) if a.size() > 4 else 3.0)
 		"thresholds":
 			_thresholds()
 		"editcost":
@@ -948,6 +951,50 @@ func _frame_cost(bups: int, radius: float, nutrient := 32.0, feed := 3.0) -> voi
 		if i >= 20:
 			base.append((Time.get_ticks_usec() - t0) / 1000.0)
 	print("FRAMECOST the engine's own frame (dish on the CPU, no bups): p50 %.3f mean %.3f ms" % [_pct(base, 0.5), _mean(base)])
+
+
+## The cost model's GPU side measured as the game pays it: frames of many steps (the budget held open, vsync off), where the GPU and
+## not the engine's own frame bounds the time; frame ms = fixed + steps x per step by least squares, against the model's figures for
+## the same dish (its clouds as they are at the end: they thin out on the GPU, so the model's step is a little high where they were many).
+func _gpu_fit(bups: int, radius: float, nutrient := 32.0, feed := 3.0) -> void:
+	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+	Engine.max_fps = 0
+	filled_dish(bups, radius, StartConditions.BACKEND_GPU, bups, feed, nutrient)
+	hover_world = dish.global_position
+	set_speed(10000.0)
+	await frames(Dish.wait_frames(1.0 / 120.0) + 30)
+	var xs := PackedFloat64Array()
+	var ys := PackedFloat64Array()
+	var pops := PackedFloat64Array()
+	for k: int in [9, 18, 36, 72]:
+		for i in 24:
+			dish.gpu_world._steps_cap = 1.0e9
+			var t0 := Time.get_ticks_usec()
+			var done := dish.advance(k * 18.52, 0)
+			dish.hover_at(hover_world, 4.0 * dish.pixel())
+			dish.population_stats()
+			dish.refresh_drawing()
+			await process_frame
+			if i >= 6:
+				xs.append(maxi(1, ceili(done / Dish.MAX_STEP - 1.0e-6)))
+				ys.append((Time.get_ticks_usec() - t0) / 1000.0)
+				pops.append(dish.population())
+	var n := xs.size()
+	var sx := 0.0
+	var sy := 0.0
+	var sxx := 0.0
+	var sxy := 0.0
+	for i in n:
+		sx += xs[i]; sy += ys[i]; sxx += xs[i] * xs[i]; sxy += xs[i] * ys[i]
+	var slope := (n * sxy - sx * sy) / maxf(n * sxx - sx * sx, 1e-9)
+	var icept := (sy - sx * slope) / n
+	var step_delta := 18.52
+	var moves := dish.sim.moves_for(step_delta)
+	var pop := _mean(pops)
+	var cells := float(dish.field.get_size())
+	var model_step := Dish.GPU_STEP_MODEL[0] + Dish.GPU_STEP_MODEL[1] * cells * cells + pop * (Dish.GPU_STEP_MODEL[2] + Dish.GPU_STEP_MODEL[3] * moves) + Dish.GPU_STEP_MODEL[4] * dish.field.puff_count()
+	var model_frame := Dish.GPU_FRAME_USEC + Dish.GPU_FRAME_USEC_PER_BUP * pop
+	print("GPUFIT %.0f bups, %.0f mm, %d cells, %d motion sub-steps, %d clouds: measured frame %.0f us + %.0f us a step; model frame %.0f + %.0f a step (%+.0f%%, %+.0f%%)" % [pop, radius / 1000.0, dish.field.get_size(), moves, dish.field.puff_count(), icept * 1000.0, slope * 1000.0, model_frame, model_step, 100.0 * (model_frame / (icept * 1000.0) - 1.0), 100.0 * (model_step / (slope * 1000.0) - 1.0)])
 
 
 ## Where Auto's rule switches, by the cost model: the least population at which it moves to the GPU, and the most at which it hands back, for
