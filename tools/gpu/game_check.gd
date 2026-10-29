@@ -279,7 +279,7 @@ func _watch_frame() -> void:
 	watch["pop"] = pop
 	watch["speed"] = stats["speed"] if stats["count"] > 0 else 0.0
 	watch["frac"] = frac
-	var id := dish.selected_id
+	var id := dish.selected.bup
 	if id >= 0:
 		if dish.has_bup(id):
 			var info := dish.bup_info(id)
@@ -296,11 +296,11 @@ func _watch_frame() -> void:
 			if not (steer.z >= 0.0 and steer.z <= 1.0):
 				_glitch("steering reading out of range %s" % str(steer))
 		else:
-			dish.selected_id = -1
-	if (id < 0 or dish.selected_id < 0) and frames_run - selected_at >= 120:  # (bup_ids walks every family record on the GPU path: not every frame)
+			dish.selected.bup = -1
+	if (id < 0 or dish.selected.bup < 0) and frames_run - selected_at >= 120:  # (bup_ids walks every family record on the GPU path: not every frame)
 		var ids := dish.bup_ids()
 		if ids.size() > 0:
-			dish.selected_id = ids[ids.size() / 2]
+			dish.selected.bup = ids[ids.size() / 2]
 			selected_at = frames_run
 
 
@@ -659,7 +659,7 @@ func _edits() -> void:
 
 	# pause with a selected bup; drops and the eraser while paused
 	await _select_living()
-	var sel := dish.selected_id
+	var sel := dish.selected.bup
 	held = true
 	await frames(5)
 	var g0 := gpu_side(dish)
@@ -703,7 +703,7 @@ func _edits() -> void:
 	_ok(source.emitted > 0.0, "...it emits (%.1f units so far)" % source.emitted)
 	hover_world = source.pos
 	await frames(4)
-	_ok(dish.hovered_source == source, "...hovering it finds it")
+	_ok(dish.hovered.source == source, "...hovering it finds it")
 	var details := dish.source_details(source)
 	await frames(4)
 	details = dish.source_details(source)
@@ -727,26 +727,26 @@ func _edits() -> void:
 		hover_world = dish.global_position + floating.pos
 		await frames(4)
 		var pd := dish.plankton_details(floating)
-		_ok(dish.hovered_plankton == floating or dish.hovered_id >= 0, "hovering a plankton finds it (or a bup over it)")
+		_ok(dish.hovered.plankton == floating or dish.hovered.bup >= 0, "hovering a plankton finds it (or a bup over it)")
 		_ok(pd["nearest_bup"] >= 0.0, "...its details answer the nearest bup (%.0f µm)" % pd["nearest_bup"])
 
 	# picking and hovering bups at x10,000
-	var target := dish.bup_world_pos(dish.selected_id)
+	var target := dish.bup_world_pos(dish.selected.bup)
 	hover_world = target
 	var slack := 4.0 * dish.pixel()
 	var hovered_frames := 0
 	for i in 60:
 		await frame()
-		if dish.hovered_id >= 0:
+		if dish.hovered.bup >= 0:
 			hovered_frames += 1
 	print("     hovering a fixed point in the colony at x10,000: a bup under it in %d of 60 frames" % hovered_frames)
 	dish.select_at(hover_world, slack)
-	_ok(dish.selected_id >= 0, "a click where the pointer rests selects at once (%d)" % dish.selected_id)
-	var picked := dish.selected_id
+	_ok(dish.selected.bup >= 0, "a click where the pointer rests selects at once (%d)" % dish.selected.bup)
+	var picked := dish.selected.bup
 	var info_frames := 0
 	for i in 120:
 		await frame()
-		if dish.selected_id == picked and dish.has_bup(picked) and not dish.bup_info(picked).is_empty():
+		if dish.selected.bup == picked and dish.has_bup(picked) and not dish.bup_info(picked).is_empty():
 			info_frames += 1
 	_ok(info_frames == 120 or not dish.has_bup(picked), "...and its info is there in every one of 120 frames at x10,000 (%d)" % info_frames)
 	var some: PackedFloat32Array = gpu_side(dish)["records"].to_float32_array()
@@ -762,10 +762,10 @@ func _edits() -> void:
 	_ok(answer >= 0 and waited <= 6, "a pick at a new point is answered within 6 frames (%d)" % waited)
 
 	# the steering readout and the debug log
-	if dish.selected_id < 0 or not dish.has_bup(dish.selected_id):  # (the picked bup may have died in the 120 frames above: a click picks another)
+	if dish.selected.bup < 0 or not dish.has_bup(dish.selected.bup):  # (the picked bup may have died in the 120 frames above: a click picks another)
 		dish.select_at(fresh, slack)
-	var steer := dish.bup_steering(dish.selected_id)
-	var steer_bytes := dish.gpu_world.bup_steer_bytes(dish.selected_id, Dish.STEER_ALPHA)
+	var steer := dish.bup_steering(dish.selected.bup)
+	var steer_bytes := dish.gpu_world.bup_steer_bytes(dish.selected.bup, Dish.STEER_ALPHA)
 	_ok(steer.z >= 0.0 and steer.z <= 1.0 and steer_bytes.size() == dish.field.get_size() * dish.field.get_size() * 4, "the steering readout (z %.3f) and map (%d bytes) of the selected bup" % [steer.z, steer_bytes.size()])
 	var text := DebugLog.report(dish, null, {"sim_speed": speed, "achieved_speed": achieved})
 	var data: Variant = JSON.parse_string(text)
@@ -1055,9 +1055,9 @@ func _edit_cost(bups: int, radius: float) -> void:
 ## Selects a living bup by id (as the watch list does) and waits until its record has come back.
 func _select_living() -> void:
 	var ids := dish.bup_ids()
-	dish.selected_id = ids[ids.size() / 2]
+	dish.selected.bup = ids[ids.size() / 2]
 	selected_at = frames_run
 	for i in 10:
 		await frame()
-		if dish.has_bup(dish.selected_id) and not dish.bup_info(dish.selected_id).is_empty():
+		if dish.has_bup(dish.selected.bup) and not dish.bup_info(dish.selected.bup).is_empty():
 			return

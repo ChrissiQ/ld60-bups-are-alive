@@ -85,7 +85,7 @@ func _init() -> void:
 		seen_steps += 1
 	TestUtil.check(not tour.active and not tour.visible, "the tour ends after the last step")
 	TestUtil.check(seen_steps == 17, "a free-mode tutorial has 17 steps (%d)" % seen_steps)
-	TestUtil.check(m.paused and m.dish.selected_id < 0 and not m.dish.is_watched(m._tutorial_bup) and m.camera.zoom.is_equal_approx(was_zoom) and m.camera.position.distance_to(was_position) < 4.0, "afterwards it is paused as before, with nothing selected or watched and the camera where it was (%s %s, was %s %s)" % [m.camera.zoom, m.camera.position, was_zoom, was_position])
+	TestUtil.check(m.paused and m.dish.selected.bup < 0 and not m.dish.is_watched(m._tutorial_bup) and m.camera.zoom.is_equal_approx(was_zoom) and m.camera.position.distance_to(was_position) < 4.0, "afterwards it is paused as before, with nothing selected or watched and the camera where it was (%s %s, was %s %s)" % [m.camera.zoom, m.camera.position, was_zoom, was_position])
 	await process_frame
 	await process_frame
 	TestUtil.check(m.dish.watched.is_empty() and m._stack.is_empty() and m.watch_list.empty_note.visible and not m.info_panel.visible, "and the panels the tour opened are shut again")
@@ -174,7 +174,7 @@ func _init() -> void:
 	escape.pressed = true
 	t.tutorial._input(escape)
 	await process_frame
-	TestUtil.check(not t.tutorial.active and t.camera.zoom.is_equal_approx(was_zoom) and t.dish.selected_id < 0, "Escape skips it from there, and the camera goes back")
+	TestUtil.check(not t.tutorial.active and t.camera.zoom.is_equal_approx(was_zoom) and t.dish.selected.bup < 0, "Escape skips it from there, and the camera goes back")
 	TestUtil.check(not t.menu_open, "and does not also open the menu")
 	t.queue_free()
 

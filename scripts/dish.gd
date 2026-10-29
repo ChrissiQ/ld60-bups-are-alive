@@ -155,27 +155,17 @@ var pick_mode := PickMode.ALL:  ## the select tool ignores whatever this leaves 
 	set(value):
 		pick_mode = value
 		if not looks_at_bups():
-			selected_id = -1
+			selected.bup = -1
 		if not looks_at_sources():
-			selected_source = null
+			selected.source = null
 		if not looks_at_plankton():
-			selected_plankton = null
+			selected.plankton = null
 		if not looks_at_husks():
-			selected_husk = NO_HUSK
-var _hover_pos := Vector2.ZERO  ## where the pointer was when `hovered_id` and the other hovers were picked
-var hovered_id := -1  ## the bup under the pointer, or -1
-var selected_id := -1:  ## the bup that was clicked, or -1
-	set(value):
-		if value != selected_id:
-			selected_id = value
-			selection_changed.emit()
-var selected_source: NutrientSource = null
-var hovered_source: NutrientSource = null
-var selected_plankton: Plankton = null
-var hovered_plankton: Plankton = null
-const NO_HUSK := Vector2(INF, INF)
-var selected_husk := NO_HUSK  ## where the clicked husk lies (a husk has no identity: it is found by its place), or NO_HUSK
-var hovered_husk := NO_HUSK
+			selected.husk = NO_HUSK
+var _hover_pos := Vector2.ZERO  ## where the pointer was when `hovered` was picked
+var selected := DishPick.new()  ## what was clicked (`selection_changed` fires when its bup changes)
+var hovered := DishPick.new()  ## what is under the pointer
+const NO_HUSK := DishPick.NO_HUSK
 var place_preview_pos := Vector2.ZERO
 var place_preview_radius := -1.0  ## < 0 hides the placement preview
 var place_preview_erases := false  ## the preview is the eraser's brush
@@ -195,6 +185,7 @@ var gpu_active := false
 
 
 func _init() -> void:
+	selected.bup_changed.connect(selection_changed.emit)
 	SimConstants.apply()
 	sim.set_husk_seconds(Biology.HUSK_SECONDS)
 	sim.set_limit(bup_limit)
@@ -330,10 +321,8 @@ func resize_to(new_radius: float) -> void:
 					remove_source(source)
 			for i in range(plankton.size() - 1, -1, -1):
 				if plankton[i].pos.length() > new_radius:
-					if selected_plankton == plankton[i]:
-						selected_plankton = null
-					if hovered_plankton == plankton[i]:
-						hovered_plankton = null
+					selected.forget(plankton[i])
+					hovered.forget(plankton[i])
 					plankton.remove_at(i)
 		radius = new_radius
 		_edited()
@@ -713,59 +702,49 @@ func source_at(world_pos: Vector2, slack: float = 0.0) -> NutrientSource:
 ## picking empty ground selects nothing, which is how a selection is let go.
 func select_at(world_pos: Vector2, slack: float = 0.0) -> void:
 	if _hover_is_at(world_pos):  # (a click where the pointer rests takes what is outlined: in a crowd that moves, a fresh pick would often be another bup)
-		selected_source = hovered_source
-		selected_id = hovered_id
-		selected_plankton = hovered_plankton
-		selected_husk = hovered_husk
+		selected.set_to(hovered)
 		return
-	var picked := _pick(world_pos, slack)
-	selected_source = picked["source"]
-	selected_id = picked["bup"]
-	selected_plankton = picked["plankton"]
-	selected_husk = picked["husk"]
+	selected.set_to(_pick(world_pos, slack))
 
 
 ## Whether something is outlined by a hover made at (nearly) this point.
 func _hover_is_at(world_pos: Vector2) -> bool:
-	var something := hovered_id >= 0 or hovered_source != null or hovered_plankton != null or hovered_husk != NO_HUSK
-	return something and _hover_pos.distance_to(world_pos) <= HOVER_CLICK_PIXELS * pixel()
+	return not hovered.is_empty() and _hover_pos.distance_to(world_pos) <= HOVER_CLICK_PIXELS * pixel()
 
 
 func hover_at(world_pos: Vector2, slack: float = 0.0) -> void:
 	_hover_pos = world_pos
-	var picked := _pick(world_pos, slack, true)
-	hovered_source = picked["source"]
-	hovered_id = picked["bup"]
-	hovered_plankton = picked["plankton"]
-	hovered_husk = picked["husk"]
+	hovered.set_to(_pick(world_pos, slack, true))
 
 
 ## What is under a world position, of the kinds the pick mode looks at: only the first of a source, a bup, a plankton and a husk
 ## (in that order) that is there, the others being none.
-func _pick(world_pos: Vector2, slack: float, hover := false) -> Dictionary:
+func _pick(world_pos: Vector2, slack: float, hover := false) -> DishPick:
 	var source: NutrientSource = source_at(world_pos, slack) if looks_at_sources() else null
 	var bup := cell_at(world_pos, slack, hover) if source == null and looks_at_bups() else -1
 	var floating: Plankton = plankton_at(world_pos, slack) if source == null and bup < 0 and looks_at_plankton() else null
 	var husk := husk_at(world_pos, slack) if source == null and bup < 0 and floating == null and looks_at_husks() else NO_HUSK
-	return {"source": source, "bup": bup, "plankton": floating, "husk": husk}
+	var picked := DishPick.new()
+	picked.source = source
+	picked.bup = bup
+	picked.plankton = floating
+	picked.husk = husk
+	return picked
 
 
 ## Whether a bup, a source, a plankton or a husk is selected.
 func has_selection() -> bool:
-	return selected_id >= 0 or has_selected_thing()
+	return not selected.is_empty()
 
 
 ## Whether a source or a plankton is selected (what is picked besides a bup).
 func has_selected_thing() -> bool:
-	return selected_source != null or selected_plankton != null or selected_husk != NO_HUSK
+	return selected.has_thing()
 
 
 ## Lets go of everything selected.
 func clear_selection() -> void:
-	selected_id = -1
-	selected_source = null
-	selected_plankton = null
-	selected_husk = NO_HUSK
+	selected.clear()
 
 
 func looks_at_sources() -> bool:
@@ -804,16 +783,16 @@ func show_layer(layer: Layer, shown: bool) -> void:
 	match layer:
 		Layer.BUPS:
 			if not shown:
-				hovered_id = -1
+				hovered.bup = -1
 		Layer.SOURCES:
 			if not shown:
-				hovered_source = null
+				hovered.source = null
 		Layer.PLANKTON:
 			if not shown:
-				hovered_plankton = null
+				hovered.plankton = null
 		Layer.HUSKS:
 			if not shown:
-				hovered_husk = NO_HUSK
+				hovered.husk = NO_HUSK
 	drawing.layer_changed(layer, shown)
 
 
@@ -824,10 +803,7 @@ func looks_at_medium() -> bool:
 
 
 func clear_hover() -> void:
-	hovered_id = -1
-	hovered_source = null
-	hovered_plankton = null
-	hovered_husk = NO_HUSK
+	hovered.clear()
 	place_preview_erases = false
 	place_preview_marker = false
 
@@ -835,10 +811,8 @@ func clear_hover() -> void:
 func remove_source(source: NutrientSource) -> void:
 	sources.erase(source)
 	edit_count += 1
-	if selected_source == source:
-		selected_source = null
-	if hovered_source == source:
-		hovered_source = null
+	selected.forget(source)
+	hovered.forget(source)
 
 
 ## Whether nutrient (a dose or a source) can be put at a world point: inside the dish, and not in
@@ -965,10 +939,8 @@ func _step_plankton(delta: float) -> void:
 				sim.add_plankton_husk(cell.pos, cell.units * NUTRIENT_ENERGY)
 			else:
 				field.add_cloud(cell.pos, PLANKTON_PATCH_RADIUS, cell.units * NUTRIENT_ENERGY)
-			if selected_plankton == cell:
-				selected_plankton = null
-			if hovered_plankton == cell:
-				hovered_plankton = null
+			selected.forget(cell)
+			hovered.forget(cell)
 			edit_count += 1
 		else:
 			plankton[kept] = cell
@@ -1251,7 +1223,7 @@ func _release_idle_gpu() -> void:
 ## watches), so that the GPU's answers to these start from the CPU's instead of from nothing.
 func _gpu_params() -> Dictionary:
 	return {"radius": radius, "limit": bup_limit, "seed": patch_seed, "upkeep_scale": upkeep_factor, "feed_per_second": feed_per_second(feed_density), "step_seconds": MAX_STEP,
-		"tracked": [selected_id, hovered_id], "fractions": _fractions_asked.keys()}
+		"tracked": [selected.bup, hovered.bup], "fractions": _fractions_asked.keys()}
 
 
 ## Hands the CPU's bups and field to the GPU (the CPU's are the true ones until it has).

@@ -55,7 +55,7 @@ func _run() -> void:
 		_same_width(m, step)
 	# With a bup picked and watched, watched no more, and the sections open and closed in turn.
 	var id: int = m.dish.bup_ids()[0]
-	m.dish.selected_id = id
+	m.dish.selected.bup = id
 	m.dish.watch_bup(id)
 	for i in 8:
 		await process_frame

@@ -202,15 +202,15 @@ static func _layers_hidden(dish: Dish) -> Array:
 
 
 static func _selected(dish: Dish) -> Dictionary:
-	var info := dish.bup_info(dish.selected_id) if dish.has_bup(dish.selected_id) else {}
+	var info := dish.bup_info(dish.selected.bup) if dish.has_bup(dish.selected.bup) else {}
 	if not info.is_empty():  # (on the GPU path a bup's info comes a few frames after it is chosen, and goes as it dies)
-		info["steering_reading"] = dish.bup_steering(dish.selected_id)
+		info["steering_reading"] = dish.bup_steering(dish.selected.bup)
 		info["nutrient_here"] = dish.nutrient_reading(info["pos"])
 		return {"bup": info}
-	if dish.selected_source != null:
-		return {"source": dish.source_details(dish.selected_source)}
-	if dish.selected_plankton != null:
-		return {"plankton": dish.plankton_details(dish.selected_plankton)}
-	if dish.selected_husk != Dish.NO_HUSK:
-		return {"husk": dish.husk_details(dish.selected_husk)}
+	if dish.selected.source != null:
+		return {"source": dish.source_details(dish.selected.source)}
+	if dish.selected.plankton != null:
+		return {"plankton": dish.plankton_details(dish.selected.plankton)}
+	if dish.selected.husk != Dish.NO_HUSK:
+		return {"husk": dish.husk_details(dish.selected.husk)}
 	return {}

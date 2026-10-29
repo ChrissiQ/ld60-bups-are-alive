@@ -219,9 +219,9 @@ func _check_husks() -> void:
 	var seen := d.husk_details(spot)
 	TestUtil.check(not seen.is_empty() and is_equal_approx(seen["left"], 1.0) and absf(seen["units"] - expected / Dish.NUTRIENT_ENERGY) < 1e-3 and seen["age"] < 60.0, "its details say what it holds (%s) and that it has leaked nothing yet" % [seen])
 	d.select_at(d.global_position + spot)
-	TestUtil.check(d.selected_husk == spot and d.has_selection(), "the select tool picks it")
+	TestUtil.check(d.selected.husk == spot and d.has_selection(), "the select tool picks it")
 	d.pick_mode = Dish.PickMode.BUPS
-	TestUtil.check(d.selected_husk == Dish.NO_HUSK, "a pick mode that skips husks lets go of it")
+	TestUtil.check(d.selected.husk == Dish.NO_HUSK, "a pick mode that skips husks lets go of it")
 	var copy := Dish.new()
 	root.add_child(copy)
 	TestUtil.check(copy.from_dict(TestUtil.saved(d)) and copy.death_husks and copy.sim.husk_count() == 1, "a husk, and the setting, survive save and load")

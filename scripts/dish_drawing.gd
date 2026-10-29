@@ -76,7 +76,7 @@ func build_children() -> void:
 ## Redraws the dish only when something it shows may have changed: the picture of the medium is rebuilt a few times a
 ## second, and the sources, the size and the zoom show at once. Most frames change none of these.
 func refresh() -> void:
-	var key := [Time.get_ticks_msec() / Dish.HAZE_REFRESH_MSEC, dish.sources.size(), dish.edit_count, dish.radius, dish.pixel(), dish.selected_id, dish._layers_hidden.size()]
+	var key := [Time.get_ticks_msec() / Dish.HAZE_REFRESH_MSEC, dish.sources.size(), dish.edit_count, dish.radius, dish.pixel(), dish.selected.bup, dish._layers_hidden.size()]
 	if key != _draw_key:
 		_draw_key = key
 		dish.queue_redraw()
@@ -111,7 +111,7 @@ func sync_render_capacity() -> void:
 func process() -> void:
 	refresh_husks()
 	if bups_mesh != null and dish.runs_on_gpu():
-		for id in [dish.selected_id, dish.hovered_id]:  # (the bups the overlay shows: their records come back every frame)
+		for id in [dish.selected.bup, dish.hovered.bup]:  # (the bups the overlay shows: their records come back every frame)
 			if id >= 0:
 				dish.gpu_world.track(id)
 		draw_bups_gpu()
@@ -350,7 +350,7 @@ func _draw_medium() -> void:
 ## noise in its own estimate of it (a keener or faster bup lights more of the dish; in a dilute medium nothing lights).
 ## Rebuilt a few times a second, like the haze it is drawn over.
 func _draw_steering() -> void:
-	var selected := dish.selected_id
+	var selected := dish.selected.bup
 	if selected < 0 or not dish._bup_shown(selected):
 		return
 	var key := [selected, dish.field.size, Time.get_ticks_msec() / Dish.HAZE_REFRESH_MSEC]
@@ -407,20 +407,20 @@ func _draw_steering_arc(canvas: CanvasItem, id: int) -> void:
 ## line at any zoom.
 func draw_overlay(canvas: CanvasItem) -> void:
 	var px := dish.pixel()
-	var selected_id := dish.selected_id
-	var hovered_id := dish.hovered_id
+	var selected_id := dish.selected.bup
+	var hovered_id := dish.hovered.bup
 	if selected_id >= 0 and dish._bup_shown(selected_id):
 		draw_ring(canvas, dish._bup_pos(selected_id), dish._bup_radius(selected_id, px), Color(1, 0.75, 0.3, 0.95))
 		if dish.layer_shown(Dish.Layer.STEERING):
 			_draw_steering_arc(canvas, selected_id)
 	if hovered_id >= 0 and hovered_id != selected_id and dish._bup_shown(hovered_id):
 		draw_ring(canvas, dish._bup_pos(hovered_id), dish._bup_radius(hovered_id, px), Color(1, 1, 1, 0.9))
-	_draw_pick_rings(canvas, dish.selected_source, dish.hovered_source, dish.global_position, dish.source_draw_radius())
-	_draw_pick_rings(canvas, dish.selected_plankton, dish.hovered_plankton, Vector2.ZERO, dish.plankton_draw_radius())
-	if dish.selected_husk != Dish.NO_HUSK:
-		draw_ring(canvas, dish.selected_husk, dish.husk_draw_size(), Color(1, 0.75, 0.3, 0.95))
-	if dish.hovered_husk != Dish.NO_HUSK and dish.hovered_husk != dish.selected_husk:
-		draw_ring(canvas, dish.hovered_husk, dish.husk_draw_size(), Color(1, 1, 1, 0.9))
+	_draw_pick_rings(canvas, dish.selected.source, dish.hovered.source, dish.global_position, dish.source_draw_radius())
+	_draw_pick_rings(canvas, dish.selected.plankton, dish.hovered.plankton, Vector2.ZERO, dish.plankton_draw_radius())
+	if dish.selected.husk != Dish.NO_HUSK:
+		draw_ring(canvas, dish.selected.husk, dish.husk_draw_size(), Color(1, 0.75, 0.3, 0.95))
+	if dish.hovered.husk != Dish.NO_HUSK and dish.hovered.husk != dish.selected.husk:
+		draw_ring(canvas, dish.hovered.husk, dish.husk_draw_size(), Color(1, 1, 1, 0.9))
 	if dish.place_preview_radius >= 0.0:
 		var brush := Color(1, 0.3, 0.25, 0.9) if dish.place_preview_erases else Color(1, 0.9, 0.5, 0.8)
 		var at := dish.place_preview_pos - dish.global_position

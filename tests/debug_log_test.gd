@@ -26,7 +26,7 @@ func _init() -> void:
 	TestUtil.check(str(ProjectSettings.get_setting("autoload/DebugHotkey")) == "*res://ui/debug_hotkey.tscn", "DebugHotkey is registered as an autoload")
 
 	# What it holds.
-	dish.selected_id = dish.bup_ids()[0]
+	dish.selected.bup = dish.bup_ids()[0]
 	var data: Variant = JSON.parse_string(DebugLog.report(dish, m, m.debug_state()))
 	TestUtil.check(data is Dictionary, "the report is readable text")
 	if data is Dictionary:

@@ -387,30 +387,30 @@ func _pick_slack() -> float:
 
 
 func _update_info_panel() -> void:
-	if dish.selected_id >= 0 and not dish.has_record(dish.selected_id):
-		dish.selected_id = -1  # its record is gone
-	if dish.hovered_id >= 0 and not dish.has_record(dish.hovered_id):
-		dish.hovered_id = -1  # (a hover left over in a dish that has come into view: it has no record of that bup, and `_deceased_text` needs one)
+	if dish.selected.bup >= 0 and not dish.has_record(dish.selected.bup):
+		dish.selected.bup = -1  # its record is gone
+	if dish.hovered.bup >= 0 and not dish.has_record(dish.hovered.bup):
+		dish.hovered.bup = -1  # (a hover left over in a dish that has come into view: it has no record of that bup, and `_deceased_text` needs one)
 	# A clicked bup, source or plankton is pinned to the info panel in the side column. Until one is, what the pointer
 	# is over (or else the nutrient at that spot) shows on a small card beside the pointer, which never moves the column.
 	var pinned := dish.has_selection()
-	var bup_id: int = dish.selected_id if pinned else dish.hovered_id
-	var source: NutrientSource = dish.selected_source if pinned else dish.hovered_source
-	var floating: Plankton = dish.selected_plankton if pinned else dish.hovered_plankton
-	var husk_place: Vector2 = dish.selected_husk if pinned else dish.hovered_husk
+	var bup_id: int = dish.selected.bup if pinned else dish.hovered.bup
+	var source: NutrientSource = dish.selected.source if pinned else dish.hovered.source
+	var floating: Plankton = dish.selected.plankton if pinned else dish.hovered.plankton
+	var husk_place: Vector2 = dish.selected.husk if pinned else dish.hovered.husk
 	var husk := dish.husk_details(husk_place) if husk_place != Dish.NO_HUSK else {}
 	if husk_place != Dish.NO_HUSK and husk.is_empty():  # (it has leaked away)
 		if pinned:
-			dish.selected_husk = Dish.NO_HUSK
+			dish.selected.husk = Dish.NO_HUSK
 		else:
-			dish.hovered_husk = Dish.NO_HUSK
+			dish.hovered.husk = Dish.NO_HUSK
 		husk_place = Dish.NO_HUSK
-	var editing := dish.selected_source != null and dish.selected_id < 0
+	var editing := dish.selected.source != null and dish.selected.bup < 0
 	var alive_info: Dictionary = dish.bup_info(bup_id) if bup_id >= 0 else {}  # (fetched once: the panels below are built from it)
 	if bup_id >= 0 and alive_info.is_empty() and dish.has_bup(bup_id):
 		alive_info = dish.lineage_info(bup_id)  # (alive, but on the GPU its record has not come back yet: its family record stands in, rather than showing it as deceased)
 	var dead := bup_id >= 0 and alive_info.is_empty()  # a selected bup that has died stays up, as a record
-	var lineage_open: bool = bup_id >= 0 and bup_id == dish.selected_id and _stack.size() > 0 and _stack.back()["view"] == "lineage"
+	var lineage_open: bool = bup_id >= 0 and bup_id == dish.selected.bup and _stack.size() > 0 and _stack.back()["view"] == "lineage"
 	var something := bup_id >= 0 or source != null or floating != null or not husk.is_empty()
 	var target: RichTextLabel = info_text if pinned else hover_text
 	info_panel.visible = pinned and something and not lineage_open
@@ -422,14 +422,14 @@ func _update_info_panel() -> void:
 	lineage_panel.theme_type_variation = &"DeceasedPanel" if dead else &"HudPanel"
 	source_rate_row.visible = editing
 	delete_source_button.visible = editing
-	follow_button.visible = dish.selected_id >= 0 and not dead  # a bup can be followed once it is selected, not just hovered
-	var watched_now := dish.is_watched(dish.selected_id)
+	follow_button.visible = dish.selected.bup >= 0 and not dead  # a bup can be followed once it is selected, not just hovered
+	var watched_now := dish.is_watched(dish.selected.bup)
 	watch_button.icon = UNWATCH_ICON if watched_now else WATCH_ICON  # (an eye; crossed out while the bup is on the list, as that is what pressing it does)
 	watch_button.tooltip_text = Strings.t("hud.unwatch") if watched_now else Strings.t("hud.watch")
 	follow_button.text = Strings.t("hud.stop_following") if following_id >= 0 else Strings.t("hud.follow")
 	follow_button.tooltip_text = Strings.t("hud.stop_following_tip" if following_id >= 0 else "hud.follow_tip")
 	top_row.visible = pinned and bup_id >= 0
-	lineage_button.visible = bup_id >= 0 and bup_id == dish.selected_id
+	lineage_button.visible = bup_id >= 0 and bup_id == dish.selected.bup
 	watch_button.visible = lineage_button.visible  # (alive or dead: a record can be watched too)
 	var shows_bup := bup_id >= 0
 	info_genome.visible = shows_bup and pinned
@@ -492,7 +492,7 @@ func _place_hover_card() -> void:
 
 ## The Watch button: the selected bup goes on the watch list, or comes off it.
 func _toggle_watch() -> void:
-	var id := dish.selected_id
+	var id := dish.selected.bup
 	if dish.is_watched(id):
 		dish.unwatch_bup(id)
 	else:
@@ -506,19 +506,19 @@ func _open_watched(watched_in: Dish, id: int) -> void:
 		return
 	toolbar.select_tool(Toolbar.Tool.SELECT)
 	tool_options.pick_buttons[Dish.PickMode.ALL].button_pressed = true  # (a mode that skips bups would let go of it again)
-	dish.selected_id = id
+	dish.selected.bup = id
 	following_id = -1
 
 
 ## Follow: the camera keeps the selected bup in the middle of the view until the player stops it,
 ## pans, selects something else, or the bup dies.
 func _toggle_follow() -> void:
-	following_id = -1 if following_id >= 0 else dish.selected_id
+	following_id = -1 if following_id >= 0 else dish.selected.bup
 	_follow_selected()
 
 
 func _follow_selected() -> void:
-	if following_id >= 0 and (following_id != dish.selected_id or not dish.has_bup(following_id)):
+	if following_id >= 0 and (following_id != dish.selected.bup or not dish.has_bup(following_id)):
 		following_id = -1
 	if following_id >= 0:
 		camera.position = dish.bup_world_pos(following_id)
@@ -531,13 +531,13 @@ func _show_source_rate(source: NutrientSource) -> void:
 
 
 func _delete_selected_source() -> void:
-	if dish.selected_source != null:
-		dish.remove_source(dish.selected_source)
+	if dish.selected.source != null:
+		dish.remove_source(dish.selected.source)
 
 
 func _on_source_rate_changed(rate: float) -> void:
-	if dish.selected_source != null:
-		dish.selected_source.rate = rate
+	if dish.selected.source != null:
+		dish.selected.source.rate = rate
 
 
 func _plankton_text(d: Dictionary) -> String:
@@ -748,10 +748,10 @@ func _on_key(event: InputEventKey) -> void:
 	elif KeyBindings.matches("frame", event):
 		_fit_camera()
 	elif KeyBindings.matches("follow", event):
-		if dish.selected_id >= 0 and dish.has_bup(dish.selected_id):
+		if dish.selected.bup >= 0 and dish.has_bup(dish.selected.bup):
 			_toggle_follow()
 	elif KeyBindings.matches("watch", event):
-		if dish.selected_id >= 0 and dish.has_record(dish.selected_id):
+		if dish.selected.bup >= 0 and dish.has_record(dish.selected.bup):
 			_toggle_watch()
 	elif KeyBindings.matches("lineage", event):
 		_open_lineage()
@@ -778,7 +778,7 @@ func _escape() -> void:
 func _step_back() -> void:
 	if _stack.size() > 1:
 		_set_stack(_stack.slice(0, _stack.size() - 1))
-		dish.selected_id = _stack.back()["id"]
+		dish.selected.bup = _stack.back()["id"]
 
 
 ## Lets go of everything selected: the bup (with whatever views were opened on it) and any source.
@@ -792,10 +792,10 @@ func _clear_selection() -> void:
 ## (A change the stack itself made leaves its top as the selection, so nothing happens.)
 func _on_selection_changed() -> void:
 	var top_id: int = _stack.back()["id"] if not _stack.is_empty() else -1
-	if dish.selected_id == top_id:
+	if dish.selected.bup == top_id:
 		return
-	if dish.selected_id >= 0:
-		_set_stack([{"view": "info", "id": dish.selected_id}])
+	if dish.selected.bup >= 0:
+		_set_stack([{"view": "info", "id": dish.selected.bup}])
 	else:
 		_set_stack([])
 
@@ -812,9 +812,9 @@ func _set_stack(new_stack: Array) -> void:
 
 ## The lineage icon: the family line of the bup on show, over its info.
 func _open_lineage() -> void:
-	if _stack.is_empty() or dish.selected_id < 0:
+	if _stack.is_empty() or dish.selected.bup < 0:
 		return
-	_set_stack(_stack + [{"view": "lineage", "id": dish.selected_id}])
+	_set_stack(_stack + [{"view": "lineage", "id": dish.selected.bup}])
 
 
 ## A name in a lineage was clicked: that bup's info, a step further on (and the bup is selected, if it is alive).
@@ -822,7 +822,7 @@ func _open_info_of(id: int) -> void:
 	if not dish.has_record(id):
 		return
 	_set_stack(_stack + [{"view": "info", "id": id}])
-	dish.selected_id = id
+	dish.selected.bup = id
 	following_id = -1
 
 
@@ -1313,8 +1313,8 @@ func _click(world: Vector2) -> void:
 				# The new source is what the player will want to look at or adjust next.
 				toolbar.select_tool(Toolbar.Tool.SELECT)
 				tool_options.pick_buttons[Dish.PickMode.ALL].button_pressed = true  # (a mode that skips sources would hide the one just placed)
-				dish.selected_id = -1
-				dish.selected_source = dish.sources[-1]
+				dish.selected.bup = -1
+				dish.selected.source = dish.sources[-1]
 			elif world.distance_to(dish.global_position) <= dish.radius:
 				if dish.sources.size() >= Dish.MAX_SOURCES:
 					_show_banner(Strings.t("hud.banner_source_limit"), 1.5)
@@ -1350,14 +1350,14 @@ func _on_screen(world_pos: Vector2, zoom: float) -> bool:
 
 ## Where the selected bup or source is in the world, or null when nothing is selected.
 func _selected_world_pos() -> Variant:
-	if dish.has_bup(dish.selected_id):
-		return dish.bup_world_pos(dish.selected_id)
-	if dish.selected_source != null:
-		return dish.selected_source.pos
-	if dish.selected_plankton != null:
-		return dish.global_position + dish.selected_plankton.pos
-	if dish.selected_husk != Dish.NO_HUSK:
-		return dish.global_position + dish.selected_husk
+	if dish.has_bup(dish.selected.bup):
+		return dish.bup_world_pos(dish.selected.bup)
+	if dish.selected.source != null:
+		return dish.selected.source.pos
+	if dish.selected.plankton != null:
+		return dish.global_position + dish.selected.plankton.pos
+	if dish.selected.husk != Dish.NO_HUSK:
+		return dish.global_position + dish.selected.husk
 	return null
 
 
@@ -1433,7 +1433,7 @@ func _start_again() -> void:
 	_lineage_shown = {}
 	_end_pipette_wait(false)
 	_pipette_clock = 0.0
-	dish.selected_id = -1
+	dish.selected.bup = -1
 	_begin_dish()
 	toolbar.set_paused(free_mode)
 
@@ -1530,10 +1530,10 @@ func _start_tutorial() -> void:
 	steps.append(_tour("tray", func() -> Rect2: return tool_options.get_global_rect()))
 	steps.append(_tour("time", func() -> Rect2: return toolbar.pause_button.get_global_rect().merge(toolbar.speed_ultra_button.get_global_rect()).grow(4.0)))
 	steps.append(_tour("layers", func() -> Rect2: return layers_panel.get_global_rect().grow(4.0)))
-	steps.append(_tour("pick_bup", _tutorial_bup_rect, func() -> bool: return dish.selected_id >= 0, _tutorial_show_bup))
+	steps.append(_tour("pick_bup", _tutorial_bup_rect, func() -> bool: return dish.selected.bup >= 0, _tutorial_show_bup))
 	steps.append(_tour("info", func() -> Rect2: return _in_tray(info_panel)))
 	steps.append(_tour("genome", func() -> Rect2: return _in_tray(info_genome)))
-	steps.append(_tour("watch", func() -> Rect2: return _in_tray(watch_button), func() -> bool: return dish.is_watched(dish.selected_id)))
+	steps.append(_tour("watch", func() -> Rect2: return _in_tray(watch_button), func() -> bool: return dish.is_watched(dish.selected.bup)))
 	steps.append(_tour("watched", func() -> Rect2: return _in_tray(watch_section)))
 	steps.append(_tour("lineage_open", func() -> Rect2: return _in_tray(lineage_button), _lineage_is_open, _tutorial_close_lineage))
 	steps.append(_tour("lineage", func() -> Rect2: return lineage_panel.get_global_rect(), func() -> bool: return not _lineage_is_open(), _tutorial_open_lineage))
@@ -1554,7 +1554,7 @@ func _tutorial_show_bup() -> void:
 	var ids := dish.bup_ids()
 	if ids.is_empty():
 		return
-	_tutorial_bup = dish.selected_id if dish.has_bup(dish.selected_id) else ids[0]  # (coming back to the step keeps the bup already chosen)
+	_tutorial_bup = dish.selected.bup if dish.has_bup(dish.selected.bup) else ids[0]  # (coming back to the step keeps the bup already chosen)
 	camera.zoom = Vector2.ONE * TUTORIAL_ZOOM
 	camera.position = dish.global_position + (dish.bup_world_pos(_tutorial_bup) - dish.global_position).limit_length(dish.radius)
 

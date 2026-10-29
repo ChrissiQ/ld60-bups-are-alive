@@ -743,23 +743,23 @@ func _init() -> void:
 	TestUtil.check(d.source_at(spot + Vector2(Dish.SOURCE_PICK_RADIUS + 2.0, 0.0)) == null, "just outside the pick radius finds none")
 	TestUtil.check(d.source_at(spot + Vector2(Dish.SOURCE_PICK_RADIUS + 2.0, 0.0), 4.0) == d.sources[0], "slack widens a source's target")
 	d.select_at(spot)
-	TestUtil.check(d.selected_source == d.sources[0] and d.selected_id == -1, "select_at selects the source")
+	TestUtil.check(d.selected.source == d.sources[0] and d.selected.bup == -1, "select_at selects the source")
 	d.select_at(d.global_position + Vector2(-200, 200))
-	TestUtil.check(d.selected_source == null and d.selected_id == -1, "selecting empty space lets go of the selection")
+	TestUtil.check(d.selected.source == null and d.selected.bup == -1, "selecting empty space lets go of the selection")
 	d.add_bup(spot, Genome.founder(), 30.0)
 	d.select_at(spot)
-	TestUtil.check(d.selected_source != null and d.selected_id == -1, "a source is picked over a bup on top of it")
+	TestUtil.check(d.selected.source != null and d.selected.bup == -1, "a source is picked over a bup on top of it")
 	d.hover_at(spot)
-	TestUtil.check(d.hovered_source != null and d.hovered_id == -1, "...and so is its hover")
+	TestUtil.check(d.hovered.source != null and d.hovered.bup == -1, "...and so is its hover")
 	d.select_at(spot + Vector2(Dish.SOURCE_PICK_RADIUS - 2.0, 0.0))
-	TestUtil.check(d.selected_source != null, "a click a little away from a source still picks it (within %.0f µm)" % Dish.SOURCE_PICK_RADIUS)
+	TestUtil.check(d.selected.source != null, "a click a little away from a source still picks it (within %.0f µm)" % Dish.SOURCE_PICK_RADIUS)
 	d.clear_bups()
 	d.select_at(spot)
-	TestUtil.check(d.selected_source != null and d.selected_id == -1, "selecting a source clears the bup selection")
+	TestUtil.check(d.selected.source != null and d.selected.bup == -1, "selecting a source clears the bup selection")
 	d.hover_at(spot)
-	TestUtil.check(d.hovered_source == d.sources[0] and d.hovered_id == -1, "hover_at highlights a source")
+	TestUtil.check(d.hovered.source == d.sources[0] and d.hovered.bup == -1, "hover_at highlights a source")
 	d.clear_hover()
-	TestUtil.check(d.hovered_source == null and d.hovered_id == -1, "clear_hover clears both kinds")
+	TestUtil.check(d.hovered.source == null and d.hovered.bup == -1, "clear_hover clears both kinds")
 	# The medium at a point: concentration, which way it rises, what is near.
 	d.sources.clear()
 	var values := []
@@ -782,7 +782,7 @@ func _init() -> void:
 	d.place_source(spot, 2.0)
 	d.select_at(spot)
 	d.strike(TestUtil.small_start())
-	TestUtil.check(d.selected_source == null and d.selected_id == -1, "a new dish clears any selection")
+	TestUtil.check(d.selected.source == null and d.selected.bup == -1, "a new dish clears any selection")
 
 	# --- History graph axes.
 	TestUtil.check(HistoryGraph.nice_ceil(0.0) == 10.0 and HistoryGraph.nice_ceil(10.0) == 10.0 and HistoryGraph.nice_ceil(11.0) == 20.0, "axis max rounds up to a round number (small)")
@@ -932,13 +932,13 @@ func _init() -> void:
 		broken[what].call(bad)
 		TestUtil.check(not victim.from_dict(bad), "rejects a save where: %s" % what)
 		TestUtil.check(victim.bup_ids() == cells_before and victim.sources == sources_before and victim.radius == radius_before and victim.time == time_before, "...and leaves the dish untouched (%s)" % what)
-	TestUtil.check(victim.selected_source != null, "...including the selection (a rejected load changes nothing)")
+	TestUtil.check(victim.selected.source != null, "...including the selection (a rejected load changes nothing)")
 	# Odd but harmless values are made safe instead of rejected.
 	var odd: Dictionary = good.duplicate(true)
 	odd["radius"] = 99999
 	TestUtil.check(victim.from_dict(odd), "a save with out-of-range values still loads")
 	TestUtil.check(victim.radius == StartConditions.MAX_DISH_RADIUS, "...with the radius clamped (%.0f)" % victim.radius)
-	TestUtil.check(victim.selected_source == null and victim.selected_id == -1, "a successful load clears the selection")
+	TestUtil.check(victim.selected.source == null and victim.selected.bup == -1, "a successful load clears the selection")
 
 	# --- StartConditions: one source for limits, and an honest copy().
 	TestUtil.check(StartConditions.MAX_BUPS <= StartConditions.MAX_BUP_LIMIT, "the bups slider cap never exceeds the limit slider's")
