@@ -2,17 +2,12 @@ extends Node2D
 
 const BANNER_SECONDS := 7.0
 const MAX_FRAME_SECONDS := 0.1  ## the longest frame the sim will catch up on, so a hitch can't snowball
-const FLASH_MSEC := 1500  ## how long the divisions number stays in the flash colour after the bup divides
-const LIVE_TEXT_MSEC := 100  ## at high playback speed the readouts are rewritten this often at most: faster is a flicker, not information
-const LIVE_TEXT_FROM_SPEED := 100.0  ## the playback speed from which that applies
 const ZOOM_MIN := 0.002  ## low enough to fit the largest dish (90000 µm in radius) in a window
 const ZOOM_MAX := 12.0  ## close enough that a bup (a few µm) fills a good part of the window
 const ZOOM_BUTTON_STEP := 1.25
 const ZOOM_WHEEL_STEP := 1.1
 const ZOOM_PINCH_GAIN := 1.0  ## a trackpad pinch zooms by its own factor, to this power
 const ZOOM_TRACKPAD_SCROLL := 0.05  ## a two-finger scroll zooms by ZOOM_WHEEL_STEP to the power of this for each unit it moves
-const WATCH_ICON := preload("res://icons/watch.svg")
-const UNWATCH_ICON := preload("res://icons/unwatch.svg")
 const PAINT_MIN_PIXELS := 24.0  ## the least screen distance between two places of a drag with a brush tool (so that a small brush does not stamp every pixel)
 const PAINT_MAX_STEPS := 60  ## the most places one pointer movement makes (a fast sweep across the dish is not worth more than this)
 const PAN_KEY_PIXELS := 600.0  ## screen pixels a second the view moves while a pan key (W, A, S or D) is held
@@ -56,30 +51,8 @@ const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) stil
 @onready var stage: Control = %Stage  ## the free middle of the screen, between the rail, the side column, the top bar and the bottom bar: the dish is framed in it
 @onready var toolbar: Toolbar = %Toolbar
 @onready var tool_options: ToolOptions = %ToolOptions
-@onready var dish_card: PanelContainer = %DishCard  ## the side column: the two ways nutrient arrives by itself, and the readout
 @onready var feed_row: SettingRow = %FeedRow
 @onready var bloom_row: SettingRow = %BloomRow  ## how often plankton appear
-@onready var info_panel: PanelContainer = %InfoPanel  ## what is picked (a bup, a source, a plankton)
-@onready var hover_card: PanelContainer = %HoverCard  ## what the pointer rests on, next to the pointer (it never moves the side column)
-@onready var hover_text: RichTextLabel = %HoverText
-@onready var info_genome: GenomeRibbon = %InfoGenome  ## the picked bup's genome as a chromosome map, and the lines that come after it
-@onready var info_tail: RichTextLabel = %InfoTail
-@onready var info_gauges: BupGauges = %InfoGauges  ## the bup's mass and reserve bars, under its name (on the hover card, under its text)
-@onready var hover_gauges: BupGauges = %HoverGauges
-@onready var hover_genome: GenomeRibbon = %HoverGenome  ## the same on the card that follows the pointer
-@onready var hover_tail: RichTextLabel = %HoverTail
-@onready var info_text: RichTextLabel = %InfoText
-@onready var top_row: HBoxContainer = %InfoTopRow
-@onready var name_row: BupNameRow = %NameRow
-@onready var lineage_button: Button = %LineageButton
-@onready var lineage_panel: PanelContainer = %LineagePanel
-@onready var lineage_title: Label = %LineageTitle
-@onready var lineage_back_button: Button = %LineageBackButton
-@onready var lineage_entries: VBoxContainer = %LineageEntries
-@onready var source_rate_row: SettingRow = %InfoSourceRate
-@onready var delete_source_button: Button = %DeleteSource
-@onready var follow_button: Button = %FollowButton
-@onready var watch_button: Button = %WatchButton
 @onready var watch_section: TraySection = %WatchSection  ## the tray's "Watching" section: a plain tray section like the rest, holding the list
 @onready var watch_list: WatchList = %WatchList
 @onready var tutorial: Tutorial = $TutorialLayer/Tutorial  ## the guided tour, when it is wanted (see Session.tutorial_wanted)
@@ -96,9 +69,6 @@ var free_mode := Session.mode == Session.Mode.FREE
 var tracker := GoalTracker.new()
 var dishes: Array[Dish] = []  ## every dish that runs; `dish` is the one in the main view (the others run beside it, see the strip)
 var _view_before_extinct: Dish = null  ## the dish that was in the main view when the first dish in `_extinct_queue` was brought into view: the view goes back to it afterwards
-var _divisions_of := -1  ## the bup whose divisions count the panel last saw ...
-var _divisions_seen := 0  ## ... and what it was
-var _flash_until := 0  ## when the divisions number stops flashing (Time.get_ticks_msec)
 var _extinct_queue: Array[Dish] = []  ## dishes that have died out and are not yet deleted (the first is the one the screen has said so about)
 var _dish_numbers := {}  ## Dish -> its number (a number is never reused: a bup's "line from dish 2" stays true)
 var _next_dish_number := 1
@@ -117,9 +87,10 @@ var _vitals_width := 0.0  ## the widest the top bar's readout has been (see _upd
 var menu_open: bool:  ## the Escape menu is up: the game is frozen behind it and takes no input
 	get:
 		return pause_menu.visible
+var readout := Readout.new()  ## how the readouts are rewritten (see Readout)
+var inspector := Inspector.new()  ## the panels about what is picked, and the hover card
 var lineage := LineageView.new()  ## the views opened on bups (info, lineage) and the lineage list
 var _pointer_stamp := []  ## what the hover and placement preview were last worked out from
-var _point_stamp := []  ## the same for the nutrient readout under the pointer
 var _tutorial_bup := -1  ## the bup the tour asked the player to pick, once it has set the view up for that (-1: it has not)
 var _tutorial_watched_before: Array[int] = []  ## who was on the watch list when the tour began, so it takes off only whom it put there
 var _view_moved := false  ## the view was panned or zoomed by hand: a change of the window does not frame the dish again
@@ -141,6 +112,16 @@ func _ready() -> void:
 	UserSettings.ensure_applied()
 	holds = PlayHolds.new(toolbar)
 	scheduler = DishScheduler.new(dishes)
+	lineage.dishes = dishes
+	lineage.numbers = _dish_numbers
+	lineage.dish = dish
+	readout.is_live = func() -> bool: return not paused and sim_speed >= Readout.LIVE_TEXT_FROM_SPEED
+	inspector.dish = dish
+	inspector.number_of = func(d: Dish) -> int: return _dish_numbers[d]
+	inspector.bind(self, lineage, readout)
+	inspector.follow_pressed.connect(_toggle_follow)
+	inspector.info_genome.entry_requested.connect(_open_encyclopedia)
+	lineage.info_opened.connect(func() -> void: following_id = -1)
 	_register_dish(dish)
 	dish_strip.dish_chosen.connect(set_main_dish)
 	tracker.goal_completed.connect(_on_goal_completed)
@@ -161,39 +142,22 @@ func _ready() -> void:
 	pause_menu.resume_requested.connect(_close_menu)
 	pause_menu.quit_requested.connect(_quit_to_menu)
 	pause_menu.tour_requested.connect(_replay_tour)
-	info_genome.entry_requested.connect(_open_encyclopedia)
 	pause_menu.dish_radius_chosen.connect(_resize_dish)
 	pause_menu.bup_limit_chosen.connect(func(limit: int) -> void: dish.change_limit(limit))
 	graph.dish = dish
 	graph.dishes = dishes
 	banner.text = ""
-	source_rate_row.configure(Dish.MIN_SOURCE_RATE, Dish.MAX_SOURCE_RATE, 0.1, 10.0, Strings.t("hud.source_rate_unit"))
-	source_rate_row.value_changed.connect(_on_source_rate_changed)
 	feed_row.configure(0.0, StartConditions.MAX_FEED_DENSITY, 0.1, 0.0, Strings.t("hud.rate_unit_feed"))
 	feed_row.value_changed.connect(func(v: float) -> void: dish.feed_density = v)
 	bloom_row.configure(0.0, StartConditions.MAX_BLOOM_DENSITY, Dish.BLOOM_DENSITY_STEP, 0.0, Strings.t("hud.rate_unit_bloom"))
 	bloom_row.disabled_reason = Strings.t("hud.rate_bloom_locked")
 	bloom_row.value_changed.connect(func(v: float) -> void: dish.bloom_density = v)
-	delete_source_button.pressed.connect(_delete_selected_source)
-	delete_source_button.focus_mode = Control.FOCUS_NONE
-	follow_button.pressed.connect(_toggle_follow)
-	watch_button.pressed.connect(_toggle_watch)
-	lineage.dishes = dishes
-	lineage.numbers = _dish_numbers
-	lineage.dish = dish
-	lineage.title = lineage_title
-	lineage.entries = lineage_entries
-	lineage.info_opened.connect(func() -> void: following_id = -1)
-	lineage_back_button.pressed.connect(lineage.step_back)
-	watch_button.focus_mode = Control.FOCUS_NONE
 	watch_list.dishes = dishes
 	watch_list.numbers = _dish_numbers
 	layers_panel.layer_toggled.connect(func(layer: Dish.Layer, shown: bool) -> void:  # (what is shown is one choice for every dish)
 		for d in dishes:
 			d.show_layer(layer, shown))
 	watch_list.bup_chosen.connect(_open_watched)
-	lineage_button.pressed.connect(lineage.open_lineage)
-	follow_button.focus_mode = Control.FOCUS_NONE
 	stage.resized.connect(_on_stage_resized)
 	get_viewport().size_changed.connect(_adapt_layout)
 	_adapt_layout()
@@ -319,7 +283,7 @@ func _process(delta: float) -> void:
 		banner.text = ""
 	_update_pointer()
 	_update_info_panel()
-	_place_hover_card()
+	inspector.place_hover_card()
 	_follow_selected()
 	dish.refresh_drawing()
 	graph.refresh()
@@ -385,117 +349,9 @@ func _pick_slack() -> float:
 	return PICK_SLACK_PIXELS / camera.zoom.x
 
 
+## The panels about what is picked, brought up to date.
 func _update_info_panel() -> void:
-	if dish.selected.bup >= 0 and not dish.has_record(dish.selected.bup):
-		dish.selected.bup = -1  # its record is gone
-	if dish.hovered.bup >= 0 and not dish.has_record(dish.hovered.bup):
-		dish.hovered.bup = -1  # (a hover left over in a dish that has come into view: it has no record of that bup, and `_deceased_text` needs one)
-	# A clicked bup, source or plankton is pinned to the info panel in the side column. Until one is, what the pointer
-	# is over (or else the nutrient at that spot) shows on a small card beside the pointer, which never moves the column.
-	var pinned := dish.has_selection()
-	var bup_id: int = dish.selected.bup if pinned else dish.hovered.bup
-	var source: NutrientSource = dish.selected.source if pinned else dish.hovered.source
-	var floating: Plankton = dish.selected.plankton if pinned else dish.hovered.plankton
-	var husk_place: Vector2 = dish.selected.husk if pinned else dish.hovered.husk
-	var husk := dish.husk_details(husk_place) if husk_place != Dish.NO_HUSK else {}
-	if husk_place != Dish.NO_HUSK and husk.is_empty():  # (it has leaked away)
-		if pinned:
-			dish.selected.husk = Dish.NO_HUSK
-		else:
-			dish.hovered.husk = Dish.NO_HUSK
-		husk_place = Dish.NO_HUSK
-	var editing := dish.selected.source != null and dish.selected.bup < 0
-	var alive_info: Dictionary = dish.bup_info(bup_id) if bup_id >= 0 else {}  # (fetched once: the panels below are built from it)
-	if bup_id >= 0 and alive_info.is_empty() and dish.has_bup(bup_id):
-		alive_info = dish.lineage_info(bup_id)  # (alive, but on the GPU its record has not come back yet: its family record stands in, rather than showing it as deceased)
-	var dead := bup_id >= 0 and alive_info.is_empty()  # a selected bup that has died stays up, as a record
-	var lineage_open := lineage.is_open_on(bup_id)
-	var something := bup_id >= 0 or source != null or floating != null or not husk.is_empty()
-	var target: RichTextLabel = info_text if pinned else hover_text
-	info_panel.visible = pinned and something and not lineage_open
-	hover_card.visible = not pinned and (something or _hovering_point)
-	dish_card.visible = not (info_panel.visible or lineage_panel.visible)  # (one slot in the side column: the dish, or what is picked)
-	hover_card.theme_type_variation = &"DeceasedPanel" if dead else &"HudPanel"
-	info_panel.theme_type_variation = &"DeceasedPanel" if dead else &"HudPanel"
-	lineage_panel.visible = lineage_open
-	lineage_panel.theme_type_variation = &"DeceasedPanel" if dead else &"HudPanel"
-	source_rate_row.visible = editing
-	delete_source_button.visible = editing
-	follow_button.visible = dish.selected.bup >= 0 and not dead  # a bup can be followed once it is selected, not just hovered
-	var watched_now := dish.is_watched(dish.selected.bup)
-	watch_button.icon = UNWATCH_ICON if watched_now else WATCH_ICON  # (an eye; crossed out while the bup is on the list, as that is what pressing it does)
-	watch_button.tooltip_text = Strings.t("hud.unwatch") if watched_now else Strings.t("hud.watch")
-	follow_button.text = Strings.t("hud.stop_following") if following_id >= 0 else Strings.t("hud.follow")
-	follow_button.tooltip_text = Strings.t("hud.stop_following_tip" if following_id >= 0 else "hud.follow_tip")
-	top_row.visible = pinned and bup_id >= 0
-	lineage_button.visible = bup_id >= 0 and bup_id == dish.selected.bup
-	watch_button.visible = lineage_button.visible  # (alive or dead: a record can be watched too)
-	var shows_bup := bup_id >= 0
-	info_genome.visible = shows_bup and pinned
-	info_tail.visible = info_genome.visible
-	info_gauges.visible = shows_bup and pinned
-	hover_gauges.visible = shows_bup and not pinned
-	hover_genome.visible = shows_bup and not pinned
-	hover_tail.visible = hover_genome.visible
-	if bup_id < 0:
-		name_row.cancel_editing()
-	if lineage_open:
-		lineage.show(bup_id)
-	if bup_id >= 0:
-		_point_stamp = []
-		var record := dish.lineage_info(bup_id) if dead else alive_info
-		var body := _deceased_text(record) if dead else _info_text(alive_info)
-		var genome_map: GenomeRibbon = info_genome if pinned else hover_genome
-		var tail: RichTextLabel = info_tail if pinned else hover_tail
-		genome_map.show_bup(record, pinned)
-		_set_rich(tail, _tail_text(record), "tail %d" % bup_id)
-		var divided := _note_divisions(bup_id, record) and not dead and pinned  # (the hover card does not flash)
-		var gauges: BupGauges = info_gauges if pinned else hover_gauges
-		gauges.show_bup(record, dish.stationary_phase, not dead)
-		if pinned:
-			name_row.show_bup(dish, bup_id, true)  # a bup can be renamed once it is clicked, not just hovered
-		else:
-			body = "%s\n%s" % [dish.bup_display(bup_id).get("name", ""), body]  # (the hover card has no name row)
-		_set_rich(target, body, "bup %d" % bup_id, divided)
-	elif source != null:
-		_point_stamp = []
-		if editing:
-			_show_source_rate(source)
-		_set_rich_when_due(target, "source %d" % source.get_instance_id(), func() -> String: return _source_text(dish.source_details(source)))
-	elif floating != null:
-		_point_stamp = []
-		_set_rich_when_due(target, "plankton %d" % floating.get_instance_id(), func() -> String: return _plankton_text(dish.plankton_details(floating)))
-	elif not husk.is_empty():
-		_point_stamp = []
-		_set_rich_when_due(target, "husk %s" % husk_place, func() -> String: return _husk_text(husk))
-	elif _hovering_point:
-		var point_stamp := [_hover_point, dish.time, dish.edit_count]
-		if point_stamp != _point_stamp:  # (the readout is worked out again only when the spot or the dish has changed)
-			_point_stamp = point_stamp
-			_set_rich(target, _point_text(dish.nutrient_at(_hover_point)), "point")
-
-
-## The hover card follows the pointer, kept inside the window.
-func _place_hover_card() -> void:
-	if not hover_card.visible:
-		return
-	hover_card.size = Vector2.ZERO  # (a card does not shrink by itself when its words get fewer: the bup's is taller than the nutrient's)
-	var view := get_viewport_rect().size
-	var at := get_viewport().get_mouse_position() + Vector2(20.0, 20.0)
-	if at.x + hover_card.size.x > view.x - 8.0:
-		at.x = get_viewport().get_mouse_position().x - 20.0 - hover_card.size.x
-	if at.y + hover_card.size.y > view.y - 8.0:
-		at.y = get_viewport().get_mouse_position().y - 20.0 - hover_card.size.y
-	hover_card.position = at.clamp(Vector2(8.0, 8.0), (view - hover_card.size - Vector2(8.0, 8.0)).max(Vector2(8.0, 8.0)))
-
-
-## The Watch button: the selected bup goes on the watch list, or comes off it.
-func _toggle_watch() -> void:
-	var id := dish.selected.bup
-	if dish.is_watched(id):
-		dish.unwatch_bup(id)
-	else:
-		dish.watch_bup(id)
+	inspector.update(following_id >= 0, _hover_point if _hovering_point else null)
 
 
 ## An entry of the watch list was clicked: that bup (living or not), in whichever dish it is in, in the inspect panel.
@@ -521,126 +377,6 @@ func _follow_selected() -> void:
 		following_id = -1
 	if following_id >= 0:
 		camera.position = dish.bup_world_pos(following_id)
-
-
-## Puts the selected source's rate in the row, without that counting as the player changing it.
-func _show_source_rate(source: NutrientSource) -> void:
-	if not source_rate_row.is_dragging() and not is_equal_approx(source_rate_row.value, snappedf(source.rate, 0.1)):
-		source_rate_row.set_value_silently(source.rate)
-
-
-func _delete_selected_source() -> void:
-	if dish.selected.source != null:
-		dish.remove_source(dish.selected.source)
-
-
-func _on_source_rate_changed(rate: float) -> void:
-	if dish.selected.source != null:
-		dish.selected.source.rate = rate
-
-
-func _plankton_text(d: Dictionary) -> String:
-	var offset: Vector2 = d["offset"]
-	var nearest: float = d["nearest_bup"]
-	return Strings.t("panel.plankton", [
-		SimClock.format_minutes(int(d["age"] / 60.0)), d["units"], offset.x, offset.y, d["distance"], _concentration_text(d["concentration"]),
-		_away_text(nearest),
-	])
-
-
-func _husk_text(d: Dictionary) -> String:
-	var offset: Vector2 = d["offset"]
-	var nearest: float = d["nearest_bup"]
-	return Strings.t("panel.husk", [
-		SimClock.format_minutes(int(d["age"] / 60.0)), d["units"], d["left"] * 100.0, offset.x, offset.y, d["distance"], _concentration_text(d["concentration"]),
-		_away_text(nearest),
-	])
-
-
-func _source_text(d: Dictionary) -> String:
-	var offset: Vector2 = d["offset"]
-	var nearest: float = d["nearest_bup"]
-	return Strings.t("panel.source", [
-		d["emitted"], offset.x, offset.y, d["distance"], _concentration_text(d["concentration"]),
-		_away_text(nearest),
-		Dish.SOURCE_NEARBY, d["nearby"],
-	])
-
-
-## A concentration in the unit the player works in: units of nutrient per square millimetre (the unit of a dose, a feed
-## and a source), not the simulation's energy per square micrometre, which is far too small to read.
-func _concentration_text(energy_per_um2: float) -> String:
-	var units := energy_per_um2 * 1.0e6 / Dish.NUTRIENT_ENERGY
-	return Strings.t("panel.concentration", [("%.1f" if units < 10.0 else "%.0f") % units])
-
-
-## The medium at a spot: how much nutrient, which way it rises and how steeply (as a share of
-## what is there, per 100 units), and what is near.
-func _point_text(d: Dictionary) -> String:
-	var offset: Vector2 = d["offset"]
-	var concentration: float = d["concentration"]
-	var gradient: Vector2 = d["gradient"]
-	var change := gradient.length() / maxf(concentration, 1e-6) * 100.0  # the fraction it changes by over 100 units
-	var slope := Strings.t("panel.gradient_flat")
-	if concentration > 0.0005 and change >= 0.02:
-		var compass := ["e", "se", "s", "sw", "w", "nw", "n", "ne"]  # the screen's y axis points down
-		slope = Strings.t("panel.gradient_rising", [Strings.t("panel.compass_" + compass[posmod(roundi(gradient.angle() / (TAU / 8.0)), 8)]), change * 100.0])
-	var source: float = d["nearest_source"]
-	var bup: float = d["nearest_bup"]
-	return Strings.t("panel.nutrient", [
-		_concentration_text(concentration), slope, offset.x, offset.y, d["distance"],
-		_away_text(source),
-		_away_text(bup),
-	])
-
-
-## How surely a bup goes up the slope where it is (the chance that it ends up further up after a minute of swimming), in a word.
-func _steering_word(chance: float) -> String:
-	if chance < 0.55:
-		return Strings.t("panel.steering_blind")
-	if chance < 0.7:
-		return Strings.t("panel.steering_faint")
-	return Strings.t("panel.steering_clear") if chance < 0.9 else Strings.t("panel.steering_sure")
-
-
-## How far away something is, for the panels: "none" when there is nothing of that kind in the dish.
-func _away_text(distance: float) -> String:
-	return Strings.t("panel.away", [distance]) if distance >= 0.0 else Strings.t("panel.none")
-
-
-## Whether the bup's divisions count went up just now: the number after "divisions" in the panel then shows in the flash colour for FLASH_MSEC, so that the drop in its mass and reserve
-## that comes with a division is seen to have a reason.
-func _note_divisions(id: int, info: Dictionary) -> bool:
-	var divisions := int(info["divisions"])
-	var now := Time.get_ticks_msec()
-	if id != _divisions_of or divisions < _divisions_seen:
-		_divisions_of = id  # (another bup is shown: nothing has just happened to it)
-		_flash_until = 0
-	elif divisions > _divisions_seen:
-		_flash_until = now + FLASH_MSEC
-	_divisions_seen = divisions
-	return now < _flash_until
-
-
-func _info_text(b: Dictionary) -> String:
-	var text := Strings.t("panel.bup", [SimClock.format_minutes(b["born"]), b["divisions"]])
-	text += Strings.t("panel.steering", [_steering_word(b.get("steering", 0.5))])
-	text += Strings.t("panel.dish_line", [_dish_numbers[dish]])  # (the dish it is in now)
-	return text.rstrip("\n")
-
-
-## The lines under a bup's genome map (alive or dead): the mutations in its lineage, and its harm.
-func _tail_text(b: Dictionary) -> String:
-	return Strings.t("panel.bup_tail", [b["mutations"], Genome.harm_share(b["harm"]) * 100.0])
-
-
-func _deceased_text(b: Dictionary) -> String:
-	var text := Strings.t("panel.deceased", [SimClock.format_minutes(b["born"]), SimClock.format_minutes(b["died"]), b["divisions"]])
-	if b.has("moved_to"):
-		text += Strings.t("panel.moved_line", [b["moved_to"]]).substr(1) + "\n"
-	else:
-		text += Strings.t("panel.dish_line", [_dish_numbers[dish]]).substr(1) + "\n"  # (the dish it died in)
-	return text.rstrip("\n")
 
 
 ## The select tool now looks at something else: a selection of a kind it no longer looks at is let go.
@@ -735,7 +471,7 @@ func _on_key(event: InputEventKey) -> void:
 		pause_menu.show_controls()
 	elif event.keycode in [KEY_DELETE, KEY_BACKSPACE]:
 		if _tools_unlocked():
-			_delete_selected_source()
+			inspector.delete_selected_source()
 	elif KeyBindings.matches("details", event):
 		_toggle_colony()
 	elif KeyBindings.matches("graph_trait", event):
@@ -751,7 +487,7 @@ func _on_key(event: InputEventKey) -> void:
 			_toggle_follow()
 	elif KeyBindings.matches("watch", event):
 		if dish.selected.bup >= 0 and dish.has_record(dish.selected.bup):
-			_toggle_watch()
+			inspector.toggle_watch()
 	elif KeyBindings.matches("lineage", event):
 		lineage.open_lineage()
 	elif layers_panel.toggle_for_key(event):
@@ -1058,6 +794,7 @@ func set_main_dish(d: Dish) -> void:
 	dish.view_position = camera.position
 	dish = d
 	lineage.dish = d
+	inspector.dish = d
 	_apply_view_mask()
 	d.clear_hover()  # (what it was hovering when last in view is stale)
 	_set_picture_scales()
@@ -1344,9 +1081,9 @@ func _update_hud() -> void:
 	if dish.population() == 0:
 		return
 	var about := "hud %s" % sim_speed
-	if not _readout_due(vitals, about):
+	if not readout.due(vitals, about):
 		return  # (nothing below is worth working out: the text would not be shown yet)
-	_set_rich(vitals, Strings.t("hud.vitals", [_dish_lines(), SimClock.format(dish.time), _playback_text()]), about)
+	readout.set_text(vitals, Strings.t("hud.vitals", [_dish_lines(), SimClock.format(dish.time), _playback_text()]), about)
 	# The readout takes the width its text needs (never less than it has needed, so it does not shrink and grow as the figures change), up to
 	# a share of the bar; the hint beside it gets all the rest.
 	_vitals_width = maxf(_vitals_width, vitals.get_content_width())
@@ -1357,14 +1094,14 @@ func _update_hud() -> void:
 	_update_all_details()
 
 
-## A dish's `population_stats`, worked out again only when its time or an edit has changed it and LIVE_TEXT_MSEC has passed since (below x100 the HUD asks every frame,
+## A dish's `population_stats`, worked out again only when its time or an edit has changed it and Readout.LIVE_TEXT_MSEC has passed since (below x100 the HUD asks every frame,
 ## and on the processor each answer is a scan of every bup; the figures move too slowly there for a tenth of a second to show).
 func _stats_of(d: Dish) -> Dictionary:
 	if d.runs_on_gpu():
 		return d.population_stats()  # (the GPU's figures are the last it sent back: nothing to scan, and they change while time stands still)
 	var now := Time.get_ticks_msec()
 	var kept: Array = _stats_cache.get(d, [])
-	if not kept.is_empty() and (kept[0] == d.time and kept[1] == d.edit_count or now - kept[2] < LIVE_TEXT_MSEC):
+	if not kept.is_empty() and (kept[0] == d.time and kept[1] == d.edit_count or now - kept[2] < Readout.LIVE_TEXT_MSEC):
 		return kept[3]
 	var stats := d.population_stats()
 	_stats_cache[d] = [d.time, d.edit_count, now, stats]
@@ -1413,19 +1150,19 @@ func _start_tutorial() -> void:
 		steps.append(_tour("goal", func() -> Rect2: return goal_card.get_global_rect()))
 	steps.append(_tour("dish", func() -> Rect2: return dish.get_global_transform_with_canvas() * Rect2(-dish.radius, -dish.radius, 2.0 * dish.radius, 2.0 * dish.radius)))
 	steps.append(_tour("readout", func() -> Rect2: return vitals.get_global_rect().grow(8.0)))
-	steps.append(_tour("rates", func() -> Rect2: return _in_tray(dish_card)))
+	steps.append(_tour("rates", func() -> Rect2: return _in_tray(inspector.dish_card)))
 	steps.append(_tour("graph", func() -> Rect2: return _in_tray(graph_section), Callable(), _tutorial_show_graph))
 	steps.append(_tour("tools", func() -> Rect2: return toolbar.select_button.get_global_rect().merge(toolbar.plankton_button.get_global_rect()), Callable(), Callable(), "" if free_mode else Strings.t("tutorial.tools_locked")))
 	steps.append(_tour("tray", func() -> Rect2: return tool_options.get_global_rect()))
 	steps.append(_tour("time", func() -> Rect2: return toolbar.pause_button.get_global_rect().merge(toolbar.speed_ultra_button.get_global_rect()).grow(4.0)))
 	steps.append(_tour("layers", func() -> Rect2: return layers_panel.get_global_rect().grow(4.0)))
 	steps.append(_tour("pick_bup", _tutorial_bup_rect, func() -> bool: return dish.selected.bup >= 0, _tutorial_show_bup))
-	steps.append(_tour("info", func() -> Rect2: return _in_tray(info_panel)))
-	steps.append(_tour("genome", func() -> Rect2: return _in_tray(info_genome)))
-	steps.append(_tour("watch", func() -> Rect2: return _in_tray(watch_button), func() -> bool: return dish.is_watched(dish.selected.bup)))
+	steps.append(_tour("info", func() -> Rect2: return _in_tray(inspector.info_panel)))
+	steps.append(_tour("genome", func() -> Rect2: return _in_tray(inspector.info_genome)))
+	steps.append(_tour("watch", func() -> Rect2: return _in_tray(inspector.watch_button), func() -> bool: return dish.is_watched(dish.selected.bup)))
 	steps.append(_tour("watched", func() -> Rect2: return _in_tray(watch_section)))
-	steps.append(_tour("lineage_open", func() -> Rect2: return _in_tray(lineage_button), lineage.is_open, _tutorial_close_lineage))
-	steps.append(_tour("lineage", func() -> Rect2: return lineage_panel.get_global_rect(), func() -> bool: return not lineage.is_open(), _tutorial_open_lineage))
+	steps.append(_tour("lineage_open", func() -> Rect2: return _in_tray(inspector.lineage_button), lineage.is_open, _tutorial_close_lineage))
+	steps.append(_tour("lineage", func() -> Rect2: return inspector.lineage_panel.get_global_rect(), func() -> bool: return not lineage.is_open(), _tutorial_open_lineage))
 	steps.back()["escape_passes"] = true  # (Escape closes a lineage, which is what that step asks for)
 	steps.append(_tour("finish"))
 	tutorial.start(steps)
@@ -1536,7 +1273,7 @@ func _update_goal_card() -> void:
 	if goal == null:
 		goal_kicker.text = ""
 		goal_title.text = Strings.t("hud.goal_all_done_title")
-		_set_rich(goal_text, Strings.t("hud.goal_all_done_text"), "goal")
+		readout.set_text(goal_text, Strings.t("hud.goal_all_done_text"), "goal")
 		goal_bar.value = 1.0
 		goal_status.text = ""
 		return
@@ -1544,8 +1281,8 @@ func _update_goal_card() -> void:
 		goal_kicker.text = Strings.t("hud.goal_kicker", [tracker.index + 1, tracker.goals.size()])
 		goal_title.text = goal.title
 		goal_text.set_meta("raw", "")  # (the text is for another goal)
-		_set_rich(goal_text, goal.text, "goal text")
-	if not _readout_due(goal_status, "goal"):
+		readout.set_text(goal_text, goal.text, "goal text")
+	if not readout.due(goal_status, "goal"):
 		return
 	goal_status.set_meta("about", "goal")
 	goal_status.set_meta("set_at", Time.get_ticks_msec())
@@ -1554,32 +1291,3 @@ func _update_goal_card() -> void:
 	if goal.hold_time > 0.0 and tracker.held > 0.0:
 		line += Strings.t("hud.goal_holding", [SimClock.format(tracker.held), SimClock.format(goal.hold_time)])
 	goal_status.text = line
-
-
-## Shows text with its numbers styled. The readouts refresh every frame, so the styling (a
-## regex pass) and the re-parse only run when the text has actually changed.
-## Sets a readout's text. `about` says what the text is about (a bup, the medium at a point...): while the same thing
-## stays shown at high playback speed, its figures change at most every LIVE_TEXT_MSEC, since they would only flicker.
-## True when the text was changed.
-func _set_rich(label: RichTextLabel, text: String, about: String, flash := false) -> bool:
-	var shown := text + ("\u0001" if flash else "")  # (what is asked for: the text, and whether its first number is flashing)
-	if label.get_meta("raw", "") == shown or not _readout_due(label, about):
-		return false
-	label.set_meta("about", about)
-	label.set_meta("set_at", Time.get_ticks_msec())
-	label.set_meta("raw", shown)
-	label.text = UiText.numbers(text, "divisions" if flash else "")
-	return true
-
-
-## Whether a readout would take new text about `about` now (see _set_rich). Asked before working the text out, so that
-## at high playback speed, where most frames change nothing, it is not worked out for nothing.
-func _readout_due(label: Control, about: String) -> bool:
-	var live := not paused and sim_speed >= LIVE_TEXT_FROM_SPEED
-	return not (live and label.get_meta("about", "") == about and Time.get_ticks_msec() - label.get_meta("set_at", 0) < LIVE_TEXT_MSEC)
-
-
-## _set_rich with the text worked out (by `make_text`) only if it is due.
-func _set_rich_when_due(label: RichTextLabel, about: String, make_text: Callable) -> void:
-	if _readout_due(label, about):
-		_set_rich(label, make_text.call(), about)

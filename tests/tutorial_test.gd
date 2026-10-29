@@ -67,7 +67,7 @@ func _init() -> void:
 				var spot: Vector2 = m.dish.bup_world_pos(m._tutorial_bup)
 				m.dish.select_at(spot, 2.0)
 			elif "eye" in key:
-				m._toggle_watch()
+				m.inspector.toggle_watch()
 			elif "family tree" in key:
 				m.lineage.open_lineage()
 			elif "back arrow" in key:
@@ -88,7 +88,7 @@ func _init() -> void:
 	TestUtil.check(m.paused and m.dish.selected.bup < 0 and not m.dish.is_watched(m._tutorial_bup) and m.camera.zoom.is_equal_approx(was_zoom) and m.camera.position.distance_to(was_position) < 4.0, "afterwards it is paused as before, with nothing selected or watched and the camera where it was (%s %s, was %s %s)" % [m.camera.zoom, m.camera.position, was_zoom, was_position])
 	await process_frame
 	await process_frame
-	TestUtil.check(m.dish.watched.is_empty() and m.lineage.is_empty() and m.watch_list.empty_note.visible and not m.info_panel.visible, "and the panels the tour opened are shut again")
+	TestUtil.check(m.dish.watched.is_empty() and m.lineage.is_empty() and m.watch_list.empty_note.visible and not m.inspector.info_panel.visible, "and the panels the tour opened are shut again")
 	m.queue_free()
 
 	# Space, Enter and Back; and what a step asks for cannot be spoiled by clicks or keys elsewhere.
@@ -133,7 +133,7 @@ func _init() -> void:
 	TestUtil.check(nt.index == 11 and nt.text_label.text.begins_with("Its genome"), "after the inspect panel comes the genome step")
 	nt.next()
 	TestUtil.check(nt.index == 12 and nt.next_button.disabled, "the watch step is shut until the eye is pressed")
-	n._toggle_watch()
+	n.inspector.toggle_watch()
 	await process_frame
 	await process_frame
 	TestUtil.check(nt.index == 13, "pressing the eye goes straight on to the watch list")

@@ -168,7 +168,7 @@ func _run() -> void:
 	m._answer_old_dish("keep")
 	TestUtil.check(not m.old_dish_dialog.visible and m.dishes.has(first) and m.paused, "keeping it leaves both dishes there, and the game as paused as it was")
 	var moved_id: int = made.sim.alive_ids()[0]
-	TestUtil.check(m._info_text(made.bup_info(moved_id)).contains("dish %d" % m._dish_numbers[made]), "a bup's panel says which dish it is in now (dish %d)" % m._dish_numbers[made])
+	TestUtil.check(PanelText.bup(made.bup_info(moved_id), m._dish_numbers[made]).contains("dish %d" % m._dish_numbers[made]), "a bup's panel says which dish it is in now (dish %d)" % m._dish_numbers[made])
 	var seen_from := made.view_zoom
 	m.camera.zoom = Vector2.ONE * 0.37
 	m.camera.position = made.global_position + Vector2(40.0, -25.0)

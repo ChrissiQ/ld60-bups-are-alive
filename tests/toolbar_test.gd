@@ -151,7 +151,7 @@ func _init() -> void:
 	TestUtil.check(m.placed_row.value_label.text == "31" and m.placed_row.name_label.text == "Nutrient placed", "the dish card shows the placed count as a label and a value ('%s')" % m.placed_row.value_label.text)
 	TestUtil.check(m.colony.get_child_count() == Genome.LABELED.size() + 6, "what was placed and the colony's averages are rows of the dish card's details (%d)" % m.colony.get_child_count())
 	TestUtil.check(m.vitals.get_theme_font("normal_font") is FontFile and m.vitals.get_theme_font("normal_font").resource_path.begins_with("res://fonts/"), "HUD text uses the bundled font")
-	for node in [m.vitals, m.goal_text, m.info_text]:
+	for node in [m.vitals, m.goal_text, m.inspector.info_text]:
 		TestUtil.check(node.mouse_filter == Control.MOUSE_FILTER_IGNORE, "%s doesn't swallow clicks" % node.name)
 
 	var before: float = TestUtil.units(m.dish)
@@ -213,18 +213,18 @@ func _init() -> void:
 	TestUtil.check(m.dish.selected.bup == bup, "info click selects the bup")
 	await process_frame
 	await process_frame  # process_frame fires before nodes' _process, so allow a full frame
-	TestUtil.check(m.name_row.swatch.visible and m.name_row.swatch.color.is_equal_approx(Genome.color_of(m.dish.lineage_info(bup))), "a living bup has its picture, in its colour, by its name")
+	TestUtil.check(m.inspector.name_row.swatch.visible and m.inspector.name_row.swatch.color.is_equal_approx(Genome.color_of(m.dish.lineage_info(bup))), "a living bup has its picture, in its colour, by its name")
 	var flash_hex := UiText.flash_color().to_html(false)
 	var plain_hex := UiText.number_color().to_html(false)
 	TestUtil.check(flash_hex != plain_hex and UiText.numbers("born 7\ndivisions 4", "divisions").contains("divisions [code][color=#%s]4" % flash_hex) and UiText.numbers("born 7\ndivisions 4", "divisions").contains("[color=#%s]7" % plain_hex), "a figure that has just changed is shown in the flash colour, and only the first number after its word")
-	m._divisions_of = -1
-	m._note_divisions(bup, {"divisions": 5})
-	TestUtil.check(not m._note_divisions(bup, {"divisions": 5}), "a bup that has not divided does not flash")
-	TestUtil.check(m._note_divisions(bup, {"divisions": 6}) and m._note_divisions(bup, {"divisions": 6}), "a bup that has just divided flashes, and goes on for a moment")
-	m._flash_until = 0
-	TestUtil.check(not m._note_divisions(bup, {"divisions": 6}), "...and the flash ends")
-	TestUtil.check(not m._note_divisions(bup + 1, {"divisions": 9}), "another bup shown does not flash")
-	TestUtil.check(m.info_panel.visible and m.name_row.visible and m.name_row.name_label.text.contains("bup #") and m.info_text.get_parsed_text().contains("divisions"), "info panel shows the selected bup, named with its number ('%s')" % m.name_row.name_label.text)
+	m.inspector._divisions_of = -1
+	m.inspector.note_divisions(bup, {"divisions": 5})
+	TestUtil.check(not m.inspector.note_divisions(bup, {"divisions": 5}), "a bup that has not divided does not flash")
+	TestUtil.check(m.inspector.note_divisions(bup, {"divisions": 6}) and m.inspector.note_divisions(bup, {"divisions": 6}), "a bup that has just divided flashes, and goes on for a moment")
+	m.inspector._flash_until = 0
+	TestUtil.check(not m.inspector.note_divisions(bup, {"divisions": 6}), "...and the flash ends")
+	TestUtil.check(not m.inspector.note_divisions(bup + 1, {"divisions": 9}), "another bup shown does not flash")
+	TestUtil.check(m.inspector.info_panel.visible and m.inspector.name_row.visible and m.inspector.name_row.name_label.text.contains("bup #") and m.inspector.info_text.get_parsed_text().contains("divisions"), "info panel shows the selected bup, named with its number ('%s')" % m.inspector.name_row.name_label.text)
 	_click(m, centre + Vector2(-250, -250))
 	TestUtil.check(m.dish.selected.bup == -1, "clicking empty space deselects")
 	m.dish.selected.bup = bup
@@ -235,10 +235,10 @@ func _init() -> void:
 	m.dish.remove_bup(bup)
 	await process_frame
 	await process_frame
-	TestUtil.check(m.dish.selected.bup == bup and m.info_panel.visible and m.info_panel.theme_type_variation == &"DeceasedPanel" and m.info_text.get_parsed_text().contains("DECEASED") and m.info_text.get_parsed_text().contains("died") and not m.follow_button.visible, "when the selected bup dies its panel stays, as a deceased one (grey, status, time of death)")
-	TestUtil.check(m.name_row.swatch.visible and m.name_row.swatch.color.is_equal_approx(Genome.color_of(m.dish.lineage_info(bup))) and is_equal_approx(m.name_row.swatch.length_um, BupPicture.body_length(m.dish.lineage_info(bup))), "a deceased bup keeps the picture it had in life, in its colour and its shape")
+	TestUtil.check(m.dish.selected.bup == bup and m.inspector.info_panel.visible and m.inspector.info_panel.theme_type_variation == &"DeceasedPanel" and m.inspector.info_text.get_parsed_text().contains("DECEASED") and m.inspector.info_text.get_parsed_text().contains("died") and not m.inspector.follow_button.visible, "when the selected bup dies its panel stays, as a deceased one (grey, status, time of death)")
+	TestUtil.check(m.inspector.name_row.swatch.visible and m.inspector.name_row.swatch.color.is_equal_approx(Genome.color_of(m.dish.lineage_info(bup))) and is_equal_approx(m.inspector.name_row.swatch.length_um, BupPicture.body_length(m.dish.lineage_info(bup))), "a deceased bup keeps the picture it had in life, in its colour and its shape")
 	await _key(KEY_ESCAPE)
-	TestUtil.check(m.dish.selected.bup == -1 and not m.info_panel.visible and not m.dish.has_record(bup), "Escape closes it, and the dead bup's record is dropped with nothing left to need it")
+	TestUtil.check(m.dish.selected.bup == -1 and not m.inspector.info_panel.visible and not m.dish.has_record(bup), "Escape closes it, and the dead bup's record is dropped with nothing left to need it")
 	m.camera.position = m.dish.global_position
 
 	# --- A long frame can't snowball: the sim catches up on at most MAX_FRAME_SECONDS.
@@ -277,37 +277,37 @@ func _init() -> void:
 	await process_frame
 	await process_frame
 	_hover_over(m, spot)
-	var point_text: String = m.hover_text.get_parsed_text()
-	TestUtil.check(m.hover_card.visible and point_text.begins_with("NUTRIENT\nconcentration"), "hovering ground shows the nutrient there: '%s'" % point_text.replace("\n", " | "))
+	var point_text: String = m.inspector.hover_text.get_parsed_text()
+	TestUtil.check(m.inspector.hover_card.visible and point_text.begins_with("NUTRIENT\nconcentration"), "hovering ground shows the nutrient there: '%s'" % point_text.replace("\n", " | "))
 	TestUtil.check(point_text.contains("position  -70, 40") and point_text.contains("nearest bup  none") and point_text.contains("nearest source  none"), "...with its position and what is near: '%s'" % point_text.replace("\n", " | "))
-	TestUtil.check(not m.source_rate_row.visible and not m.delete_source_button.visible, "...and no source controls")
+	TestUtil.check(not m.inspector.source_rate_row.visible and not m.inspector.delete_source_button.visible, "...and no source controls")
 	m.dish.field.reset(m.dish.radius)
 	m.dish.edit_count += 1  # (the dish is told when the medium is changed by hand, so the readout looks again)
 	_hover_over(m, spot)
-	TestUtil.check(m.hover_text.get_parsed_text().contains("gradient  flat"), "an empty medium reads flat")
+	TestUtil.check(m.inspector.hover_text.get_parsed_text().contains("gradient  flat"), "an empty medium reads flat")
 	var rising := []
 	for k in m.dish.field.size * m.dish.field.size:
 		rising.append(0.02 * exp(m.dish.field.cell_centre(k).x / 100.0))
 	m.dish.field.load_values(rising)
 	m.dish.edit_count += 1
 	_hover_over(m, spot)
-	TestUtil.check(m.hover_text.get_parsed_text().contains("rising to the E"), "a medium that rises to the right says so: '%s'" % m.hover_text.get_parsed_text().replace("\n", " | "))
+	TestUtil.check(m.inspector.hover_text.get_parsed_text().contains("rising to the E"), "a medium that rises to the right says so: '%s'" % m.inspector.hover_text.get_parsed_text().replace("\n", " | "))
 	var near_pos := spot + Vector2(20, 0)
 	var near_bup: int = m.dish.add_bup(near_pos, Genome.founder(), 30.0)
 	m.dish.place_source(spot + Vector2(0, 60), 2.0)
 	_hover_over(m, spot)
-	TestUtil.check(m.hover_text.get_parsed_text().contains("nearest bup  20 away") and m.hover_text.get_parsed_text().contains("nearest source  60 away"), "the readout shows what is near: '%s'" % m.hover_text.get_parsed_text().replace("\n", " | "))
+	TestUtil.check(m.inspector.hover_text.get_parsed_text().contains("nearest bup  20 away") and m.inspector.hover_text.get_parsed_text().contains("nearest source  60 away"), "the readout shows what is near: '%s'" % m.inspector.hover_text.get_parsed_text().replace("\n", " | "))
 	# Hovering a bup or a source shows that instead; clicking pins it.
 	_hover_over(m, near_pos)
-	TestUtil.check(m.hover_card.visible and m.hover_text.get_parsed_text().contains("divisions") and not m.info_panel.visible, "hovering a bup shows the bup, but can't rename it")
+	TestUtil.check(m.inspector.hover_card.visible and m.inspector.hover_text.get_parsed_text().contains("divisions") and not m.inspector.info_panel.visible, "hovering a bup shows the bup, but can't rename it")
 	_hover_over(m, m.dish.sources[0].pos)
-	TestUtil.check(m.hover_text.get_parsed_text().begins_with("NUTRIENT SOURCE") and not m.source_rate_row.visible, "hovering a source shows it, read-only")
+	TestUtil.check(m.inspector.hover_text.get_parsed_text().begins_with("NUTRIENT SOURCE") and not m.inspector.source_rate_row.visible, "hovering a source shows it, read-only")
 	m.dish.select_at(near_pos)
 	_hover_over(m, spot)
-	TestUtil.check(m.name_row.visible and m.info_text.get_parsed_text().contains("divisions") and not m.info_text.get_parsed_text().contains("NUTRIENT") and m.name_row.rename_button.visible, "a clicked bup stays on the panel while the pointer moves away, and can be renamed")
+	TestUtil.check(m.inspector.name_row.visible and m.inspector.info_text.get_parsed_text().contains("divisions") and not m.inspector.info_text.get_parsed_text().contains("NUTRIENT") and m.inspector.name_row.rename_button.visible, "a clicked bup stays on the panel while the pointer moves away, and can be renamed")
 	m.dish.select_at(m.dish.global_position + Vector2(-200, -200))
 	_hover_over(m, spot)
-	TestUtil.check(m.dish.selected.bup == -1 and m.hover_text.get_parsed_text().begins_with("NUTRIENT\nconcentration"), "clicking empty ground lets go, and the panel follows the pointer again")
+	TestUtil.check(m.dish.selected.bup == -1 and m.inspector.hover_text.get_parsed_text().begins_with("NUTRIENT\nconcentration"), "clicking empty ground lets go, and the panel follows the pointer again")
 	m.dish.remove_bup(near_bup)
 	m.dish.select_at(m.dish.global_position + Vector2(-200, -200))
 	m.dish.sources.clear()
@@ -390,13 +390,13 @@ func _init() -> void:
 	m.dish.selected.bup = tracked
 	await process_frame
 	await process_frame
-	TestUtil.check(m.follow_button.visible and m.follow_button.text == "Follow", "a selected bup offers a Follow button")
-	m.follow_button.pressed.emit()
+	TestUtil.check(m.inspector.follow_button.visible and m.inspector.follow_button.text == "Follow", "a selected bup offers a Follow button")
+	m.inspector.follow_button.pressed.emit()
 	TestUtil.check(m.camera.position.is_equal_approx(m.dish.bup_world_pos(tracked)), "Follow centres the view on the bup at once")
 	m.dish.sim.set_bup_pos(tracked, Vector2(-120, 80))
 	await process_frame
 	await process_frame
-	TestUtil.check(m.camera.position.is_equal_approx(m.dish.bup_world_pos(tracked)) and m.follow_button.text == "Stop following", "...and the view stays on it as it moves")
+	TestUtil.check(m.camera.position.is_equal_approx(m.dish.bup_world_pos(tracked)) and m.inspector.follow_button.text == "Stop following", "...and the view stays on it as it moves")
 	m.toolbar.zoom_in_button.pressed.emit()
 	TestUtil.check(m.camera.position.is_equal_approx(m.dish.bup_world_pos(tracked)), "...also when zooming")
 	_drag(m, centre, Vector2(30, 0), MOUSE_BUTTON_MIDDLE)
@@ -404,21 +404,21 @@ func _init() -> void:
 	await process_frame
 	await process_frame
 	TestUtil.check(m.following_id == -1 and not m.camera.position.is_equal_approx(m.dish.bup_world_pos(tracked)), "panning by hand stops following")
-	m.follow_button.pressed.emit()
-	m.follow_button.pressed.emit()
-	TestUtil.check(m.following_id == -1 and m.follow_button.text == "Follow", "the button toggles following off")
-	m.follow_button.pressed.emit()
+	m.inspector.follow_button.pressed.emit()
+	m.inspector.follow_button.pressed.emit()
+	TestUtil.check(m.following_id == -1 and m.inspector.follow_button.text == "Follow", "the button toggles following off")
+	m.inspector.follow_button.pressed.emit()
 	var other: int = m.dish.add_bup(m.dish.global_position + Vector2(-50, -50), Genome.founder(), 30.0)
 	m.dish.selected.bup = other
 	await process_frame
 	await process_frame
 	TestUtil.check(m.following_id == -1, "selecting another bup stops following the first")
 	m.dish.selected.bup = tracked
-	m.follow_button.pressed.emit()
+	m.inspector.follow_button.pressed.emit()
 	m.dish.remove_bup(tracked)
 	await process_frame
 	await process_frame
-	TestUtil.check(m.following_id == -1 and not m.follow_button.visible, "following ends when the bup dies")
+	TestUtil.check(m.following_id == -1 and not m.inspector.follow_button.visible, "following ends when the bup dies")
 	m.dish.remove_bup(other)
 	m.dish.selected.bup = -1
 	m.toolbar.set_paused(false)
@@ -430,24 +430,24 @@ func _init() -> void:
 	m.dish.selected.bup = named_id
 	await process_frame
 	await process_frame
-	var default_label: String = m.name_row.name_label.text
+	var default_label: String = m.inspector.name_row.name_label.text
 	TestUtil.check(default_label == m.dish.bup_default_name(named_id) and default_label.contains("#%d" % named_id), "an unnamed bup shows its default name ('%s')" % default_label)
-	m.name_row.rename_button.pressed.emit()
-	TestUtil.check(m.name_row.editing and m.name_row.edit.visible and not m.name_row.name_label.visible and m.name_row.edit.placeholder_text == default_label, "the pencil opens a box to type a name, hinting the default")
+	m.inspector.name_row.rename_button.pressed.emit()
+	TestUtil.check(m.inspector.name_row.editing and m.inspector.name_row.edit.visible and not m.inspector.name_row.name_label.visible and m.inspector.name_row.edit.placeholder_text == default_label, "the pencil opens a box to type a name, hinting the default")
 	await _key(KEY_ESCAPE)
-	TestUtil.check(not m.name_row.editing and m.dish.selected.bup == named_id and not m.menu_open, "Escape while typing cancels only the typing")
-	m.name_row.rename_button.pressed.emit()
-	m.name_row.edit.text = "Finnigan"
-	m.name_row.edit.text_submitted.emit("Finnigan")
+	TestUtil.check(not m.inspector.name_row.editing and m.dish.selected.bup == named_id and not m.menu_open, "Escape while typing cancels only the typing")
+	m.inspector.name_row.rename_button.pressed.emit()
+	m.inspector.name_row.edit.text = "Finnigan"
+	m.inspector.name_row.edit.text_submitted.emit("Finnigan")
 	await process_frame
-	TestUtil.check(m.dish.bup_name(named_id) == "Finnigan" and m.name_row.name_label.text == "Finnigan" and not m.name_row.editing, "Enter gives the bup the name ('%s')" % m.name_row.name_label.text)
-	m.name_row.rename_button.pressed.emit()
-	m.name_row.edit.text = "   "
-	m.name_row.edit.text_submitted.emit("   ")
+	TestUtil.check(m.dish.bup_name(named_id) == "Finnigan" and m.inspector.name_row.name_label.text == "Finnigan" and not m.inspector.name_row.editing, "Enter gives the bup the name ('%s')" % m.inspector.name_row.name_label.text)
+	m.inspector.name_row.rename_button.pressed.emit()
+	m.inspector.name_row.edit.text = "   "
+	m.inspector.name_row.edit.text_submitted.emit("   ")
 	TestUtil.check(m.dish.bup_name(named_id) == default_label, "an empty name goes back to the number")
 	# The name is a field made to look like a label: a click puts a caret in it, the keys that move it work, none changes the text, and
 	# leaving it puts the name back at its start.
-	var name_field: LineEdit = m.name_row.name_label
+	var name_field: LineEdit = m.inspector.name_row.name_label
 	TestUtil.check(name_field.theme_type_variation == &"BupNameField" and name_field.focus_mode == Control.FOCUS_ALL, "the name is a field that can take focus, drawn like a label")
 	var letter := InputEventKey.new()
 	letter.keycode = KEY_X
@@ -466,7 +466,7 @@ func _init() -> void:
 	TestUtil.check(name_field.caret_column == 0, "leaving the name puts it back at its start")
 	name_field.grab_focus()
 	name_field.caret_column = 3
-	m.name_row.show_bup(m.dish, named_id, true)  # (the panel does this every frame)
+	m.inspector.name_row.show_bup(m.dish, named_id, true)  # (the panel does this every frame)
 	TestUtil.check(name_field.caret_column == 3, "the name keeps its caret while the panel refreshes it every frame")
 	name_field.release_focus()
 	m.dish.remove_bup(named_id)
@@ -483,19 +483,19 @@ func _init() -> void:
 	m.dish.place_source(mode_spot, 2.0)
 	await process_frame
 	await process_frame
-	var heading := func() -> String: return m.hover_text.get_parsed_text().get_slice("\n", 0)
+	var heading := func() -> String: return m.inspector.hover_text.get_parsed_text().get_slice("\n", 0)
 	_hover_over(m, mode_spot)
 	TestUtil.check(heading.call() == "NUTRIENT SOURCE", "Select all: a source over a bup shows the source ('%s')" % heading.call())
 	picks[3].button_pressed = true
 	_hover_over(m, mode_spot)
 	TestUtil.check(m.dish.pick_mode == Dish.PickMode.SOURCES and heading.call() == "NUTRIENT SOURCE", "Nutrient sources: shows the source")
 	_hover_over(m, m.dish.global_position + Vector2(120, -90))
-	TestUtil.check(not m.hover_card.visible, "...and nothing over empty ground or a bup")
+	TestUtil.check(not m.inspector.hover_card.visible, "...and nothing over empty ground or a bup")
 	picks[2].button_pressed = true
 	_hover_over(m, mode_spot)
-	TestUtil.check(m.hover_card.visible and m.hover_text.get_parsed_text().contains("divisions") and m.dish.hovered.source == null, "Bups: shows the bup, not the source on top of it")
+	TestUtil.check(m.inspector.hover_card.visible and m.inspector.hover_text.get_parsed_text().contains("divisions") and m.dish.hovered.source == null, "Bups: shows the bup, not the source on top of it")
 	_hover_over(m, m.dish.global_position + Vector2(120, -90))
-	TestUtil.check(not m.hover_card.visible, "...and nothing over empty ground")
+	TestUtil.check(not m.inspector.hover_card.visible, "...and nothing over empty ground")
 	picks[1].button_pressed = true
 	_hover_over(m, mode_spot)
 	TestUtil.check(heading.call() == "NUTRIENT" and m.dish.hovered.bup == -1 and m.dish.hovered.source == null, "Background: the medium's readout even over a bup and a source ('%s')" % heading.call())
@@ -525,17 +525,17 @@ func _init() -> void:
 	floater.burst_at = m.dish.time + 1.0e9  # (not within this test)
 	await process_frame
 	_hover_over(m, float_spot)
-	TestUtil.check(heading.call() == "PLANKTON" and m.hover_text.get_parsed_text().contains("holds"), "Select all: hovering a plankton shows what it holds ('%s')" % heading.call())
-	TestUtil.check(not m.hover_text.get_parsed_text().contains("burst"), "...and doesn't give away when it will burst")
+	TestUtil.check(heading.call() == "PLANKTON" and m.inspector.hover_text.get_parsed_text().contains("holds"), "Select all: hovering a plankton shows what it holds ('%s')" % heading.call())
+	TestUtil.check(not m.inspector.hover_text.get_parsed_text().contains("burst"), "...and doesn't give away when it will burst")
 	var over_floater: int = m.dish.add_bup(float_spot, Genome.founder(), 30.0)
 	_hover_over(m, float_spot)
-	TestUtil.check(m.hover_text.get_parsed_text().contains("divisions") and m.dish.hovered.plankton == null, "a bup over a plankton is picked first")
+	TestUtil.check(m.inspector.hover_text.get_parsed_text().contains("divisions") and m.dish.hovered.plankton == null, "a bup over a plankton is picked first")
 	m.dish.remove_bup(over_floater)
 	picks[Dish.PickMode.PLANKTON].button_pressed = true
 	_hover_over(m, float_spot)
 	TestUtil.check(m.dish.pick_mode == Dish.PickMode.PLANKTON and heading.call() == "PLANKTON", "Plankton mode: shows the plankton")
 	_hover_over(m, m.dish.global_position + Vector2(-150, 120))
-	TestUtil.check(not m.hover_card.visible, "...and nothing over empty ground")
+	TestUtil.check(not m.inspector.hover_card.visible, "...and nothing over empty ground")
 	m.dish.select_at(float_spot)
 	TestUtil.check(m.dish.selected.plankton == floater and m.dish.selected.bup == -1 and m.dish.selected.source == null, "a click in Plankton mode picks it")
 	picks[Dish.PickMode.BUPS].button_pressed = true
@@ -564,16 +564,16 @@ func _init() -> void:
 	TestUtil.check(heading.call() == "NUTRIENT", "running at x1000, the medium's readout shows ('%s')" % heading.call())
 	_hover_over(m, live_source.pos)
 	TestUtil.check(heading.call() == "NUTRIENT SOURCE", "...and hovering a source switches the readout to it at once ('%s')" % heading.call())
-	m.hover_text.set_meta("set_at", Time.get_ticks_msec())
-	var source_text: String = m.hover_text.get_parsed_text()
+	m.inspector.hover_text.set_meta("set_at", Time.get_ticks_msec())
+	var source_text: String = m.inspector.hover_text.get_parsed_text()
 	live_source.emitted += 500.0
 	m._update_info_panel()
-	TestUtil.check(m.hover_text.get_parsed_text() == source_text, "...but the same source's figures don't rewrite within the live interval")
-	m.hover_text.set_meta("set_at", 0)
+	TestUtil.check(m.inspector.hover_text.get_parsed_text() == source_text, "...but the same source's figures don't rewrite within the live interval")
+	m.inspector.hover_text.set_meta("set_at", 0)
 	m._update_info_panel()
-	TestUtil.check(m.hover_text.get_parsed_text() != source_text, "...and do once it has passed")
+	TestUtil.check(m.inspector.hover_text.get_parsed_text() != source_text, "...and do once it has passed")
 	_hover_over(m, mode_spot)
-	TestUtil.check(m.hover_card.visible and m.hover_text.get_parsed_text().contains("divisions"), "hovering a bup switches the readout to it at once")
+	TestUtil.check(m.inspector.hover_card.visible and m.inspector.hover_text.get_parsed_text().contains("divisions"), "hovering a bup switches the readout to it at once")
 	m.toolbar.set_paused(true)
 	m.dish.clear_bups()
 	m.dish.sources.clear()
@@ -591,24 +591,24 @@ func _init() -> void:
 	m.dish.selected.bup = mother
 	await process_frame
 	await process_frame
-	TestUtil.check(m.lineage_button.visible and m.lineage_button.tooltip_text == "Lineage (L)" and not m.lineage_panel.visible, "the info panel has a Lineage button; the lineage is not open yet")
-	m.lineage_button.pressed.emit()
+	TestUtil.check(m.inspector.lineage_button.visible and m.inspector.lineage_button.tooltip_text == "Lineage (L)" and not m.inspector.lineage_panel.visible, "the info panel has a Lineage button; the lineage is not open yet")
+	m.inspector.lineage_button.pressed.emit()
 	await process_frame
 	await process_frame
-	TestUtil.check(m.lineage_entries.get_child(0).get_child(1).text.contains("\nborn"), "each lineage entry has its name on one row and its times below, so nothing is cut off")
-	TestUtil.check(m._concentration_text(0.002) == "125/mm²" and m._concentration_text(0.0000001) == "0.0/mm²" and m._concentration_text(0.00005) == "3.1/mm²", "concentration is shown in units per mm² (%s, %s)" % [m._concentration_text(0.002), m._concentration_text(0.00005)])
-	TestUtil.check(m.lineage_panel.visible and not m.info_panel.visible and m.lineage_entries.get_child_count() == 2, "the lineage covers the info and lists the family line (%d entries)" % m.lineage_entries.get_child_count())
-	TestUtil.check(m.lineage_entries.get_child(1).get_child(1).disabled and not m.lineage_entries.get_child(0).get_child(1).disabled, "the bup itself is marked, its ancestors can be clicked")
-	TestUtil.check(m.lineage_back_button.visible and m.lineage_back_button.tooltip_text == "Back", "the lineage panel has a back icon")
+	TestUtil.check(m.lineage.entries.get_child(0).get_child(1).text.contains("\nborn"), "each lineage entry has its name on one row and its times below, so nothing is cut off")
+	TestUtil.check(PanelText.concentration(0.002) == "125/mm²" and PanelText.concentration(0.0000001) == "0.0/mm²" and PanelText.concentration(0.00005) == "3.1/mm²", "concentration is shown in units per mm² (%s, %s)" % [PanelText.concentration(0.002), PanelText.concentration(0.00005)])
+	TestUtil.check(m.inspector.lineage_panel.visible and not m.inspector.info_panel.visible and m.lineage.entries.get_child_count() == 2, "the lineage covers the info and lists the family line (%d entries)" % m.lineage.entries.get_child_count())
+	TestUtil.check(m.lineage.entries.get_child(1).get_child(1).disabled and not m.lineage.entries.get_child(0).get_child(1).disabled, "the bup itself is marked, its ancestors can be clicked")
+	TestUtil.check(m.inspector.lineage_back_button.visible and m.inspector.lineage_back_button.tooltip_text == "Back", "the lineage panel has a back icon")
 	var stack_before: int = m.lineage.depth()
-	m.lineage_back_button.pressed.emit()
+	m.inspector.lineage_back_button.pressed.emit()
 	await process_frame
-	TestUtil.check(m.lineage.depth() == stack_before - 1 and not m.lineage_panel.visible and m.info_panel.visible, "the back icon closes the lineage, like Escape, back to the bup's info")
-	m.lineage_button.pressed.emit()
+	TestUtil.check(m.lineage.depth() == stack_before - 1 and not m.inspector.lineage_panel.visible and m.inspector.info_panel.visible, "the back icon closes the lineage, like Escape, back to the bup's info")
+	m.inspector.lineage_button.pressed.emit()
 	await process_frame
 	await process_frame
-	var swatch_mother: BupPicture = m.lineage_entries.get_child(1).get_child(0)
-	var swatch_grandmother: BupPicture = m.lineage_entries.get_child(0).get_child(0)
+	var swatch_mother: BupPicture = m.lineage.entries.get_child(1).get_child(0)
+	var swatch_grandmother: BupPicture = m.lineage.entries.get_child(0).get_child(0)
 	TestUtil.check(swatch_mother.color.is_equal_approx(Genome.color_of(m.dish.lineage_info(mother))) and swatch_grandmother.color.is_equal_approx(Genome.color_of(m.dish.lineage_info(grandmother))), "each line of the lineage has a small square in that bup's colour")
 	var small := BupPicture.new()
 	small.size = Vector2(14.0, 14.0)
@@ -621,31 +621,31 @@ func _init() -> void:
 	small.free()
 	tall.free()
 	TestUtil.check(BupPicture.body_length({"max_energy": 0.0, "size_gene": 4.0}) == 4.0 and BupPicture.body_length({"max_energy": 80.0}) == 2.5, "a record without a reserve takes the length its size gene divides at; one with a reserve, its own")
-	TestUtil.check(m.lineage_entries.get_child(0).get_child(1).text.begins_with(m.dish.bup_name(grandmother)), "entries use the bups' names ('%s')" % m.lineage_entries.get_child(0).get_child(1).text)
+	TestUtil.check(m.lineage.entries.get_child(0).get_child(1).text.begins_with(m.dish.bup_name(grandmother)), "entries use the bups' names ('%s')" % m.lineage.entries.get_child(0).get_child(1).text)
 	await _drag(m, centre, Vector2(30, 0), MOUSE_BUTTON_MIDDLE)
-	TestUtil.check(m.lineage_panel.visible and m.lineage.depth() == 2, "panning leaves the lineage as it is")
-	m.lineage_entries.get_child(0).get_child(1).pressed.emit()
+	TestUtil.check(m.inspector.lineage_panel.visible and m.lineage.depth() == 2, "panning leaves the lineage as it is")
+	m.lineage.entries.get_child(0).get_child(1).pressed.emit()
 	await process_frame
 	await process_frame
-	TestUtil.check(m.dish.selected.bup == grandmother and m.info_panel.visible and not m.lineage_panel.visible and m.lineage.depth() == 3, "clicking an ancestor shows her info (and selects her), not her lineage")
-	m.lineage_button.pressed.emit()
+	TestUtil.check(m.dish.selected.bup == grandmother and m.inspector.info_panel.visible and not m.inspector.lineage_panel.visible and m.lineage.depth() == 3, "clicking an ancestor shows her info (and selects her), not her lineage")
+	m.inspector.lineage_button.pressed.emit()
 	await process_frame
-	TestUtil.check(m.lineage_panel.visible and m.lineage.depth() == 4, "her lineage can be opened in turn: the views nest")
+	TestUtil.check(m.inspector.lineage_panel.visible and m.lineage.depth() == 4, "her lineage can be opened in turn: the views nest")
 	m.dish.remove_bup(grandmother)  # she dies while all this is open
 	m.dish.remove_bup(mother)
 	TestUtil.check(m.dish.has_record(grandmother) and m.dish.has_record(mother), "the bups on the stack are kept when they die")
 	await _key(KEY_ESCAPE)
 	await process_frame
-	TestUtil.check(m.info_panel.visible and m.dish.selected.bup == grandmother and m.info_text.get_parsed_text().contains("DECEASED") and m.lineage.depth() == 3, "Escape goes back one step: to her info, now showing she has died")
+	TestUtil.check(m.inspector.info_panel.visible and m.dish.selected.bup == grandmother and m.inspector.info_text.get_parsed_text().contains("DECEASED") and m.lineage.depth() == 3, "Escape goes back one step: to her info, now showing she has died")
 	await _key(KEY_ESCAPE)
 	await process_frame
-	TestUtil.check(m.lineage_panel.visible and m.dish.selected.bup == mother and m.lineage.depth() == 2, "...then to the first lineage")
+	TestUtil.check(m.inspector.lineage_panel.visible and m.dish.selected.bup == mother and m.lineage.depth() == 2, "...then to the first lineage")
 	await _key(KEY_ESCAPE)
 	await process_frame
-	TestUtil.check(m.info_panel.visible and m.dish.selected.bup == mother and m.lineage.depth() == 1, "...then to the first info")
+	TestUtil.check(m.inspector.info_panel.visible and m.dish.selected.bup == mother and m.lineage.depth() == 1, "...then to the first info")
 	await _key(KEY_ESCAPE)
 	await process_frame
-	TestUtil.check(m.dish.selected.bup == -1 and m.lineage.is_empty() and not m.info_panel.visible and not m.menu_open and not m.dish.has_record(grandmother) and not m.dish.has_record(mother), "the next Escape closes it all; nothing is kept now nothing needs it")
+	TestUtil.check(m.dish.selected.bup == -1 and m.lineage.is_empty() and not m.inspector.info_panel.visible and not m.menu_open and not m.dish.has_record(grandmother) and not m.dish.has_record(mother), "the next Escape closes it all; nothing is kept now nothing needs it")
 	# Anything outside the stack closes the lot, however deep.
 	var kin_a: int = m.dish.add_bup(m.dish.global_position + Vector2(10, 10), Genome.founder(), 200.0, 4.0, 8.0, 0, Vector2.RIGHT)
 	m.dish.step(1.0)
@@ -656,26 +656,26 @@ func _init() -> void:
 	m.dish.selected.bup = kin_b
 	await process_frame
 	await process_frame
-	m.lineage_button.pressed.emit()
+	m.inspector.lineage_button.pressed.emit()
 	await process_frame
 	await process_frame
-	m.lineage_entries.get_child(0).get_child(1).pressed.emit()
+	m.lineage.entries.get_child(0).get_child(1).pressed.emit()
 	await process_frame
 	TestUtil.check(m.lineage.depth() == 3, "(three steps deep)")
 	m.toolbar.select_tool(Toolbar.Tool.NUTRIENT)
 	await process_frame
 	await process_frame
-	TestUtil.check(m.lineage.is_empty() and m.dish.selected.bup == -1 and not m.lineage_panel.visible and not m.info_panel.visible, "choosing another tool closes every step and the info")
+	TestUtil.check(m.lineage.is_empty() and m.dish.selected.bup == -1 and not m.inspector.lineage_panel.visible and not m.inspector.info_panel.visible, "choosing another tool closes every step and the info")
 	m.toolbar.select_tool(Toolbar.Tool.SELECT)
 	m.dish.selected.bup = kin_b
 	await process_frame
-	m.lineage_button.pressed.emit()
+	m.inspector.lineage_button.pressed.emit()
 	await process_frame
 	var stranger: int = m.dish.add_bup(m.dish.global_position + Vector2(-90, 10), Genome.founder(), 30.0)
 	m.dish.selected.bup = stranger  # a different bup selected from outside the stack
 	await process_frame
 	await process_frame
-	TestUtil.check(m.lineage.depth() == 1 and m.dish.selected.bup == stranger and not m.lineage_panel.visible, "selecting another bup starts afresh on that bup")
+	TestUtil.check(m.lineage.depth() == 1 and m.dish.selected.bup == stranger and not m.inspector.lineage_panel.visible, "selecting another bup starts afresh on that bup")
 	m.dish.selected.bup = -1
 	await process_frame
 	TestUtil.check(m.lineage.is_empty(), "no selection, no stack")
@@ -687,10 +687,10 @@ func _init() -> void:
 	m.dish.selected.bup = watched_one
 	await process_frame
 	await process_frame
-	TestUtil.check(m.watch_button.visible and m.watch_button.tooltip_text == "Watch (O)" and m.watch_button.icon == m.WATCH_ICON, "a selected bup has a Watch icon, an eye")
-	m.watch_button.pressed.emit()
+	TestUtil.check(m.inspector.watch_button.visible and m.inspector.watch_button.tooltip_text == "Watch (O)" and m.inspector.watch_button.icon == Inspector.WATCH_ICON, "a selected bup has a Watch icon, an eye")
+	m.inspector.watch_button.pressed.emit()
 	m._process(0.0)
-	TestUtil.check(m.dish.is_watched(watched_one) and m.watch_list.scroll.visible and not m.watch_list.empty_note.visible and m.watch_button.tooltip_text == "Stop watching (O)" and m.watch_section.header.text == "Watching" and m.watch_button.icon == m.UNWATCH_ICON, "pressing it puts the bup on the list, which appears, and the eye is crossed out to offer taking it off again")
+	TestUtil.check(m.dish.is_watched(watched_one) and m.watch_list.scroll.visible and not m.watch_list.empty_note.visible and m.inspector.watch_button.tooltip_text == "Stop watching (O)" and m.watch_section.header.text == "Watching" and m.inspector.watch_button.icon == Inspector.UNWATCH_ICON, "pressing it puts the bup on the list, which appears, and the eye is crossed out to offer taking it off again")
 	m.dish.selected.bup = -1
 	m.dish.remove_bup(watched_one)
 	await process_frame
@@ -701,8 +701,8 @@ func _init() -> void:
 	m.watch_list._buttons[[m.dish, watched_one]].pressed.emit()
 	await process_frame
 	await process_frame
-	TestUtil.check(m.dish.selected.bup == watched_one and m.info_panel.visible and m.info_panel.theme_type_variation == &"DeceasedPanel", "clicking its entry opens it in the inspect panel, as a deceased bup")
-	m.watch_button.pressed.emit()
+	TestUtil.check(m.dish.selected.bup == watched_one and m.inspector.info_panel.visible and m.inspector.info_panel.theme_type_variation == &"DeceasedPanel", "clicking its entry opens it in the inspect panel, as a deceased bup")
+	m.inspector.watch_button.pressed.emit()
 	m._process(0.0)
 	TestUtil.check(not m.dish.is_watched(watched_one) and m.watch_list.empty_note.visible, "pressing the button again takes it off the list, which goes away when empty")
 	var older: int = m.dish.add_bup(m.dish.global_position + Vector2(30, 20), Genome.founder(), 100.0)
@@ -863,24 +863,24 @@ func _init() -> void:
 	_click(m, _screen(m, m.dish.global_position + Vector2(-80, -60)))
 	TestUtil.check(m.dish.sources.size() == 2 and m.dish.pick_mode == Dish.PickMode.ALL and m.tool_options.pick_buttons[Dish.PickMode.ALL].button_pressed and m.dish.selected.source == m.dish.sources[1], "placing a source from Bups mode switches the mode back to Select all, with the source selected")
 	m.toolbar.select_tool(Toolbar.Tool.PAN)
-	TestUtil.check(m.dish.selected.source == null and not m.source_rate_row.is_visible_in_tree(), "using another tool lets go of a selected source, as it does a bup")
+	TestUtil.check(m.dish.selected.source == null and not m.inspector.source_rate_row.is_visible_in_tree(), "using another tool lets go of a selected source, as it does a bup")
 	m.dish.remove_source(m.dish.sources[1])
 	m.toolbar.select_tool(Toolbar.Tool.SELECT)
 	_click(m, _screen(m, spot + Vector2(3, 2)))
 	await process_frame
 	await process_frame
-	TestUtil.check(m.dish.selected.source == m.dish.sources[0] and m.info_panel.visible and m.info_text.get_parsed_text().begins_with("NUTRIENT SOURCE"), "the select tool selects a source and shows its box")
-	TestUtil.check(m.source_rate_row.is_visible_in_tree() and m.delete_source_button.is_visible_in_tree(), "a selected source has a rate row and a delete button")
-	TestUtil.check(is_equal_approx(m.source_rate_row.value, 12.5), "the rate row shows the source's rate (%.1f)" % m.source_rate_row.value)
-	m.source_rate_row.value = 20
+	TestUtil.check(m.dish.selected.source == m.dish.sources[0] and m.inspector.info_panel.visible and m.inspector.info_text.get_parsed_text().begins_with("NUTRIENT SOURCE"), "the select tool selects a source and shows its box")
+	TestUtil.check(m.inspector.source_rate_row.is_visible_in_tree() and m.inspector.delete_source_button.is_visible_in_tree(), "a selected source has a rate row and a delete button")
+	TestUtil.check(is_equal_approx(m.inspector.source_rate_row.value, 12.5), "the rate row shows the source's rate (%.1f)" % m.inspector.source_rate_row.value)
+	m.inspector.source_rate_row.value = 20
 	TestUtil.check(is_equal_approx(m.dish.sources[0].rate, 20.0), "changing the row changes the source's rate")
 	m.dish.place_source(m.dish.global_position + Vector2(-90, 0), 7.5)
 	_click(m, _screen(m, m.dish.global_position + Vector2(-90, 0)))
 	await process_frame
 	TestUtil.check(is_equal_approx(m.dish.sources[1].rate, 7.5) and is_equal_approx(m.dish.sources[0].rate, 20.0), "selecting another source shows its rate without changing either")
-	m.delete_source_button.pressed.emit()
+	m.inspector.delete_source_button.pressed.emit()
 	await process_frame
-	TestUtil.check(m.dish.sources.size() == 1 and m.dish.sources[0].pos.distance_to(spot) < 0.5 and m.dish.selected.source == null and not m.source_rate_row.is_visible_in_tree(), "the delete button removes the selected source")
+	TestUtil.check(m.dish.sources.size() == 1 and m.dish.sources[0].pos.distance_to(spot) < 0.5 and m.dish.selected.source == null and not m.inspector.source_rate_row.is_visible_in_tree(), "the delete button removes the selected source")
 	m.dish.selected.source = m.dish.sources[0]
 	await _key(KEY_DELETE)
 	TestUtil.check(m.dish.sources.is_empty(), "the Delete key removes the selected source")
@@ -949,7 +949,7 @@ func _init() -> void:
 	g.tracker.index = 0
 	# The rate box: the feed is always there; the bloom comes with plankton, at experiment 2, and starts at none.
 	await process_frame
-	TestUtil.check(g.dish_card.visible and g.feed_row.visible and g.bloom_row.visible and not g.bloom_row.slider.editable and g.bloom_row.label.tooltip_text == "Unlocks with experiment 2" and g.dish.bloom_density == 0.0, "goal 1 shows the feed control, and the bloom control faint with the reason")
+	TestUtil.check(g.inspector.dish_card.visible and g.feed_row.visible and g.bloom_row.visible and not g.bloom_row.slider.editable and g.bloom_row.label.tooltip_text == "Unlocks with experiment 2" and g.dish.bloom_density == 0.0, "goal 1 shows the feed control, and the bloom control faint with the reason")
 	TestUtil.check(not g.vitals.get_parsed_text().contains("UP/DOWN") and not g.vitals.get_parsed_text().contains("ESC"), "the top bar has no shortcut reminders")
 	g.feed_row.slider.value = 4.0
 	TestUtil.check(is_equal_approx(g.dish.feed_density, 4.0), "the feed control sets the dish's feed")
