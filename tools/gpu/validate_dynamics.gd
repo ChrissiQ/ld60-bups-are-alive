@@ -1,6 +1,6 @@
 extends SceneTree
 ## Whole runs, CPU against GPU. godot --path . [--rendering-driver metal --position 6000,6000] -s tools/gpu/validate_dynamics.gd -- mode scenario seed
-##   GPU_FROM_SOURCE=1 compiles the kernels from gpu/kernels.gd at run time instead of using the imported shaders. NO_BUPS=1 runs the
+##   GPU_FROM_SOURCE=1 compiles the kernels from GpuKernels.all() at run time instead of using the imported shaders. NO_BUPS=1 runs the
 ##   dish without bups (what goes into the field: feed, bursts, sources).
 ##   mode: cpu | gpu     scenario: A (default dish until 1,000 bups) | B (3 mm dish, 20k cap, feed) | C (90 mm dish, 100k cap, feed) | D-F, L, S, M
 ##   (tools/gpu/world_tools.gd holds the table)

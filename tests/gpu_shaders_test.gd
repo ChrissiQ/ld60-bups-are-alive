@@ -1,10 +1,10 @@
 extends SceneTree
 ## Run: godot --headless --path . -s tests/gpu_shaders_test.gd
-## The GPU kernels are written in gpu/kernels.gd, turned into gpu/shaders/<name>.glsl by tools/gen_gpu_shaders.gd, and imported (to
+## The GPU kernels are written in gpu/kernels*.gd (GpuKernels.all()), turned into gpu/shaders/<name>.glsl by tools/gen_gpu_shaders.gd, and imported (to
 ## SPIR-V) by the editor's importer. This checks, for every kernel, that the file exists and is what the generator would write now,
 ## that it declares each of its buffers, and that it compiled: the importer reports success even when the shader has an error, so
 ## the error is read from the imported resource.
-## An edit of gpu/kernels.gd needs both steps (a headless -s run does not import):
+## An edit of a kernel needs both steps (a headless -s run does not import):
 const REGENERATE := "stale: run  /Applications/Godot.app/Contents/MacOS/Godot --headless --path . -s tools/gen_gpu_shaders.gd  and then  --headless --path . --import"
 
 
@@ -15,7 +15,7 @@ func _init() -> void:
 		_check_kernel(kernel_name, all[kernel_name])
 	for f in DirAccess.get_files_at("res://gpu/shaders"):
 		if f.get_extension() == "glsl":
-			TestUtil.check(all.has(f.get_basename()), "gpu/shaders/%s has no kernel in gpu/kernels.gd (delete it and its .import)" % f)
+			TestUtil.check(all.has(f.get_basename()), "gpu/shaders/%s has no kernel in GpuKernels.all() (delete it and its .import)" % f)
 	TestUtil.finish(self, "GPU SHADERS TEST OK")
 
 
@@ -25,7 +25,7 @@ func _check_kernel(kernel_name: String, def: Dictionary) -> void:
 		TestUtil.check(false, "%s: missing (%s)" % [path, REGENERATE])
 		return
 	var text := FileAccess.get_file_as_string(path)
-	TestUtil.check(text == def["source"], "%s: differs from what gpu/kernels.gd generates (%s)" % [path, REGENERATE])
+	TestUtil.check(text == def["source"], "%s: differs from what GpuKernels.all() generates (%s)" % [path, REGENERATE])
 	TestUtil.check(text.contains("#[compute]"), "%s: has no #[compute] line" % path)
 	for b: String in def["buffers"]:
 		TestUtil.check(text.contains("buffer B_%s " % b), "%s: does not declare buffer %s" % [path, b])

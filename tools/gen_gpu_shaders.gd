@@ -1,5 +1,5 @@
 extends SceneTree
-## Writes gpu/shaders/<kernel>.glsl for every kernel in gpu/kernels.gd (GpuKernels.all()). Run it after editing gpu/kernels.gd,
+## Writes gpu/shaders/<kernel>.glsl for every kernel of GpuKernels.all() (gpu/kernels*.gd). Run it after editing a kernel,
 ## then import:
 ##   /Applications/Godot.app/Contents/MacOS/Godot --headless --path . -s tools/gen_gpu_shaders.gd
 ##   /Applications/Godot.app/Contents/MacOS/Godot --headless --path . --import

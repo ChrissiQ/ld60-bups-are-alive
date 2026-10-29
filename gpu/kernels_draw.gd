@@ -1,13 +1,13 @@
 class_name GpuKernelsDraw
 extends RefCounted
 ## The drawing's compute kernels (the bups' MultiMesh written on the GPU: see gpu/gpu_draw.gd), apart from the
-## simulation's in gpu/kernels.gd so the two can change separately. GpuKernels.all() includes these; each gets its own
+## simulation's (gpu/kernels_field.gd and the others) so they can change separately. GpuKernels.all() includes these; each gets its own
 ## gpu/shaders/<name>.glsl from tools/gen_gpu_shaders.gd, like the others.
 ##
-## To add a kernel: build it in `all()` with GpuKernels.add(out, name, body, buffer_names, extra, local_size)
+## To add a kernel: build it in `register()` with GpuKernels.add(out, name, body, buffer_names, extra, local_size, TYPES)
 ## (the header, FUNCS and one declaration per buffer are added for you; binding = position in `buffer_names`). Buffers the simulation
 ## has (P, CNT, BUPS, BUPS_U, ...) take their types from GpuKernels.TYPES; a buffer of the drawing's own (the MultiMesh's, say) is
-## declared in TYPES below. The bup record and P are in gpu/gpu_layout.gd (P_MIN_LENGTH_PX to P_MAX_TRAIL_PX are the drawing's constants), and `add` declares the names a kernel uses.
+## declared in TYPES below, which `add` is given. The bup record and P are in gpu/gpu_layout.gd (P_MIN_LENGTH_PX to P_MAX_TRAIL_PX are the drawing's constants), and `add` declares the names a kernel uses.
 ## A kernel bound to a buffer GpuSim does not own (the MultiMesh's RD buffer) is set up with GpuSim.make_external_kernel().
 
 ## The element type of each buffer only the drawing's kernels bind (name -> GLSL type).
@@ -83,8 +83,6 @@ void main() {
 """
 
 
-## The drawing's kernels, in the form of GpuKernels.all().
-static func all() -> Dictionary:
-	var out := {}
-	GpuKernels.add(out, "render_bups", K_RENDER_BUPS, ["P", "CNT", "BUPS", "INST"], COLOUR_FUNCS)
-	return out
+## Adds the drawing's kernels to `out` (see GpuKernels.all()).
+static func register(out: Dictionary) -> void:
+	GpuKernels.add(out, "render_bups", K_RENDER_BUPS, ["P", "CNT", "BUPS", "INST"], COLOUR_FUNCS, 64, TYPES)

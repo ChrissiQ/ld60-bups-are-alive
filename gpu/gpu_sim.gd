@@ -1,7 +1,7 @@
 class_name GpuSim
 extends RefCounted
 ## The simulation's whole step on the GPU (see AGENTS.md, "GPU path"): feed, diffusion, the plankton clouds,
-## swimming and growing, uptake, death, division and mutation, compaction. The kernels are gpu/kernels.gd, imported from
+## swimming and growing, uptake, death, division and mutation, compaction. The kernels are GpuKernels.all() (gpu/kernels*.gd), imported from
 ## gpu/shaders/*.glsl; the bup record, P, CNT and PCNT are laid out in gpu/gpu_layout.gd.
 ##
 ## Two ways to run it:
@@ -57,7 +57,7 @@ var _push_cache := {}  ## (pa, pb, pc) -> the 16 bytes of the push constant
 var _stats_groups := 1  ## groups of 256 the stats' first pass runs in
 
 
-## `device` is the RenderingDevice to run on (null: make a local one). `from_source` compiles the kernels' text from gpu/kernels.gd
+## `device` is the RenderingDevice to run on (null: make a local one). `from_source` compiles the kernels' text from GpuKernels.all()
 ## at run time instead of loading the imported SPIR-V (for tools: the Metal driver compiles that for SPIR-V 1.6, the import for 1.4).
 func _init(device: RenderingDevice = null, from_source := false) -> void:
 	rd = device if device != null else RenderingServer.create_local_rendering_device()
@@ -134,7 +134,6 @@ func buffer(buf_name: String) -> RID:
 ## up with make_external_kernel must be set up again (`buffers_rebuilt`).
 func load_state(state: State) -> void:
 	var bups := state.bups
-	var owner := state.owner
 	assert(bups.size() % GpuLayout.RECORD_BYTES == 0, "bup records are %d bytes each" % GpuLayout.RECORD_BYTES)
 	n = state.cells_across
 	spacing = state.spacing
@@ -149,6 +148,21 @@ func load_state(state: State) -> void:
 	limit = state.limit if state.limit > 0 else count
 	capacity = ((int(limit * 1.05) + 1024 + 255) / 256) * 256
 	event_capacity = maxi(32768, capacity / 4)
+	_make_field_and_bup_buffers(state)
+	_make_cloud_buffers(state)
+	_make_game_buffers()
+	_bind_kernels()
+	_fill_params()
+	_set_step(_delta)
+	_steps_recorded = 0
+	loads += 1
+	buffers_rebuilt.emit()
+
+
+## The field's buffers (the nutrient, the acetate, the grid's sums), the bups' (their records, wants and scans), the motion table and CNT.
+func _make_field_and_bup_buffers(state: State) -> void:
+	var bups := state.bups
+	var owner := state.owner
 	var inside := PackedInt32Array()
 	inside.resize(n * n)
 	for i in n * n:
@@ -207,14 +221,12 @@ func load_state(state: State) -> void:
 	for nm in ["SURV", "KID", "EXCS", "EXCK"]:
 		_buf(nm, _zeros(capacity * 4))
 	_buf("DTAB", _zeros((65536 * 4 + 2048) * 4))  # (the conjugation donors by place: 65,536 buckets of four slots, then a bitmap of the buckets in use)
-	_scan_sizes = [capacity, (capacity + 255) / 256, 0]
-	_scan_sizes[2] = (_scan_sizes[1] + 255) / 256
-	for nm in ["S1", "S1X"]:
-		_buf(nm, _zeros(_scan_sizes[1] * 4))
-	for nm in ["S2", "S2X"]:
-		_buf(nm, _zeros(_scan_sizes[2] * 4))
-	_buf("S3", _zeros(16))
-	# the clouds
+	_scan_sizes = _make_scan_buffers("S", capacity)
+
+
+## The clouds' buffers: their slots, the sums of what is wanted from them, their lists by place and the scans of both, the events the
+## dish's own world sends, and the deposits waiting for the grid.
+func _make_cloud_buffers(state: State) -> void:
 	var bin_size := 0.5 * spacing
 	_bins_across = maxi(1, ceili(2.0 * radius / bin_size) + 1)
 	_bins = _bins_across * _bins_across
@@ -258,7 +270,12 @@ func load_state(state: State) -> void:
 	_buf("DPLO", _zeros(n * n * 4))
 	_buf("DPHI", _zeros(n * n * 4))
 	_buf("WANTC", _zeros(capacity * 4))
-	# the game's side (gpu/gpu_world.gd): events, the frame's questions and answers, stats, the eraser, the field's copy
+	_puff_sizes = _make_scan_buffers("PS", puff_capacity)
+	_bin_sizes = _make_scan_buffers("BS", _bins)
+
+
+## The game's side (gpu/gpu_world.gd): the family events, the frame's questions and answers, the stats, the eraser, the field's copy.
+func _make_game_buffers() -> void:
 	_buf("EVB", _zeros(GpuLayout.EVENT_SETS * event_capacity * GpuLayout.BIRTH_WORDS * 4))
 	_buf("EVD", _zeros(GpuLayout.EVENT_SETS * event_capacity * GpuLayout.DEATH_WORDS * 4))
 	_buf("EVN", _zeros(GpuLayout.EVENT_SETS * 2 * 4))
@@ -270,23 +287,25 @@ func load_state(state: State) -> void:
 	_buf("ERASE", _zeros(GpuLayout.MAX_ERASE * 16))
 	_buf("QD", _zeros(capacity * 4))
 	_buf("MIRROR", _zeros((1 + puff_capacity * 5) * 4))
-	_puff_sizes = [puff_capacity, (puff_capacity + 255) / 256, 0]
-	_puff_sizes[2] = (_puff_sizes[1] + 255) / 256
-	_bin_sizes = [_bins, (_bins + 255) / 256, 0]
-	_bin_sizes[2] = (_bin_sizes[1] + 255) / 256
-	for nm in ["PS1", "PS1X"]:
-		_buf(nm, _zeros(_puff_sizes[1] * 4))
-	for nm in ["PS2", "PS2X"]:
-		_buf(nm, _zeros(_puff_sizes[2] * 4))
-	_buf("PS3", _zeros(16))
-	for nm in ["BS1", "BS1X"]:
-		_buf(nm, _zeros(_bin_sizes[1] * 4))
-	for nm in ["BS2", "BS2X"]:
-		_buf(nm, _zeros(_bin_sizes[2] * 4))
-	_buf("BS3", _zeros(16))
+
+
+## The block sums of a three-level scan of `count` elements (<prefix>1, 1X, 2, 2X, 3): the elements and the blocks of each level.
+func _make_scan_buffers(prefix: String, elements: int) -> Array:
+	var sizes := [elements, (elements + 255) / 256, 0]
+	sizes[2] = (sizes[1] + 255) / 256
+	for nm in [prefix + "1", prefix + "1X"]:
+		_buf(nm, _zeros(sizes[1] * 4))
+	for nm in [prefix + "2", prefix + "2X"]:
+		_buf(nm, _zeros(sizes[2] * 4))
+	_buf(prefix + "3", _zeros(16))
+	return sizes
+
+
+## The buffers were remade: so are the sets that bind them (the kernels are made at the first load).
+func _bind_kernels() -> void:
 	if _kernels.is_empty():
 		_make_kernels()
-	for kname: String in _kernels:  # (the buffers were remade: so are the sets that bind them)
+	for kname: String in _kernels:
 		var kern: Dictionary = _kernels[kname]
 		kern["set"] = RID()
 		if kern["external"]:
@@ -295,11 +314,6 @@ func load_state(state: State) -> void:
 		if not names.all(func(b: String) -> bool: return _bufs.has(b)):
 			continue  # (a kernel whose buffers come with each call, as `probe`, or a drawing kernel set up from outside)
 		kern["set"] = _uniform_set(kern, names)
-	_fill_params()
-	_set_step(_delta)
-	_steps_recorded = 0
-	loads += 1
-	buffers_rebuilt.emit()
 
 
 func _uniform_set(kern: Dictionary, rids: Array) -> RID:
@@ -326,12 +340,19 @@ func make_external_kernel(kernel_name: String, rids_by_binding: Array) -> void:
 	kern["set"] = _uniform_set(kern, rids_by_binding)
 
 
+## A three-level exclusive scan (GpuKernels.add_scan_chain's five kernels, `prefix` + 0, 1, 2, a2, a1), `sizes` from _make_scan_buffers.
 func _record_scan_chain(cl: int, prefix: String, sizes: Array) -> void:
-	dispatch(cl, prefix + "0", sizes[0], float(sizes[0]))
-	dispatch(cl, prefix + "1", sizes[1], float(sizes[1]))
-	dispatch(cl, prefix + "2", sizes[2], float(sizes[2]))
-	dispatch(cl, prefix + "a2", sizes[1], float(sizes[1]))
-	dispatch(cl, prefix + "a1", sizes[0], float(sizes[0]))
+	_record_scan(cl, [prefix + "0", prefix + "1", prefix + "2", prefix + "a2", prefix + "a1"], sizes)
+
+
+## A three-level exclusive scan by its five kernels: the first level, the second, the third, then the third's sums added to the second's
+## and the second's to the first's.
+func _record_scan(cl: int, kernel_names: Array, sizes: Array) -> void:
+	dispatch(cl, kernel_names[0], sizes[0], float(sizes[0]))
+	dispatch(cl, kernel_names[1], sizes[1], float(sizes[1]))
+	dispatch(cl, kernel_names[2], sizes[2], float(sizes[2]))
+	dispatch(cl, kernel_names[3], sizes[1], float(sizes[1]))
+	dispatch(cl, kernel_names[4], sizes[0], float(sizes[0]))
 
 
 ## The entries of P that do not depend on the step's length (those are set by _set_step): every slot of GpuLayout.P_SLOTS of the kinds
@@ -497,15 +518,8 @@ func _record_life(cl: int, step := 0, event_set := 0) -> void:
 	dispatch(cl, "conj_insert", capacity)
 	dispatch(cl, "conj_apply", capacity)
 	dispatch(cl, "life", capacity)
-	var c: int = _scan_sizes[0]
-	var n1: int = _scan_sizes[1]
-	var n2: int = _scan_sizes[2]
-	for which in ["s", "k"]:
-		dispatch(cl, "scan0_" + which, c, float(c))
-		dispatch(cl, "scan1", n1, float(n1))
-		dispatch(cl, "scan2", n2, float(n2))
-		dispatch(cl, "add2", n1, float(n1))
-		dispatch(cl, "add1_" + which, c, float(c))
+	for which in ["s", "k"]:  # (the kept bups' places, then the newborns')
+		_record_scan(cl, ["scan0_" + which, "scan1", "scan2", "add2", "add1_" + which], _scan_sizes)
 	dispatch(cl, "finalize", 1)
 	if _has_clouds:
 		dispatch(cl, "death_clouds", capacity)

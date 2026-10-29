@@ -12,7 +12,7 @@ extends SceneTree
 ##    (with trails) and a later one (none), and the MultiMesh's buffer read back against render_buffer.
 ## C. ("time") What the render kernel costs: local device, wall time of submit and sync, for some sizes; and the dish's frame time
 ##    with the GPU path drawing every frame into a MultiMesh at a 1,000,000-bup capacity.
-## GPU_FROM_SOURCE=1 compiles the kernels from gpu/kernels.gd instead of the imported files.
+## GPU_FROM_SOURCE=1 compiles the kernels from GpuKernels.all() instead of the imported files.
 
 const REL := 2e-5
 const COLOUR_TOL := 1.0 / 255.0
