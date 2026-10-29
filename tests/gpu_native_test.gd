@@ -11,10 +11,6 @@ const BIRTH_BYTES := GpuLayout.BIRTH_WORDS * 4
 const DEATH_BYTES := GpuLayout.DEATH_WORDS * 4
 
 
-func check(ok: bool, what: String) -> void:
-	TestUtil.check(ok, what)
-
-
 func _init() -> void:
 	SimConstants.apply()
 	_records_round_trip()
@@ -60,13 +56,13 @@ func _records_round_trip() -> void:
 	sim.step(20.0, PackedVector2Array(), PackedFloat32Array(), 0.0, 40.0)
 	var ids := sim.bup_ids()
 	var state := sim.export_state_bytes()
-	check(ids.size() > 900 and state.size() == ids.size() * RECORD_BYTES, "export_state_bytes gives a 112-byte record per bup (%d bytes for %d bups)" % [state.size(), ids.size()])
+	TestUtil.check(ids.size() > 900 and state.size() == ids.size() * RECORD_BYTES, "export_state_bytes gives a 112-byte record per bup (%d bytes for %d bups)" % [state.size(), ids.size()])
 	var high := 0
 	var ids_ok := true
 	for i in ids.size():
 		ids_ok = ids_ok and _id_of(state, i) == ids[i]
 		high += 1 if ids[i] >= (1 << 32) else 0
-	check(ids_ok and high > 400, "each record holds its bup's id in R_ID_LO and R_ID_HI (%d of them past 2^32)" % high)
+	TestUtil.check(ids_ok and high > 400, "each record holds its bup's id in R_ID_LO and R_ID_HI (%d of them past 2^32)" % high)
 	var floats := state.to_float32_array()
 	var drawn := 0
 	var undrawn := 0
@@ -77,15 +73,15 @@ func _records_round_trip() -> void:
 		elif absf(floats[o + GpuLayout.R_PX]) <= 10000.0 and absf(floats[o + GpuLayout.R_PY]) <= 10000.0:
 			drawn += 1
 	# (the first 600 were drawn, then a step: at most 600 have a last picture, and every newborn and the 400 never drawn have none)
-	check(drawn > 0 and drawn <= 600 and undrawn >= ids.size() - 600 and drawn + undrawn == ids.size(), "R_PX and R_PY hold where it was last drawn, or a value from 1e30 up if nowhere yet (%d drawn, %d not)" % [drawn, undrawn])
+	TestUtil.check(drawn > 0 and drawn <= 600 and undrawn >= ids.size() - 600 and drawn + undrawn == ids.size(), "R_PX and R_PY hold where it was last drawn, or a value from 1e30 up if nowhere yet (%d drawn, %d not)" % [drawn, undrawn])
 	var other := BupSim.new()
 	other.reset(10000.0, 3)
 	other.import_state_bytes(state)
-	check(other.export_state_bytes() == state, "import_state_bytes then export_state_bytes gives the same bytes")
-	check(other.get_next_id() > ids[ids.size() - 1] and other.get_next_id() >= (1 << 32), "after an import the next id is past every id in the state (%d)" % other.get_next_id())
-	check(other.record_count() == 0, "import_state_bytes leaves the family records alone")
+	TestUtil.check(other.export_state_bytes() == state, "import_state_bytes then export_state_bytes gives the same bytes")
+	TestUtil.check(other.get_next_id() > ids[ids.size() - 1] and other.get_next_id() >= (1 << 32), "after an import the next id is past every id in the state (%d)" % other.get_next_id())
+	TestUtil.check(other.record_count() == 0, "import_state_bytes leaves the family records alone")
 	sim.import_state_bytes(state)
-	check(sim.export_state_bytes() == state and sim.bup_ids() == ids, "importing a dish's own state into it changes nothing")
+	TestUtil.check(sim.export_state_bytes() == state and sim.bup_ids() == ids, "importing a dish's own state into it changes nothing")
 	var info_ok := 0
 	var steer_ok := 0
 	for i in ids.size():
@@ -94,12 +90,12 @@ func _records_round_trip() -> void:
 		var info := sim.bup_info(ids[i])
 		if sim.steering_at(info["pos"], info["speed"], info["sense_range"]) == sim.bup_steering(ids[i]):
 			steer_ok += 1
-	check(info_ok == ids.size(), "info_from_state gives bup_info's dictionary for every record (%d of %d)" % [info_ok, ids.size()])
-	check(steer_ok == ids.size(), "steering_at gives bup_steering for a bup's place, speed and sense range (%d of %d)" % [steer_ok, ids.size()])
-	check(sim.info_from_state(state, ids.size()).is_empty() and sim.info_from_state(state, -1).is_empty(), "info_from_state of a record that is not there is empty")
+	TestUtil.check(info_ok == ids.size(), "info_from_state gives bup_info's dictionary for every record (%d of %d)" % [info_ok, ids.size()])
+	TestUtil.check(steer_ok == ids.size(), "steering_at gives bup_steering for a bup's place, speed and sense range (%d of %d)" % [steer_ok, ids.size()])
+	TestUtil.check(sim.info_from_state(state, ids.size()).is_empty() and sim.info_from_state(state, -1).is_empty(), "info_from_state of a record that is not there is empty")
 	var sorted := ids.duplicate()
 	sorted.sort()
-	check(sim.alive_ids() == sorted, "alive_ids gives the living bups' ids from the records, in order")
+	TestUtil.check(sim.alive_ids() == sorted, "alive_ids gives the living bups' ids from the records, in order")
 
 
 ## The same births and deaths, made once by the CPU's step and once given to apply_events as the GPU's events: the same records.
@@ -162,7 +158,7 @@ func _events_against_the_cpu() -> void:
 			for w: int in genes:
 				e.encode_float(w * 4, genes[w])
 			deaths.append_array(e)
-	check(births.size() / BIRTH_BYTES > 20 and deaths.size() / DEATH_BYTES > 10, "the CPU run has births and deaths to compare (%d and %d)" % [births.size() / BIRTH_BYTES, deaths.size() / DEATH_BYTES])
+	TestUtil.check(births.size() / BIRTH_BYTES > 20 and deaths.size() / DEATH_BYTES > 10, "the CPU run has births and deaths to compare (%d and %d)" % [births.size() / BIRTH_BYTES, deaths.size() / DEATH_BYTES])
 	records.set_time(12345.0)
 	records.apply_events(births, deaths, 20.0, 20.0)
 	var by_id_cpu := {}
@@ -175,7 +171,7 @@ func _events_against_the_cpu() -> void:
 	var keys_gpu := by_id_gpu.keys()
 	keys_cpu.sort()
 	keys_gpu.sort()
-	check(keys_cpu == keys_gpu, "apply_events keeps and frees the same records as the CPU's step (%d against %d)" % [keys_gpu.size(), keys_cpu.size()])
+	TestUtil.check(keys_cpu == keys_gpu, "apply_events keeps and frees the same records as the CPU's step (%d against %d)" % [keys_gpu.size(), keys_cpu.size()])
 	var same := 0
 	var dead_kept := 0
 	for id in keys_cpu:
@@ -190,12 +186,12 @@ func _events_against_the_cpu() -> void:
 			same += 1
 		if not c["alive"]:
 			dead_kept += 1
-	check(same == keys_cpu.size(), "every record apply_events made is the CPU's (%d of %d; the reserve at death to 1e-6)" % [same, keys_cpu.size()])
-	check(dead_kept > 0, "some dead records were kept, so their deaths were compared too (%d)" % dead_kept)
+	TestUtil.check(same == keys_cpu.size(), "every record apply_events made is the CPU's (%d of %d; the reserve at death to 1e-6)" % [same, keys_cpu.size()])
+	TestUtil.check(dead_kept > 0, "some dead records were kept, so their deaths were compared too (%d)" % dead_kept)
 	var alive_cpu := cpu.bup_ids()
 	alive_cpu.sort()
-	check(records.alive_ids() == alive_cpu, "alive_ids from the events' records are the CPU's living bups")
-	check(is_equal_approx(records.lineage_info(keys_cpu[0])["born"], cpu.lineage_info(keys_cpu[0])["born"]), "records are stamped with their step's time")
+	TestUtil.check(records.alive_ids() == alive_cpu, "alive_ids from the events' records are the CPU's living bups")
+	TestUtil.check(is_equal_approx(records.lineage_info(keys_cpu[0])["born"], cpu.lineage_info(keys_cpu[0])["born"]), "records are stamped with their step's time")
 	var again := records.lineage_export()
 	var still_kept := PackedByteArray()  # (a birth whose record has since been freed cannot be told from a new one: a batch must be given once)
 	for i in births.size() / BIRTH_BYTES:
@@ -203,13 +199,13 @@ func _events_against_the_cpu() -> void:
 		if records.has_record(id):
 			still_kept.append_array(births.slice(i * BIRTH_BYTES, (i + 1) * BIRTH_BYTES))
 	records.apply_events(still_kept, PackedByteArray(), 20.0, 20.0)
-	check(still_kept.size() > 0 and records.lineage_export().size() == again.size(), "a birth given again while its record is kept is not recorded twice")
+	TestUtil.check(still_kept.size() > 0 and records.lineage_export().size() == again.size(), "a birth given again while its record is kept is not recorded twice")
 	var newest := 0
 	for id in keys_cpu:
 		newest = maxi(newest, id)
-	check(records.get_next_id() > newest, "apply_events keeps the next id past every id born (%d, newest %d)" % [records.get_next_id(), newest])
+	TestUtil.check(records.get_next_id() > newest, "apply_events keeps the next id past every id born (%d, newest %d)" % [records.get_next_id(), newest])
 	var added := records.add_bup(Vector2.ZERO, Genome.founder(), 10.0, -1.0, -1.0, 0, Vector2.RIGHT)
-	check(records.lineage_info(added)["born"] == int(12345.0 / 60.0), "apply_events puts the sim's clock back as it was")
+	TestUtil.check(records.lineage_info(added)["born"] == int(12345.0 / 60.0), "apply_events puts the sim's clock back as it was")
 
 
 ## The sources' part of a step, alone (step_world), records the same clouds and deposits as a whole step does.
@@ -239,7 +235,7 @@ func _world_emissions() -> void:
 			var amounts_b: PackedFloat32Array = world.get_field().take_recorded_amounts()
 			same = same and puffs_a == puffs_b and cells_a == cells_b and amounts_a == amounts_b
 			events += puffs_a.size() / 5 + cells_a.size()
-		check(same and events > 0, "step_world records the same clouds and deposits as step does, on a %d mm dish (%d events)" % [int(radius / 1000.0), events])
+		TestUtil.check(same and events > 0, "step_world records the same clouds and deposits as step does, on a %d mm dish (%d events)" % [int(radius / 1000.0), events])
 
 
 func _packed_field() -> void:
@@ -252,13 +248,13 @@ func _packed_field() -> void:
 		field.add_cloud(sim.random_point(80000.0), Dish.PLANKTON_PATCH_RADIUS, 300.0 * Dish.NUTRIENT_ENERGY)
 	var packed := field.export_packed()
 	var puffs: PackedFloat32Array = packed["puffs"]
-	check(packed["conc"] == field.values() and puffs.size() == field.puff_count() * 5 and field.puff_count() == 60, "export_packed gives the grid and 5 floats a cloud")
+	TestUtil.check(packed["conc"] == field.values() and puffs.size() == field.puff_count() * 5 and field.puff_count() == 60, "export_packed gives the grid and 5 floats a cloud")
 	var other := BupSim.new()
 	other.reset(90000.0, 9)
 	other.get_field().import_packed(packed["conc"], puffs)
 	var back := other.get_field().export_packed()
-	check(back["conc"] == packed["conc"] and back["puffs"] == puffs, "import_packed then export_packed gives the same arrays")
-	check(absf(other.get_field().total() - field.total()) <= 1e-6 * field.total(), "the nutrient is all there after import_packed (%f against %f)" % [other.get_field().total(), field.total()])
+	TestUtil.check(back["conc"] == packed["conc"] and back["puffs"] == puffs, "import_packed then export_packed gives the same arrays")
+	TestUtil.check(absf(other.get_field().total() - field.total()) <= 1e-6 * field.total(), "the nutrient is all there after import_packed (%f against %f)" % [other.get_field().total(), field.total()])
 	var empty := PackedFloat32Array([1.0, 2.0, 0.0, 100.0, 1.0])
 	other.get_field().import_packed(packed["conc"], empty)
-	check(other.get_field().puff_count() == 0, "import_packed drops a cloud with nothing in it")
+	TestUtil.check(other.get_field().puff_count() == 0, "import_packed drops a cloud with nothing in it")

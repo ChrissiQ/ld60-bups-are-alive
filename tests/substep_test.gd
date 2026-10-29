@@ -13,10 +13,6 @@ const KS := 0.002  # Cell.HALF_SATURATION
 const ALLOWED_LOSS := 1.5  ## percent of the exposure: the sub-steps of the rule against the 3 s ones. Measured at 40 mm: -0.96 +- 0.31; 90 mm: -0.87 +- 0.25 (the same length at 20 mm costs 5%, which this would catch)
 
 
-func check(ok: bool, what: String) -> void:
-	TestUtil.check(ok, what)
-
-
 func _init() -> void:
 	SimConstants.apply()
 	_check_counts()
@@ -35,12 +31,12 @@ func _check_counts() -> void:
 		var start := StartConditions.new()
 		start.dish_radius = maxf(radius_mm * 1000.0, StartConditions.MIN_DISH_RADIUS) if radius_mm >= 1.0 else 300.0
 		d.strike(start)
-		check(d.sim.moves_for(20.0) == expected[radius_mm], "a 20 s step of the coarse motion is cut into %d sub-steps on a %s mm dish (%d)" % [expected[radius_mm], radius_mm, d.sim.moves_for(20.0)])
+		TestUtil.check(d.sim.moves_for(20.0) == expected[radius_mm], "a 20 s step of the coarse motion is cut into %d sub-steps on a %s mm dish (%d)" % [expected[radius_mm], radius_mm, d.sim.moves_for(20.0)])
 		d.free()
 	var fine := Dish.new()
 	root.add_child(fine)
 	fine.strike(TestUtil.small_start())
-	check(fine.sim.moves_for(3.0) == 1 and fine.sim.moves_for(0.5) == 1, "a short step is one sub-step")
+	TestUtil.check(fine.sim.moves_for(3.0) == 1 and fine.sim.moves_for(0.5) == 1, "a short step is one sub-step")
 	fine.free()
 
 
@@ -54,8 +50,8 @@ func _check_solver() -> void:
 		var start := StartConditions.new()
 		start.dish_radius = 300.0 if radius_mm < 1.0 else radius_mm * 1000.0
 		d.strike(start)
-		check(d.sim.diffuse_pieces(20.0) == expected[radius_mm], "20 s of diffusion is solved in %d pieces on a %s mm dish (%d)" % [expected[radius_mm], radius_mm, d.sim.diffuse_pieces(20.0)])
-		check(d.sim.diffuse_pieces(5.0) == 1, "a 5 s stretch is one solve")
+		TestUtil.check(d.sim.diffuse_pieces(20.0) == expected[radius_mm], "20 s of diffusion is solved in %d pieces on a %s mm dish (%d)" % [expected[radius_mm], radius_mm, d.sim.diffuse_pieces(20.0)])
+		TestUtil.check(d.sim.diffuse_pieces(5.0) == 1, "a 5 s stretch is one solve")
 		d.free()
 	for radius_mm in [30.0, 90.0]:  # (where the pieces are not cut: one 20 s solve against 5 s ones, a plankton cloud after ten minutes)
 		var fields := []
@@ -77,18 +73,10 @@ func _check_solver() -> void:
 		for i in fields[0].size():
 			peak = maxf(peak, fields[1][i])
 			worst = maxf(worst, absf(fields[0][i] - fields[1][i]))
-		check(worst < 0.0005 * peak, "on a %.0f mm dish one 20 s solve leaves the field within 0.05%% of 5 s ones (%.4f%% of the peak)" % [radius_mm, 100.0 * worst / peak])
+		TestUtil.check(worst < 0.0005 * peak, "on a %.0f mm dish one 20 s solve leaves the field within 0.05%% of 5 s ones (%.4f%% of the peak)" % [radius_mm, 100.0 * worst / peak])
 
 
 ## Every constant but what is overridden, with the nutrient held still and nothing eating.
-func _frozen(structure: float) -> void:
-	var consts := SimConstants.build()
-	consts["diffusion"] = 0.0
-	consts["uptake_per_size"] = 0.0
-	consts["motion_structure"] = structure
-	BupSim.configure(consts)
-
-
 func _build_field(radius_mm: float) -> Array:  # (the grid's values and the clouds' export)
 	BupSim.configure(SimConstants.build())
 	var d := Dish.new()
@@ -110,7 +98,7 @@ func _build_field(radius_mm: float) -> Array:  # (the grid's values and the clou
 
 ## The mean uptake factor (c / (Ks + c)) of the nutrient the crowd ends up in.
 func _exposure(radius_mm: float, state: Array, structure: float, seed_value: int) -> float:
-	_frozen(structure)
+	TestUtil.frozen_constants(structure)
 	var d := Dish.new()
 	root.add_child(d)
 	d.set_seed(seed_value)
@@ -153,4 +141,4 @@ func _check_exposure(radius_mm: float) -> void:
 	var variance := 0.0
 	for dv: float in diffs:
 		variance += (dv - mean) * (dv - mean) / (diffs.size() - 1)
-	check(absf(mean) < ALLOWED_LOSS, "on a %.0f mm dish the longer sub-steps leave the bups in the same nutrient as the 3 s ones (%+.2f%% +- %.2f%%, allowed %.1f%%)" % [radius_mm, mean, sqrt(variance / diffs.size()), ALLOWED_LOSS])
+	TestUtil.check(absf(mean) < ALLOWED_LOSS, "on a %.0f mm dish the longer sub-steps leave the bups in the same nutrient as the 3 s ones (%+.2f%% +- %.2f%%, allowed %.1f%%)" % [radius_mm, mean, sqrt(variance / diffs.size()), ALLOWED_LOSS])

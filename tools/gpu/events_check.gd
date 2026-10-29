@@ -13,7 +13,6 @@ var per_frame := 1000.0 / 6.0  # (x10,000 at 60 frames a second)
 var phase := 0
 var waited := 0
 var wait_started := 0  ## when the wait for the last results began (msec)
-var failures := 0
 var traits_started := false  ## `traits` was asked for: some founders are donors with raised ceilings
 var frames := 0
 var started_usec := 0
@@ -34,12 +33,6 @@ func _initialize() -> void:
 			dish.add_bup(Vector2(randf_range(-1000.0, 1000.0), randf_range(-1000.0, 1000.0)), genome, 30.0)
 	Tools.load_onto_gpu(dish, 1)
 	started_usec = Time.get_ticks_usec()
-
-
-func _check(ok: bool, what: String) -> void:
-	print(("ok   " if ok else "FAIL ") + what)
-	if not ok:
-		failures += 1
 
 
 func _compare(label: String) -> void:
@@ -64,7 +57,7 @@ func _compare(label: String) -> void:
 			stale += 1  # (a record has the reach word of the bup's birth until it dies: a conjugation can change a living bup's)
 		donors += 1 if donor else 0
 		raised += 1 if reach > 0 else 0
-	_check(wrong == 0, "%s: every record has the F factor of its GPU bup (%d wrong; %d donors, %d with a raised ceiling or key; %d of them changed since birth)" % [label, wrong, donors, raised, stale])
+	TestUtil.show(wrong == 0, "%s: every record has the F factor of its GPU bup (%d wrong; %d donors, %d with a raised ceiling or key; %d of them changed since birth)" % [label, wrong, donors, raised, stale])
 	var dead_donors := 0
 	var dead_raised := 0
 	var dead := 0
@@ -77,16 +70,16 @@ func _compare(label: String) -> void:
 	for record: Dictionary in dish.sim.lineage_export():
 		if not record["alive"] and (float(record["mass"]) <= 0.0 or float(record["birth_mass"]) <= 0.0 or float(record["energy"]) < 0.0 or float(record["div_mass"]) <= float(record["birth_mass"])):
 			bad_dead += 1
-	_check(bad_dead == 0, "%s: every dead record has the mass, reserve and birth mass its death event carried (%d without, of %d)" % [label, bad_dead, dead])
+	TestUtil.show(bad_dead == 0, "%s: every dead record has the mass, reserve and birth mass its death event carried (%d without, of %d)" % [label, bad_dead, dead])
 	print("%s: %d dead records, %d with the F factor, %d with a raised ceiling or key" % [label, dead, dead_donors, dead_raised])
 	var alive := dish.sim.alive_ids()
-	_check(missing == 0, "%s: every one of the GPU's %d bups has a living record (%d without)" % [label, count, missing])
-	_check(alive.size() == count, "%s: living records %d = GPU bups %d" % [label, alive.size(), count])
+	TestUtil.show(missing == 0, "%s: every one of the GPU's %d bups has a living record (%d without)" % [label, count, missing])
+	TestUtil.show(alive.size() == count, "%s: living records %d = GPU bups %d" % [label, alive.size(), count])
 	var over := Tools.overflows(world.gpu)
-	_check(over["births_lost"] == 0 and over["deaths_lost"] == 0 and over["clouds_to_grid"] == 0 and over["list_entries_cut"] == 0, "%s: no overflow %s" % [label, str(over)])
+	TestUtil.show(over["births_lost"] == 0 and over["deaths_lost"] == 0 and over["clouds_to_grid"] == 0 and over["list_entries_cut"] == 0, "%s: no overflow %s" % [label, str(over)])
 	var samples: int = dish.history["pop"].size()
 	var expected := roundi((dish.time - dish._history_accum) / Dish.HISTORY_INTERVAL)  # (the samples the dish's history clock has taken)
-	_check(samples == expected, "%s: %d history samples for %.0f s (%d expected); last pop %d, GPU %d" % [label, samples, dish.time, expected, dish.history["pop"][-1] if samples > 0 else -1, count])
+	TestUtil.show(samples == expected, "%s: %d history samples for %.0f s (%d expected); last pop %d, GPU %d" % [label, samples, dish.time, expected, dish.history["pop"][-1] if samples > 0 else -1, count])
 	print("%s: records kept %d, time %.1f s, history clock %.6f s, frames %d" % [label, dish.sim.record_count(), dish.time, dish._history_accum, frames])
 
 
@@ -119,9 +112,9 @@ func _process(_delta: float) -> bool:
 				var gpu := dish.gpu_world.gpu
 				var conc := []
 				RenderingServer.call_on_render_thread(func() -> void: conc.append(gpu.read_conc()))
-				_check(dish.field.values() == conc[0], "2 h: the CPU field's copy (refreshed from the GPU) equals the GPU's grid")
+				TestUtil.show(dish.field.values() == conc[0], "2 h: the CPU field's copy (refreshed from the GPU) equals the GPU's grid")
 				print("real time %.2f s" % ((Time.get_ticks_usec() - started_usec) / 1e6))
-				print("EVENTS CHECK " + ("OK" if failures == 0 else "FAILED (%d)" % failures))
+				print("EVENTS CHECK " + ("OK" if TestUtil.failures.is_empty() else "FAILED (%d)" % TestUtil.failures.size()))
 				phase = 3
 				waited = 0
 		3:

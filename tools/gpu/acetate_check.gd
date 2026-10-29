@@ -5,15 +5,6 @@ extends SceneTree
 
 const Tools := preload("res://tools/gpu/world_tools.gd")
 
-var failures := 0
-
-
-func _check(ok: bool, what: String) -> void:
-	print(("ok   " if ok else "FAIL ") + what)
-	if not ok:
-		failures += 1
-
-
 func _peak(field: NutrientField) -> float:
 	var peak := 0.0
 	for v: float in field.values():
@@ -39,7 +30,7 @@ func _run() -> void:
 		dish.advance(1000.0 / 6.0)
 		frames += 1
 		await process_frame
-	_check(dish.gpu_active, "the dish runs on the GPU (after %d frames)" % frames)
+	TestUtil.show(dish.gpu_active, "the dish runs on the GPU (after %d frames)" % frames)
 	for i in 120:
 		dish.advance(1000.0 / 6.0)
 		await process_frame
@@ -48,11 +39,11 @@ func _run() -> void:
 	root.add_child(copy)
 	copy.process_mode = Node.PROCESS_MODE_DISABLED
 	var loaded := copy.from_dict(saved)
-	_check(loaded, "the save loads")
+	TestUtil.show(loaded, "the save loads")
 	var total1: float = copy.acetate.total()
 	var peak1 := _peak(copy.acetate)
-	_check(absf(total1 / total0 - 1.0) < 1e-3, "the acetate keeps its total on the GPU (%.2f of %.2f)" % [total1, total0])
-	_check(peak1 < 0.9 * peak0 and peak1 > 0.0, "it has spread there (peak %.3f of %.3f)" % [peak1, peak0])
+	TestUtil.show(absf(total1 / total0 - 1.0) < 1e-3, "the acetate keeps its total on the GPU (%.2f of %.2f)" % [total1, total0])
+	TestUtil.show(peak1 < 0.9 * peak0 and peak1 > 0.0, "it has spread there (peak %.3f of %.3f)" % [peak1, peak0])
 	Tools.release(dish)
-	print("ACETATE CHECK %s" % ("OK" if failures == 0 else "FAILED"))
-	quit(failures)
+	print("ACETATE CHECK %s" % ("OK" if TestUtil.failures.is_empty() else "FAILED"))
+	quit(TestUtil.failures.size())

@@ -3,10 +3,6 @@ extends SceneTree
 ## A scroll that begins in a list stays in it: at the end of the list the wheel does not go on to the panel round it (ScrollKeep).
 
 
-func check(ok: bool, what: String) -> void:
-	TestUtil.check(ok, what)
-
-
 func _init() -> void:
 	_run()
 
@@ -53,19 +49,19 @@ func _run() -> void:
 		await process_frame
 	var on_long := long_list.get_global_rect().get_center()
 	var on_short := short_list.get_global_rect().get_center()
-	check(UiInput.holds_scrollable_at(outer, on_long), "a list with more than it shows, under the pointer, keeps the wheel")
-	check(not UiInput.holds_scrollable_at(outer, on_short), "a list that shows everything does not: the panel round it may scroll")
-	check(not UiInput.holds_scrollable_at(outer, Vector2(15.0, 235.0)), "a pointer that is not over a list does not")
-	check(UiInput.is_scroll(InputEventPanGesture.new()) and not UiInput.is_scroll(InputEventMouseMotion.new()), "wheel turns and trackpad scrolls count, other events do not")
+	TestUtil.check(UiInput.holds_scrollable_at(outer, on_long), "a list with more than it shows, under the pointer, keeps the wheel")
+	TestUtil.check(not UiInput.holds_scrollable_at(outer, on_short), "a list that shows everything does not: the panel round it may scroll")
+	TestUtil.check(not UiInput.holds_scrollable_at(outer, Vector2(15.0, 235.0)), "a pointer that is not over a list does not")
+	TestUtil.check(UiInput.is_scroll(InputEventPanGesture.new()) and not UiInput.is_scroll(InputEventMouseMotion.new()), "wheel turns and trackpad scrolls count, other events do not")
 
 	long_list.scroll_vertical = int(long_list.get_v_scroll_bar().max_value)  # (the end of the list)
 	var before := outer.scroll_vertical
 	for i in 5:
 		_wheel(on_long, MOUSE_BUTTON_WHEEL_DOWN)
 		await process_frame
-	check(outer.scroll_vertical == before, "a wheel turned at the end of the list does not scroll the panel round it (%d, was %d)" % [outer.scroll_vertical, before])
+	TestUtil.check(outer.scroll_vertical == before, "a wheel turned at the end of the list does not scroll the panel round it (%d, was %d)" % [outer.scroll_vertical, before])
 	for i in 5:
 		_wheel(on_short, MOUSE_BUTTON_WHEEL_DOWN)
 		await process_frame
-	check(outer.scroll_vertical > before, "over a list that has nothing to scroll the panel does scroll (%d)" % outer.scroll_vertical)
+	TestUtil.check(outer.scroll_vertical > before, "over a list that has nothing to scroll the panel does scroll (%d)" % outer.scroll_vertical)
 	TestUtil.finish(self, "SCROLL KEEP TESTS OK", "SCROLL KEEP TESTS FAILED:")

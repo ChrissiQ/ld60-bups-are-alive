@@ -6,10 +6,6 @@ extends SceneTree
 const SCENES := ["menu", "intro", "founders", "free_setup", "pause_menu", "main"]
 
 
-func check(ok: bool, what: String) -> void:
-	TestUtil.check(ok, what)
-
-
 ## Every "@section.name" in the scene files, and every Strings.t / raw / has_key("section.name") in the scripts.
 func _asked_for() -> Dictionary:
 	var asked := {}  # key -> where
@@ -44,10 +40,10 @@ func _walk(node: Node, found: Array) -> void:
 
 
 func _init() -> void:
-	check(Strings.has_key("hud.dish_title") and Strings.t("hud.dish_title") == "Dish", "the file loads and gives a text")
-	check(Strings.problems().is_empty(), "every text in the file loads: %s" % [Strings.problems()])
+	TestUtil.check(Strings.has_key("hud.dish_title") and Strings.t("hud.dish_title") == "Dish", "the file loads and gives a text")
+	TestUtil.check(Strings.problems().is_empty(), "every text in the file loads: %s" % [Strings.problems()])
 	var asked := _asked_for()
-	check(asked.size() > 100, "the code and scenes ask for the texts (found %d)" % asked.size())
+	TestUtil.check(asked.size() > 100, "the code and scenes ask for the texts (found %d)" % asked.size())
 	for key: String in asked:
 		if key.ends_with("*"):
 			var prefix := key.trim_suffix("*")
@@ -57,9 +53,9 @@ func _init() -> void:
 			config.load(Strings.FILE)
 			for name in config.get_section_keys(section):
 				any = any or name.begins_with(prefix.get_slice(".", 1))
-			check(any, "%s asks for texts starting '%s' and there are none" % [asked[key], prefix])
+			TestUtil.check(any, "%s asks for texts starting '%s' and there are none" % [asked[key], prefix])
 		else:
-			check(Strings.has_key(key), "%s asks for '%s', which text/strings.cfg does not have" % [asked[key], key])
+			TestUtil.check(Strings.has_key(key), "%s asks for '%s', which text/strings.cfg does not have" % [asked[key], key])
 
 	# Every text is a string with something in it, and a %% is not taken for a place for a number.
 	var config := ConfigFile.new()
@@ -67,15 +63,15 @@ func _init() -> void:
 	for section in config.get_sections():
 		for name in config.get_section_keys(section):
 			var value: Variant = config.get_value(section, name)
-			check(value is String, "%s.%s is a text" % [section, name])
-	check(Strings.count_places("a %d and %s and %.1f and 5%%") == 3, "places for numbers are counted, not percent signs")
-	check(Strings.t("hud.readout_bups", [7]) == "7 bups", "a text with a place is filled in")
-	check(Strings.list("menu", "quip").size() >= 3, "the title screen has some lines to pick from")
+			TestUtil.check(value is String, "%s.%s is a text" % [section, name])
+	TestUtil.check(Strings.count_places("a %d and %s and %.1f and 5%%") == 3, "places for numbers are counted, not percent signs")
+	TestUtil.check(Strings.t("hud.readout_bups", [7]) == "7 bups", "a text with a place is filled in")
+	TestUtil.check(Strings.list("menu", "quip").size() >= 3, "the title screen has some lines to pick from")
 
 	# Nothing the scenes show is left as a raw "@key" (the TextSweep autoload does it); and TextSweep comes before
 	# DialogStyle, so that a dialog is sized with its text.
 	var project := FileAccess.get_file_as_string("res://project.godot")
-	check(project.contains("TextSweep=") and project.find("TextSweep=") < project.find("DialogStyle="), "project.godot starts TextSweep before DialogStyle")
+	TestUtil.check(project.contains("TextSweep=") and project.find("TextSweep=") < project.find("DialogStyle="), "project.godot starts TextSweep before DialogStyle")
 	Session.free_start = StartConditions.new()
 	for scene in SCENES:
 		var node: Node = load("res://scenes/%s.tscn" % scene).instantiate()
@@ -83,10 +79,10 @@ func _init() -> void:
 		await process_frame
 		var raw: Array = []
 		_walk(node, raw)
-		check(raw.is_empty(), "%s shows a raw key: %s" % [scene, raw.slice(0, 3)])
+		TestUtil.check(raw.is_empty(), "%s shows a raw key: %s" % [scene, raw.slice(0, 3)])
 		node.queue_free()
 		await process_frame
-	check(Strings.missing.is_empty(), "no text was asked for that the file lacks: %s" % [Strings.missing])
+	TestUtil.check(Strings.missing.is_empty(), "no text was asked for that the file lacks: %s" % [Strings.missing])
 
 	# Raw files the game reads (not resources Godot imports) are left out of an exported game unless a preset's include filter names
 	# them, and then every text shows as its key: so each one a script names must be in every preset's filter.
@@ -97,7 +93,7 @@ func _init() -> void:
 			for m in raw_file.search_all(FileAccess.get_file_as_string(path)):
 				needed[m.get_string(1)] = path
 	var presets := ConfigFile.new()
-	check(presets.load("res://export_presets.cfg") == OK and needed.has("text/strings.cfg"), "the export presets load, and the scripts read raw files (text/strings.cfg at least)")
+	TestUtil.check(presets.load("res://export_presets.cfg") == OK and needed.has("text/strings.cfg"), "the export presets load, and the scripts read raw files (text/strings.cfg at least)")
 	for section in presets.get_sections():
 		if not section.begins_with("preset.") or section.ends_with(".options"):
 			continue
@@ -106,5 +102,5 @@ func _init() -> void:
 			var included := false
 			for pattern in filters:
 				included = included or file.match(pattern.strip_edges())
-			check(included, "export preset '%s' includes %s (read by %s)" % [presets.get_value(section, "name", section), file, needed[file]])
+			TestUtil.check(included, "export preset '%s' includes %s (read by %s)" % [presets.get_value(section, "name", section), file, needed[file]])
 	TestUtil.finish(self, "STRINGS TESTS OK  (%d texts asked for)" % asked.size())

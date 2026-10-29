@@ -10,6 +10,12 @@ static func check(ok: bool, what: String) -> void:
 		failures.append(what)
 
 
+## `check`, and the line a windowed tool prints for it: "ok   " or "FAIL " and what it checked.
+static func show(ok: bool, what: String) -> void:
+	check(ok, what)
+	print(("ok   " if ok else "FAIL ") + what)
+
+
 ## Ends a test script: prints `ok_text` if nothing failed, or each failure if something did, and quits with the result.
 static func finish(tree: SceneTree, ok_text: String, failed_title := "FAILED:") -> void:
 	if failures.is_empty():
@@ -61,3 +67,24 @@ static func density(dish: Dish) -> float:
 ## A dish's save, as it comes back from a file.
 static func saved(dish: Dish) -> Dictionary:
 	return JSON.parse_string(JSON.stringify(dish.to_dict()))
+
+
+## A key press (or its release, repeat or shift) as an event to hand to a node's `_input` or to `Input.parse_input_event`.
+static func key_event(code: Key, pressed := true, echo := false, shift := false) -> InputEventKey:
+	var e := InputEventKey.new()
+	e.keycode = code
+	e.pressed = pressed
+	e.echo = echo
+	e.shift_pressed = shift
+	return e
+
+
+## The simulation constants with diffusion and uptake switched off, so a bup's motion is all that moves: tests that pin the motion count on it.
+## `structure` sets `motion_structure` too when it is a number.
+static func frozen_constants(structure := NAN) -> void:
+	var consts := SimConstants.build()
+	consts["diffusion"] = 0.0
+	consts["uptake_per_size"] = 0.0
+	if not is_nan(structure):
+		consts["motion_structure"] = structure
+	BupSim.configure(consts)

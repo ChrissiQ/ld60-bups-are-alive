@@ -8,10 +8,6 @@ extends SceneTree
 const UNITS := 300.0
 
 
-func check(ok: bool, what: String) -> void:
-	TestUtil.check(ok, what)
-
-
 func _dish(radius_mm: float, seed_value := 5) -> Dish:
 	var d := Dish.new()
 	root.add_child(d)
@@ -56,7 +52,7 @@ func _check_small_dish_unchanged() -> void:
 	for p: Vector2 in [Vector2(500, 300), Vector2(-2000, 1500), Vector2(7000, 0)]:
 		a.field.add_cloud(p, Dish.PLANKTON_PATCH_RADIUS, UNITS * Dish.NUTRIENT_ENERGY)
 		b.field.deposit_disc(p, Dish.PLANKTON_PATCH_RADIUS, UNITS * Dish.NUTRIENT_ENERGY)
-	check(a.field.puff_count() == 0 and a.field.values() == b.field.values(), "on a 10 mm dish (200 µm cells) a burst goes straight onto the grid, as it always did")
+	TestUtil.check(a.field.puff_count() == 0 and a.field.values() == b.field.values(), "on a 10 mm dish (200 µm cells) a burst goes straight onto the grid, as it always did")
 	a.free()
 	b.free()
 
@@ -66,17 +62,17 @@ func _check_reads() -> void:
 	var energy := UNITS * Dish.NUTRIENT_ENERGY
 	var where := Vector2(4000, -3000)
 	d.field.add_cloud(where, Dish.PLANKTON_PATCH_RADIUS, energy)
-	check(d.field.puff_count() == 1 and absf(d.field.total() - energy) < 1e-3 * energy, "on a 90 mm dish a burst is kept as a cloud, and the dish holds its nutrient (%.1f of %.1f)" % [d.field.total(), energy])
+	TestUtil.check(d.field.puff_count() == 1 and absf(d.field.total() - energy) < 1e-3 * energy, "on a 90 mm dish a burst is kept as a cloud, and the dish holds its nutrient (%.1f of %.1f)" % [d.field.total(), energy])
 	var variance := 0.25 * Dish.PLANKTON_PATCH_RADIUS * Dish.PLANKTON_PATCH_RADIUS
 	var peak: float = d.field.sample(where)
-	check(absf(peak / (energy / (TAU * variance)) - 1.0) < 1e-6, "a cloud's concentration at its centre is mass / (2 pi variance) (%.5f)" % peak)
+	TestUtil.check(absf(peak / (energy / (TAU * variance)) - 1.0) < 1e-6, "a cloud's concentration at its centre is mass / (2 pi variance) (%.5f)" % peak)
 	var off := where + Vector2(180, 90)
 	var reading: Vector3 = d.field.read(off)
 	var h := 0.5
 	var numeric_x: float = (d.field.sample(off + Vector2(h, 0)) - d.field.sample(off - Vector2(h, 0))) / (2.0 * h)
 	var numeric_y: float = (d.field.sample(off + Vector2(0, h)) - d.field.sample(off - Vector2(0, h))) / (2.0 * h)
-	check(reading.y < 0.0 and reading.z < 0.0 and absf(reading.y / numeric_x - 1.0) < 1e-3 and absf(reading.z / numeric_y - 1.0) < 1e-3, "its gradient points at its centre and is the slope of its concentration (%s, %s against %s, %s)" % [reading.y, reading.z, numeric_x, numeric_y])
-	check(d.field.min_cloud_sigma(where.x, where.y) < 130.0 and d.field.min_cloud_sigma(-30000.0, 30000.0) > 1.0e9, "a place near a cloud knows the cloud's size, and a place far from any does not")
+	TestUtil.check(reading.y < 0.0 and reading.z < 0.0 and absf(reading.y / numeric_x - 1.0) < 1e-3 and absf(reading.z / numeric_y - 1.0) < 1e-3, "its gradient points at its centre and is the slope of its concentration (%s, %s against %s, %s)" % [reading.y, reading.z, numeric_x, numeric_y])
+	TestUtil.check(d.field.min_cloud_sigma(where.x, where.y) < 130.0 and d.field.min_cloud_sigma(-30000.0, 30000.0) > 1.0e9, "a place near a cloud knows the cloud's size, and a place far from any does not")
 	d.free()
 
 
@@ -90,8 +86,8 @@ func _check_conservation() -> void:
 	var clouds_before: int = d.field.puff_count()
 	for i in int(8.0 * 3600.0 / 20.0):
 		d.step(20.0)
-	check(clouds_before == 41 and d.field.puff_count() == 0, "clouds spread and, by about five hours, have all been given to the grid (%d of %d left)" % [d.field.puff_count(), clouds_before])
-	check(absf(d.field.total() / before - 1.0) < 1e-4, "the nutrient is conserved through the spreading and the handover (%.1f before, %.1f after)" % [before, d.field.total()])
+	TestUtil.check(clouds_before == 41 and d.field.puff_count() == 0, "clouds spread and, by about five hours, have all been given to the grid (%d of %d left)" % [d.field.puff_count(), clouds_before])
+	TestUtil.check(absf(d.field.total() / before - 1.0) < 1e-4, "the nutrient is conserved through the spreading and the handover (%.1f before, %.1f after)" % [before, d.field.total()])
 	d.free()
 
 
@@ -102,8 +98,8 @@ func _check_death_release() -> void:
 	d.sim.add_bup(where, Genome.founder(), 0.0, sqrt(mass), mass, 0, Vector2.RIGHT)  # (no energy: it starves in the first step)
 	d.sim.step(20.0, PackedVector2Array(), PackedFloat32Array(), 0.0, 0.0)
 	var expected := Biology.DEATH_RELEASE * Cell.COST_PER_MASS * mass
-	check(d.population() == 0, "a bup with no energy dies in its first step")
-	check(d.field.puff_count() == 1 and absf(d.field.total() - expected) < 1e-4 * expected, "a bup that starves gives back a share of its body as a cloud where it died (%.3f of %.3f)" % [d.field.total(), expected])
+	TestUtil.check(d.population() == 0, "a bup with no energy dies in its first step")
+	TestUtil.check(d.field.puff_count() == 1 and absf(d.field.total() - expected) < 1e-4 * expected, "a bup that starves gives back a share of its body as a cloud where it died (%.3f of %.3f)" % [d.field.total(), expected])
 	d.free()
 
 
@@ -115,18 +111,18 @@ func _check_record_traits() -> void:
 	genome["reach"] = 0x0D | (2 << 8)  # (speed +1, sense +3, and the acetate key)
 	var id := d.add_bup(Vector2(100.0, 100.0), genome, 30.0)
 	var born := d.lineage_info(id)
-	check(born["donor"] == true and int(born["reach"]) == (0x0D | (2 << 8)), "a record has the F factor and the reach word its bup was born with")
+	TestUtil.check(born["donor"] == true and int(born["reach"]) == (0x0D | (2 << 8)), "a record has the F factor and the reach word its bup was born with")
 	d.watch_bup(id)  # (a watched record stays after its bup is gone)
 	d.remove_bup(id)
 	var dead := d.lineage_info(id)
-	check(not dead.is_empty() and not dead["alive"] and dead["donor"] == true and int(dead["reach"]) == (0x0D | (2 << 8)), "...and a dead bup's record keeps them")
+	TestUtil.check(not dead.is_empty() and not dead["alive"] and dead["donor"] == true and int(dead["reach"]) == (0x0D | (2 << 8)), "...and a dead bup's record keeps them")
 	var copy := Dish.new()
 	root.add_child(copy)
-	check(copy.from_dict(TestUtil.saved(d)) and copy.lineage_info(id).get("donor", false) == true and int(copy.lineage_info(id).get("reach", 0)) == (0x0D | (2 << 8)), "...through a save and a load")
+	TestUtil.check(copy.from_dict(TestUtil.saved(d)) and copy.lineage_info(id).get("donor", false) == true and int(copy.lineage_info(id).get("reach", 0)) == (0x0D | (2 << 8)), "...through a save and a load")
 	var bytes := d.sim.lineage_export_bytes()
 	var other := _dish(90.0)
 	other.sim.lineage_import_bytes(bytes, PackedInt64Array([id]))
-	check(other.lineage_info(id).get("donor", false) == true and int(other.lineage_info(id).get("reach", 0)) == (0x0D | (2 << 8)), "...and through the pipette's bytes")
+	TestUtil.check(other.lineage_info(id).get("donor", false) == true and int(other.lineage_info(id).get("reach", 0)) == (0x0D | (2 << 8)), "...and through the pipette's bytes")
 	copy.free()
 	other.free()
 	# A death the GPU reports carries the bup's divisions, reach word and F factor in one word, and its genes, as the bup was when it died
@@ -149,8 +145,8 @@ func _check_record_traits() -> void:
 	death.encode_float(GpuLayout.ED_SIZE * 4, 4.5)
 	gpu_dead.sim.apply_events(PackedByteArray(), death, 100.0, 20.0)
 	var gone := gpu_dead.lineage_info(living)
-	check(not gone.is_empty() and not gone["alive"] and int(gone["divisions"]) == 7 and int(gone["reach"]) == 0x0D and gone["donor"] == true and is_equal_approx(gone["mass"], 8.0) and is_equal_approx(gone["energy"], 6.5) and is_equal_approx(gone["birth_mass"], 5.0) and gone["div_mass"] > gone["birth_mass"], "a death event gives the record the bup's divisions, reach word, F factor, mass, reserve and birth mass as it died")
-	check(is_equal_approx(gone["speed"], 33.0) and is_equal_approx(gone["sense"], 77.0) and is_equal_approx(gone["metabolism"], 1.5) and is_equal_approx(gone["size_gene"], 4.5), "...and its genes as it died")
+	TestUtil.check(not gone.is_empty() and not gone["alive"] and int(gone["divisions"]) == 7 and int(gone["reach"]) == 0x0D and gone["donor"] == true and is_equal_approx(gone["mass"], 8.0) and is_equal_approx(gone["energy"], 6.5) and is_equal_approx(gone["birth_mass"], 5.0) and gone["div_mass"] > gone["birth_mass"], "a death event gives the record the bup's divisions, reach word, F factor, mass, reserve and birth mass as it died")
+	TestUtil.check(is_equal_approx(gone["speed"], 33.0) and is_equal_approx(gone["sense"], 77.0) and is_equal_approx(gone["metabolism"], 1.5) and is_equal_approx(gone["size_gene"], 4.5), "...and its genes as it died")
 	# A husk made from a GPU death is as old as the time since that death: a batch's events reach the CPU some frames after its steps.
 	var late := BupSim.new()
 	late.reset(3000.0, 3)
@@ -167,7 +163,7 @@ func _check_record_traits() -> void:
 	late_death.encode_float(GpuLayout.ED_GIVES * 4, 10.0)
 	late.apply_events(PackedByteArray(), late_death, 1960.0, 20.0)  # (its step ended at 1,960 + 2 x 20 = 2,000 s; the dish's clock is at 5,000)
 	var late_husk := late.husks_export()
-	check(late_husk.size() == 5 and is_equal_approx(late_husk[3], 3000.0), "a husk from a death heard of late is as old as the time since the death (%s s)" % str(late_husk[3] if late_husk.size() == 5 else -1.0))
+	TestUtil.check(late_husk.size() == 5 and is_equal_approx(late_husk[3], 3000.0), "a husk from a death heard of late is as old as the time since the death (%s s)" % str(late_husk[3] if late_husk.size() == 5 else -1.0))
 	# On the CPU too: a conjugation's recipient that dies keeps the genes it was given, with their raised ceilings.
 	var cpu_dead := _dish(90.0)
 	var given := cpu_dead.add_bup(Vector2(5.0, 5.0), Genome.founder(), 30.0)
@@ -184,7 +180,7 @@ func _check_record_traits() -> void:
 	var given_speed: float = cpu_dead.sim.bup_info(given)["speed"]
 	cpu_dead.sim.remove_bup(given)
 	var dead_record := cpu_dead.lineage_info(given)
-	check(cpu_dead.sim.transfer_count() > 0 and is_equal_approx(given_speed, float(donor_genome["speed"])) and is_equal_approx(dead_record["speed"], given_speed) and int(dead_record["reach"]) & 3 == 2, "a recipient's record, once it dies, has the speed gene it was given (%.1f) with that gene's raised ceiling" % float(dead_record.get("speed", 0.0)))
+	TestUtil.check(cpu_dead.sim.transfer_count() > 0 and is_equal_approx(given_speed, float(donor_genome["speed"])) and is_equal_approx(dead_record["speed"], given_speed) and int(dead_record["reach"]) & 3 == 2, "a recipient's record, once it dies, has the speed gene it was given (%.1f) with that gene's raised ceiling" % float(dead_record.get("speed", 0.0)))
 	cpu_dead.free()
 	gpu_dead.free()
 	d.free()
@@ -204,8 +200,8 @@ func _check_husks_picture() -> void:
 	var spare := 0.0
 	for k in range(400 * 8, buffer.size()):
 		spare += absf(buffer[k])
-	check(buffer.size() == 1024 * 8 and wrong == 0 and spare == 0.0, "all 400 husks are in the picture, each 4 µm square at its place, and the spare room is empty (%d wrong)" % wrong)
-	check(d.sim.husk_buffer(4.0, 10).size() == 400 * 8, "a picture is never smaller than the husks there are")
+	TestUtil.check(buffer.size() == 1024 * 8 and wrong == 0 and spare == 0.0, "all 400 husks are in the picture, each 4 µm square at its place, and the spare room is empty (%d wrong)" % wrong)
+	TestUtil.check(d.sim.husk_buffer(4.0, 10).size() == 400 * 8, "a picture is never smaller than the husks there are")
 	d.free()
 
 
@@ -216,30 +212,30 @@ func _check_husks() -> void:
 	d.sim.add_bup(Vector2(-3000, 2000), Genome.founder(), 0.0, sqrt(mass), mass, 0, Vector2.RIGHT)
 	d.sim.step(20.0, PackedVector2Array(), PackedFloat32Array(), 0.0, 0.0)
 	var expected := Biology.DEATH_RELEASE * Cell.COST_PER_MASS * mass
-	check(d.population() == 0 and d.sim.husk_count() == 1 and d.field.puff_count() == 0 and d.field.total() == 0.0, "with husks on a dead bup leaves a husk and no cloud yet")
+	TestUtil.check(d.population() == 0 and d.sim.husk_count() == 1 and d.field.puff_count() == 0 and d.field.total() == 0.0, "with husks on a dead bup leaves a husk and no cloud yet")
 	var lying := d.sim.husks_export()
 	var spot := Vector2(lying[0], lying[1])  # (where the bup died: it swam a little in its last seconds)
-	check(d.husk_at(d.global_position + spot) == spot and d.husk_at(d.global_position + spot + Vector2(500, 0)) == Dish.NO_HUSK, "a husk can be found where it lies, and not far from it")
+	TestUtil.check(d.husk_at(d.global_position + spot) == spot and d.husk_at(d.global_position + spot + Vector2(500, 0)) == Dish.NO_HUSK, "a husk can be found where it lies, and not far from it")
 	var seen := d.husk_details(spot)
-	check(not seen.is_empty() and is_equal_approx(seen["left"], 1.0) and absf(seen["units"] - expected / Dish.NUTRIENT_ENERGY) < 1e-3 and seen["age"] < 60.0, "its details say what it holds (%s) and that it has leaked nothing yet" % [seen])
+	TestUtil.check(not seen.is_empty() and is_equal_approx(seen["left"], 1.0) and absf(seen["units"] - expected / Dish.NUTRIENT_ENERGY) < 1e-3 and seen["age"] < 60.0, "its details say what it holds (%s) and that it has leaked nothing yet" % [seen])
 	d.select_at(d.global_position + spot)
-	check(d.selected_husk == spot and d.has_selection(), "the select tool picks it")
+	TestUtil.check(d.selected_husk == spot and d.has_selection(), "the select tool picks it")
 	d.pick_mode = Dish.PickMode.BUPS
-	check(d.selected_husk == Dish.NO_HUSK, "a pick mode that skips husks lets go of it")
+	TestUtil.check(d.selected_husk == Dish.NO_HUSK, "a pick mode that skips husks lets go of it")
 	var copy := Dish.new()
 	root.add_child(copy)
-	check(copy.from_dict(TestUtil.saved(d)) and copy.death_husks and copy.sim.husk_count() == 1, "a husk, and the setting, survive save and load")
+	TestUtil.check(copy.from_dict(TestUtil.saved(d)) and copy.death_husks and copy.sim.husk_count() == 1, "a husk, and the setting, survive save and load")
 	copy.free()
 	var none := PackedVector2Array()
 	var rates := PackedFloat32Array()
 	for i in 180:  # (an hour: only the first piece, the middle of whose quarter-lifetime is 22 minutes, has leaked)
 		d.sim.step(20.0, none, rates, 0.0, 0.0)
 	var first := expected * (1.0 - exp(-0.25))
-	check(absf(d.field.total() - first) < 1e-3 * first and d.sim.husk_count() == 1, "an hour on, the first piece has leaked (%.3f of %.3f)" % [d.field.total(), first])
+	TestUtil.check(absf(d.field.total() - first) < 1e-3 * first and d.sim.husk_count() == 1, "an hour on, the first piece has leaked (%.3f of %.3f)" % [d.field.total(), first])
 	for i in 1500:  # (to nine hours and a little over: every piece)
 		d.sim.step(20.0, none, rates, 0.0, 0.0)
-	check(d.husk_details(spot).is_empty(), "a husk that has leaked away has no details")
-	check(d.sim.husk_count() == 0 and absf(d.field.total() - expected) < 1e-3 * expected, "in the end the husk has given all of it back (%.3f of %.3f)" % [d.field.total(), expected])
+	TestUtil.check(d.husk_details(spot).is_empty(), "a husk that has leaked away has no details")
+	TestUtil.check(d.sim.husk_count() == 0 and absf(d.field.total() - expected) < 1e-3 * expected, "in the end the husk has given all of it back (%.3f of %.3f)" % [d.field.total(), expected])
 	d.free()
 
 
@@ -270,13 +266,13 @@ func _check_starvation() -> void:
 				total += ex[i * GpuSim.STRIDE + 6]
 			masses["%s_%s" % [setting, metabolism]] = total / maxf(np, 1)
 			d.free()
-	check(survivors["off_first_1.0"] == 0, "with the stationary phase off every bup with no energy dies in its first step")
+	TestUtil.check(survivors["off_first_1.0"] == 0, "with the stationary phase off every bup with no energy dies in its first step")
 	var expected := {0.5: exp(-0.22 * exp(0.95 * 1.0397 * 0.5)), 1.0: exp(-0.22 * exp(0.95 * 1.0397)), 2.0: exp(-0.22 * exp(0.95 * 1.0397 * 2.0))}
 	for metabolism in [0.5, 1.0, 2.0]:
 		var share: float = survivors["true_%s" % metabolism] / float(n)
-		check(absf(share - expected[metabolism]) < 0.08, "a day of starvation at metabolism %s leaves %.2f of the bups alive (expected %.2f from the death rate)" % [metabolism, share, expected[metabolism]])
-	check(survivors["true_2.0"] < survivors["true_1.0"] and survivors["true_1.0"] < survivors["true_0.5"], "the fast metabolism dies first: the growth rate costs survival")
-	check(absf(masses["true_1.0"] / 12.0 - exp(-0.08)) < 0.02, "the survivors have shrunk by about the starving maintenance (%.3f of their mass, expected %.3f)" % [masses["true_1.0"] / 12.0, exp(-0.08)])
+		TestUtil.check(absf(share - expected[metabolism]) < 0.08, "a day of starvation at metabolism %s leaves %.2f of the bups alive (expected %.2f from the death rate)" % [metabolism, share, expected[metabolism]])
+	TestUtil.check(survivors["true_2.0"] < survivors["true_1.0"] and survivors["true_1.0"] < survivors["true_0.5"], "the fast metabolism dies first: the growth rate costs survival")
+	TestUtil.check(absf(masses["true_1.0"] / 12.0 - exp(-0.08)) < 0.02, "the survivors have shrunk by about the starving maintenance (%.3f of their mass, expected %.3f)" % [masses["true_1.0"] / 12.0, exp(-0.08)])
 
 
 ## Overflow: a bup eating faster than it can grow lets go of acetate (up to the share the threshold-linear law gives), one that eats slowly does not,
@@ -293,14 +289,14 @@ func _check_acetate() -> void:
 	rich.sim.step(20.0, none, rates, 0.0, 0.0)
 	var let_go: float = rich.acetate.total()
 	var taken: float = eaten_before - rich.field.total()
-	check(let_go > 0.0 and let_go < 0.5 * taken, "bups eating fast let go of acetate, under half of what they eat (%.3f of %.3f)" % [let_go, taken])
+	TestUtil.check(let_go > 0.0 and let_go < 0.5 * taken, "bups eating fast let go of acetate, under half of what they eat (%.3f of %.3f)" % [let_go, taken])
 	rich.free()
 	var lean := _dish(90.0)
 	lean.field.fill(Cell.HALF_SATURATION * 0.05)
 	for i in 200:
 		lean.sim.add_bup(lean.sim.random_point(80000.0), Genome.founder(), 0.0, sqrt(mass), mass, 0, Vector2.RIGHT)
 	lean.sim.step(20.0, none, rates, 0.0, 0.0)
-	check(lean.acetate.total() < 0.01 * let_go, "bups eating slowly let go of none (%.5f)" % lean.acetate.total())
+	TestUtil.check(lean.acetate.total() < 0.01 * let_go, "bups eating slowly let go of none (%.5f)" % lean.acetate.total())
 	lean.free()
 	var bodies := []
 	var gone := 0.0
@@ -319,7 +315,7 @@ func _check_acetate() -> void:
 		bodies.append(body)
 		gone = start - d.acetate.total()
 		d.free()
-	check(gone > 0.0 and absf((bodies[1] - bodies[0]) / gone - 1.0) < 0.02, "a bup with room and no glucose takes acetate up at its yield (%.4f gone, bodies %.2f against %.2f without)" % [gone, bodies[1], bodies[0]])
+	TestUtil.check(gone > 0.0 and absf((bodies[1] - bodies[0]) / gone - 1.0) < 0.02, "a bup with room and no glucose takes acetate up at its yield (%.4f gone, bodies %.2f against %.2f without)" % [gone, bodies[1], bodies[0]])
 
 
 func _check_plankton_husks() -> void:
@@ -329,18 +325,18 @@ func _check_plankton_husks() -> void:
 	var energy := 40.0 * Dish.NUTRIENT_ENERGY
 	d.plankton.append(Plankton.new(d.global_position + Vector2(2000, 1000), 0.0, 100.0, 40.0, 0))
 	d.advance(200.0)
-	check(d.plankton.is_empty() and d.sim.husk_count() == 1 and d.field.puff_count() == 0, "a plankton that dies with husks on leaves a husk and no cloud")
+	TestUtil.check(d.plankton.is_empty() and d.sim.husk_count() == 1 and d.field.puff_count() == 0, "a plankton that dies with husks on leaves a husk and no cloud")
 	d.advance(Biology.HUSK_SECONDS * 0.75)
 	var leaked: float = d.field.total()
-	check(leaked > 0.4 * energy and leaked < energy, "its nutrient leaks back over hours (%.0f of %.0f)" % [leaked, energy])
+	TestUtil.check(leaked > 0.4 * energy and leaked < energy, "its nutrient leaks back over hours (%.0f of %.0f)" % [leaked, energy])
 	var copy := Dish.new()
 	root.add_child(copy)
-	check(copy.from_dict(TestUtil.saved(d)) and copy.plankton_husks, "the setting survives save and load")
+	TestUtil.check(copy.from_dict(TestUtil.saved(d)) and copy.plankton_husks, "the setting survives save and load")
 	var plain := _dish(90.0)
 	plain.bloom_density = 0.0
 	plain.plankton.append(Plankton.new(plain.global_position + Vector2(2000, 1000), 0.0, 100.0, 40.0, 0))
 	plain.advance(200.0)
-	check(plain.sim.husk_count() == 0 and plain.field.total() > 0.99 * energy, "with them off it bursts into a cloud at once")
+	TestUtil.check(plain.sim.husk_count() == 0 and plain.field.total() > 0.99 * energy, "with them off it bursts into a cloud at once")
 	d.free()
 	copy.free()
 	plain.free()
@@ -375,10 +371,10 @@ func _check_key() -> void:
 			total += ex[i * GpuSim.STRIDE + 6]
 		growth[level] = total
 		g.free()
-	check(absf(gains[2] / gains[0] - Genome.KEY_FACTOR) < 0.05 * Genome.KEY_FACTOR and absf(gains[1] / gains[0] - 1.0) < 0.01, "the key takes acetate up %.2f times as fast (expected %.1f), a potentiated bup as fast as any (%.3f)" % [gains[2] / gains[0], Genome.KEY_FACTOR, gains[1] / gains[0]])
+	TestUtil.check(absf(gains[2] / gains[0] - Genome.KEY_FACTOR) < 0.05 * Genome.KEY_FACTOR and absf(gains[1] / gains[0] - 1.0) < 0.01, "the key takes acetate up %.2f times as fast (expected %.1f), a potentiated bup as fast as any (%.3f)" % [gains[2] / gains[0], Genome.KEY_FACTOR, gains[1] / gains[0]])
 	var grown0: float = growth[0] - 100.0 * mass
-	check(grown0 > 0.0 and absf((growth[2] - 100.0 * mass) / grown0 - (1.0 - Genome.KEY_COST)) < 0.01 and absf((growth[1] - 100.0 * mass) / grown0 - 1.0) < 0.005, "the key costs %.1f%% of the growth (expected %.0f%%), potentiation nothing" % [100.0 * (1.0 - (growth[2] - 100.0 * mass) / grown0), 100.0 * Genome.KEY_COST])
-	check(Genome.key_level(2 << 8 | 5) == 2 and Genome.key_level(1 << 8) == 1 and Genome.key_level(255) == 0, "the key's level is read from bits 8-9 of the reach word")
+	TestUtil.check(grown0 > 0.0 and absf((growth[2] - 100.0 * mass) / grown0 - (1.0 - Genome.KEY_COST)) < 0.01 and absf((growth[1] - 100.0 * mass) / grown0 - 1.0) < 0.005, "the key costs %.1f%% of the growth (expected %.0f%%), potentiation nothing" % [100.0 * (1.0 - (growth[2] - 100.0 * mass) / grown0), 100.0 * Genome.KEY_COST])
+	TestUtil.check(Genome.key_level(2 << 8 | 5) == 2 and Genome.key_level(1 << 8) == 1 and Genome.key_level(255) == 0, "the key's level is read from bits 8-9 of the reach word")
 	var d := _dish(90.0)
 	var consts := SimConstants.build()
 	consts["key_potentiation_rate"] = 0.05
@@ -394,7 +390,7 @@ func _check_key() -> void:
 				counts[level][Genome.key_level(int(r["reach"]))] += 1
 	var from0: float = counts[0][1] / 20000.0
 	var from1: float = counts[1][2] / 20000.0
-	check(absf(from0 - 0.05) < 0.004 and absf(from1 - 0.1) < 0.006 and counts[0][2] == 0 and counts[1][0] == 0 and counts[2][2] > 19000, "a daughter is potentiated at its rate (%.4f of 0.05), made a key at its (%.4f of 0.1), only from a potentiated line, and keeps the key" % [from0, from1])
+	TestUtil.check(absf(from0 - 0.05) < 0.004 and absf(from1 - 0.1) < 0.006 and counts[0][2] == 0 and counts[1][0] == 0 and counts[2][2] > 19000, "a daughter is potentiated at its rate (%.4f of 0.05), made a key at its (%.4f of 0.1), only from a potentiated line, and keeps the key" % [from0, from1])
 	SimConstants.apply()
 	d.free()
 
@@ -424,15 +420,15 @@ func _check_conjugation() -> void:
 			for g in 4:
 				runs[g] += 1 if genes[g] == [30.0, 100.0, 1.5, 6.0][g] else 0
 	var share := float(transferred) / n
-	check(absf(share - (1.0 - exp(-Genome.CONJ_RATE * 10.0))) < 0.06, "touching pairs transfer at the rate: %.3f of %d (expected %.3f)" % [share, n, 1.0 - exp(-Genome.CONJ_RATE * 10.0)])
-	check(runs[0] == transferred and absf(float(runs[1]) / transferred - Genome.CONJ_CONTINUE) < 0.08 and absf(float(runs[2]) / transferred - 0.25) < 0.08 and absf(float(runs[3]) / transferred - 0.125) < 0.06, "a transfer is a run from the first gene, each next one with the chance %.2f: %s of %d" % [Genome.CONJ_CONTINUE, str(runs), transferred])
-	check(d.sim.bup_info(apart)["speed"] == 10.0, "a bup that touches no donor takes nothing")
+	TestUtil.check(absf(share - (1.0 - exp(-Genome.CONJ_RATE * 10.0))) < 0.06, "touching pairs transfer at the rate: %.3f of %d (expected %.3f)" % [share, n, 1.0 - exp(-Genome.CONJ_RATE * 10.0)])
+	TestUtil.check(runs[0] == transferred and absf(float(runs[1]) / transferred - Genome.CONJ_CONTINUE) < 0.08 and absf(float(runs[2]) / transferred - 0.25) < 0.08 and absf(float(runs[3]) / transferred - 0.125) < 0.06, "a transfer is a run from the first gene, each next one with the chance %.2f: %s of %d" % [Genome.CONJ_CONTINUE, str(runs), transferred])
+	TestUtil.check(d.sim.bup_info(apart)["speed"] == 10.0, "a bup that touches no donor takes nothing")
 	var still_donors := 0
 	for id: int in d.sim.bup_ids():
 		var info := d.sim.bup_info(id)
 		if info["donor"] and info["speed"] != 30.0:
 			still_donors += 1
-	check(still_donors == 0, "a donor keeps its own genes")
+	TestUtil.check(still_donors == 0, "a donor keeps its own genes")
 	d.free()
 
 
@@ -451,14 +447,14 @@ func _check_reach() -> void:
 		over_plain += 1 if a["speed"] > 40.0 else 0
 		over_raised += 1 if b["speed"] > 40.0 else 0
 		highest = maxf(highest, b["speed"])
-	check(over_plain == 0 and over_raised > 100 and highest <= 40.0 * Genome.REACH_FACTOR_3, "a raised ceiling lets a gene pass its usual top (%d of 3000 daughters over 40, the highest %.1f, none past %.0f)" % [over_raised, highest, 40.0 * Genome.REACH_FACTOR_3])
+	TestUtil.check(over_plain == 0 and over_raised > 100 and highest <= 40.0 * Genome.REACH_FACTOR_3, "a raised ceiling lets a gene pass its usual top (%d of 3000 daughters over 40, the highest %.1f, none past %.0f)" % [over_raised, highest, 40.0 * Genome.REACH_FACTOR_3])
 	var mass := 12.0
 	var gains := []
 	for genome in [Genome.founder(), raised]:
 		var id: int = d.sim.add_bup(Vector2(0.0, 0.0), genome, 90.0, sqrt(mass), mass, 0, Vector2.RIGHT)
 		d.sim.bup_pay_upkeep_and_grow(id, 60.0)
 		gains.append(float(d.sim.bup_info(id)["mass"]) - mass)
-	check(absf(gains[1] / gains[0] - (1.0 - 3.0 * Genome.REACH_COST)) < 0.03, "each raise costs a share of growth: a bup raised three times grows %.2f of what the usual one does (expected %.2f)" % [gains[1] / gains[0], 1.0 - 3.0 * Genome.REACH_COST])
+	TestUtil.check(absf(gains[1] / gains[0] - (1.0 - 3.0 * Genome.REACH_COST)) < 0.03, "each raise costs a share of growth: a bup raised three times grows %.2f of what the usual one does (expected %.2f)" % [gains[1] / gains[0], 1.0 - 3.0 * Genome.REACH_COST])
 	d.free()
 
 
@@ -470,9 +466,9 @@ func _check_uptake() -> void:
 	d.field.fill(0.002 / 40.0)  # (a little in the grid too, so the share between them is used)
 	var before: float = d.field.total()
 	var got: float = d.field.take(where + Vector2(50, 20), 2.0)
-	check(absf(got - 2.0) < 1e-9 and absf(before - d.field.total() - got) < 1e-6 * before, "a bup takes what it wants from the cloud and the grid together, and the dish loses just that (%.4f)" % got)
+	TestUtil.check(absf(got - 2.0) < 1e-9 and absf(before - d.field.total() - got) < 1e-6 * before, "a bup takes what it wants from the cloud and the grid together, and the dish loses just that (%.4f)" % got)
 	var greedy: float = d.field.take(where, 1.0e9)
-	check(greedy < 1.0e9 and d.field.total() >= 0.0 and d.field.puff_count() == 1, "it cannot take more than is there")
+	TestUtil.check(greedy < 1.0e9 and d.field.total() >= 0.0 and d.field.puff_count() == 1, "it cannot take more than is there")
 	d.free()
 
 
@@ -484,7 +480,7 @@ func _check_save() -> void:
 	var copy := Dish.new()
 	root.add_child(copy)
 	var saved := TestUtil.saved(d)
-	check(copy.from_dict(saved) and copy.field.puff_count() == d.field.puff_count() and absf(copy.field.total() / d.field.total() - 1.0) < 1e-6, "clouds survive save and load (%d, %.2f against %.2f)" % [copy.field.puff_count(), copy.field.total(), d.field.total()])
+	TestUtil.check(copy.from_dict(saved) and copy.field.puff_count() == d.field.puff_count() and absf(copy.field.total() / d.field.total() - 1.0) < 1e-6, "clouds survive save and load (%d, %.2f against %.2f)" % [copy.field.puff_count(), copy.field.total(), d.field.total()])
 	d.free()
 	copy.free()
 
@@ -497,31 +493,31 @@ func _check_sources() -> void:
 	d.place_source(d.global_position + Vector2(2000, 1000), 30.0)  # (30 units a minute)
 	d.advance(1200.0)
 	var made: float = 30.0 * 20.0 * Dish.NUTRIENT_ENERGY
-	check(d.field.puff_count() > 0 and absf(d.field.total() / made - 1.0) < 1e-3, "a source on a 90 mm dish releases its nutrient as clouds, and none of it is lost (%.1f of %.1f in %d clouds)" % [d.field.total(), made, d.field.puff_count()])
+	TestUtil.check(d.field.puff_count() > 0 and absf(d.field.total() / made - 1.0) < 1e-3, "a source on a 90 mm dish releases its nutrient as clouds, and none of it is lost (%.1f of %.1f in %d clouds)" % [d.field.total(), made, d.field.puff_count()])
 	var at_source: float = d.field.sample(Vector2(2000, 1000))
 	var away: float = d.field.sample(Vector2(2000, 1000) + Vector2(900, 0))
 	var toward: Vector2 = d.field.read(Vector2(2000, 1000) + Vector2(300, 0)).y * Vector2.RIGHT
-	check(at_source > 3.0 * away and toward.x < 0.0, "the plume peaks at the source and its gradient points at it (%.5f there, %.5f 900 µm away)" % [at_source, away])
+	TestUtil.check(at_source > 3.0 * away and toward.x < 0.0, "the plume peaks at the source and its gradient points at it (%.5f there, %.5f 900 µm away)" % [at_source, away])
 	var before: float = d.field.total()
 	d.remove_source(d.sources[0])
 	d.step(20.0)
-	check(absf(d.field.total() - before) < 1e-3 * before, "taking a source away loses nothing it had kept (%.3f then, %.3f now)" % [before, d.field.total()])
+	TestUtil.check(absf(d.field.total() - before) < 1e-3 * before, "taking a source away loses nothing it had kept (%.3f then, %.3f now)" % [before, d.field.total()])
 	var copy := _dish(90.0, 14)
 	copy.place_source(copy.global_position + Vector2(-3000, 500), 12.0)
 	copy.advance(90.0)  # (less than a release interval since the last: some of what it released is still being kept)
 	var total_now: float = copy.field.total()
 	var reloaded := Dish.new()
 	root.add_child(reloaded)
-	check(reloaded.from_dict(TestUtil.saved(copy)) and absf(reloaded.field.total() / total_now - 1.0) < 1e-6, "a saved dish has all the nutrient its sources have released (%.3f of %.3f)" % [reloaded.field.total(), total_now])
+	TestUtil.check(reloaded.from_dict(TestUtil.saved(copy)) and absf(reloaded.field.total() / total_now - 1.0) < 1e-6, "a saved dish has all the nutrient its sources have released (%.3f of %.3f)" % [reloaded.field.total(), total_now])
 	var drop := _dish(90.0, 15)
 	drop.drop_nutrients(drop.global_position + Vector2(500, -500), 1)
-	check(drop.field.puff_count() == 1 and absf(drop.field.total() - Dish.NUTRIENT_ENERGY) < 1e-6, "a single unit of nutrient dropped in a big dish is a point-sized cloud, all there")
+	TestUtil.check(drop.field.puff_count() == 1 and absf(drop.field.total() - Dish.NUTRIENT_ENERGY) < 1e-6, "a single unit of nutrient dropped in a big dish is a point-sized cloud, all there")
 	var fine := Dish.new()
 	root.add_child(fine)
 	fine.strike(TestUtil.small_start())  # (a 300 µm dish: cells of 12.5 µm, finer than a source's plume: straight onto the grid, as before)
 	fine.place_source(fine.global_position + Vector2(20, 0), 30.0)
 	fine.advance(120.0)
-	check(fine.field.puff_count() == 0 and fine.field.total() > 0.0, "on a fine grid a source's nutrient goes straight onto the grid")
+	TestUtil.check(fine.field.puff_count() == 0 and fine.field.total() > 0.0, "on a fine grid a source's nutrient goes straight onto the grid")
 	for dish: Dish in [d, copy, reloaded, drop, fine]:
 		dish.free()
 
@@ -566,7 +562,7 @@ func _check_plume() -> void:
 		var ratio: float = d.field.sample(where + Vector2(r, 0.0)) / exact
 		worst = maxf(worst, absf(ratio - 1.0))
 		report += "  %.0f µm: %.3f" % [r, ratio]
-	check(worst < 0.05, "a source's plume after three hours matches the exact solution within 5%% at 100 to 2,000 µm (ratios%s)" % report)
+	TestUtil.check(worst < 0.05, "a source's plume after three hours matches the exact solution within 5%% at 100 to 2,000 µm (ratios%s)" % report)
 	d.free()
 
 
@@ -590,4 +586,4 @@ func _check_threads() -> void:
 				sum += info["pos"]
 		positions.append(sum)
 		d.free()
-	check(positions[0].is_equal_approx(positions[1]), "bups move the same on one thread as on many, with clouds in the field (%s, %s)" % [positions[0], positions[1]])
+	TestUtil.check(positions[0].is_equal_approx(positions[1]), "bups move the same on one thread as on many, with clouds in the field (%s, %s)" % [positions[0], positions[1]])

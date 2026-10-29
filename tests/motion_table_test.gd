@@ -24,10 +24,6 @@ const DRIFT_CASES := [  # [speed µm/s, sense, concentration at the origin, grad
 ]
 
 
-func check(ok: bool, what: String) -> void:
-	TestUtil.check(ok, what)
-
-
 func _init() -> void:
 	SimConstants.apply()
 	_check_constants_are_classed()
@@ -50,24 +46,24 @@ func _check_constants_are_classed() -> void:
 		var other: bool = key in SimConstants.OTHER_CONSTANTS
 		if motion == other:
 			unclassed.append(key)
-	check(unclassed.is_empty(), "every constant handed to the native code is in exactly one of SimConstants.MOTION_INPUTS and OTHER_CONSTANTS (decide whether the real swimming reads it): %s" % [unclassed])
+	TestUtil.check(unclassed.is_empty(), "every constant handed to the native code is in exactly one of SimConstants.MOTION_INPUTS and OTHER_CONSTANTS (decide whether the real swimming reads it): %s" % [unclassed])
 	var unknown := []
 	for key: String in SimConstants.MOTION_INPUTS + SimConstants.OTHER_CONSTANTS:
 		if not built.has(key):
 			unknown.append(key)
-	check(unknown.is_empty(), "the lists in SimConstants name only constants that exist: %s" % [unknown])
+	TestUtil.check(unknown.is_empty(), "the lists in SimConstants name only constants that exist: %s" % [unknown])
 
 
 func _check_table_is_current() -> void:
-	check(MotionFingerprint.constants_current(), "the motion table was measured from the constants of the swimming as they are now (%s)" % REGENERATE)
-	check(MotionFingerprint.code_hash() != "", "the native sources of the swimming can be read (MotionFingerprint.FINE_MOTION names functions that exist)")
-	check(MotionFingerprint.code_current(), "the motion table was measured from the native swimming code as it is now (%s)" % REGENERATE)
+	TestUtil.check(MotionFingerprint.constants_current(), "the motion table was measured from the constants of the swimming as they are now (%s)" % REGENERATE)
+	TestUtil.check(MotionFingerprint.code_hash() != "", "the native sources of the swimming can be read (MotionFingerprint.FINE_MOTION names functions that exist)")
+	TestUtil.check(MotionFingerprint.code_current(), "the motion table was measured from the native swimming code as it is now (%s)" % REGENERATE)
 
 
 func _check_table_shape() -> void:
 	var ns: int = MotionTable.S_AXIS.size()
 	var ne: int = MotionTable.E_AXIS.size()
-	check(ns >= 8 and ne >= 8 and MotionTable.DRIFT.size() == ns * ne and MotionTable.D_ALONG.size() == ns * ne and MotionTable.D_ACROSS.size() == ns * ne and MotionTable.D_FLAT.size() == ne, "the table's arrays agree in size (%d x %d)" % [ns, ne])
+	TestUtil.check(ns >= 8 and ne >= 8 and MotionTable.DRIFT.size() == ns * ne and MotionTable.D_ALONG.size() == ns * ne and MotionTable.D_ACROSS.size() == ns * ne and MotionTable.D_FLAT.size() == ne, "the table's arrays agree in size (%d x %d)" % [ns, ne])
 	if MotionTable.DRIFT.size() != ns * ne:
 		return
 	for axis: Array in [MotionTable.S_AXIS, MotionTable.E_AXIS]:
@@ -75,7 +71,7 @@ func _check_table_shape() -> void:
 		var even := true
 		for i in range(1, axis.size()):
 			even = even and absf(log(axis[i] / axis[i - 1]) - step) < 0.01 * step
-		check(even and step > 0.0, "an axis of the table is even in its logarithm (the native lookup counts on it)")
+		TestUtil.check(even and step > 0.0, "an axis of the table is even in its logarithm (the native lookup counts on it)")
 	var rising := true
 	var bounded := true
 	for i in ns:
@@ -83,20 +79,13 @@ func _check_table_shape() -> void:
 			var k := i * ne + j
 			rising = rising and (i == 0 or MotionTable.DRIFT[k] >= MotionTable.DRIFT[k - ne] - 1e-9)
 			bounded = bounded and MotionTable.DRIFT[k] >= 0.0 and MotionTable.DRIFT[k] < 0.3 and MotionTable.D_ALONG[k] > 0.0 and MotionTable.D_ACROSS[k] > 0.0
-	check(rising, "a steeper slope never gives less drift")
-	check(bounded, "the table's drift is a share of speed under 0.3 and its diffusions are positive")
+	TestUtil.check(rising, "a steeper slope never gives less drift")
+	TestUtil.check(bounded, "the table's drift is a share of speed under 0.3 and its diffusions are positive")
 
 
 # ---- 3: the coarse model against the real one -------------------------------------------------------------
 
 ## The nutrient frozen and no eating, so that nothing but the motion changes between the runs.
-func _frozen() -> void:
-	var consts := SimConstants.build()
-	consts["diffusion"] = 0.0
-	consts["uptake_per_size"] = 0.0
-	BupSim.configure(consts)
-
-
 ## A dish with the given field and `bups` identical swimmers placed within `reach` of the origin; returns [dish, ids, start positions].
 func _crowd(radius: float, seed_: int, bups: int, speed: float, sense: float, reach: float, field: Callable) -> Array:
 	var d := Dish.new()
@@ -159,7 +148,7 @@ func _drift(step: float, speed: float, sense: float, c0: float, gradient_percent
 
 
 func _check_drift() -> void:
-	_frozen()
+	TestUtil.frozen_constants()
 	var signed_sum := 0.0
 	var worst := 0.0
 	for case: Array in DRIFT_CASES:
@@ -172,9 +161,9 @@ func _check_drift() -> void:
 			if OS.get_cmdline_user_args().has("verbose"):
 				print("drift speed %.0f sense %.0f c %s %s%%/µm, %.1f s steps: coarse %.2f, real %.2f (s.e. %.2f, %.2f)" % [case[0], case[1], case[2], case[3], step, coarse.x, fine.x, coarse.y, fine.y])
 			worst = maxf(worst, absf(gap))
-			check(absf(gap) <= allowed, "coarse drift (%.1f s steps) follows the real swimming: speed %.0f, sense %.0f, c %s, %s%%/µm: %.2f vs %.2f µm/s (allowed %.2f)" % [step, case[0], case[1], case[2], case[3], coarse.x, fine.x, allowed])
+			TestUtil.check(absf(gap) <= allowed, "coarse drift (%.1f s steps) follows the real swimming: speed %.0f, sense %.0f, c %s, %s%%/µm: %.2f vs %.2f µm/s (allowed %.2f)" % [step, case[0], case[1], case[2], case[3], coarse.x, fine.x, allowed])
 	var mean_gap := signed_sum / (DRIFT_CASES.size() * 2)
-	check(absf(mean_gap) <= MEAN_TOLERANCE, "on average the coarse drift is neither high nor low (mean %.3f µm/s off, worst %.2f): if not, adjust CALIBRATION in tools/gen_motion_table.gd" % [mean_gap, worst])
+	TestUtil.check(absf(mean_gap) <= MEAN_TOLERANCE, "on average the coarse drift is neither high nor low (mean %.3f µm/s off, worst %.2f): if not, adjust CALIBRATION in tools/gen_motion_table.gd" % [mean_gap, worst])
 
 
 ## The mean squared distance from the start after `seconds`, of a crowd in a uniform field of this concentration, at two times.
@@ -197,14 +186,14 @@ func _spread(step: float, c: float, speed: float, sense: float) -> Array:
 
 
 func _check_flat_diffusion() -> void:
-	_frozen()
+	TestUtil.frozen_constants()
 	for case: Array in [[50.0, 0.0], [10.0, 0.0003], [150.0, 0.03]]:  # [sense, concentration]
 		var fine := _spread(0.05, case[1], 20.0, case[0])
 		var coarse := _spread(1.5, case[1], 20.0, case[0])
 		# (16,000 swimmers each: the measure is good to about 2%)
 		var d_fine: float = (fine[1] - fine[0]) / (4.0 * 60.0)  # (the growth between 60 s and 120 s: free of the offset of the first runs)
 		var d_coarse: float = (coarse[1] - coarse[0]) / (4.0 * 60.0)
-		check(absf(d_coarse / d_fine - 1.0) < 0.08, "coarse diffusion in a flat medium follows the real swimming (sense %.0f, c %s: %.0f vs %.0f µm²/s)" % [case[0], case[1], d_coarse, d_fine])
+		TestUtil.check(absf(d_coarse / d_fine - 1.0) < 0.08, "coarse diffusion in a flat medium follows the real swimming (sense %.0f, c %s: %.0f vs %.0f µm²/s)" % [case[0], case[1], d_coarse, d_fine])
 
 
 ## The share of a crowd within 20 µm of the rim of a 300 µm dish after 10 minutes. Uniform would be 0.129.
@@ -225,11 +214,11 @@ func _rim_share(step: float) -> float:
 
 
 func _check_wall() -> void:
-	_frozen()
+	TestUtil.frozen_constants()
 	var fine := _rim_share(0.05)
 	var coarse := _rim_share(20.0)
 	# A swimmer in the real model slides along the wall until a tumble frees it, so a crowd collects there a little (0.17
 	# against 0.129 for an even crowd): real bacteria do too. The coarse model reflects off the wall and stays even, about
 	# 0.04 short (projecting onto the wall instead made it 0.22, and worse with longer sub-steps). Within 0.06 keeps it from
 	# going back to either.
-	check(absf(coarse - fine) < 0.06 and coarse < 0.2, "a crowd does not pile up against the wall in long steps, nor leave it empty (share within 20 µm of the rim: %.3f vs %.3f in the real swimming; even would be 0.129)" % [coarse, fine])
+	TestUtil.check(absf(coarse - fine) < 0.06 and coarse < 0.2, "a crowd does not pile up against the wall in long steps, nor leave it empty (share within 20 µm of the rim: %.3f vs %.3f in the real swimming; even would be 0.129)" % [coarse, fine])

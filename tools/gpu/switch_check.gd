@@ -89,8 +89,7 @@ var _checks := 0
 
 func _ok(ok: bool, what: String) -> void:
 	_checks += 1
-	TestUtil.check(ok, what)
-	print(("ok   " if ok else "FAIL ") + what)
+	TestUtil.show(ok, what)
 
 
 func _init() -> void:

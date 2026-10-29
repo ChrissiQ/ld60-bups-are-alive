@@ -1,6 +1,7 @@
 extends RefCounted
-## Helpers for the windowed checks of the game's GPU path (tools/gpu/events_check.gd, queries_check.gd, dish_speed.gd): the dishes of
-## validate_dynamics.gd's scenarios, and a load of a dish onto the main RenderingDevice through GpuWorld.load_from_cpu.
+## Helpers for the windowed checks of the game's GPU path (tools/gpu/events_check.gd, queries_check.gd, dish_speed.gd, validate_dynamics.gd,
+## game_dynamics.gd): the dishes of the scenarios, their SAMPLE line, and a load of a dish onto the main RenderingDevice through
+## GpuWorld.load_from_cpu.
 
 
 ## The start of a validate_dynamics.gd scenario (the scenarios A-F, L, S and M of game_dynamics.gd; an unknown name is an error).
@@ -33,6 +34,24 @@ static func start_conditions(scenario: String, bup_limit := 0) -> StartCondition
 	return sc
 
 
+## The sources a scenario places on its dish (E has three steady ones).
+static func place_sources(dish: Dish, scenario: String) -> void:
+	if scenario == "E":
+		dish.place_source(dish.global_position + Vector2(-30000.0, 0.0), 20.0)
+		dish.place_source(dish.global_position + Vector2(20000.0, 25000.0), 20.0)
+		dish.place_source(dish.global_position + Vector2(0.0, -40000.0), 20.0)
+
+
+## The sim-hours a scenario runs when the command line gives no number.
+static func default_hours(scenario: String) -> int:
+	return {"A": 60, "B": 12, "C": 30, "D": 24, "E": 24, "F": 24, "L": 16, "M": 12, "S": 120}[scenario]
+
+
+## One SAMPLE line, the format compare_dynamics.py and game_dynamics_flags.py read: `means` are speed, sense, metabolism, size, harm.
+static func sample_line(mode: String, scenario: String, seed_value: int, hour: float, pop: int, means: Array, energy: float, nutrient: float) -> void:
+	print("SAMPLE %s %s %d %.2f %d %.4f %.4f %.5f %.5f %.5f %.4f %.2f" % [mode, scenario, seed_value, hour, pop, means[0], means[1], means[2], means[3], means[4], energy, nutrient])
+
+
 ## A dish of the scenario, in the tree (for its _ready) but not processing (its _process draws).
 static func make_dish(tree: SceneTree, scenario: String, seed_value: int, bup_limit := 0) -> Dish:
 	var dish := Dish.new()
@@ -40,10 +59,7 @@ static func make_dish(tree: SceneTree, scenario: String, seed_value: int, bup_li
 	dish.process_mode = Node.PROCESS_MODE_DISABLED
 	dish.set_seed(seed_value)
 	dish.strike(start_conditions(scenario, bup_limit))
-	if scenario == "E":  # (three steady sources, as validate_dynamics.gd places them)
-		dish.place_source(dish.global_position + Vector2(-30000.0, 0.0), 20.0)
-		dish.place_source(dish.global_position + Vector2(20000.0, 25000.0), 20.0)
-		dish.place_source(dish.global_position + Vector2(0.0, -40000.0), 20.0)
+	place_sources(dish, scenario)
 	return dish
 
 

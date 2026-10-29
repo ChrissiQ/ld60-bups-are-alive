@@ -31,51 +31,8 @@ var mutator_mean := 1.0  ## the mean mutator at the last reading (printed as a M
 var wall_run := 0.0  ## µs spent advancing (not sampling)
 
 
-func _start(sc_name: String) -> StartConditions:
-	var sc := StartConditions.new()
-	match sc_name:
-		"A":
-			sc.spread_founders()
-		"B":
-			sc.bups = 250; sc.bup_limit = 20000; sc.dish_radius = 3000.0; sc.nutrient_density = 32.0; sc.feed_density = 5.0
-			sc.spread_founders()
-		"C":
-			sc.bups = 250; sc.bup_limit = 100000; sc.dish_radius = 90000.0; sc.nutrient_density = 32.0; sc.feed_density = 2.0
-			sc.spread_founders()
-		"D":  # a 90 mm dish living on plankton bursts (clouds) and a little starting nutrient
-			sc.bups = 250; sc.bup_limit = 100000; sc.dish_radius = 90000.0; sc.nutrient_density = 4.0; sc.bloom_density = 2.0
-			sc.spread_founders()
-		"E":  # the same dish with three steady sources and a lighter bloom
-			sc.bups = 250; sc.bup_limit = 50000; sc.dish_radius = 90000.0; sc.nutrient_density = 8.0; sc.bloom_density = 0.5
-			sc.spread_founders()
-		"F":  # a 10 mm dish with a bloom: the grid is fine enough to hold a burst, so bursts are deposits on it
-			sc.bups = 250; sc.bup_limit = 20000; sc.dish_radius = 10000.0; sc.nutrient_density = 8.0; sc.bloom_density = 0.5
-			sc.spread_founders()
-		"L":  # D with a 300,000 cap and a heavier bloom
-			sc.bups = 250; sc.bup_limit = 300000; sc.dish_radius = 90000.0; sc.nutrient_density = 4.0; sc.bloom_density = 4.0
-			sc.spread_founders()
-		"S":  # a 10 mm dish with a little food and no more: it fills, the food runs out, and the crowd starves (the stationary phase's test)
-			sc.bups = 250; sc.bup_limit = 20000; sc.dish_radius = 10000.0; sc.nutrient_density = 8.0
-			sc.spread_founders()
-		"M":  # 90 mm dish, a million bups
-			sc.bups = 250; sc.bup_limit = 1000000; sc.dish_radius = 90000.0; sc.nutrient_density = 32.0; sc.feed_density = 5.0; sc.bloom_density = 5.0
-			sc.spread_founders()
-	return sc
-
-
-func _place_sources(d: Dish, sc_name: String) -> void:
-	if sc_name == "E":
-		d.place_source(d.global_position + Vector2(-30000.0, 0.0), 20.0)
-		d.place_source(d.global_position + Vector2(20000.0, 25000.0), 20.0)
-		d.place_source(d.global_position + Vector2(0.0, -40000.0), 20.0)
-
-
-func _hours_default(sc_name: String) -> int:
-	return {"A": 60, "B": 12, "C": 30, "D": 24, "E": 24, "F": 24, "L": 16, "M": 12, "S": 120}[sc_name]
-
-
 func _line(hour: int, pop: int, means: Array, energy: float, nutrient: float) -> void:
-	print("SAMPLE %s %s %d %.2f %d %.4f %.4f %.5f %.5f %.5f %.4f %.2f" % [mode, scenario, seed_value, float(hour), pop, means[0], means[1], means[2], means[3], means[4], energy, nutrient])
+	Tools.sample_line(mode, scenario, seed_value, float(hour), pop, means, energy, nutrient)
 	print("MUTATOR %s %s %d %.2f %.4f donors %.5f transfers %d births %d" % [mode, scenario, seed_value, float(hour), mutator_mean, donor_mean, dish.sim.transfer_count() if mode == "cpu" else -1, dish.sim.record_count()])
 	print("ACETATE %s %s %d %.2f %.4f" % [mode, scenario, seed_value, float(hour), acetate_total])
 	if start.death_husks:
@@ -167,20 +124,20 @@ func _flush_chk() -> void:
 func _run() -> void:
 	var a := OS.get_cmdline_user_args()
 	mode = a[0]; scenario = a[1]; seed_value = int(a[2]); speed = float(a[3])
-	hours = int(a[4]) if a.size() > 4 and int(a[4]) > 0 else _hours_default(scenario)
+	hours = int(a[4]) if a.size() > 4 and int(a[4]) > 0 else Tools.default_hours(scenario)
 	SimConstants.apply()
 	dish = Dish.new()
 	root.add_child(dish)
 	dish.process_mode = Node.PROCESS_MODE_DISABLED  # (the game's _process draws: not what is measured here)
 	dish.set_seed(seed_value)
-	start = _start(scenario)
+	start = Tools.start_conditions(scenario)
 	if OS.get_environment("STATIONARY") != "":  # (STATIONARY=0 or 1 overrides the stationary phase, on by default)
 		start.stationary_phase = OS.get_environment("STATIONARY") == "1"
 	if OS.get_environment("DETAIL") != "":  # (DETAIL=200: the nutrient grid's cells across)
 		start.nutrient_resolution = int(OS.get_environment("DETAIL"))
 	start.death_husks = OS.get_environment("DEATH_HUSKS") == "1"  # (DEATH_HUSKS=1: the dead leave husks, whose leak the CPU runs for both backends)
 	dish.strike(start)
-	_place_sources(dish, scenario)
+	Tools.place_sources(dish, scenario)
 	dish.set_backend_setting(StartConditions.BACKEND_GPU if mode == "gpu" else StartConditions.BACKEND_CPU)
 	var budget: int = MainScript.FRAME_BUDGET_USEC if mode == "gpu" else 0
 	print("RUN %s %s seed %d speed x%.0f hours %d limit %d radius %.0f budget %d device %s" % [mode, scenario, seed_value, speed, hours, dish.bup_limit, dish.radius, budget, RenderingServer.get_rendering_device().get_device_name() if RenderingServer.get_rendering_device() != null else "none"])

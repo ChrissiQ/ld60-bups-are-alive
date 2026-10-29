@@ -10,13 +10,9 @@ func sized(designed: int) -> int:
 	return roundi(designed * UserSettings.text_factor())
 
 
-func check(ok: bool, what: String) -> void:
-	TestUtil.check(ok, what)
-
-
 func _ready() -> void:
 	var root := get_tree().root
-	check(root.get_node_or_null("DialogStyle") != null, "the DialogStyle autoload is running")
+	TestUtil.check(root.get_node_or_null("DialogStyle") != null, "the DialogStyle autoload is running")
 
 	# Brand-new dialogs, created the plain way, never touched by any styling code.
 	var plain := AcceptDialog.new()
@@ -36,22 +32,22 @@ func _ready() -> void:
 	for dialog in [plain, confirm]:
 		var who: String = dialog.title
 		var header: Label = dialog.get_meta("header_label")
-		check(dialog.borderless, "%s: no system title bar, so no part of the dialog can be dragged" % who)
-		check(header.text == who and header.get_theme_font_size("font_size") == sized(20), "%s: the dialog draws its own title (designed 20)" % who)
-		check(not dialog.has_meta("header_close") and header.position.x == 24.0 and header.horizontal_alignment == HORIZONTAL_ALIGNMENT_LEFT, "%s: no cross (the buttons are the way out), and the title starts at the same left edge as the text" % who)
+		TestUtil.check(dialog.borderless, "%s: no system title bar, so no part of the dialog can be dragged" % who)
+		TestUtil.check(header.text == who and header.get_theme_font_size("font_size") == sized(20), "%s: the dialog draws its own title (designed 20)" % who)
+		TestUtil.check(not dialog.has_meta("header_close") and header.position.x == 24.0 and header.horizontal_alignment == HORIZONTAL_ALIGNMENT_LEFT, "%s: no cross (the buttons are the way out), and the title starts at the same left edge as the text" % who)
 		var msg: Label = dialog.get_label()
-		check(msg.theme_type_variation == &"DialogText" and msg.get_theme_font_size("font_size") == sized(16), "%s: message is designed 16" % who)
-		check(msg.get_theme_font("font").resource_path.ends_with("-300.ttf"), "%s: message is Plex Light" % who)
-		check(msg.position.y >= 56.0, "%s: body starts under the title (%.0fpx)" % [who, msg.position.y])
+		TestUtil.check(msg.theme_type_variation == &"DialogText" and msg.get_theme_font_size("font_size") == sized(16), "%s: message is designed 16" % who)
+		TestUtil.check(msg.get_theme_font("font").resource_path.ends_with("-300.ttf"), "%s: message is Plex Light" % who)
+		TestUtil.check(msg.position.y >= 56.0, "%s: body starts under the title (%.0fpx)" % [who, msg.position.y])
 		var panel: StyleBoxFlat = dialog.get_theme_stylebox("panel")
-		check(panel.bg_color.a >= 0.98 and panel.border_width_top == 1 and panel.content_margin_top >= 56.0, "%s: solid dark panel with a hairline border and room for the title" % who)
+		TestUtil.check(panel.bg_color.a >= 0.98 and panel.border_width_top == 1 and panel.content_margin_top >= 56.0, "%s: solid dark panel with a hairline border and room for the title" % who)
 		var ok: Button = dialog.get_ok_button()
-		check(ok.theme_type_variation == &"DialogPrimaryButton" and ok.get_theme_font_size("font_size") == sized(15), "%s: OK is the main button, designed 15" % who)
-		check(ok.size.y >= 36.0 and ok.size.y <= 52.0, "%s: OK button height is about 40 to 48 (%.0f)" % [who, ok.size.y])
-		check(ok.get_theme_font("font").resource_path.ends_with("-400.ttf"), "%s: buttons are Regular" % who)
+		TestUtil.check(ok.theme_type_variation == &"DialogPrimaryButton" and ok.get_theme_font_size("font_size") == sized(15), "%s: OK is the main button, designed 15" % who)
+		TestUtil.check(ok.size.y >= 36.0 and ok.size.y <= 52.0, "%s: OK button height is about 40 to 48 (%.0f)" % [who, ok.size.y])
+		TestUtil.check(ok.get_theme_font("font").resource_path.ends_with("-400.ttf"), "%s: buttons are Regular" % who)
 	var cancel := confirm.get_cancel_button()
-	check(cancel.theme_type_variation == &"DialogButton" and cancel.get_theme_font_size("font_size") == sized(15), "cancel button is styled")
-	check(extra.theme_type_variation == &"DialogButton" and extra.get_theme_font_size("font_size") == sized(15), "a button added later with add_button() is styled too")
+	TestUtil.check(cancel.theme_type_variation == &"DialogButton" and cancel.get_theme_font_size("font_size") == sized(15), "cancel button is styled")
+	TestUtil.check(extra.theme_type_variation == &"DialogButton" and extra.get_theme_font_size("font_size") == sized(15), "a button added later with add_button() is styled too")
 
 	# Short button texts are not left as stubs, and the text sits in the middle; a longer text is not cut or changed.
 	var yes_no := ConfirmationDialog.new()
@@ -70,12 +66,12 @@ func _ready() -> void:
 	yes_no.popup_centered()
 	await get_tree().create_timer(0.4).timeout
 	var minimum: float = yes_no.get_theme_constant("buttons_min_width")
-	check(minimum >= 96.0 and yes_no.get_ok_button().size.x >= minimum - 0.5 and yes_no.get_cancel_button().size.x >= minimum - 0.5, "Yes and No are at least %.0f wide (%.0f, %.0f)" % [minimum, yes_no.get_ok_button().size.x, yes_no.get_cancel_button().size.x])
-	check(yes_no.get_ok_button().alignment == HORIZONTAL_ALIGNMENT_CENTER, "the text sits in the middle of the button")
+	TestUtil.check(minimum >= 96.0 and yes_no.get_ok_button().size.x >= minimum - 0.5 and yes_no.get_cancel_button().size.x >= minimum - 0.5, "Yes and No are at least %.0f wide (%.0f, %.0f)" % [minimum, yes_no.get_ok_button().size.x, yes_no.get_cancel_button().size.x])
+	TestUtil.check(yes_no.get_ok_button().alignment == HORIZONTAL_ALIGNMENT_CENTER, "the text sits in the middle of the button")
 	yes_no.hide()
 	long_text.popup_centered()
 	await get_tree().create_timer(0.4).timeout
-	check(long_text.get_ok_button().size.x > minimum, "a longer text makes its button wider than the minimum (%.0f)" % long_text.get_ok_button().size.x)
+	TestUtil.check(long_text.get_ok_button().size.x > minimum, "a longer text makes its button wider than the minimum (%.0f)" % long_text.get_ok_button().size.x)
 
 	# The space between the message and the buttons is the same whatever the message's length.
 	var gaps: Array[float] = []
@@ -92,7 +88,7 @@ func _ready() -> void:
 		spaced.hide()
 		spaced.queue_free()
 		await get_tree().process_frame
-	check(absf(gaps[0] - gaps[1]) < 1.5 and absf(gaps[0] - gaps[2]) < 1.5, "the space between the message and the buttons does not change with the message's length (%s)" % [gaps])
+	TestUtil.check(absf(gaps[0] - gaps[1]) < 1.5 and absf(gaps[0] - gaps[2]) < 1.5, "the space between the message and the buttons does not change with the message's length (%s)" % [gaps])
 
 	# Dialogs already in the tree when the game starts (the first scene's: nothing announces them) are styled by a sweep.
 	var early := ConfirmationDialog.new()
@@ -101,7 +97,7 @@ func _ready() -> void:
 	early.get_label().theme_type_variation = &""  # (as if the autoload had never seen it)
 	early.get_ok_button().theme_type_variation = &""
 	DialogStyle.style_existing(get_tree().root)
-	check(early.get_label().theme_type_variation == &"DialogText" and early.get_ok_button().theme_type_variation == &"DialogPrimaryButton", "a dialog that was already in the tree gets styled by the start-up sweep")
+	TestUtil.check(early.get_label().theme_type_variation == &"DialogText" and early.get_ok_button().theme_type_variation == &"DialogPrimaryButton", "a dialog that was already in the tree gets styled by the start-up sweep")
 	early.queue_free()
 
 	# Widgets inside a dialog's own content are not touched.
@@ -111,6 +107,6 @@ func _ready() -> void:
 	holder.add_child(inner)
 	add_child(holder)
 	await get_tree().process_frame
-	check(inner.theme_type_variation == &"", "a button in the dialog's content is left alone")
+	TestUtil.check(inner.theme_type_variation == &"", "a button in the dialog's content is left alone")
 
 	TestUtil.finish(get_tree(), "DIALOG TESTS OK")
