@@ -143,10 +143,11 @@ static func available() -> bool:
 	return true
 
 
-## The most bup slots a dish may ask the GPU for. `compact` and `copy` run one thread for each 16 bytes of the bups' buffer (six per bup), and
-## a dispatch has at most LIMIT_MAX_COMPUTE_WORKGROUP_COUNT_X groups in a dimension (65,535 on Direct3D 12: about 700,000 bups in one row), so
-## GpuSim.dispatch makes a grid of rows when it must; what is left is the GPU's memory (about 480 bytes a slot: 630 MB at 1,000,000, the
-## most a dish holds), which this does not know. 0 when there is no device.
+## The most bup slots a dish may ask the GPU for: four times the slider's top, which is room no dish uses. `compact` and `copy` run one thread
+## for each 16 bytes of the bups' buffer (six per bup), and a dispatch has at most LIMIT_MAX_COMPUTE_WORKGROUP_COUNT_X groups in a dimension
+## (65,535 on Direct3D 12: about 700,000 bups in one row), so GpuSim.dispatch makes a grid of rows when it must and the dispatch limit does
+## not bind here; what does is the GPU's memory (about 480 bytes a slot: 630 MB at 1,000,000, the most a dish holds), which this does not
+## know. 0 when there is no device.
 static func most_bups() -> int:
 	var rd := RenderingServer.get_rendering_device()
 	if rd == null:

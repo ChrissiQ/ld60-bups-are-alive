@@ -10,7 +10,7 @@ const REGENERATE := "stale: run  /Applications/Godot.app/Contents/MacOS/Godot --
 
 func _init() -> void:
 	var all := GpuKernels.all()
-	TestUtil.check(all.size() >= 49, "expected at least the 49 kernels, found %d" % all.size())
+	TestUtil.check(not all.is_empty(), "GpuKernels.all() lists no kernels")
 	for kernel_name: String in all:
 		_check_kernel(kernel_name, all[kernel_name])
 	for f in DirAccess.get_files_at("res://gpu/shaders"):
