@@ -51,16 +51,21 @@ func _draw() -> void:
 		_capsule(Rect2(0.0, y, maxf(size.x * fraction, CAPSULE_HEIGHT), CAPSULE_HEIGHT), _fill_color())
 		if tone != Tone.DEAD:
 			for share in ticks:
-				draw_rect(Rect2(size.x * share - TICK_WIDTH * 0.5, y - TICK_OVERHANG, TICK_WIDTH, CAPSULE_HEIGHT + 2.0 * TICK_OVERHANG), tick)
+				_tick(share, y, CAPSULE_HEIGHT, tick)
 			if mark >= 0.0:
-				draw_rect(Rect2(size.x * mark - TICK_WIDTH * 0.5, y - TICK_OVERHANG, TICK_WIDTH, CAPSULE_HEIGHT + 2.0 * TICK_OVERHANG), get_theme_color("starving", THEME_TYPE))
+				_tick(mark, y, CAPSULE_HEIGHT, get_theme_color("starving", THEME_TYPE))
 	else:
 		var y := (size.y - BAR_HEIGHT) * 0.5
 		draw_rect(Rect2(0.0, y, size.x, BAR_HEIGHT), track)
 		draw_rect(Rect2(0.0, y, size.x * band, BAR_HEIGHT), get_theme_color("band", THEME_TYPE))
 		draw_rect(Rect2(0.0, y, size.x * fraction, BAR_HEIGHT), _fill_color())
 		for share in ticks:
-			draw_rect(Rect2(size.x * share - TICK_WIDTH * 0.5, y - TICK_OVERHANG, TICK_WIDTH, BAR_HEIGHT + 2.0 * TICK_OVERHANG), tick)
+			_tick(share, y, BAR_HEIGHT, tick)
+
+
+## A mark across the bar at `share` of its length, standing out a little above and below the bar (at `y`, `h` high).
+func _tick(share: float, y: float, h: float, color: Color) -> void:
+	draw_rect(Rect2(size.x * share - TICK_WIDTH * 0.5, y - TICK_OVERHANG, TICK_WIDTH, h + 2.0 * TICK_OVERHANG), color)
 
 
 ## A rod with round ends.
