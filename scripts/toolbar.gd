@@ -29,7 +29,7 @@ signal pause_toggled(paused: bool)
 var _tool_buttons: Dictionary = {}
 var _keyed: Array[Button] = []  ## every button that has a key action (see _setup)
 var _last_play: Button  ## the speed button to resume with
-var resume_locked := false  ## nothing but the screen can resume play (the game waits for the pipette): Space and the speed buttons do nothing
+var resume_locked := false  ## nothing but the screen can resume play (a PlayHolds hold locks it): Space and the speed buttons do nothing
 
 
 func _ready() -> void:
@@ -70,6 +70,10 @@ func _exit_tree() -> void:
 func _mark_resume() -> void:
 	for button: Button in [speed_1_button, speed_100_button, speed_1000_button, speed_ultra_button]:
 		button.theme_type_variation = &"ToolButtonArmed" if pause_button.button_pressed and button == _last_play else &"ToolButton"
+
+
+func is_paused() -> bool:
+	return pause_button.button_pressed
 
 
 ## Pauses, or resumes at the last speed, exactly as clicking the buttons would.

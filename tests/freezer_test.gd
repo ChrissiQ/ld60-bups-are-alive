@@ -84,12 +84,12 @@ func _run() -> void:
 	m.toolbar.set_paused(false)
 	for i in 3:
 		await process_frame
-	TestUtil.check(m.dishes == [emptied] and m._extinct_queue.is_empty() and not m._game_over, "resuming with dishes frozen leaves the empty dish where it is")
+	TestUtil.check(m.dishes == [emptied] and m._extinct_queue.is_empty() and not m.holds.has(&"end"), "resuming with dishes frozen leaves the empty dish where it is")
 	m.thaw(m.freezer_shelf.entries[0])
 	TestUtil.check(m.dishes.size() == 1 and m.dishes[0] != emptied and m.dish == m.dishes[0], "thawing replaces the empty dish and brings the thawed one into view")
 	m.toolbar.set_paused(false)
 	m.dish.clear_bups()
 	for i in 10:
 		await process_frame
-	TestUtil.check(m._extinct_queue.has(m.dish) or m._game_over, "the thawed dish dying out is noticed")
+	TestUtil.check(m._extinct_queue.has(m.dish) or m.holds.has(&"end"), "the thawed dish dying out is noticed")
 	TestUtil.finish(self, "FREEZER TESTS OK")

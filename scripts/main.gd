@@ -106,12 +106,11 @@ var _divisions_of := -1  ## the bup whose divisions count the panel last saw ...
 var _divisions_seen := 0  ## ... and what it was
 var _flash_until := 0  ## when the divisions number stops flashing (Time.get_ticks_msec)
 var _extinct_queue: Array[Dish] = []  ## dishes that have died out and are not yet deleted (the first is the one the screen has said so about)
-var _game_over := false  ## the last dish died out: only starting again or quitting goes on
 var _dish_numbers := {}  ## Dish -> its number (a number is never reused: a bup's "line from dish 2" stays true)
 var _next_dish_number := 1
+var holds: PlayHolds  ## what holds the game besides the player: the pipette's timer (&"pipette"), the question about the old dish (&"old_dish"), the tour (&"tour") and the end of the game (&"end")
 var _pipette_hours := 0.0  ## the pipette timer: the game pauses for the pipette every this many simulated hours (0: off)
 var _pipette_clock := 0.0  ## simulated seconds since the last pause for the pipette
-var _pipette_waiting := false  ## paused for the pipette: only a pipette use resumes play
 var _elsewhere := {}  ## see _alive_elsewhere, and when it was worked out
 var _elsewhere_stamp := []
 var _switch_turn := 0  ## whose turn it is to change backend when no dish is waiting
@@ -133,8 +132,6 @@ var _stack: Array[Dictionary] = []
 var _lineage_shown := {}  ## what the lineage list was last built from, so it is only rebuilt when that changes
 var _pointer_stamp := []  ## what the hover and placement preview were last worked out from
 var _point_stamp := []  ## the same for the nutrient readout under the pointer
-var _old_dish_was_paused := false  ## whether the game was already held when a pipette's question about the old dish came, which it goes back to
-var _tutorial_was_paused := false  ## whether the game was held before the tour began, which it goes back to
 var _tutorial_bup := -1  ## the bup the tour asked the player to pick, once it has set the view up for that (-1: it has not)
 var _tutorial_watched_before: Array[int] = []  ## who was on the watch list when the tour began, so it takes off only whom it put there
 var _view_moved := false  ## the view was panned or zoomed by hand: a change of the window does not frame the dish again
@@ -154,6 +151,7 @@ var _drag_threshold: float = ProjectSettings.get_setting("gui/common/drag_thresh
 
 func _ready() -> void:
 	UserSettings.ensure_applied()
+	holds = PlayHolds.new(toolbar)
 	_register_dish(dish)
 	dish_strip.dish_chosen.connect(set_main_dish)
 	tracker.goal_completed.connect(_on_goal_completed)
@@ -169,7 +167,7 @@ func _ready() -> void:
 	end_dialog.confirmed.connect(_start_again)
 	end_dialog.get_cancel_button().pressed.connect(_quit_to_menu)  # (only the button leaves: the window's cross and Escape do not, so the choice is always a deliberate one)
 	end_dialog.visibility_changed.connect(func() -> void:
-		if _game_over and not end_dialog.visible:
+		if holds.has(&"end") and not end_dialog.visible:
 			end_dialog.popup_centered.call_deferred())
 	pause_menu.resume_requested.connect(_close_menu)
 	pause_menu.quit_requested.connect(_quit_to_menu)
@@ -306,8 +304,7 @@ func _notification(what: int) -> void:
 
 
 func _process(delta: float) -> void:
-	if tutorial.active and not paused:
-		toolbar.set_paused(true)  # (the game waits while the tour is up, even on a step that asks the player to act)
+	holds.enforce()  # (the game waits while the tour is up, even on a step that asks the player to act)
 	if not menu_open and not tutorial.active:
 		_pan_with_keys(delta)
 	if not paused and not menu_open:
@@ -316,7 +313,7 @@ func _process(delta: float) -> void:
 		var done := _advance_world(frame * sim_speed)
 		if frame > 0.0:
 			achieved_speed = lerpf(achieved_speed, done / frame, 0.1)
-		if _pipette_hours > 0.0 and not _pipette_waiting:
+		if _pipette_hours > 0.0 and not holds.has(&"pipette"):
 			_pipette_clock += done
 			if _pipette_clock >= _pipette_hours * 3600.0:
 				_begin_pipette_wait()
@@ -919,10 +916,8 @@ func _set_pipette_timer(hours: float) -> void:
 
 ## The timer has run out: the game pauses, and only using the pipette resumes it. Tools can still be changed; the pipette's button pulses.
 func _begin_pipette_wait() -> void:
-	_pipette_waiting = true
 	_pipette_clock = 0.0
-	toolbar.set_paused(true)
-	toolbar.resume_locked = true
+	holds.hold(&"pipette")
 	var button := toolbar.button_for(Toolbar.Tool.PIPETTE)
 	if UserSettings.reduce_motion:
 		button.modulate.a = 0.5  # (lit, but not pulsing)
@@ -933,15 +928,12 @@ func _begin_pipette_wait() -> void:
 
 
 func _end_pipette_wait(resume: bool) -> void:
-	if not _pipette_waiting:
+	if not holds.has(&"pipette"):
 		return
-	_pipette_waiting = false
-	toolbar.resume_locked = false
+	holds.release(&"pipette", PlayHolds.Then.RESUME if resume else PlayHolds.Then.STAY)
 	if _pipette_pulse != null:
 		_pipette_pulse.kill()
 	toolbar.button_for(Toolbar.Tool.PIPETTE).modulate.a = 1.0
-	if resume:
-		toolbar.set_paused(false)
 
 
 ## The pipette: every bup in the circle moves to a new dish (a droplet in the middle of a fresh dish like this one, as the player started it), and the old dish
@@ -1226,9 +1218,7 @@ static func _pad_series(series_by_name: Dictionary, count: int) -> void:
 ## After a pipette: the dish the bups came from is what the player decides about, and nothing else can be done until they have. The game holds meanwhile.
 func _ask_about_old_dish(source: Dish, moved: int, receiver: Dish) -> void:
 	_old_dish = source
-	_old_dish_was_paused = paused
-	toolbar.set_paused(true)
-	toolbar.resume_locked = true
+	holds.hold(&"old_dish")
 	var number: int = _dish_numbers[source]
 	old_dish_dialog.title = Strings.t("hud.old_title", [number])
 	old_dish_dialog.dialog_text = Strings.t("hud.old_text", [UiText.thousands(moved), _dish_numbers[receiver], UiText.thousands(source.population())])
@@ -1259,11 +1249,8 @@ func _answer_old_dish(choice: String) -> void:
 				freeze_dish(source)
 			"trash":
 				trash_dish(source)
-	toolbar.resume_locked = false
-	if _pipette_waiting:
-		_end_pipette_wait(true)  # (the pause the pipette's timer held is what using the pipette ends)
-	else:
-		toolbar.set_paused(_old_dish_was_paused)  # (the question held the game; answering gives it back as it was)
+	holds.release(&"old_dish")  # (the question held the game; answering gives it back as it was, unless the pipette's timer still holds it ...)
+	_end_pipette_wait(true)  # (... the pause the pipette's timer held is what using the pipette ends)
 
 
 ## The rect of something in the tray, scrolled into view first (the tray scrolls when its sections are taller than the window).
@@ -1504,7 +1491,7 @@ func _on_goal_completed(goal: Goal) -> void:
 ## A dish has no bups left. The game pauses on that dish and says so; resuming goes on without it (the dish before it, or the next when it was the first, comes
 ## into view and the extinct one is deleted). When it was the last dish the game is over: only starting again or quitting to the menu go on.
 func _on_dish_extinct(d: Dish) -> void:
-	if _game_over or not dishes.has(d) or _extinct_queue.has(d):
+	if holds.has(&"end") or not dishes.has(d) or _extinct_queue.has(d):
 		return
 	_extinct_queue.append(d)
 	if _extinct_queue.size() == 1:
@@ -1522,10 +1509,9 @@ func _announce_extinct() -> void:
 		_show_banner(Strings.t("hud.banner_extinct_frozen", [_dish_numbers[d]]), 1e9)
 		return
 	if dishes.size() == 1:
-		_game_over = true
 		_extinct_queue.clear()
 		_view_before_extinct = null
-		toolbar.resume_locked = true
+		holds.hold(&"end")
 		pause_ring.visible = false  # (the game is over, not paused: the dialog says what happened)
 		end_dialog.dialog_text = Strings.t("hud.end_text") + "\n" + Strings.t("hud.end_survived", [SimClock.format(dish.time)])
 		end_dialog.popup_centered()
@@ -1535,7 +1521,7 @@ func _announce_extinct() -> void:
 
 ## Play was resumed after a dish went extinct: it is deleted as though it had never been, and the view goes to its neighbour.
 func _retire_extinct() -> void:
-	if _extinct_queue.is_empty() or _game_over:
+	if _extinct_queue.is_empty() or holds.has(&"end"):
 		return
 	if dishes.size() < 2:  # (the last running dish died out while others are frozen: it stays, empty, until one is unfrozen)
 		_extinct_queue.clear()
@@ -1555,8 +1541,7 @@ func _retire_extinct() -> void:
 
 ## The last dish died out and the player chose to begin again: the same beginning as the game screen's own.
 func _start_again() -> void:
-	_game_over = false
-	toolbar.resume_locked = false
+	holds.release(&"end", PlayHolds.Then.STAY)
 	_stack.clear()
 	_lineage_shown = {}
 	_end_pipette_wait(false)
@@ -1644,9 +1629,8 @@ func _replay_tour() -> void:
 ## The tour of the screen: what each part does, in the order a first-time player needs it, asking for a click now and then so
 ## that what only shows while it is in use (the info panel, the watch list, the lineage) is there to be explained.
 func _start_tutorial() -> void:
-	_tutorial_was_paused = paused
 	_tutorial_watched_before = dish.watched.duplicate()
-	toolbar.set_paused(true)
+	holds.hold(&"tour", false)
 	var steps: Array[Dictionary] = []
 	steps.append(_tour("welcome"))
 	if not free_mode:
@@ -1719,7 +1703,7 @@ func _on_tutorial_closed(_completed: bool) -> void:
 		_tutorial_bup = -1
 		_clear_selection()
 		_fit_camera()
-	toolbar.set_paused(_tutorial_was_paused)
+	holds.release(&"tour")
 
 
 ## A narrow window gives the side column less width; the graph, in the column, is as tall as the window allows.
@@ -1761,7 +1745,7 @@ func _dish_lines() -> String:
 
 ## The playback speed, and the speed actually achieved when the simulation can't keep up with it.
 func _playback_text() -> String:
-	if _pipette_waiting:
+	if holds.has(&"pipette"):
 		return Strings.t("hud.pipette_paused")
 	var slow := sim_speed > 1.0 and achieved_speed < 0.85 * sim_speed  # (while paused the speed it reached stays what it was: nothing updates it)
 	if paused:

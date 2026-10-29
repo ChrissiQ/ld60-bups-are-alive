@@ -106,12 +106,12 @@ func _run() -> void:
 	third.clear_bups()
 	for i in 5:
 		await process_frame
-	TestUtil.check(m._game_over and m.paused and m.toolbar.resume_locked and m.end_dialog.visible, "the last dish dying out ends the game with the window up")
+	TestUtil.check(m.holds.has(&"end") and m.paused and m.toolbar.resume_locked and m.end_dialog.visible, "the last dish dying out ends the game with the window up")
 	m.toolbar.set_paused(false)
 	TestUtil.check(m.paused, "...and nothing resumes it")
 	m.end_dialog.confirmed.emit()
 	await process_frame
-	TestUtil.check(not m._game_over and not m.toolbar.resume_locked and m.dish.population() > 0 and m.dishes.size() == 1, "starting again begins the dish afresh")
+	TestUtil.check(not m.holds.has(&"end") and not m.toolbar.resume_locked and m.dish.population() > 0 and m.dishes.size() == 1, "starting again begins the dish afresh")
 	# A dish that dies out while another is being looked at: afterwards the view goes back to what was being looked at, not to the dish before the dead one.
 	var base: Dish = m.dish
 	var dying: Dish = m.add_dish(chosen)
@@ -196,7 +196,7 @@ func _run() -> void:
 	m.sim_speed = 100.0
 	for i in 20:
 		await process_frame
-	TestUtil.check(m._pipette_waiting and m.paused and m.toolbar.resume_locked and m.vitals.get_parsed_text().contains(Strings.t("hud.pipette_paused")), "after the hours the game pauses and says so in the top bar")
+	TestUtil.check(m.holds.has(&"pipette") and m.paused and m.toolbar.resume_locked and m.vitals.get_parsed_text().contains(Strings.t("hud.pipette_paused")), "after the hours the game pauses and says so in the top bar")
 	var space := InputEventKey.new()
 	space.keycode = KEY_SPACE
 	space.pressed = true
@@ -204,12 +204,12 @@ func _run() -> void:
 	m.toolbar.speed_1000_button.button_pressed = true
 	TestUtil.check(m.paused, "neither Space nor a speed button resumes while it waits")
 	m.pipette(first.global_position + Vector2(5000.0, 5000.0), 30.0)
-	TestUtil.check(m._pipette_waiting and m.paused, "a pipette that moves nothing does not resume it")
+	TestUtil.check(m.holds.has(&"pipette") and m.paused, "a pipette that moves nothing does not resume it")
 	TestUtil.check(m.dish == first, "an empty pipette leaves the view where it is")
 	var again: Dish = m.pipette(first.global_position, 250.0)  # (the bups have swum a little since they were placed)
-	TestUtil.check(again != null and m.paused and m._pipette_waiting, "a pipette that moves bups holds the game until its question is answered")
+	TestUtil.check(again != null and m.paused and m.holds.has(&"pipette"), "a pipette that moves bups holds the game until its question is answered")
 	m._answer_old_dish("keep")
-	TestUtil.check(again != null and m.dish == again and not m._pipette_waiting and not m.paused and not m.toolbar.resume_locked, "...and the answer resumes play (%s, waiting %s, paused %s, locked %s, bups %d)" % [again != null, m._pipette_waiting, m.paused, m.toolbar.resume_locked, first.population()])
+	TestUtil.check(again != null and m.dish == again and not m.holds.has(&"pipette") and not m.paused and not m.toolbar.resume_locked, "...and the answer resumes play (%s, waiting %s, paused %s, locked %s, bups %d)" % [again != null, m.holds.has(&"pipette"), m.paused, m.toolbar.resume_locked, first.population()])
 	# Slowing down from a fast speed leaves one dish ahead of the other: the one behind catches up quickly instead of the one ahead standing still for as long as the gap.
 	var lagging: Dish = m.dishes[0]
 	var leading: Dish = m.dishes[1]
