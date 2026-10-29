@@ -15,3 +15,5 @@ native/.sconsign.dblite
 
 # Mac OS
 .DS_Store
+
+.claude/
