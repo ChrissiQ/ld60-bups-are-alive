@@ -1,7 +1,7 @@
 extends SceneTree
 ## The GPU path as the game drives it (windowed: needs the main RenderingDevice). A real Dish in the scene tree, processing (so its
 ## _process draws the bups from the GPU), with a camera framing it as scripts/main.gd's _fit_camera does, advanced once a frame as
-## main.gd's _process does (advance(min(delta, 0.1) x speed, Main.FRAME_BUDGET_USEC), achieved speed its running mean), hovering a
+## main.gd's _process does (advance(min(delta, 0.1) x speed, DishScheduler.FRAME_BUDGET_USEC), achieved speed its running mean), hovering a
 ## point every frame as the select tool does. Every real transfer between the backends is checked at the moment it happens (a subclass of
 ## Dish wraps _load_gpu and _to_cpu_for_edit), and so is every history sample (its time).
 ##   godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/game_check.gd -- <mode> [args]
@@ -24,7 +24,7 @@ extends SceneTree
 
 const Tools := preload("res://tools/gpu/world_tools.gd")
 
-const FRAME_BUDGET_USEC := 9000  ## Main.FRAME_BUDGET_USEC
+const FRAME_BUDGET_USEC := DishScheduler.FRAME_BUDGET_USEC
 const MAX_FRAME_SECONDS := 0.1  ## Main.MAX_FRAME_SECONDS
 
 

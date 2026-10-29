@@ -44,13 +44,13 @@ func _run() -> void:
 	TestUtil.check(behind == 0, "a bup's count is never above its living parent's: the daughter takes the parent's count after the division")
 	var turns := []
 	for round in 4:
-		m._let_one_dish_switch()
+		m.scheduler.let_one_dish_switch()
 		turns.append(m.dishes.filter(func(d: Dish) -> bool: return d.backend.switch_allowed).size())
 	TestUtil.check(turns == [1, 1, 1, 1], "exactly one dish at a time may change backend (%s)" % [turns])
 	other.backend.switch_wanted = true
 	other.backend.switch_wanted_gpu = true
-	m._let_one_dish_switch()
-	m._let_one_dish_switch()  # (no advance between: as for a dish the budget leaves out)
+	m.scheduler.let_one_dish_switch()
+	m.scheduler.let_one_dish_switch()  # (no advance between: as for a dish the budget leaves out)
 	TestUtil.check(other.backend.switch_allowed and other.backend.switch_wanted and not first.backend.switch_allowed, "a dish waiting to change backend keeps its wish and its turn until it is next advanced")
 	other.backend.switch_wanted = false
 	m.set_main_dish(other)
@@ -68,17 +68,17 @@ func _run() -> void:
 		d.backend.measured_usec = 8000.0  # (each costs most of the 9 ms the simulation may spend in a frame)
 	var before_turns := trio.map(func(d: Dish) -> float: return d.time)
 	var at_once := 0
-	var world_before: float = m.world_time()
+	var world_before: float = m.scheduler.world_time()
 	for round in 3:
 		var times := trio.map(func(d: Dish) -> float: return d.time)
-		m._advance_world(1.0)
+		m.scheduler.advance(1.0)
 		var moved := 0
 		for k in 3:
 			moved += 1 if trio[k].time > times[k] + 0.001 else 0
 		at_once = maxi(at_once, moved)
 	var every := trio.all(func(d: Dish) -> bool: return d.time > before_turns[trio.find(d)] + 0.001)
 	TestUtil.check(at_once == 1 and every, "when each dish costs most of the budget only one is advanced a frame, and in three frames every dish has had its turn (most in one frame: %d)" % at_once)
-	TestUtil.check(m.world_time() - world_before <= 1.0 + 0.001, "the world's clock moved by about the one step in those three frames (%.2f s), not three: it slows down together" % (m.world_time() - world_before))
+	TestUtil.check(m.scheduler.world_time() - world_before <= 1.0 + 0.001, "the world's clock moved by about the one step in those three frames (%.2f s), not three: it slows down together" % (m.scheduler.world_time() - world_before))
 	for d in trio:
 		d.backend.measured_usec = 0.0
 	m.toolbar.set_paused(false)
@@ -216,7 +216,7 @@ func _run() -> void:
 	leading.time = lagging.time + 40.0
 	var frames := 0
 	while absf(leading.time - lagging.time) > 1.0 and frames < 400:
-		m._advance_world(1.0 / 60.0)
+		m.scheduler.advance(1.0 / 60.0)
 		frames += 1
 	TestUtil.check(absf(leading.time - lagging.time) <= 1.0 and frames < 400, "a gap of 40 s between the dishes is closed in %d frames at x1, not 2400" % frames)
 	m._set_pipette_timer(0.0)

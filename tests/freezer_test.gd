@@ -39,7 +39,7 @@ func _run() -> void:
 	for i in 40:
 		await process_frame
 	TestUtil.check(absf(first.time - third.time) <= m.sim_speed / 60.0 + 1.0, "the running dishes keep one clock without it")
-	var world: float = m.world_time()
+	var world: float = m.scheduler.world_time()
 	TestUtil.check(world > frozen_time, "the world went on while it was frozen (%.1f > %.1f)" % [world, frozen_time])
 	m.thaw(m.freezer_shelf.entries[0])
 	var back: Dish = m.dishes.back()

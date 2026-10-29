@@ -5,7 +5,7 @@ extends SceneTree
 ## godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/dish_speed.gd -- [scenario] [founders] [frames] [speed] [limit]
 
 const Tools := preload("res://tools/gpu/world_tools.gd")
-const FRAME_BUDGET_USEC := 9000
+const FRAME_BUDGET_USEC := DishScheduler.FRAME_BUDGET_USEC
 const MAX_FRAME_SECONDS := 0.1
 
 var dish: Dish

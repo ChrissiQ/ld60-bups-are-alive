@@ -5,7 +5,6 @@ const MAX_FRAME_SECONDS := 0.1  ## the longest frame the sim will catch up on, s
 const FLASH_MSEC := 1500  ## how long the divisions number stays in the flash colour after the bup divides
 const LIVE_TEXT_MSEC := 100  ## at high playback speed the readouts are rewritten this often at most: faster is a flicker, not information
 const LIVE_TEXT_FROM_SPEED := 100.0  ## the playback speed from which that applies
-const FRAME_BUDGET_USEC := 9000  ## the most time the simulation may spend per frame; past it the sim falls behind its speed instead of the game stuttering
 const ZOOM_MIN := 0.002  ## low enough to fit the largest dish (90000 µm in radius) in a window
 const ZOOM_MAX := 12.0  ## close enough that a bup (a few µm) fills a good part of the window
 const ZOOM_BUTTON_STEP := 1.25
@@ -25,10 +24,6 @@ const TUTORIAL_ZOOM := 6.0  ## how close the tutorial brings the camera to a bup
 const TUTORIAL_BUP_PIXELS := 18.0  ## the lit square round that bup is this far out on each side
 const MAX_DISHES := 20  ## the most dishes at once (the strip holds that many)
 const LINEAGE_ELSEWHERE_MSEC := 30000  ## how often the lineage panel looks again for a line's bups alive in other dishes
-const LOCKSTEP_MIN_GAP := 1.0  ## a dish at least this many simulated seconds behind the world's target is advanced (a shorter step would be a fine one, Dish.FINE_STEP or less, whose run-and-tumble steps cost far more per simulated second); nearer, it waits
-const CATCHUP_SECONDS := 5.0  ## when the dishes are further apart than a frame holds (after a fast speed, one dish can be a minute ahead), the ones behind are asked for this many simulated seconds a frame (what the frame's budget allows) until they have caught up
-const COST_SMOOTHING := 0.4  ## how much of a dish's newest timing goes into its running average
-const LOCKSTEP_MIN_SHARE := 0.25  ## at speeds where a frame holds less than four of those seconds, a quarter of the frame's step
 const DISH_SPACING := 4.0e5  ## µm between the centres of the dishes in the shared world (clear of the largest dish, 90000 µm in radius, either side). They sit in a grid DISH_COLUMNS wide so no coordinate grows large: the renderer's single-precision positions would shake what is drawn far from the origin when zoomed in
 const DISH_COLUMNS := 5
 const VIEW_BITS := 19  ## render layers there are for dishes (the 2D world has twenty and the screen keeps the first): dishes this many places apart share one
@@ -108,12 +103,12 @@ var _flash_until := 0  ## when the divisions number stops flashing (Time.get_tic
 var _extinct_queue: Array[Dish] = []  ## dishes that have died out and are not yet deleted (the first is the one the screen has said so about)
 var _dish_numbers := {}  ## Dish -> its number (a number is never reused: a bup's "line from dish 2" stays true)
 var _next_dish_number := 1
+var scheduler: DishScheduler  ## the dishes' world clock and their turns for the processor
 var holds: PlayHolds  ## what holds the game besides the player: the pipette's timer (&"pipette"), the question about the old dish (&"old_dish"), the tour (&"tour") and the end of the game (&"end")
 var _pipette_hours := 0.0  ## the pipette timer: the game pauses for the pipette every this many simulated hours (0: off)
 var _pipette_clock := 0.0  ## simulated seconds since the last pause for the pipette
 var _elsewhere := {}  ## see _alive_elsewhere, and when it was worked out
 var _elsewhere_stamp := []
-var _switch_turn := 0  ## whose turn it is to change backend when no dish is waiting
 var _pipette_pulse: Tween
 var tool := Toolbar.Tool.SELECT  ## kept in step with the toolbar's selection (see _on_tool_selected)
 var sim_speed := 1.0  ## seconds of simulation per real second (the toolbar sets it)
@@ -152,6 +147,7 @@ var _drag_threshold: float = ProjectSettings.get_setting("gui/common/drag_thresh
 func _ready() -> void:
 	UserSettings.ensure_applied()
 	holds = PlayHolds.new(toolbar)
+	scheduler = DishScheduler.new(dishes)
 	_register_dish(dish)
 	dish_strip.dish_chosen.connect(set_main_dish)
 	tracker.goal_completed.connect(_on_goal_completed)
@@ -310,7 +306,7 @@ func _process(delta: float) -> void:
 	if not paused and not menu_open:
 		# The playback speed is how many seconds of simulation pass per real second.
 		var frame := minf(delta, MAX_FRAME_SECONDS)
-		var done := _advance_world(frame * sim_speed)
+		var done := scheduler.advance(frame * sim_speed)
 		if frame > 0.0:
 			achieved_speed = lerpf(achieved_speed, done / frame, 0.1)
 		if _pipette_hours > 0.0 and not holds.has(&"pipette"):
@@ -696,10 +692,10 @@ func debug_state() -> Dictionary:
 		"tray_open": {"graph": graph_section.open, "dish_details": dish_details.open, "all_details": all_details.open},
 		"dish_strip": {"visible": dish_strip.visible, "main_zoomed_in": dish_strip.main_zoomed_in},
 		"watched_total": dishes.reduce(func(n: int, d: Dish) -> int: return n + d.watched.size(), 0),
-		"world_time": world_time(),
+		"world_time": scheduler.world_time(),
 		"dishes": dishes.map(func(d: Dish) -> Dictionary: return {"number": _dish_numbers[d], "bups": d.population(), "time": d.time, "history_origin": d.history_origin, "position": [d.global_position.x, d.global_position.y], "backend": d.backend_running(), "husks": d.sim.husk_count(), "behind_s": maxf(dishes.reduce(func(m: float, o: Dish) -> float: return maxf(m, o.time), 0.0) - d.time, 0.0), "rule": DebugLog.rule(d)}),
-		"switch_turn": _switch_turn,
-		"frame_budget_usec": FRAME_BUDGET_USEC,
+		"switch_turn": scheduler._turn,
+		"frame_budget_usec": DishScheduler.FRAME_BUDGET_USEC,
 		"freezer": freezer_shelf.entries.map(func(entry: Dictionary) -> Dictionary: return {"number": entry["number"], "bups": entry["bups"], "frozen_at": entry["data"].get("time", 0.0)}),
 	}
 
@@ -967,101 +963,6 @@ func pipette(world: Vector2, circle_radius: float) -> Dish:
 	return receiver
 
 
-## One world clock: every dish is advanced to the same time, so no dish runs faster than another over time. The target is a frame's simulated seconds past the
-## slowest dish; a dish that has reached it waits, and a dish that is short of it by less than a second (or a quarter of a frame's step, if that is less) waits for the next frame
-## (a tiny step would take it off the GPU). A dish that is ahead of a slow world moves every frame by what the slow one gained, so it stays smooth. The dishes that move share the frame's budget. If the machine cannot keep up, the whole world slows together. Returns how far the world's clock moved.
-func _advance_world(asked: float) -> float:
-	var cpu_total := 0.0  # (the processor's load: what each dish still running on it is estimated to need for a frame)
-	for d in dishes:
-		if not d.gpu_active:
-			cpu_total += d.backend.cpu_cost_estimate
-	for d in dishes:
-		d.backend.other_cpu_load = cpu_total - (0.0 if d.gpu_active else d.backend.cpu_cost_estimate)
-	_let_one_dish_switch()
-	var before := world_time()
-	var latest := before
-	for d in dishes:
-		latest = maxf(latest, d.time)
-	if latest - before > maxf(LOCKSTEP_MIN_GAP, 2.0 * asked):
-		# The dishes are further apart than the world moves in a frame (slowing down from a fast speed leaves them so): waiting for the slowest at the speed asked would
-		# freeze the others for as long as the gap is, so the ones behind catch up first, as fast as the frame's budget lets them, and the ones ahead wait.
-		var behind: Array[Dish] = dishes.filter(func(d: Dish) -> bool: return latest - d.time > 0.0)
-		behind = _within_budget(behind, latest)
-		var catch_share := FRAME_BUDGET_USEC / maxi(behind.size(), 1)
-		for d in behind:
-			_advance_timed(d, minf(latest - d.time, maxf(asked, CATCHUP_SECONDS)), catch_share)
-		return minf(maxf(world_time() - before, 0.0), asked)  # (what the speed readout and the timers see is the pace asked for, not the catching up)
-	var target := before + asked
-	var due: Array[Dish] = []
-	for d in dishes:
-		if target - d.time >= minf(LOCKSTEP_MIN_GAP, asked * LOCKSTEP_MIN_SHARE):
-			due.append(d)
-	due = _within_budget(due, target)
-	var share := FRAME_BUDGET_USEC / maxi(due.size(), 1)
-	for d in due:
-		_advance_timed(d, target - d.time, share)
-	return maxf(world_time() - before, 0.0)
-
-
-## Which of the dishes that are due this frame the processor can afford. A dish on the processor costs what it was timed to take (or what the cost model says, until it has been
-## timed); the GPU's dishes cost the processor next to nothing and always go. The dishes furthest behind go first, and one dish on the processor always goes, however much it costs, so
-## the world never stops; the ones left out are further behind next frame, so they go first then: the dishes take turns, and when the processor cannot keep up with all of them the whole
-## world slows down together (its clock is the slowest dish's) instead of every frame costing the sum of every dish's step and the interface waiting for it.
-func _within_budget(due: Array[Dish], target: float) -> Array[Dish]:
-	var ordered := due.duplicate()
-	ordered.sort_custom(func(a: Dish, b: Dish) -> bool: return target - a.time > target - b.time)
-	var left := float(FRAME_BUDGET_USEC)
-	var chosen: Array[Dish] = []
-	var on_processor := 0
-	for d: Dish in ordered:
-		if d.gpu_active:
-			chosen.append(d)
-			continue
-		var cost := d.backend.measured_usec if d.backend.measured_usec > 0.0 else d.backend.cpu_cost_estimate
-		if on_processor == 0 or cost <= left:
-			left -= cost
-			on_processor += 1
-			chosen.append(d)
-	return chosen
-
-
-## Advances a dish and, when it ran on the processor, notes how long that took (see DishBackend.measured_usec).
-func _advance_timed(d: Dish, seconds: float, budget_usec: int) -> void:
-	var started := Time.get_ticks_usec()
-	d.advance(seconds, budget_usec)
-	if d.gpu_active:
-		d.backend.measured_usec = 0.0  # (the timing was of the processor; on the GPU it is timed afresh if the dish comes back)
-	else:
-		var took := float(Time.get_ticks_usec() - started)
-		d.backend.measured_usec = took if d.backend.measured_usec <= 0.0 else lerpf(d.backend.measured_usec, took, COST_SMOOTHING)
-
-
-## Auto moves one dish between the processor and the GPU at a time: dishes that all decide in the same frame would each see the others' load as it was, and all go (or all come
-## back) together. Of the dishes waiting, the one that wants the GPU and costs the processor most goes first; with none waiting, the turn goes round the dishes.
-## A dish's wish (`DishBackend.switch_wanted`) lasts until it is next advanced, which asks again: a dish that the budget leaves out or that is not due keeps its turn
-## until it does advance, instead of the turn passing to it in a frame it is not advanced in and being lost.
-func _let_one_dish_switch() -> void:
-	var chosen: Dish = null
-	for d in dishes:
-		if not d.backend.switch_wanted:
-			continue
-		if chosen == null or (d.backend.switch_wanted_gpu and (not chosen.backend.switch_wanted_gpu or d.backend.cpu_cost_estimate > chosen.backend.cpu_cost_estimate)) or (not d.backend.switch_wanted_gpu and not chosen.backend.switch_wanted_gpu and d.backend.cpu_cost_estimate < chosen.backend.cpu_cost_estimate):
-			chosen = d
-	if chosen == null:  # (nobody is waiting: the turn goes round, so no two dishes ever decide in the same frame)
-		_switch_turn = (_switch_turn + 1) % dishes.size()
-		chosen = dishes[_switch_turn]
-	for d in dishes:
-		d.backend.switch_allowed = d == chosen
-
-
-## The world's time: that of the slowest dish.
-func world_time() -> float:
-	var slowest := dish.time
-	for d in dishes:
-		slowest = minf(slowest, d.time)
-	return slowest
-
-
 ## Takes a dish into the set: the screen hears when it dies out or its selection changes (when it is the one in the main view), and the strip gets its thumbnail.
 func _register_dish(d: Dish, number := -1) -> void:
 	var is_new := number < 0  # (a dish out of the freezer comes back under the number it had)
@@ -1108,7 +1009,7 @@ func add_dish(start: StartConditions, number := -1) -> Dish:
 		slot += 1
 	d.global_position = _slot_position(slot)
 	d.strike(start)
-	d.begin_at(world_time())  # (a dish that joins is at the world's time: one clock for all)
+	d.begin_at(scheduler.world_time())  # (a dish that joins is at the world's time: one clock for all)
 	for layer: int in Dish.Layer.values():
 		d.show_layer(layer, dish.layer_shown(layer))  # (what is shown is one choice for every dish)
 	_register_dish(d, number)
@@ -1168,7 +1069,7 @@ func thaw(entry: Dictionary) -> void:
 	if dishes.size() >= MAX_DISHES:
 		_show_banner(Strings.t("hud.banner_unfreeze_limit"), 1.5)
 		return
-	var world := world_time()
+	var world := scheduler.world_time()
 	var data: Dictionary = (entry["data"] as Dictionary).duplicate(true)
 	_move_saved_dish_to(data, world)
 	var emptied: Dish = null  # (the last running dish died out while others were frozen and stayed, empty: the thawed dish takes its place)

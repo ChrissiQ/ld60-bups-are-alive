@@ -13,7 +13,6 @@ extends SceneTree
 ## sim seconds per real second, share of the asked sim time done, frames a real second), PERFTOTAL, OVERFLOWS.
 
 const Tools := preload("res://tools/gpu/world_tools.gd")
-const MainScript := preload("res://scripts/main.gd")
 const HOUR := 3600.0
 const MIN_REMAINDER := 2.0  ## a rest of less than this at a mark counts as the mark (a shorter step would be taken for a fine one)
 
@@ -139,7 +138,7 @@ func _run() -> void:
 	dish.strike(start)
 	Tools.place_sources(dish, scenario)
 	dish.set_backend_setting(StartConditions.BACKEND_GPU if mode == "gpu" else StartConditions.BACKEND_CPU)
-	var budget: int = MainScript.FRAME_BUDGET_USEC if mode == "gpu" else 0
+	var budget: int = DishScheduler.FRAME_BUDGET_USEC if mode == "gpu" else 0
 	print("RUN %s %s seed %d speed x%.0f hours %d limit %d radius %.0f budget %d device %s" % [mode, scenario, seed_value, speed, hours, dish.bup_limit, dish.radius, budget, RenderingServer.get_rendering_device().get_device_name() if RenderingServer.get_rendering_device() != null else "none"])
 	var frame_sim := speed / 60.0
 	var next_hour := 1
