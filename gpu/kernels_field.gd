@@ -217,24 +217,12 @@ void readc(float x, float y, int own, out float c, out float own_share) {
 	if (OWNER[i0 + n] == own) own_share += (1.0 - tx) * ty;
 	if (OWNER[i0 + n + 1] == own) own_share += tx * ty;
 }
-void add_fixed(uint cell, float w, int which) { // 2^30 to the unit, in 64 bits (two words): an exact sum whatever the order
-	while (w > 0.0) {
-		float part = min(w, 3.9);
-		w -= part;
-		uint q = uint(part * 1073741824.0 + 0.5);
-		if (which == 0) { uint old = atomicAdd(DLO[cell], q); if (old + q < old) atomicAdd(DHI[cell], 1u); }
-		else if (which == 1) { uint old = atomicAdd(RLO[cell], q); if (old + q < old) atomicAdd(RHI[cell], 1u); }
-		else { uint old = atomicAdd(ALO[cell], q); if (old + q < old) atomicAdd(AHI[cell], 1u); }
-	}
+void add_fixed(uint cell, float w, int which) { // what is wanted (0), what is read (1) and the own cell's share of it (2), summed per cell
+	if (which == 0) ADD_FIXED30(DLO, DHI, cell, w)
+	else if (which == 1) ADD_FIXED30(RLO, RHI, cell, w)
+	else ADD_FIXED30(ALO, AHI, cell, w)
 }
-void add_puff_demand(uint k, float mass) { // 2^20 to the unit
-	while (mass > 0.0) {
-		float part = min(mass, 4000.0);
-		mass -= part;
-		uint q = uint(part * 1048576.0 + 0.5);
-		uint old = atomicAdd(PDLO[k], q); if (old + q < old) atomicAdd(PDHI[k], 1u);
-	}
-}
+void add_puff_demand(uint k, float mass) { ADD_FIXED20(PDLO, PDHI, k, mass) }
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
 	uint b = i * RECORD_WORDS;
@@ -321,14 +309,9 @@ void main() {
 
 const K_APPLY := """
 // A bup that takes in more than its growth can use lets go of acetate besides (the CPU's `acetate_share`; its own gain is the same), and a bup with room then takes up acetate (`take_acetate`).
-void add_fixed2(uint cell, float w, int which) { // 2^30 to the unit, in 64 bits (two words): an exact sum whatever the order
-	while (w > 0.0) {
-		float part = min(w, 3.9);
-		w -= part;
-		uint q = uint(part * 1073741824.0 + 0.5);
-		if (which == 0) { uint old = atomicAdd(AWLO[cell], q); if (old + q < old) atomicAdd(AWHI[cell], 1u); }
-		else { uint old = atomicAdd(ADLO[cell], q); if (old + q < old) atomicAdd(ADHI[cell], 1u); }
-	}
+void add_fixed2(uint cell, float w, int which) { // the acetate wanted (0) and let go (1), summed per cell
+	if (which == 0) ADD_FIXED30(AWLO, AWHI, cell, w)
+	else ADD_FIXED30(ADLO, ADHI, cell, w)
 }
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
@@ -446,9 +429,9 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "clear", K_CLEAR, ["P", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI"])
 	GpuKernels.add(out, "snapshot", K_SNAPSHOT, ["P", "CONC", "OWNER", "EFF"])
 	GpuKernels.add(out, "swim", K_SWIM, ["P", "CNT", "BUPS", "EFF", "TABLE", "ENTD", "BINS", "BINC"], FIELD_FUNCS + LOOKUP_FUNCS + GpuKernelsClouds.CLOUD_FUNCS)
-	GpuKernels.add(out, "demand", K_DEMAND, ["P", "CNT", "BUPS", "EFF", "OWNER", "CONC", "WANT", "WANTC", "CELLOF", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "ENTD", "BINS", "BINC", "PDLO", "PDHI"], GpuKernelsClouds.CLOUD_FUNCS)
+	GpuKernels.add(out, "demand", K_DEMAND, ["P", "CNT", "BUPS", "EFF", "OWNER", "CONC", "WANT", "WANTC", "CELLOF", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "ENTD", "BINS", "BINC", "PDLO", "PDHI"], GpuKernels.FIXED_FUNCS + GpuKernelsClouds.CLOUD_FUNCS)
 	GpuKernels.add(out, "cells", K_CELLS, ["P", "CONC", "OWNER", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "SCALE"])
-	GpuKernels.add(out, "apply", K_APPLY, ["P", "CNT", "BUPS", "WANT", "WANTC", "CELLOF", "SCALE", "ENTD", "BINS", "BINC", "PSCALE", "OWNER", "CONC", "CONC2", "WANT2", "CELL2", "AWLO", "AWHI", "ADLO", "ADHI"], GpuKernelsClouds.CLOUD_FUNCS)
+	GpuKernels.add(out, "apply", K_APPLY, ["P", "CNT", "BUPS", "WANT", "WANTC", "CELLOF", "SCALE", "ENTD", "BINS", "BINC", "PSCALE", "OWNER", "CONC", "CONC2", "WANT2", "CELL2", "AWLO", "AWHI", "ADLO", "ADHI"], GpuKernels.FIXED_FUNCS + GpuKernelsClouds.CLOUD_FUNCS)
 	GpuKernels.add(out, "ac_cells", K_AC_CELLS, ["P", "CONC2", "AWLO", "AWHI", "ADLO", "ADHI", "SCALE2"])
 	GpuKernels.add(out, "ac_apply", K_AC_APPLY, ["P", "CNT", "BUPS", "WANT2", "CELL2", "SCALE2"])
 	GpuKernels.add(out, "diffuse2_a", K_DIFFUSE.replace("SRC", "CONC2").replace("DST", "CONC2B"), ["P", "INSIDE", "CONC2", "CONC2B"])

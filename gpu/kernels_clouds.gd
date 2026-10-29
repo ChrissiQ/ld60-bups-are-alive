@@ -94,14 +94,7 @@ void main() {
 ## What puts nutrient on the grid from many threads at once (the clouds that have spread to a cell, and the deaths' that find no slot): in fixed point,
 ## an exact sum whatever the order; `dep_apply` adds it to the field. Used by `puff_advance` and `death_clouds`.
 const DEP_FUNCS := """
-void add_dep(uint cell, float amount) { // 2^20 to the unit, in 64 bits
-	while (amount > 0.0) {
-		float part = min(amount, 4000.0);
-		amount -= part;
-		uint q = uint(part * 1048576.0 + 0.5);
-		uint old = atomicAdd(DPLO[cell], q); if (old + q < old) atomicAdd(DPHI[cell], 1u);
-	}
-}
+void add_dep(uint cell, float amount) { ADD_FIXED20(DPLO, DPHI, cell, amount) }
 void deposit_xy(float x, float y, float mass) {
 	int n = int(P[P_CELLS]); float sp = P[P_SPACING];
 	float fx = (x + P[P_ORIGIN]) / sp - 0.5, fy = (y + P[P_ORIGIN]) / sp - 0.5;
@@ -332,7 +325,7 @@ void main() {
 static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "ev_puffs", K_EV_PUFFS, ["P", "PCNT", "PUFF", "EVR", "EVP", "CONC", "INSIDE"])
 	GpuKernels.add(out, "ev_deposits", K_EV_DEPOSITS, ["P", "CONC", "EVR", "EVCC", "EVCA"])
-	GpuKernels.add(out, "puff_advance", K_PUFF_ADVANCE, ["P", "PCNT", "PUFF", "INSIDE", "DPLO", "DPHI"], DEP_FUNCS)
+	GpuKernels.add(out, "puff_advance", K_PUFF_ADVANCE, ["P", "PCNT", "PUFF", "INSIDE", "DPLO", "DPHI"], GpuKernels.FIXED_FUNCS + DEP_FUNCS)
 	GpuKernels.add(out, "dep_apply", K_DEP_APPLY, ["P", "CONC", "DPLO", "DPHI"])
 	GpuKernels.add(out, "puff_clear", K_PUFF_CLEAR, ["P", "PDLO", "PDHI", "PSCALE"])
 	GpuKernels.add(out, "puff_scale", K_PUFF_SCALE, ["PCNT", "PUFF", "PDLO", "PDHI", "PSCALE"])
@@ -350,5 +343,5 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "pcopy", K_PCOPY, ["PCNT", "PUFF_V", "PUFF2_V"])
 	GpuKernels.add(out, "psetcount", K_PSETCOUNT, ["PCNT"])
 	GpuKernels.add(out, "probe", K_PROBE, ["P", "ENTD", "BINS", "BINC", "PQ", "PR"], CLOUD_FUNCS)
-	GpuKernels.add(out, "death_clouds", K_DEATH_CLOUDS, ["P", "CNT", "PCNT", "BUPS", "SURV", "EXCS", "PUFF", "INSIDE", "DPLO", "DPHI"], DEP_FUNCS)
+	GpuKernels.add(out, "death_clouds", K_DEATH_CLOUDS, ["P", "CNT", "PCNT", "BUPS", "SURV", "EXCS", "PUFF", "INSIDE", "DPLO", "DPHI"], GpuKernels.FIXED_FUNCS + DEP_FUNCS)
 	GpuKernels.add(out, "death_count", K_DEATH_COUNT, ["P", "CNT", "PCNT"])

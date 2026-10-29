@@ -46,6 +46,12 @@ uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
+#define ADD64(LO, HI, cell, q_) { uint old_ = atomicAdd(LO[cell], q_); if (old_ + q_ < old_) atomicAdd(HI[cell], 1u); }
+#define ADD_FIXED30(LO, HI, cell, amount) { float rest_ = amount; while (rest_ > 0.0) { float part_ = min(rest_, 3.9); rest_ -= part_; uint q_ = uint(part_ * 1073741824.0 + 0.5); ADD64(LO, HI, cell, q_) } }
+#define ADD_FIXED20(LO, HI, cell, amount) { float rest_ = amount; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); ADD64(LO, HI, cell, q_) } }
+#define FIX30(HI, LO) (float(HI) * 4.0 + float(LO) * 9.313225746154785e-10)
+#define FIX20(HI, LO) (float(HI) * 4096.0 + float(LO) * 9.5367431640625e-7)
+
 // the clouds' concentration and gradient where a bup is, and the smallest sigma among the clouds that reach it (as the CPU's puff_probe)
 void puffs_at(float x, float y, out float c, out float gx, out float gy, out float sigma) {
 	c = 0.0; gx = 0.0; gy = 0.0; sigma = 1e18;
@@ -83,24 +89,12 @@ void readc(float x, float y, int own, out float c, out float own_share) {
 	if (OWNER[i0 + n] == own) own_share += (1.0 - tx) * ty;
 	if (OWNER[i0 + n + 1] == own) own_share += tx * ty;
 }
-void add_fixed(uint cell, float w, int which) { // 2^30 to the unit, in 64 bits (two words): an exact sum whatever the order
-	while (w > 0.0) {
-		float part = min(w, 3.9);
-		w -= part;
-		uint q = uint(part * 1073741824.0 + 0.5);
-		if (which == 0) { uint old = atomicAdd(DLO[cell], q); if (old + q < old) atomicAdd(DHI[cell], 1u); }
-		else if (which == 1) { uint old = atomicAdd(RLO[cell], q); if (old + q < old) atomicAdd(RHI[cell], 1u); }
-		else { uint old = atomicAdd(ALO[cell], q); if (old + q < old) atomicAdd(AHI[cell], 1u); }
-	}
+void add_fixed(uint cell, float w, int which) { // what is wanted (0), what is read (1) and the own cell's share of it (2), summed per cell
+	if (which == 0) ADD_FIXED30(DLO, DHI, cell, w)
+	else if (which == 1) ADD_FIXED30(RLO, RHI, cell, w)
+	else ADD_FIXED30(ALO, AHI, cell, w)
 }
-void add_puff_demand(uint k, float mass) { // 2^20 to the unit
-	while (mass > 0.0) {
-		float part = min(mass, 4000.0);
-		mass -= part;
-		uint q = uint(part * 1048576.0 + 0.5);
-		uint old = atomicAdd(PDLO[k], q); if (old + q < old) atomicAdd(PDHI[k], 1u);
-	}
-}
+void add_puff_demand(uint k, float mass) { ADD_FIXED20(PDLO, PDHI, k, mass) }
 void main() {
 	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
 	uint b = i * RECORD_WORDS;

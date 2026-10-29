@@ -50,6 +50,17 @@ float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 """
 
+## Sums that many threads add to at once, in fixed point: a 64-bit unsigned number in two words (`LO`, `HI` name the two buffers), so that the
+## sum is exact whatever the order the threads run in. ADD_FIXED30 (2^30 to the unit, parts of at most 3.9) and ADD_FIXED20 (2^20 to the
+## unit, parts of at most 4000) add an amount; FIX30 and FIX20 read a sum back. Macros, because a function cannot take a buffer.
+const FIXED_FUNCS := """
+#define ADD64(LO, HI, cell, q_) { uint old_ = atomicAdd(LO[cell], q_); if (old_ + q_ < old_) atomicAdd(HI[cell], 1u); }
+#define ADD_FIXED30(LO, HI, cell, amount) { float rest_ = amount; while (rest_ > 0.0) { float part_ = min(rest_, 3.9); rest_ -= part_; uint q_ = uint(part_ * 1073741824.0 + 0.5); ADD64(LO, HI, cell, q_) } }
+#define ADD_FIXED20(LO, HI, cell, amount) { float rest_ = amount; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); ADD64(LO, HI, cell, q_) } }
+#define FIX30(HI, LO) (float(HI) * 4.0 + float(LO) * 9.313225746154785e-10)
+#define FIX20(HI, LO) (float(HI) * 4096.0 + float(LO) * 9.5367431640625e-7)
+"""
+
 ## An exclusive prefix sum, in three levels of blocks of 256 (so up to 16 million elements): the new place of every bup that is kept
 ## and of every newborn does not depend on the order the threads run in, so a run is the same every time.
 const K_SCAN := """
