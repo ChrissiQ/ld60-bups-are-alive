@@ -112,7 +112,7 @@ func alive_elsewhere(chain: PackedInt64Array) -> Dictionary:
 	for other in dishes:
 		if other == dish or not other.has_record(chain[0]):
 			continue
-		var counts := other.living_descendants(chain)
+		var counts := other.sim.living_descendants_of(chain)
 		for k in chain.size():
 			if counts[k] > 0:
 				if not _elsewhere.has(chain[k]):

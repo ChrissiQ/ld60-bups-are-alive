@@ -279,7 +279,7 @@ func _on_pick_mode_selected(mode: Dish.PickMode) -> void:
 
 
 func _on_tool_selected(new_tool: Toolbar.Tool) -> void:
-	if new_tool != Toolbar.Tool.SELECT and (not lineage.is_empty() or dish.has_selected_thing()):
+	if new_tool != Toolbar.Tool.SELECT and (not lineage.is_empty() or dish.selected.has_thing()):
 		_clear_selection()  # using another tool closes whatever was open on a bup or source
 	stage_input.tool = new_tool
 	tool_options.show_for(tool)

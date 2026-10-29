@@ -582,11 +582,6 @@ func add_transferred(records: PackedByteArray, lineage: PackedByteArray) -> Pack
 		return ids)
 
 
-## For each of these ids, how many bups alive in this dish have it in their family line (itself included).
-func living_descendants(ids: PackedInt64Array) -> PackedInt32Array:
-	return sim.living_descendants_of(ids)
-
-
 ## The family line that led to a bup: its oldest known ancestor first, the bup itself last.
 func lineage_chain(id: int) -> PackedInt64Array:
 	return sim.lineage_chain(id)
@@ -735,11 +730,6 @@ func _pick(world_pos: Vector2, slack: float, hover := false) -> DishPick:
 ## Whether a bup, a source, a plankton or a husk is selected.
 func has_selection() -> bool:
 	return not selected.is_empty()
-
-
-## Whether a source or a plankton is selected (what is picked besides a bup).
-func has_selected_thing() -> bool:
-	return selected.has_thing()
 
 
 ## Lets go of everything selected.
