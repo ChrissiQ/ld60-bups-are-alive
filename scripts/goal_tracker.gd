@@ -45,6 +45,18 @@ func from_dict(d: Dictionary) -> void:
 	held = float(d.get("held", 0.0))
 
 
+## Nutrient tools unlock with experiment 2 (goal mode; free mode has them from the start).
+func tools_unlocked() -> bool:
+	return index >= 1
+
+
+## Sets what the experiments change about a dish: from experiment 2 on, staying alive costs more. (A dish being struck
+## resets it, so it is asked again after one; and when an experiment is completed.)
+func apply_costs(dish: Dish) -> void:
+	if index >= 1:
+		dish.upkeep_factor = Dish.GOAL_UPKEEP_FACTOR
+
+
 func current() -> Goal:
 	return goals[index] if index < goals.size() else null
 

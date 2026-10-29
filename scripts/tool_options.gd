@@ -50,7 +50,12 @@ func set_husks_available(available: bool) -> void:
 	var button: Button = pick_buttons[Dish.PickMode.HUSKS]
 	button.visible = available
 	if not available and button.button_pressed:
-		pick_buttons[Dish.PickMode.ALL].button_pressed = true
+		show_all()
+
+
+## Back to the select tray's "all" mode.
+func show_all() -> void:
+	pick_buttons[Dish.PickMode.ALL].button_pressed = true
 
 
 func _setup_pick(group: ButtonGroup, button: Button, mode: Dish.PickMode, tip: String) -> void:

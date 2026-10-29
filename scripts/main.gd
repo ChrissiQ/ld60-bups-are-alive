@@ -184,8 +184,7 @@ func _exit_tree() -> void:
 
 func _begin_dish() -> void:
 	dish.strike(Session.free_start if free_mode else null)
-	if not free_mode and tracker.index >= 1:
-		dish.upkeep_factor = Dish.GOAL_UPKEEP_FACTOR  # (strike resets it: experiment 2 and after costs what it did)
+	tracker.apply_costs(dish)  # (strike resets it: experiment 2 and after costs what it did)
 	stage_input.fit_camera()
 	if free_mode:
 		toolbar.set_paused(true)  # the playground starts paused so you can set the scene
@@ -194,7 +193,7 @@ func _begin_dish() -> void:
 ## Nutrient tools are a free-mode toy and a reward in goal mode: they unlock with experiment 2,
 ## so experiment 1 is about what a random supply does and experiment 2 about what a placed one does.
 func _tools_unlocked() -> bool:
-	return free_mode or tracker.index >= 1
+	return free_mode or tracker.tools_unlocked()
 
 
 func _sync_tool_locks() -> void:
@@ -269,7 +268,7 @@ func _open_watched(watched_in: Dish, id: int) -> void:
 	if not dish.has_record(id):
 		return
 	toolbar.select_tool(Toolbar.Tool.SELECT)
-	tool_options.pick_buttons[Dish.PickMode.ALL].button_pressed = true  # (a mode that skips bups would let go of it again)
+	tool_options.show_all()  # (a mode that skips bups would let go of it again)
 	dish.selected.bup = id
 	stage_input.stop_following()
 
@@ -457,7 +456,7 @@ func pipette(world: Vector2, circle_radius: float) -> Dish:
 	if count == 0:
 		_show_banner(Strings.t("hud.banner_pipette_empty"), 1.5)
 		return null
-	var start: StartConditions = Session.free_start.copy() if Session.free_start != null else StartConditions.new()
+	var start: StartConditions = Session.free_start.copy()
 	start.dish_radius = source.radius
 	start.bup_limit = source.bup_limit
 	var receiver := add_dish(start)
@@ -720,7 +719,7 @@ func _click(world: Vector2) -> void:
 			if dish.place_source(world, tool_options.source_rate()):
 				# The new source is what the player will want to look at or adjust next.
 				toolbar.select_tool(Toolbar.Tool.SELECT)
-				tool_options.pick_buttons[Dish.PickMode.ALL].button_pressed = true  # (a mode that skips sources would hide the one just placed)
+				tool_options.show_all()  # (a mode that skips sources would hide the one just placed)
 				dish.selected.bup = -1
 				dish.selected.source = dish.sources[-1]
 			elif dish.contains(world):
@@ -745,8 +744,7 @@ func _show_banner(text: String, seconds: float) -> void:
 
 
 func _on_goal_completed(goal: Goal) -> void:
-	if tracker.index >= 1:
-		dish.upkeep_factor = Dish.GOAL_UPKEEP_FACTOR  # experiment 2 and after: staying alive costs more
+	tracker.apply_costs(dish)
 	toolbar.set_paused(true)  # so the colony isn't left running while the player reads and sets up what comes next
 	_sync_tool_locks()
 	_show_banner(Strings.t("hud.banner_complete", [goal.title]) + ("\n" + Strings.t("hud.banner_unlocked") if tracker.index == 1 else ""), BANNER_SECONDS)
@@ -927,7 +925,7 @@ func _tour(key: String, target := Callable(), wait := Callable(), enter := Calla
 ## Brings the camera close to a bup and makes sure a click on it would select it: the step that asks for that click.
 func _tutorial_show_bup() -> void:
 	toolbar.select_tool(Toolbar.Tool.SELECT)
-	tool_options.pick_buttons[Dish.PickMode.ALL].button_pressed = true
+	tool_options.show_all()
 	var ids := dish.bup_ids()
 	if ids.is_empty():
 		return
