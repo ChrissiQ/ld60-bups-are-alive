@@ -1022,12 +1022,11 @@ func _update_goal_card() -> void:
 	if goal_title.text != goal.title:
 		goal_kicker.text = Strings.t("hud.goal_kicker", [tracker.index + 1, tracker.goals.size()])
 		goal_title.text = goal.title
-		goal_text.set_meta("raw", "")  # (the text is for another goal)
+		readout.forget(goal_text)  # (the text is for another goal)
 		readout.set_text(goal_text, goal.text, "goal text")
 	if not readout.due(goal_status, "goal"):
 		return
-	goal_status.set_meta("about", "goal")
-	goal_status.set_meta("set_at", Time.get_ticks_msec())
+	readout.stamp(goal_status, "goal")
 	goal_bar.value = goal.progress.call(dish)
 	var line: String = goal.status.call(dish)
 	if goal.hold_time > 0.0 and tracker.held > 0.0:

@@ -16,8 +16,7 @@ func set_text(label: RichTextLabel, text: String, about: String, flash := false)
 	var shown := text + ("\u0001" if flash else "")  # (what is asked for: the text, and whether its first number is flashing)
 	if label.get_meta("raw", "") == shown or not due(label, about):
 		return false
-	label.set_meta("about", about)
-	label.set_meta("set_at", Time.get_ticks_msec())
+	stamp(label, about)
 	label.set_meta("raw", shown)
 	label.text = UiText.numbers(text, "divisions" if flash else "")
 	return true
@@ -27,6 +26,17 @@ func set_text(label: RichTextLabel, text: String, about: String, flash := false)
 ## at high playback speed, where most frames change nothing, it is not worked out for nothing.
 func due(label: Control, about: String) -> bool:
 	return not (is_live.call() and label.get_meta("about", "") == about and Time.get_ticks_msec() - label.get_meta("set_at", 0) < LIVE_TEXT_MSEC)
+
+
+## Notes that a readout was just updated by the caller (a label whose text is not set through set_text): `due` then holds it for LIVE_TEXT_MSEC.
+func stamp(label: Control, about: String) -> void:
+	label.set_meta("about", about)
+	label.set_meta("set_at", Time.get_ticks_msec())
+
+
+## Makes the next set_text on a readout take its text even when it is the same as the one shown (the text is for something else now).
+func forget(label: Control) -> void:
+	label.set_meta("raw", "")
 
 
 ## set_text with the text worked out (by `make_text`) only if it is due.
