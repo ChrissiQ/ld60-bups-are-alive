@@ -66,7 +66,7 @@ func _parts_apart() -> void:
 	TestUtil.check(L.R_ID_LO < L.ANSWER_WORDS and L.R_ID_HI < L.ANSWER_WORDS, "an answer's record holds the id (a tracked bup not found is told by it)")
 	TestUtil.check(L.R_SPEED + 1 == L.R_SENSE and L.R_SENSE + 1 == L.R_METABOLISM and L.R_METABOLISM + 1 == L.R_SIZE, "the genes are four words in a row (R_SPEED + g)")
 	TestUtil.check(L.EB_SPEED + 3 == L.EB_SIZE and L.ST_SPEED + 3 == L.ST_SIZE, "the genes are in a row in a birth and in a stats sample too")
-	TestUtil.check(Genome.GENES.keys() == ["speed", "sense", "metabolism", "size"] and GpuWorld.GENE_NAMES == Genome.GENES.keys(), "the genes' order is Genome.GENES' and GpuWorld.GENE_NAMES'")
+	TestUtil.check(Genome.GENES.keys() == ["speed", "sense", "metabolism", "size"] and L.GENE_NAMES == Genome.GENES.keys(), "the genes' order is Genome.GENES' and GpuLayout.GENE_NAMES'")
 	TestUtil.check(L.ST_COUNT == 0 and L.ST_SPEED == 1 and L.ST_MUTATIONS == 6, "stats2 copies its sums 1-6 to ST_SPEED..ST_MUTATIONS")
 	TestUtil.check(L.EV_LOW_MASK == (1 << L.EV_REACH_SHIFT) - 1 and L.EV_REACH_SHIFT + 10 == L.EV_DONOR_SHIFT and L.EV_REACH_MASK == 0x3FF, "a traits word: 20 low bits, the reach word's 10, then the F factor")
 	# QIN: the counts, then their parts, in order and inside it

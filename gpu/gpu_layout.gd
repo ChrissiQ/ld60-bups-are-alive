@@ -5,8 +5,8 @@ extends RefCounted
 ## declares the names a kernel uses at the top of its GLSL (an int constant here as `const uint NAME = value;`, a slot of P as
 ## `const int P_<NAME> = slot;`), so the kernels, gpu/gpu_sim.gd, gpu/gpu_world.gd and the tools all read these. The C++ side (BupSim's
 ## export_state_bytes, bup_from_record, apply_events) has its own literals: tests/gpu_layout_test.gd checks it against this table word
-## by word. What belongs here: int constants (every one becomes a GLSL name), P_SLOTS, the record's one float marker (NO_PICTURE), and
-## the static helpers that read and write a record's words; none of it may refer to another class.
+## by word. What belongs here: int constants (every one becomes a GLSL name), P_SLOTS, the record's one float marker (NO_PICTURE) and
+## its genes' names (GENE_NAMES), and the static helpers that read and write a record's words; none of it may refer to another class.
 
 # ---- the bup record (BUPS, BUPS2, CHILD; BupSim.export_state_bytes) ------------------------------------------------------------------
 const RECORD_WORDS := 28
@@ -42,6 +42,7 @@ const R_TUMBLING := 27  ## the seconds of tumble left
 const ANSWER_WORDS := 24  ## the words of a record a pick's or a tracked bup's answer carries: all but the chemotaxis memory
 const RECORD_BYTES := RECORD_WORDS * 4
 const ANSWER_BYTES := ANSWER_WORDS * 4
+const GENE_NAMES := ["speed", "sense", "metabolism", "size"]  ## BupSim's genes in the record's order: R_SPEED + g is GENE_NAMES[g]
 const NO_PICTURE := 3e38  ## R_PX, R_PY of a bup with no last picture: no trail (any value >= 1e30 means the same)
 
 # ---- the family events (EVB, EVD; BupSim.apply_events) --------------------------------------------------------------------------------

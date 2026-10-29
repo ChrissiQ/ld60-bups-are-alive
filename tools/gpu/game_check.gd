@@ -914,7 +914,7 @@ func _frame_cost(bups: int, radius: float, nutrient := 32.0, feed := 3.0) -> voi
 		var adv := PackedFloat64Array()
 		for rep in 3:
 			for i in 150:
-				dish.gpu_world._steps_cap = 1.0e9  # (the budget held open: the frame takes the steps asked)
+				dish.gpu_world.budget.steps_cap = 1.0e9  # (the budget held open: the frame takes the steps asked)
 				var t0 := Time.get_ticks_usec()
 				var done := dish.advance(k * 18.0, 0) if k > 0 else 0.0
 				adv.append((Time.get_ticks_usec() - t0) / 1000.0)
@@ -967,7 +967,7 @@ func _gpu_fit(bups: int, radius: float, nutrient := 32.0, feed := 3.0) -> void:
 	var pops := PackedFloat64Array()
 	for k: int in [9, 18, 36, 72]:
 		for i in 24:
-			dish.gpu_world._steps_cap = 1.0e9
+			dish.gpu_world.budget.steps_cap = 1.0e9
 			var t0 := Time.get_ticks_usec()
 			var done := dish.advance(k * 18.52, 0)
 			dish.hover_at(hover_world, 4.0 * dish.pixel())
