@@ -1,10 +1,8 @@
 class_name EncyclopediaPanel
-extends PanelContainer
+extends PanelPage
 ## The encyclopedia (see Encyclopedia): a list of terms on the left, grouped under headings and searchable, and the article of the chosen one on the right, whose
 ## links go to other entries. Shown by the title screen and by the pause menu in place of what is behind it (each shows that again on `back_requested`);
 ## `show_entry` opens it on an entry, which is how a click on a band of the genome map gets here. The words are in text/strings.cfg, [encyclopedia].
-
-signal back_requested
 
 @onready var search_field: LineEdit = $Box/Columns/Index/Search
 @onready var list: VBoxContainer = $Box/Columns/Index/Scroll/List
@@ -15,7 +13,6 @@ signal back_requested
 @onready var about_body: RichTextLabel = $Box/Columns/ArticleScroll/Page/AboutBody  ## what the thing is in real life
 @onready var game_heading: Label = $Box/Columns/ArticleScroll/Page/GameHeading
 @onready var game_body: RichTextLabel = $Box/Columns/ArticleScroll/Page/GameBody  ## how it works in the game
-@onready var back_button: Button = $Box/Actions/BackButton
 
 var _buttons := {}  ## entry id -> its button in the list
 var _headings := {}  ## heading id -> its label in the list
@@ -57,7 +54,6 @@ func _ready() -> void:
 		body.meta_clicked.connect(func(meta: Variant) -> void: show_entry(str(meta)))
 	about_heading.text = Strings.t("encyclopedia.heading_about")
 	game_heading.text = Strings.t("encyclopedia.heading_game")
-	back_button.pressed.connect(back_requested.emit)
 	show_entry(Encyclopedia.all_entries()[0])
 
 
@@ -110,7 +106,3 @@ func _filter(query: String) -> void:
 		(_headings[category[0]] as Label).visible = any
 	none_found.visible = found.is_empty()
 
-
-## So the keyboard can go straight back.
-func focus_back() -> void:
-	back_button.grab_focus()

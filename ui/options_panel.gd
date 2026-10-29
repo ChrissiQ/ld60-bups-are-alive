@@ -1,15 +1,12 @@
 class_name OptionsPanel
-extends PanelContainer
+extends PanelPage
 ## The player's preferences (see UserSettings), with a Back button. Shown by the title screen and by the pause menu, in
 ## place of what is behind it, until `back_requested`.
-
-signal back_requested
 
 @onready var fullscreen_toggle: ToggleRow = $Box/Scroll/Rows/FullscreenToggle
 @onready var scale_row: SettingRow = $Box/Scroll/Rows/ScaleRow
 @onready var zoom_row: SettingRow = $Box/Scroll/Rows/ZoomRow
 @onready var motion_toggle: ToggleRow = $Box/Scroll/Rows/MotionToggle  ## ticked: the operating system decides, and the switch shows what it says
-@onready var back_button: Button = $Box/Actions/BackButton
 @onready var reset_button: Button = $Box/Actions/ResetButton  ## one reset for every setting on the panel
 
 var _syncing := false
@@ -35,7 +32,6 @@ func _ready() -> void:
 	reset_button.pressed.connect(func() -> void:
 		UserSettings.reset()
 		_sync())
-	back_button.pressed.connect(back_requested.emit)
 	visibility_changed.connect(_sync)
 	_sync()
 
@@ -72,7 +68,3 @@ func _motion_changed() -> void:
 		UserSettings.set_reduce_motion("on" if motion_toggle.button_pressed else "off")
 	_show_motion()
 
-
-## So the keyboard can go straight back.
-func focus_back() -> void:
-	back_button.grab_focus()

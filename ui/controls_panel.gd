@@ -1,16 +1,13 @@
 class_name ControlsPanel
-extends PanelContainer
+extends PanelPage
 ## The list of controls, which is also where they are changed: every action has its key on a button, and clicking it waits
 ## for the new key (Escape cancels). The keys that cannot change are listed under them. Shown by the title screen and by
 ## the pause menu (each hides what is behind it while this is up, and shows it again on `back_requested`).
 ## The names are in text/strings.cfg, [keys]; the keys themselves are KeyBindings'.
 
-signal back_requested
-
 @onready var keys_grid: GridContainer = $Box/Scroll/Keys
 @onready var message: Label = $Box/Message
 @onready var reset_button: Button = $Box/Actions/ResetButton
-@onready var back_button: Button = $Box/Actions/BackButton
 
 var _buttons := {}  ## action id -> its key button
 var _waiting := ""  ## the action whose new key is being waited for ("" for none)
@@ -46,7 +43,6 @@ func _ready() -> void:
 		text.text = Strings.t("keys.fixed_text_%d" % n)
 		text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		keys_grid.add_child(text)
-	back_button.pressed.connect(back_requested.emit)
 	reset_button.pressed.connect(func() -> void:
 		_waiting = ""
 		message.text = ""
@@ -109,7 +105,3 @@ func _input(event: InputEvent) -> void:
 func is_waiting() -> bool:
 	return _waiting != ""
 
-
-## So the keyboard can go straight back.
-func focus_back() -> void:
-	back_button.grab_focus()
