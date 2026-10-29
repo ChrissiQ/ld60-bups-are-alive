@@ -2,26 +2,14 @@ extends Node2D
 
 const BANNER_SECONDS := 7.0
 const MAX_FRAME_SECONDS := 0.1  ## the longest frame the sim will catch up on, so a hitch can't snowball
-const ZOOM_MIN := 0.002  ## low enough to fit the largest dish (90000 µm in radius) in a window
-const ZOOM_MAX := 12.0  ## close enough that a bup (a few µm) fills a good part of the window
-const ZOOM_BUTTON_STEP := 1.25
-const ZOOM_WHEEL_STEP := 1.1
-const ZOOM_PINCH_GAIN := 1.0  ## a trackpad pinch zooms by its own factor, to this power
-const ZOOM_TRACKPAD_SCROLL := 0.05  ## a two-finger scroll zooms by ZOOM_WHEEL_STEP to the power of this for each unit it moves
-const PAINT_MIN_PIXELS := 24.0  ## the least screen distance between two places of a drag with a brush tool (so that a small brush does not stamp every pixel)
-const PAINT_MAX_STEPS := 60  ## the most places one pointer movement makes (a fast sweep across the dish is not worth more than this)
-const PAN_KEY_PIXELS := 600.0  ## screen pixels a second the view moves while a pan key (W, A, S or D) is held
-const FIT_MARGIN := 24.0  ## screen pixels kept clear round the dish when framing it in the stage
 const MIN_TABS_WIDTH := 140.0  ## the least the dish tabs are given before the layer toggles make way for them
 const VITALS_MAX_SHARE := 0.55  ## the most of the window's width the top bar's readout may take
-const TRAY_RESERVE := 48.0  ## at the top of the stage, room for the tool options that open there (kept whether they are open or not, so choosing a tool never moves the dish)
 const TUTORIAL_ZOOM := 6.0  ## how close the tutorial brings the camera to a bup it asks the player to click
 const TUTORIAL_BUP_PIXELS := 18.0  ## the lit square round that bup is this far out on each side
 const MAX_DISHES := 20  ## the most dishes at once (the strip holds that many)
 const DISH_SPACING := 4.0e5  ## µm between the centres of the dishes in the shared world (clear of the largest dish, 90000 µm in radius, either side). They sit in a grid DISH_COLUMNS wide so no coordinate grows large: the renderer's single-precision positions would shake what is drawn far from the origin when zoomed in
 const DISH_COLUMNS := 5
 const VIEW_BITS := 19  ## render layers there are for dishes (the 2D world has twenty and the screen keeps the first): dishes this many places apart share one
-const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) still counts as pointing at it
 
 @onready var dish: Dish = $Dish
 @onready var camera: Camera2D = $Camera
@@ -77,7 +65,10 @@ var holds: PlayHolds  ## what holds the game besides the player: the pipette's t
 var _pipette_hours := 0.0  ## the pipette timer: the game pauses for the pipette every this many simulated hours (0: off)
 var _pipette_clock := 0.0  ## simulated seconds since the last pause for the pipette
 var _pipette_pulse: Tween
-var tool := Toolbar.Tool.SELECT  ## kept in step with the toolbar's selection (see _on_tool_selected)
+var stage_input := StageInput.new()  ## the camera and the pointer on the stage
+var tool: Toolbar.Tool:  ## the selected tool (kept in step with the toolbar's selection: see _on_tool_selected)
+	get:
+		return stage_input.tool
 var sim_speed := 1.0  ## seconds of simulation per real second (the toolbar sets it)
 var achieved_speed := 1.0  ## what the simulation actually managed lately: lower than sim_speed when the frame budget cut a step short
 var paused := false
@@ -90,28 +81,23 @@ var menu_open: bool:  ## the Escape menu is up: the game is frozen behind it and
 var readout := Readout.new()  ## how the readouts are rewritten (see Readout)
 var inspector := Inspector.new()  ## the panels about what is picked, and the hover card
 var lineage := LineageView.new()  ## the views opened on bups (info, lineage) and the lineage list
-var _pointer_stamp := []  ## what the hover and placement preview were last worked out from
 var _tutorial_bup := -1  ## the bup the tour asked the player to pick, once it has set the view up for that (-1: it has not)
 var _tutorial_watched_before: Array[int] = []  ## who was on the watch list when the tour began, so it takes off only whom it put there
-var _view_moved := false  ## the view was panned or zoomed by hand: a change of the window does not frame the dish again
-var following_id := -1  ## the bup the camera is keeping in the middle of the view, or -1
 var _banner_left := 0.0
-var _hover_point := Vector2.ZERO  ## the spot in the dish the pointer is over, for the select tool's readout
-var _hovering_point := false
 
 # Left/middle-button press tracking, to tell a click from a drag.
-var _press_button := MOUSE_BUTTON_NONE
-var _press_position := Vector2.ZERO
-var _dragging := false
-var _painting := false  ## the left button is down with a brush tool: the pointer's path is painted, and does not pan
-var _paint_last := Vector2.ZERO  ## where the brush last placed something (world position)
-var _drag_threshold: float = ProjectSettings.get_setting("gui/common/drag_threshold", 10)
 
 
 func _ready() -> void:
 	UserSettings.ensure_applied()
 	holds = PlayHolds.new(toolbar)
 	scheduler = DishScheduler.new(dishes)
+	stage_input.host = self
+	stage_input.camera = camera
+	stage_input.stage = stage
+	stage_input.tool_options = tool_options
+	stage_input.dish = dish
+	stage_input.clicked.connect(_click)
 	lineage.dishes = dishes
 	lineage.numbers = _dish_numbers
 	lineage.dish = dish
@@ -119,15 +105,15 @@ func _ready() -> void:
 	inspector.dish = dish
 	inspector.number_of = func(d: Dish) -> int: return _dish_numbers[d]
 	inspector.bind(self, lineage, readout)
-	inspector.follow_pressed.connect(_toggle_follow)
+	inspector.follow_pressed.connect(stage_input.toggle_follow)
 	inspector.info_genome.entry_requested.connect(_open_encyclopedia)
-	lineage.info_opened.connect(func() -> void: following_id = -1)
+	lineage.info_opened.connect(stage_input.stop_following)
 	_register_dish(dish)
 	dish_strip.dish_chosen.connect(set_main_dish)
 	tracker.goal_completed.connect(_on_goal_completed)
 	toolbar.tool_selected.connect(_on_tool_selected)
-	toolbar.zoom_in_requested.connect(_zoom_by.bind(ZOOM_BUTTON_STEP))
-	toolbar.zoom_out_requested.connect(_zoom_by.bind(1.0 / ZOOM_BUTTON_STEP))
+	toolbar.zoom_in_requested.connect(stage_input.zoom_by.bind(StageInput.ZOOM_BUTTON_STEP))
+	toolbar.zoom_out_requested.connect(stage_input.zoom_by.bind(1.0 / StageInput.ZOOM_BUTTON_STEP))
 	tool_options.pick_mode_selected.connect(_on_pick_mode_selected)
 	tool_options.pipette_timer_changed.connect(_set_pipette_timer)
 	toolbar.speed_selected.connect(func(multiplier: float) -> void:
@@ -158,7 +144,7 @@ func _ready() -> void:
 		for d in dishes:
 			d.show_layer(layer, shown))
 	watch_list.bup_chosen.connect(_open_watched)
-	stage.resized.connect(_on_stage_resized)
+	stage.resized.connect(stage_input.on_stage_resized)
 	get_viewport().size_changed.connect(_adapt_layout)
 	_adapt_layout()
 	graph_controls.setup(graph)
@@ -181,11 +167,11 @@ func _ready() -> void:
 		_begin_dish()
 	else:
 		tracker.from_dict(data["goals"])
-		_fit_camera()
+		stage_input.fit_camera()
 	_sync_tool_locks()
 	layers_panel.sync_from(dish)
 	tool_options.set_husks_available(dish.has_husks())
-	_refit_when_laid_out.call_deferred()
+	stage_input.refit_when_laid_out.call_deferred()
 	tutorial.closed.connect(_on_tutorial_closed)
 	if Session.tutorial_wanted:
 		Session.tutorial_wanted = false
@@ -200,7 +186,7 @@ func _begin_dish() -> void:
 	dish.strike(Session.free_start if free_mode else null)
 	if not free_mode and tracker.index >= 1:
 		dish.upkeep_factor = Dish.GOAL_UPKEEP_FACTOR  # (strike resets it: experiment 2 and after costs what it did)
-	_fit_camera()
+	stage_input.fit_camera()
 	if free_mode:
 		toolbar.set_paused(true)  # the playground starts paused so you can set the scene
 
@@ -226,30 +212,6 @@ func _set_paused(is_paused: bool) -> void:
 		_retire_extinct.call_deferred()  # (play was resumed: the dish that died out goes)
 
 
-## Frame the whole dish in the stage (the free middle of the screen: the layout leaves it clear), but never zoom in past 1:1.
-func _fit_camera() -> void:
-	_view_moved = false
-	var view := get_viewport_rect().size
-	var area := Rect2(Vector2.ZERO, view)
-	if is_node_ready() and stage.size.x > 0.0:
-		area = stage.get_global_rect()
-		area = Rect2(area.position + Vector2(0.0, TRAY_RESERVE), area.size - Vector2(0.0, TRAY_RESERVE))
-	var room := minf((area.size.x - 2.0 * FIT_MARGIN) * 0.5, (area.size.y - 2.0 * FIT_MARGIN) * 0.5)
-	room = maxf(room, 40.0)
-	camera.zoom = Vector2.ONE * clampf(room / dish.radius, ZOOM_MIN, 1.0)
-	var shift := area.get_center() - view * 0.5  # (screen pixels the dish's centre sits from the window's centre)
-	camera.position = dish.global_position - shift / camera.zoom.x
-
-
-## The panels know their sizes a frame or two after the screen is made: frame the dish again then (unless the player has moved the view).
-func _refit_when_laid_out() -> void:
-	var before := camera.position
-	await get_tree().process_frame
-	await get_tree().process_frame
-	if is_inside_tree() and camera.position.is_equal_approx(before) and following_id < 0:
-		_fit_camera()
-
-
 ## Extinct colonies aren't saved, so a wipe-out never overwrites a good save.
 func save_game() -> void:
 	if free_mode or dish.population() == 0:
@@ -265,7 +227,7 @@ func _notification(what: int) -> void:
 func _process(delta: float) -> void:
 	holds.enforce()  # (the game waits while the tour is up, even on a step that asks the player to act)
 	if not menu_open and not tutorial.active:
-		_pan_with_keys(delta)
+		stage_input.pan_with_keys(delta)
 	if not paused and not menu_open:
 		# The playback speed is how many seconds of simulation pass per real second.
 		var frame := minf(delta, MAX_FRAME_SECONDS)
@@ -281,10 +243,10 @@ func _process(delta: float) -> void:
 	_banner_left = maxf(0.0, _banner_left - delta)
 	if _banner_left == 0.0:
 		banner.text = ""
-	_update_pointer()
+	stage_input.update_pointer()
 	_update_info_panel()
 	inspector.place_hover_card()
-	_follow_selected()
+	stage_input.follow_selected()
 	dish.refresh_drawing()
 	graph.refresh()
 	_show_graph_choices()
@@ -296,62 +258,9 @@ func _process(delta: float) -> void:
 	_sync_bloom_panel()
 
 
-## What the select tool is over at a world point, under the pick mode: a bup, a source, or else the medium itself.
-func _hover_dish(world: Vector2) -> void:
-	dish.hover_at(world, _pick_slack())
-	_hover_point = world
-	_hovering_point = dish.looks_at_medium()
-
-
-## Hover highlight (select tool) and the placement preview (nutrient tool).
-func _update_pointer() -> void:
-	# Nothing to look at again when neither the pointer, the view, the dish nor the tool has changed.
-	var stamp := [get_viewport().get_mouse_position(), camera.position, camera.zoom, dish.get_instance_id(), dish.time, dish.edit_count, dish.radius, tool, _dragging, get_viewport().gui_get_hovered_control() != null, tool_options.nutrient_count(), tool_options.brush_radius(), dish.pick_mode]
-	if stamp == _pointer_stamp:
-		return
-	_pointer_stamp = stamp
-	dish.clear_hover()
-	dish.place_preview_radius = -1.0
-	_hovering_point = false
-	# Skip while the mouse is over the toolbar/panels, or mid-drag.
-	if _dragging or get_viewport().gui_get_hovered_control() != null:
-		return
-	var world := get_global_mouse_position()
-	if world.distance_to(dish.global_position) > dish.radius:
-		return
-	match tool:
-		Toolbar.Tool.SELECT:
-			_hover_dish(world)
-		Toolbar.Tool.NUTRIENT:
-			if dish.can_place_at(world):  # no ring where a click would do nothing
-				dish.place_preview_pos = world
-				dish.place_preview_radius = Dish.scatter_radius(tool_options.nutrient_count())
-		Toolbar.Tool.SOURCE:
-			if dish.can_place_at(world):
-				dish.place_preview_pos = world
-				dish.place_preview_radius = dish.source_draw_radius()
-				dish.place_preview_marker = true  # a ring like a selection's: same size at any zoom
-		Toolbar.Tool.PLANKTON:
-			if dish.can_place_at(world):
-				dish.place_preview_pos = world
-				dish.place_preview_radius = dish.plankton_draw_radius()
-				dish.place_preview_marker = true
-		Toolbar.Tool.ERASE:
-			dish.place_preview_pos = world
-			dish.place_preview_radius = tool_options.brush_radius()
-			dish.place_preview_erases = true
-		Toolbar.Tool.PIPETTE:
-			dish.place_preview_pos = world
-			dish.place_preview_radius = tool_options.pipette_radius()
-
-
-func _pick_slack() -> float:
-	return PICK_SLACK_PIXELS / camera.zoom.x
-
-
 ## The panels about what is picked, brought up to date.
 func _update_info_panel() -> void:
-	inspector.update(following_id >= 0, _hover_point if _hovering_point else null)
+	inspector.update(stage_input.following_id >= 0, stage_input.hover_point if stage_input.hovering_point else null)
 
 
 ## An entry of the watch list was clicked: that bup (living or not), in whichever dish it is in, in the inspect panel.
@@ -362,21 +271,7 @@ func _open_watched(watched_in: Dish, id: int) -> void:
 	toolbar.select_tool(Toolbar.Tool.SELECT)
 	tool_options.pick_buttons[Dish.PickMode.ALL].button_pressed = true  # (a mode that skips bups would let go of it again)
 	dish.selected.bup = id
-	following_id = -1
-
-
-## Follow: the camera keeps the selected bup in the middle of the view until the player stops it,
-## pans, selects something else, or the bup dies.
-func _toggle_follow() -> void:
-	following_id = -1 if following_id >= 0 else dish.selected.bup
-	_follow_selected()
-
-
-func _follow_selected() -> void:
-	if following_id >= 0 and (following_id != dish.selected.bup or not dish.has_bup(following_id)):
-		following_id = -1
-	if following_id >= 0:
-		camera.position = dish.bup_world_pos(following_id)
+	stage_input.stop_following()
 
 
 ## The select tool now looks at something else: a selection of a kind it no longer looks at is let go.
@@ -387,7 +282,7 @@ func _on_pick_mode_selected(mode: Dish.PickMode) -> void:
 func _on_tool_selected(new_tool: Toolbar.Tool) -> void:
 	if new_tool != Toolbar.Tool.SELECT and (not lineage.is_empty() or dish.has_selected_thing()):
 		_clear_selection()  # using another tool closes whatever was open on a bup or source
-	tool = new_tool
+	stage_input.tool = new_tool
 	tool_options.show_for(tool)
 	match tool:
 		Toolbar.Tool.PAN:
@@ -410,7 +305,7 @@ func debug_state() -> Dictionary:
 		"tutorial_step": tutorial.index if tutorial.active else -1,
 		"tool": Toolbar.Tool.keys()[tool],
 		"zoom": camera.zoom.x,
-		"following": following_id,
+		"following": stage_input.following_id,
 		"views_open": lineage.depth(),
 		"camera_position": [camera.position.x, camera.position.y],
 		"camera_follow_precision_um": absf(camera.position.x) * 6.0e-8,  # (the single-precision step of the renderer's coordinates at the camera: a zoomed-in view shakes by it times the zoom)
@@ -443,18 +338,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		if UiInput.is_escape_press(event) and not pause_menu.close_panel():
 			_close_menu()
 		return
-	if event is InputEventMouseButton:
-		_on_mouse_button(event)
-	elif event is InputEventMouseMotion:
-		_on_mouse_motion(event)
-	elif event is InputEventMagnifyGesture:  # a trackpad pinch: apart zooms in
-		if not _over_hud():
-			_zoom_by(pow(event.factor, ZOOM_PINCH_GAIN))
-	elif event is InputEventPanGesture:  # a trackpad's two-finger scroll, which stands in for the mouse wheel (up zooms in)
-		if not _over_hud():
-			_zoom_by(pow(ZOOM_WHEEL_STEP, -event.delta.y * ZOOM_TRACKPAD_SCROLL * UserSettings.zoom_speed))
-	elif event is InputEventKey and event.pressed and not event.echo:
-		_on_key(event)
+	if event is InputEventKey:
+		if event.pressed and not event.echo:
+			_on_key(event)
+	else:
+		stage_input.handle(event)
 
 
 ## A band of the genome map was clicked: the game holds and the encyclopedia opens on the entry of its gene.
@@ -481,10 +369,10 @@ func _on_key(event: InputEventKey) -> void:
 	elif KeyBindings.matches("graph_show", event):
 		graph_section.open = not graph_section.open
 	elif KeyBindings.matches("frame", event):
-		_fit_camera()
+		stage_input.fit_camera()
 	elif KeyBindings.matches("follow", event):
 		if dish.selected.bup >= 0 and dish.has_bup(dish.selected.bup):
-			_toggle_follow()
+			stage_input.toggle_follow()
 	elif KeyBindings.matches("watch", event):
 		if dish.selected.bup >= 0 and dish.has_record(dish.selected.bup):
 			inspector.toggle_watch()
@@ -512,7 +400,7 @@ func _escape() -> void:
 func _clear_selection() -> void:
 	lineage.clear()
 	dish.clear_selection()
-	following_id = -1
+	stage_input.stop_following()
 
 
 func _open_menu() -> void:
@@ -789,10 +677,9 @@ func set_main_dish(d: Dish) -> void:
 	if d == dish or not dishes.has(d):
 		return
 	_clear_selection()
-	following_id = -1
-	dish.view_zoom = camera.zoom.x  # (where it was being looked at, for when the view comes back)
-	dish.view_position = camera.position
+	stage_input.remember_view()
 	dish = d
+	stage_input.dish = d
 	lineage.dish = d
 	inspector.dish = d
 	_apply_view_mask()
@@ -803,11 +690,7 @@ func set_main_dish(d: Dish) -> void:
 	layers_panel.sync_from(d)
 	tool_options.set_husks_available(d.has_husks())
 	dish_strip.light(d)
-	if d.view_zoom > 0.0:
-		camera.zoom = Vector2.ONE * d.view_zoom
-		camera.position = d.view_position
-	else:
-		_fit_camera()
+	stage_input.restore_view()
 
 
 func _resize_dish(target: Dish, new_radius: float) -> void:
@@ -815,7 +698,7 @@ func _resize_dish(target: Dish, new_radius: float) -> void:
 		return
 	target.resize_to(new_radius)
 	if target == dish:
-		camera.position = dish.global_position + (camera.position - dish.global_position).limit_length(dish.radius)
+		stage_input.keep_on_dish()
 
 
 ## A goal-mode experiment is saved on the way out; free mode is not saved.
@@ -827,112 +710,10 @@ func _quit_to_menu() -> void:
 # Click vs. drag: remember where the button went down. If the pointer travels past the
 # engine's drag threshold the gesture is a pan; if the button comes back up first it is a
 # click. The middle button, and the left button with the pan tool, always pan.
-func _on_mouse_button(event: InputEventMouseButton) -> void:
-	match event.button_index:
-		MOUSE_BUTTON_WHEEL_UP:
-			if event.pressed and not _over_hud():
-				_zoom_by(pow(ZOOM_WHEEL_STEP, UserSettings.zoom_speed))
-		MOUSE_BUTTON_WHEEL_DOWN:
-			if event.pressed and not _over_hud():
-				_zoom_by(pow(ZOOM_WHEEL_STEP, -UserSettings.zoom_speed))
-		MOUSE_BUTTON_LEFT, MOUSE_BUTTON_MIDDLE:
-			if event.pressed:
-				get_viewport().gui_release_focus()  # so keys go to shortcuts, not the nutrient box
-				_press_button = event.button_index
-				_press_position = event.position
-				_dragging = event.button_index == MOUSE_BUTTON_MIDDLE or tool == Toolbar.Tool.PAN
-				_painting = event.button_index == MOUSE_BUTTON_LEFT and _is_brush(tool)
-				if _painting:  # (a brush tool acts where the button goes down, and goes on along the drag: it never pans)
-					_paint_last = make_input_local(event).position
-					_click(_paint_last)
-			elif event.button_index == _press_button:
-				if not _dragging and not _painting:
-					_click(make_input_local(event).position)
-				_press_button = MOUSE_BUTTON_NONE
-				_dragging = false
-				_painting = false
-
-
-## Whether the pointer is over one of the HUD's panels or lists: a wheel or a trackpad scroll there is the list's, and
-## never the zoom's, even when the list has nowhere left to scroll.
-func _over_hud() -> bool:
-	return get_viewport().gui_get_hovered_control() != null
-
-
-func _on_mouse_motion(event: InputEventMouseMotion) -> void:
-	if _press_button == MOUSE_BUTTON_NONE:
-		return
-	# The release may have been eaten by the GUI (or happened outside the window), so trust the
-	# button state this event reports rather than waiting for a release we may never see.
-	var held_mask := MOUSE_BUTTON_MASK_MIDDLE if _press_button == MOUSE_BUTTON_MIDDLE else MOUSE_BUTTON_MASK_LEFT
-	if event.button_mask & held_mask == 0:
-		_press_button = MOUSE_BUTTON_NONE
-		_dragging = false
-		_painting = false
-		return
-	if _painting:
-		_paint_to(make_input_local(event).position)
-		return
-	if not _dragging and event.position.distance_to(_press_position) > _drag_threshold:
-		_dragging = true
-	if _dragging:
-		_pan_camera(-event.relative / camera.zoom.x)
-
-
-## The tools that place something along a drag (the nutrient dose, the plankton and the eraser), and so do not pan with the left button.
-func _is_brush(which: Toolbar.Tool) -> bool:
-	return which == Toolbar.Tool.NUTRIENT or which == Toolbar.Tool.PLANKTON or which == Toolbar.Tool.ERASE
-
-
-## The world distance between two places of a drag: the brush's own width, and never less than PAINT_MIN_PIXELS on the screen.
-func _paint_spacing() -> float:
-	var width := 0.0
-	match tool:
-		Toolbar.Tool.ERASE:
-			width = tool_options.brush_radius()
-		Toolbar.Tool.NUTRIENT:
-			width = Dish.scatter_radius(tool_options.nutrient_count())
-		Toolbar.Tool.PLANKTON:
-			width = Dish.PLANKTON_PATCH_RADIUS
-	return maxf(width, PAINT_MIN_PIXELS / camera.zoom.x)
-
-
-## Carries the brush from where it last placed something to `world`, placing at every spacing along the way.
-func _paint_to(world: Vector2) -> void:
-	var spacing := _paint_spacing()
-	var steps := 0
-	while _paint_last.distance_to(world) >= spacing and steps < PAINT_MAX_STEPS:
-		_paint_last = _paint_last.move_toward(world, spacing)
-		_click(_paint_last)
-		steps += 1
-	if steps == PAINT_MAX_STEPS:
-		_paint_last = world  # (a sweep past the cap carries on from here, not from where it fell short)
-
-
-## Moves the view by `world_delta`, but never off the dish. Panning by hand takes over from following.
-func _pan_camera(world_delta: Vector2) -> void:
-	_view_moved = true
-	following_id = -1
-	camera.position = dish.global_position + (camera.position + world_delta - dish.global_position).limit_length(dish.radius)
-
-
-## W, A, S and D move the view while held. The keys are taken by their place on the keyboard, so they are the same four
-## on any layout; nothing happens while a text box has the keyboard, or with Ctrl, Alt or Cmd held (those are shortcuts).
-func _pan_with_keys(delta: float) -> void:
-	var focus := get_viewport().gui_get_focus_owner()
-	if focus is LineEdit or focus is TextEdit or Input.is_key_pressed(KEY_CTRL) or Input.is_key_pressed(KEY_ALT) or Input.is_key_pressed(KEY_META):
-		return
-	var direction := Vector2(
-		float(Input.is_key_pressed(KeyBindings.key("pan_right"))) - float(Input.is_key_pressed(KeyBindings.key("pan_left"))),
-		float(Input.is_key_pressed(KeyBindings.key("pan_down"))) - float(Input.is_key_pressed(KeyBindings.key("pan_up"))))
-	if direction != Vector2.ZERO:
-		_pan_camera(direction.normalized() * PAN_KEY_PIXELS * delta / camera.zoom.x)
-
-
 func _click(world: Vector2) -> void:
 	match tool:
 		Toolbar.Tool.SELECT:
-			dish.select_at(world, _pick_slack())
+			dish.select_at(world, stage_input.pick_slack())
 		Toolbar.Tool.NUTRIENT:
 			dish.drop_nutrients(world, tool_options.nutrient_count())
 		Toolbar.Tool.SOURCE:
@@ -942,50 +723,20 @@ func _click(world: Vector2) -> void:
 				tool_options.pick_buttons[Dish.PickMode.ALL].button_pressed = true  # (a mode that skips sources would hide the one just placed)
 				dish.selected.bup = -1
 				dish.selected.source = dish.sources[-1]
-			elif world.distance_to(dish.global_position) <= dish.radius:
+			elif dish.contains(world):
 				if dish.sources.size() >= Dish.MAX_SOURCES:
 					_show_banner(Strings.t("hud.banner_source_limit"), 1.5)
 				else:
 					_show_banner(Strings.t("hud.banner_edge"), 1.5)
 		Toolbar.Tool.PLANKTON:
-			if not dish.place_plankton(world) and world.distance_to(dish.global_position) <= dish.radius:
+			if not dish.place_plankton(world) and dish.contains(world):
 				_show_banner(Strings.t("hud.banner_plankton_limit" if dish.plankton.size() >= Dish.MAX_PLANKTON else "hud.banner_edge"), 1.5)
 		Toolbar.Tool.ERASE:
-			if world.distance_to(dish.global_position) <= dish.radius:
+			if dish.contains(world):
 				dish.erase_nutrient(world, tool_options.brush_radius())
 		Toolbar.Tool.PIPETTE:
-			if world.distance_to(dish.global_position) <= dish.radius:
+			if dish.contains(world):
 				pipette(world, tool_options.pipette_radius())
-
-
-## Zooms about the selected bup or source, so it stays where it is on the screen. With nothing selected, or the
-## selection out of view, it zooms about the middle of the view.
-func _zoom_by(factor: float) -> void:
-	_view_moved = true
-	var old_zoom := camera.zoom.x
-	camera.zoom = Vector2.ONE * clampf(old_zoom * factor, ZOOM_MIN, ZOOM_MAX)
-	var anchor: Variant = _selected_world_pos()
-	if anchor != null and _on_screen(anchor, old_zoom):  # (a selection scrolled out of view is no anchor)
-		camera.position = anchor - (anchor - camera.position) * old_zoom / camera.zoom.x
-
-
-## Whether a world position is inside the window at this zoom.
-func _on_screen(world_pos: Vector2, zoom: float) -> bool:
-	var view := get_viewport_rect().size
-	return Rect2(Vector2.ZERO, view).has_point((world_pos - camera.position) * zoom + view * 0.5)
-
-
-## Where the selected bup or source is in the world, or null when nothing is selected.
-func _selected_world_pos() -> Variant:
-	if dish.has_bup(dish.selected.bup):
-		return dish.bup_world_pos(dish.selected.bup)
-	if dish.selected.source != null:
-		return dish.selected.source.pos
-	if dish.selected.plankton != null:
-		return dish.global_position + dish.selected.plankton.pos
-	if dish.selected.husk != Dish.NO_HUSK:
-		return dish.global_position + dish.selected.husk
-	return null
 
 
 func _show_banner(text: String, seconds: float) -> void:
@@ -1181,8 +932,7 @@ func _tutorial_show_bup() -> void:
 	if ids.is_empty():
 		return
 	_tutorial_bup = dish.selected.bup if dish.has_bup(dish.selected.bup) else ids[0]  # (coming back to the step keeps the bup already chosen)
-	camera.zoom = Vector2.ONE * TUTORIAL_ZOOM
-	camera.position = dish.global_position + (dish.bup_world_pos(_tutorial_bup) - dish.global_position).limit_length(dish.radius)
+	stage_input.look_at_world(dish.bup_world_pos(_tutorial_bup), TUTORIAL_ZOOM)
 
 
 ## The lineage step comes with the lineage open, and the step that asks for it with it shut, whichever way they are reached.
@@ -1211,7 +961,7 @@ func _on_tutorial_closed(_completed: bool) -> void:
 				dish.unwatch_bup(id)
 		_tutorial_bup = -1
 		_clear_selection()
-		_fit_camera()
+		stage_input.fit_camera()
 	holds.release(&"tour")
 
 
@@ -1237,12 +987,6 @@ func _fit_top_bar() -> void:
 	if tabs_full > 0.0:
 		dish_strip.max_width = maxf(left_with_views if show_views else left_with_views + views_w + 12.0, 60.0)
 	views.visible = show_views
-
-
-## The stage changed size (the window, or the interface size): the dish is framed again, unless the view has been moved.
-func _on_stage_resized() -> void:
-	if following_id < 0 and not _view_moved:
-		_fit_camera()
 
 
 ## The top bar's bups: how many there are, and (in free mode, where you can change it) the dish's bup limit.

@@ -422,9 +422,9 @@ func draw_overlay(canvas: CanvasItem) -> void:
 	if dish.hovered.husk != Dish.NO_HUSK and dish.hovered.husk != dish.selected.husk:
 		draw_ring(canvas, dish.hovered.husk, dish.husk_draw_size(), Color(1, 1, 1, 0.9))
 	if dish.place_preview_radius >= 0.0:
-		var brush := Color(1, 0.3, 0.25, 0.9) if dish.place_preview_erases else Color(1, 0.9, 0.5, 0.8)
+		var brush := Color(1, 0.3, 0.25, 0.9) if dish.place_preview_kind == Dish.Preview.ERASE else Color(1, 0.9, 0.5, 0.8)
 		var at := dish.place_preview_pos - dish.global_position
-		if dish.place_preview_marker:
+		if dish.place_preview_kind == Dish.Preview.MARKER:
 			draw_ring(canvas, at, dish.place_preview_radius, brush)
 		else:
 			canvas.draw_arc(at, maxf(dish.place_preview_radius, 3.0 * px), 0.0, TAU, 32, brush, px)

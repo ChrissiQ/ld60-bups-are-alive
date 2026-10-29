@@ -37,7 +37,7 @@ func _drag(m: Node, from: Vector2, delta: Vector2, button: MouseButton = MOUSE_B
 ## Puts the pointer over a point of the dish, as far as the select tool's readout is concerned.
 func _hover_over(m: Node, world: Vector2) -> void:
 	m.dish.clear_hover()
-	m._hover_dish(world)
+	m.stage_input.hover_at(world)
 	m._update_info_panel()
 
 
@@ -157,7 +157,7 @@ func _init() -> void:
 	var before: float = TestUtil.units(m.dish)
 	var cam_before: Vector2 = m.camera.position
 	_drag(m, centre, Vector2(60, 0))
-	var spacing: float = m._paint_spacing()
+	var spacing: float = m.stage_input.paint_spacing()
 	var places := 1 + int(floor(60.0 / m.camera.zoom.x / spacing))  # (where the button went down, and every spacing along the way)
 	var dropped_doses := roundi((TestUtil.units(m.dish) - before) / 30.0)
 	TestUtil.check(absi(dropped_doses - places) <= 1 and dropped_doses >= 2, "a drag drops a dose every %.0f µm along its path: %d doses (about %d expected)" % [spacing, dropped_doses, places])
@@ -191,10 +191,10 @@ func _init() -> void:
 	cam_before = m.camera.position
 	_button(m, MOUSE_BUTTON_LEFT, true, centre)
 	_motion(m, centre + Vector2(30, 0), Vector2(30, 0))
-	TestUtil.check(m._dragging and m.camera.position.x < cam_before.x, "a held drag pans")
+	TestUtil.check(m.stage_input.is_dragging() and m.camera.position.x < cam_before.x, "a held drag pans")
 	var cam_dragged: Vector2 = m.camera.position
 	_motion(m, centre + Vector2(60, 0), Vector2(30, 0), 0)  # the button is no longer down, but no release reached us
-	TestUtil.check(m._press_button == MOUSE_BUTTON_NONE and not m._dragging, "motion with no button held cancels a stuck drag")
+	TestUtil.check(m.stage_input._press_button == MOUSE_BUTTON_NONE and not m.stage_input.is_dragging(), "motion with no button held cancels a stuck drag")
 	_motion(m, centre + Vector2(90, 0), Vector2(30, 0), 0)
 	TestUtil.check(m.camera.position.is_equal_approx(cam_dragged), "...and the camera stops following the cursor")
 	m.camera.position = m.dish.global_position
@@ -342,13 +342,13 @@ func _init() -> void:
 	TestUtil.check(is_equal_approx(m.camera.zoom.x, 1.0), "...and down zooms back out")
 	m.camera.zoom = Vector2.ONE
 	m.toolbar.zoom_in_button.pressed.emit()
-	TestUtil.check(is_equal_approx(m.camera.zoom.x, m.ZOOM_BUTTON_STEP), "zoom-in button steps zoom")
+	TestUtil.check(is_equal_approx(m.camera.zoom.x, StageInput.ZOOM_BUTTON_STEP), "zoom-in button steps zoom")
 	for i in 100:
 		_button(m, MOUSE_BUTTON_WHEEL_UP, true, centre)
-	TestUtil.check(is_equal_approx(m.camera.zoom.x, m.ZOOM_MAX), "zoom clamps at max")
+	TestUtil.check(is_equal_approx(m.camera.zoom.x, StageInput.ZOOM_MAX), "zoom clamps at max")
 	for i in 200:
 		_button(m, MOUSE_BUTTON_WHEEL_DOWN, true, centre)
-	TestUtil.check(is_equal_approx(m.camera.zoom.x, m.ZOOM_MIN), "zoom clamps at min")
+	TestUtil.check(is_equal_approx(m.camera.zoom.x, StageInput.ZOOM_MIN), "zoom clamps at min")
 	m.camera.zoom = Vector2.ONE
 	# Zooming keeps a selected bup or source where it is on the screen; with nothing selected it zooms about the middle.
 	m.dish.selected.bup = -1
@@ -403,22 +403,22 @@ func _init() -> void:
 	m.dish.sim.set_bup_pos(tracked, Vector2(100, 100))
 	await process_frame
 	await process_frame
-	TestUtil.check(m.following_id == -1 and not m.camera.position.is_equal_approx(m.dish.bup_world_pos(tracked)), "panning by hand stops following")
+	TestUtil.check(m.stage_input.following_id == -1 and not m.camera.position.is_equal_approx(m.dish.bup_world_pos(tracked)), "panning by hand stops following")
 	m.inspector.follow_button.pressed.emit()
 	m.inspector.follow_button.pressed.emit()
-	TestUtil.check(m.following_id == -1 and m.inspector.follow_button.text == "Follow", "the button toggles following off")
+	TestUtil.check(m.stage_input.following_id == -1 and m.inspector.follow_button.text == "Follow", "the button toggles following off")
 	m.inspector.follow_button.pressed.emit()
 	var other: int = m.dish.add_bup(m.dish.global_position + Vector2(-50, -50), Genome.founder(), 30.0)
 	m.dish.selected.bup = other
 	await process_frame
 	await process_frame
-	TestUtil.check(m.following_id == -1, "selecting another bup stops following the first")
+	TestUtil.check(m.stage_input.following_id == -1, "selecting another bup stops following the first")
 	m.dish.selected.bup = tracked
 	m.inspector.follow_button.pressed.emit()
 	m.dish.remove_bup(tracked)
 	await process_frame
 	await process_frame
-	TestUtil.check(m.following_id == -1 and not m.inspector.follow_button.visible, "following ends when the bup dies")
+	TestUtil.check(m.stage_input.following_id == -1 and not m.inspector.follow_button.visible, "following ends when the bup dies")
 	m.dish.remove_bup(other)
 	m.dish.selected.bup = -1
 	m.toolbar.set_paused(false)
@@ -723,9 +723,9 @@ func _init() -> void:
 	m.dish.add_bup(m.dish.global_position + Vector2(40, 40), Genome.founder(), 30.0)
 	var picked: int = m.dish.bup_ids()[0]
 	m.dish.selected.bup = picked
-	m.following_id = picked
+	m.stage_input.following_id = picked
 	await _key(KEY_ESCAPE)
-	TestUtil.check(m.dish.selected.bup == -1 and m.following_id == -1 and not m.menu_open and not m.pause_menu.visible, "Escape with something selected lets go of it and does not open the menu")
+	TestUtil.check(m.dish.selected.bup == -1 and m.stage_input.following_id == -1 and not m.menu_open and not m.pause_menu.visible, "Escape with something selected lets go of it and does not open the menu")
 	m.dish.place_source(m.dish.global_position + Vector2(-60, 20), 2.0)
 	m.dish.selected.source = m.dish.sources[0]
 	await _key(KEY_ESCAPE)

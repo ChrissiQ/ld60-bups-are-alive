@@ -166,10 +166,10 @@ var _hover_pos := Vector2.ZERO  ## where the pointer was when `hovered` was pick
 var selected := DishPick.new()  ## what was clicked (`selection_changed` fires when its bup changes)
 var hovered := DishPick.new()  ## what is under the pointer
 const NO_HUSK := DishPick.NO_HUSK
+enum Preview { BRUSH, ERASE, MARKER }  ## what the placement preview shows: a circle the size of what a click scatters, the eraser's brush, or a single point (a source about to be placed: drawn as a GUI ring, like a selection)
 var place_preview_pos := Vector2.ZERO
 var place_preview_radius := -1.0  ## < 0 hides the placement preview
-var place_preview_erases := false  ## the preview is the eraser's brush
-var place_preview_marker := false  ## the preview marks a single point (a source about to be placed): drawn as a GUI ring, like a selection
+var place_preview_kind := Preview.BRUSH
 
 var history := DishHistory.new()  ## what the graph shows of this dish
 
@@ -802,10 +802,26 @@ func looks_at_medium() -> bool:
 	return pick_mode == PickMode.ALL or pick_mode == PickMode.BACKGROUND
 
 
+## Shows the placement preview at a world position.
+func set_place_preview(pos: Vector2, preview_radius: float, kind := Preview.BRUSH) -> void:
+	place_preview_pos = pos
+	place_preview_radius = preview_radius
+	place_preview_kind = kind
+
+
+func clear_place_preview() -> void:
+	place_preview_radius = -1.0
+	place_preview_kind = Preview.BRUSH
+
+
+## Whether a world position is inside the dish.
+func contains(world: Vector2) -> bool:
+	return world.distance_to(global_position) <= radius
+
+
 func clear_hover() -> void:
 	hovered.clear()
-	place_preview_erases = false
-	place_preview_marker = false
+	place_preview_kind = Preview.BRUSH
 
 
 func remove_source(source: NutrientSource) -> void:
