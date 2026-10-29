@@ -46,12 +46,12 @@ void lookup(float s, float eps, out float f, out float along, out float across) 
 """
 
 const K_CLEAR := """
-void main() { uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return; DLO[i] = 0u; DHI[i] = 0u; RLO[i] = 0u; RHI[i] = 0u; ALO[i] = 0u; AHI[i] = 0u; }
+void main() { CELL_THREAD DLO[i] = 0u; DHI[i] = 0u; RLO[i] = 0u; RHI[i] = 0u; ALO[i] = 0u; AHI[i] = 0u; }
 """
 
 const K_SNAPSHOT := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
+	CELL_THREAD
 	int o = OWNER[i];
 	EFF[i] = o >= 0 ? CONC[o] : 0.0;
 }
@@ -59,8 +59,7 @@ void main() {
 
 const K_SWIM := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
-	uint b = i * RECORD_WORDS;
+	BUP_RECORD_THREAD
 	float x = BUPS[b + R_X], y = BUPS[b + R_Y], dx = BUPS[b + R_DX], dy = BUPS[b + R_DY];
 	float energy = BUPS[b + R_ENERGY], mass = BUPS[b + R_MASS];
 	float speed = BUPS[b + R_SPEED], sense = BUPS[b + R_SENSE], metab = BUPS[b + R_METABOLISM], drag = P[P_DRAG_UPKEEP] * BUPS[b + R_SPEED] * BUPS[b + R_SPEED], donor = BUPS[b + R_DONOR];  // (the drag cost from the speed gene)
@@ -224,8 +223,7 @@ void add_fixed(uint cell, float w, int which) { // what is wanted (0), what is r
 }
 void add_puff_demand(uint k, float mass) { ADD_FIXED20(PDLO, PDHI, k, mass) }
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
-	uint b = i * RECORD_WORDS;
+	BUP_RECORD_THREAD
 	float x = BUPS[b + R_X], y = BUPS[b + R_Y], energy = BUPS[b + R_ENERGY], mass = BUPS[b + R_MASS], metab = BUPS[b + R_METABOLISM], yld = exp(-BUPS[b + R_HARM]) / sqrt(BUPS[b + R_METABOLISM]);  // (the yield, from harm and metabolism)
 	float max_e = P[P_RESERVE_PER_MASS] * mass;
 	WANT[i] = -1.0; WANTC[i] = 0.0; CELLOF[i] = -1;
@@ -278,7 +276,7 @@ float neglog1m(float x) { // -ln(1 - x)
 	return -log(1.0 - x);
 }
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
+	CELL_THREAD
 	if (OWNER[i] != int(i)) return;
 	float d = FIX30(DHI[i], DLO[i]); // what the bups there wanted
 	SCALE[i] = 0.0;
@@ -314,8 +312,7 @@ void add_fixed2(uint cell, float w, int which) { // the acetate wanted (0) and l
 	else ADD_FIXED30(ADLO, ADHI, cell, w)
 }
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
-	uint b = i * RECORD_WORDS;
+	BUP_RECORD_THREAD
 	float wg = WANT[i], wc = WANTC[i];
 	float mass = BUPS[b + R_MASS], yld = exp(-BUPS[b + R_HARM]) / sqrt(BUPS[b + R_METABOLISM]);
 	float max_e = P[P_RESERVE_PER_MASS] * mass;
@@ -370,7 +367,7 @@ void main() {
 ## then what they let go is added (it can be eaten from the next step).
 const K_AC_CELLS := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
+	CELL_THREAD
 	float d = FIX30(AWHI[i], AWLO[i]);
 	float dep = FIX30(ADHI[i], ADLO[i]);
 	float area = P[P_SPACING] * P[P_SPACING];
@@ -388,7 +385,7 @@ void main() {
 
 const K_AC_APPLY := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+	BUP_THREAD
 	float w = WANT2[i];
 	if (w <= 0.0) return;
 	uint b = i * RECORD_WORDS;
@@ -417,7 +414,7 @@ void main() {
 
 const K_FEED := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
+	CELL_THREAD
 	CONC[i] += P[P_FEED] * WGT[i];
 }
 """

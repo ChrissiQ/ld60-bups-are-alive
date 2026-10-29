@@ -13,7 +13,7 @@ void main() { if (gl_GlobalInvocationID.x == 0u) { CNT[CNT_BIRTHS] = 0u; CNT[CNT
 ## each bup not kept a death at CNT_DEATHS + its place among those; so the order is the bups' order, whatever order the threads run in.
 const K_EVENTS := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+	BUP_THREAD
 	uint cap = uint(P[P_EVENT_CAPACITY]), base = uint(pcs.pb) * cap, st = uint(pcs.pa);
 	uint b = i * RECORD_WORDS;
 	if (KID[i] == 1u && CNT[CNT_SURVIVORS] + EXCK[i] < uint(P[P_CAPACITY])) {  // (a newborn `compact` will place)
@@ -161,7 +161,7 @@ void main() {
 
 const K_Q_TRACK := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+	BUP_THREAD
 	uint n = QIN[Q_TRACK]; if (n == 0u) return;
 	uint b = i * RECORD_WORDS, lo = BUPS_U[b + R_ID_LO], hi = BUPS_U[b + R_ID_HI];
 	for (uint t = 0u; t < n; t++) {

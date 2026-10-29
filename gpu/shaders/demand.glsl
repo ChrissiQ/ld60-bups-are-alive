@@ -46,6 +46,10 @@ uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
+#define BUP_THREAD uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+#define BUP_RECORD_THREAD BUP_THREAD uint b = i * RECORD_WORDS;
+#define CELL_THREAD uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
+
 #define ADD64(LO, HI, cell, q_) { uint old_ = atomicAdd(LO[cell], q_); if (old_ + q_ < old_) atomicAdd(HI[cell], 1u); }
 #define ADD_FIXED30(LO, HI, cell, amount) { float rest_ = amount; while (rest_ > 0.0) { float part_ = min(rest_, 3.9); rest_ -= part_; uint q_ = uint(part_ * 1073741824.0 + 0.5); ADD64(LO, HI, cell, q_) } }
 #define ADD_FIXED20(LO, HI, cell, amount) { float rest_ = amount; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); ADD64(LO, HI, cell, q_) } }
@@ -96,8 +100,7 @@ void add_fixed(uint cell, float w, int which) { // what is wanted (0), what is r
 }
 void add_puff_demand(uint k, float mass) { ADD_FIXED20(PDLO, PDHI, k, mass) }
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
-	uint b = i * RECORD_WORDS;
+	BUP_RECORD_THREAD
 	float x = BUPS[b + R_X], y = BUPS[b + R_Y], energy = BUPS[b + R_ENERGY], mass = BUPS[b + R_MASS], metab = BUPS[b + R_METABOLISM], yld = exp(-BUPS[b + R_HARM]) / sqrt(BUPS[b + R_METABOLISM]);  // (the yield, from harm and metabolism)
 	float max_e = P[P_RESERVE_PER_MASS] * mass;
 	WANT[i] = -1.0; WANTC[i] = 0.0; CELLOF[i] = -1;

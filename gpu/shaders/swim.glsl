@@ -82,6 +82,10 @@ uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
+#define BUP_THREAD uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+#define BUP_RECORD_THREAD BUP_THREAD uint b = i * RECORD_WORDS;
+#define CELL_THREAD uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
+
 // the field's concentration (and its gradient) at a point, bilinear in the snapshot, as the CPU's read_snapshot_xy
 void readf(float x, float y, out float c, out float gx, out float gy) {
 	int n = int(P[P_CELLS]); float sp = P[P_SPACING];
@@ -139,8 +143,7 @@ void puffs_at(float x, float y, out float c, out float gx, out float gy, out flo
 }
 
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
-	uint b = i * RECORD_WORDS;
+	BUP_RECORD_THREAD
 	float x = BUPS[b + R_X], y = BUPS[b + R_Y], dx = BUPS[b + R_DX], dy = BUPS[b + R_DY];
 	float energy = BUPS[b + R_ENERGY], mass = BUPS[b + R_MASS];
 	float speed = BUPS[b + R_SPEED], sense = BUPS[b + R_SENSE], metab = BUPS[b + R_METABOLISM], drag = P[P_DRAG_UPKEEP] * BUPS[b + R_SPEED] * BUPS[b + R_SPEED], donor = BUPS[b + R_DONOR];  // (the drag cost from the speed gene)

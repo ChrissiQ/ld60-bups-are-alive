@@ -13,13 +13,19 @@ layout(set = 0, binding = 6, std430) buffer B_RHI { uint RHI[]; };
 layout(set = 0, binding = 7, std430) buffer B_ALO { uint ALO[]; };
 layout(set = 0, binding = 8, std430) buffer B_AHI { uint AHI[]; };
 layout(set = 0, binding = 9, std430) buffer B_SCALE { float SCALE[]; };
+const uint CNT_BUPS = 0u;
 const int P_CELLS = 1;
 const int P_HALF_SATURATION = 24;
 const int P_SPACING = 2;
+const uint RECORD_WORDS = 28u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
+
+#define BUP_THREAD uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+#define BUP_RECORD_THREAD BUP_THREAD uint b = i * RECORD_WORDS;
+#define CELL_THREAD uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
 
 #define ADD64(LO, HI, cell, q_) { uint old_ = atomicAdd(LO[cell], q_); if (old_ + q_ < old_) atomicAdd(HI[cell], 1u); }
 #define ADD_FIXED30(LO, HI, cell, amount) { float rest_ = amount; while (rest_ > 0.0) { float part_ = min(rest_, 3.9); rest_ -= part_; uint q_ = uint(part_ * 1073741824.0 + 0.5); ADD64(LO, HI, cell, q_) } }
@@ -32,7 +38,7 @@ float neglog1m(float x) { // -ln(1 - x)
 	return -log(1.0 - x);
 }
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
+	CELL_THREAD
 	if (OWNER[i] != int(i)) return;
 	float d = FIX30(DHI[i], DLO[i]); // what the bups there wanted
 	SCALE[i] = 0.0;

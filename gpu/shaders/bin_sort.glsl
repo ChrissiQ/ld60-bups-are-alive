@@ -9,12 +9,19 @@ layout(set = 0, binding = 2, std430) buffer B_BINS { uint BINS[]; };
 layout(set = 0, binding = 3, std430) buffer B_BINC { uint BINC[]; };
 layout(set = 0, binding = 4, std430) buffer B_ENT { uint ENT[]; };
 layout(set = 0, binding = 5, std430) buffer B_ENTD { vec4 ENTD[]; };
+const uint CNT_BUPS = 0u;
 const int P_BINS = 73;
+const int P_CELLS = 1;
 const int P_ENTRY_CAPACITY = 72;
+const uint RECORD_WORDS = 28u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
+
+#define BUP_THREAD uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+#define BUP_RECORD_THREAD BUP_THREAD uint b = i * RECORD_WORDS;
+#define CELL_THREAD uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
 
 void main() {
 	uint b = gl_GlobalInvocationID.x; if (b >= uint(P[P_BINS])) return;

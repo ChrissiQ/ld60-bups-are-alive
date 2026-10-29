@@ -16,6 +16,7 @@ const uint CNT_STEP = 5u;
 const uint CNT_TRIMMED = 13u;
 const int P_ADD_MASS_FACTOR = 56;
 const int P_CAPACITY = 62;
+const int P_CELLS = 1;
 const int P_COMPENSATORY_MUTATIONS = 34;
 const int P_DEATH_CHANCE = 59;
 const int P_DELTA = 5;
@@ -88,6 +89,10 @@ const uint R_Y = 2u;
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
+
+#define BUP_THREAD uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+#define BUP_RECORD_THREAD BUP_THREAD uint b = i * RECORD_WORDS;
+#define CELL_THREAD uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
 
 float gamma_big(float shape, inout uint s) {
 	float d = shape - 0.3333333, c = 1.0 / sqrt(9.0 * d);

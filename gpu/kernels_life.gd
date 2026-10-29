@@ -210,8 +210,7 @@ void main() {
 
 const K_CONJ_INSERT := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
-	uint b = i * RECORD_WORDS;
+	BUP_RECORD_THREAD
 	if (BUPS[b + R_DONOR] < 0.5) return;
 	atomicAdd(CNT[CNT_DONORS], 1u);
 	atomicMax(CNT[CNT_DONOR_REACH], floatBitsToUint(0.5 * BUPS[b + R_MASS] * P[P_MASS_UM]));  // (a positive float's bits order as the float does)

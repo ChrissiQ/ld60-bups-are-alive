@@ -17,13 +17,19 @@ const uint CNT_NEXT_ID_HI = 6u;
 const uint CNT_NEXT_ID_LO = 4u;
 const uint CNT_SURVIVORS = 1u;
 const int P_CAPACITY = 62;
+const int P_CELLS = 1;
 const uint RECORD_VEC4 = 7u;
+const uint RECORD_WORDS = 28u;
 const uint R_ID_HI = 21u;
 const uint R_ID_LO = 0u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
+
+#define BUP_THREAD uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+#define BUP_RECORD_THREAD BUP_THREAD uint b = i * RECORD_WORDS;
+#define CELL_THREAD uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
 
 // One thread per 16 bytes (a bup is RECORD_VEC4 of them): a kept bup is copied to its new place, a newborn written after the kept ones, with
 // its id (the next id plus the number of newborns before it: 64 bits in words R_ID_LO and R_ID_HI, with the carry).

@@ -10,6 +10,7 @@ layout(set = 0, binding = 3, std430) buffer B_DTAB { uint DTAB[]; };
 const uint CNT_BUPS = 0u;
 const uint CNT_DONORS = 15u;
 const uint CNT_DONOR_REACH = 14u;
+const int P_CELLS = 1;
 const int P_MASS_UM = 14;
 const uint RECORD_WORDS = 28u;
 const uint R_DONOR = 14u;
@@ -21,14 +22,17 @@ uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
+#define BUP_THREAD uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+#define BUP_RECORD_THREAD BUP_THREAD uint b = i * RECORD_WORDS;
+#define CELL_THREAD uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
+
 const uint DMASK = 65535u;
 const float DCELL = 20.0;
 uint dhash(int cx, int cy) { return hash(uint(cx) * 73856093u ^ uint(cy) * 19349663u) & DMASK; }
 float keyed01(uint a, uint b, uint c) { uint h = hash(hash(hash(a ^ 0x9E3779B9u) + b * 0x85EBCA6Bu) ^ (c * 0xC2B2AE35u)); return (float(h >> 8) + 0.5) / 16777216.0; }
 
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
-	uint b = i * RECORD_WORDS;
+	BUP_RECORD_THREAD
 	if (BUPS[b + R_DONOR] < 0.5) return;
 	atomicAdd(CNT[CNT_DONORS], 1u);
 	atomicMax(CNT[CNT_DONOR_REACH], floatBitsToUint(0.5 * BUPS[b + R_MASS] * P[P_MASS_UM]));  // (a positive float's bits order as the float does)

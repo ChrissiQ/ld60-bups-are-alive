@@ -151,7 +151,7 @@ void main() {
 
 const K_DEP_APPLY := """
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
+	CELL_THREAD
 	float m = FIX20(DPHI[i], DPLO[i]);
 	if (m > 0.0) CONC[i] += m / (P[P_SPACING] * P[P_SPACING]);
 	DPLO[i] = 0u; DPHI[i] = 0u;

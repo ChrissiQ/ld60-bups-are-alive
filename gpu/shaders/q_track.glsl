@@ -10,6 +10,7 @@ layout(set = 0, binding = 3, std430) buffer B_OUT { uint OUT[]; };
 const uint ANSWER_WORDS = 24u;
 const uint CNT_BUPS = 0u;
 const uint OUT_Q = 32u;
+const int P_CELLS = 1;
 const uint QO_TRACKED = 36u;
 const uint Q_TRACK = 27u;
 const uint Q_TRACK_FIRST = 28u;
@@ -21,8 +22,12 @@ uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
+#define BUP_THREAD uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+#define BUP_RECORD_THREAD BUP_THREAD uint b = i * RECORD_WORDS;
+#define CELL_THREAD uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
+
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+	BUP_THREAD
 	uint n = QIN[Q_TRACK]; if (n == 0u) return;
 	uint b = i * RECORD_WORDS, lo = BUPS_U[b + R_ID_LO], hi = BUPS_U[b + R_ID_HI];
 	for (uint t = 0u; t < n; t++) {

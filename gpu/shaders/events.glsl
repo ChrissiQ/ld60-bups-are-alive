@@ -58,6 +58,7 @@ const uint EV_LOW_MASK = 1048575u;
 const uint EV_REACH_MASK = 1023u;
 const uint EV_REACH_SHIFT = 20u;
 const int P_CAPACITY = 62;
+const int P_CELLS = 1;
 const int P_DEATH_GIVE = 8;
 const int P_EVENT_CAPACITY = 78;
 const uint RECORD_WORDS = 28u;
@@ -87,8 +88,12 @@ uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 
+#define BUP_THREAD uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+#define BUP_RECORD_THREAD BUP_THREAD uint b = i * RECORD_WORDS;
+#define CELL_THREAD uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
+
 void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+	BUP_THREAD
 	uint cap = uint(P[P_EVENT_CAPACITY]), base = uint(pcs.pb) * cap, st = uint(pcs.pa);
 	uint b = i * RECORD_WORDS;
 	if (KID[i] == 1u && CNT[CNT_SURVIVORS] + EXCK[i] < uint(P[P_CAPACITY])) {  // (a newborn `compact` will place)

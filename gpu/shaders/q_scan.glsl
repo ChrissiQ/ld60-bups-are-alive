@@ -11,6 +11,7 @@ const uint CNT_BUPS = 0u;
 const uint FRACTIONS = 4u;
 const uint NEAR_SLOTS = 4u;
 const uint OUT_Q = 32u;
+const int P_CELLS = 1;
 const uint QO_FRAC = 28u;
 const uint QO_NEAR = 26u;
 const uint QO_NEAR_MORE = 228u;
@@ -26,6 +27,10 @@ const uint R_Y = 2u;
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
+
+#define BUP_THREAD uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+#define BUP_RECORD_THREAD BUP_THREAD uint b = i * RECORD_WORDS;
+#define CELL_THREAD uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
 
 shared uint smin[NEAR_SLOTS * 256u];
 shared uint scnt[(NEAR_SLOTS + FRACTIONS) * 256u];

@@ -50,6 +50,14 @@ float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5
 float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0 * log(a)) * cos(6.2831853 * b); }
 """
 
+## The first lines of a kernel with a thread for each bup (BUP_THREAD: its index `i`, and the threads past the count do nothing;
+## BUP_RECORD_THREAD: and `b`, its record's first word) and of a kernel with a thread for each cell of the grid (CELL_THREAD: `i`).
+const THREAD_FUNCS := """
+#define BUP_THREAD uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
+#define BUP_RECORD_THREAD BUP_THREAD uint b = i * RECORD_WORDS;
+#define CELL_THREAD uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
+"""
+
 ## Sums that many threads add to at once, in fixed point: a 64-bit unsigned number in two words (`LO`, `HI` name the two buffers), so that the
 ## sum is exact whatever the order the threads run in. ADD_FIXED30 (2^30 to the unit, parts of at most 3.9) and ADD_FIXED20 (2^20 to the
 ## unit, parts of at most 4000) add an amount; FIX30 and FIX20 read a sum back. Macros, because a function cannot take a buffer.
@@ -116,7 +124,7 @@ static func add(out: Dictionary, kernel_name: String, body: String, buffer_names
 		var b: String = buffer_names[k]
 		var type: String = TYPES[b] if TYPES.has(b) else types[b]
 		src += "layout(set = 0, binding = %d, std430) buffer B_%s { %s %s[]; };\n" % [k, b, type, b]
-	var code := FUNCS + extra + body
+	var code := FUNCS + THREAD_FUNCS + extra + body
 	var names := layout_names()
 	var used := {}
 	for m in _words().search_all(code):
