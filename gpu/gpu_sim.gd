@@ -549,18 +549,6 @@ func run(step_seconds: float, k_per_piece: float, diffuse_pieces: int, swim := t
 	_submit()
 
 
-## Many steps of the core in one submit, for timing.
-func run_many(steps: int, step_seconds: float, k_per_piece: float, diffuse_pieces: int, swim := true) -> void:
-	_set_step(step_seconds, swim)
-	var cl := rd.compute_list_begin()
-	for step in steps:
-		_record_diffusion(cl, k_per_piece * diffuse_pieces)
-		_record_after_diffusion(cl)
-		_record_bups(cl)
-	rd.compute_list_end()
-	_submit()
-
-
 ## What comes in from outside during a batch of steps: `events` has "ranges" (4 ints per step: first cloud, clouds, first deposit, deposits),
 ## "puffs" (GpuLayout.EV_PUFF_FLOATS floats each: x, y, mass, variance, cut, 0) and "cells" / "amounts" (a cell and a concentration to add). Made by
 ## WorldEvents.

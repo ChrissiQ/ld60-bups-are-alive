@@ -4,7 +4,8 @@ extends SceneTree
 ##       CPU against GPU, time per step at 2k-50k bups (with `clouds` plankton clouds in the dish, 0 by default), the GPU's alone (a submit and
 ##       wait on a bare GpuSim, not the game's frame: BackendRule.GPU_STEP_MODEL is fitted by game_check.gd gpufit), and a check of the processor's model (BackendRule.CPU_STEP_MODEL, fitted to the whole
 ##       `Dish.advance`) at the sizes it reaches.
-##       BENCH_COUNTS=100000,500000 overrides the crowd sizes; BENCH_CPU_ONLY=1 times the processor alone (for the sizes past what the fit covers).
+##       BENCH_COUNTS=100000,500000 overrides the crowd sizes; BENCH_CPU_ONLY=1 times the processor alone (for the sizes past what the fit covers);
+##       BENCH_PROFILE=1 also prints the time of each kernel on its own (GpuSim.profile).
 ##   godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/switch_check.gd -- check
 ##       the state transfer: GPU -> CPU -> GPU round trips, rapid switches, and the saved dictionary.
 
@@ -435,7 +436,7 @@ func _dish_switching() -> void:
 
 # ---- bench -------------------------------------------------------------------------------------------------------------------
 
-## A dish with `n` bups spread over most of it, as bench.gd places them (limit = n: the crowd stays about that size).
+## A dish with `n` bups spread over most of it (limit = n: the crowd stays about that size).
 func _bench_dish(n: int, radius: float, detail: int, clouds: int) -> Dish:
 	var dish := Dish.new()
 	root.add_child(dish)
@@ -507,4 +508,10 @@ func _bench(reps: int, clouds: int) -> void:
 				var g1: float = (nine[0] - one[0]) / 8.0  ## marginal us per step; the rest of a one-step batch is the batch's own fixed cost
 				var f0: float = one[0] - g1
 				print("BENCH clouds=%d r=%d cells=%d delta=%.2f N=%d | cpu %.0f us/step (median %.0f, max %.0f) | gpu1 %.0f us (median %.0f) gpu9 %.0f us (median %.0f) -> marginal %.0f us/step, fixed %.0f us" % [dish.field.puff_count(), dish_cfg[0], dish_cfg[1], delta, n, cpu[0], cpu[cpu.size() / 2], cpu[-1], one[0], one[one.size() / 2], nine[0], nine[nine.size() / 2], g1, f0])
+				if OS.get_environment("BENCH_PROFILE") == "1":
+					var prof := gpu.profile()
+					var parts := []
+					for k in prof:
+						parts.append("%s %.0f" % [k, prof[k]])
+					print("BENCH per kernel (us a dispatch): ", ", ".join(parts))
 				dish.free()
