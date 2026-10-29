@@ -18,8 +18,7 @@ func _run() -> void:
 	start.nutrient_density = 4.0
 	start.bloom_density = 2.0
 	start.spread_founders()
-	var m: Node = TestUtil.free_game(start)
-	root.add_child(m)
+	var m: Node = TestUtil.game_screen(self, start)
 	await process_frame
 	m.toolbar.set_paused(false)
 	m.sim_speed = float(OS.get_environment("SPEED")) if OS.get_environment("SPEED") != "" else 10000.0

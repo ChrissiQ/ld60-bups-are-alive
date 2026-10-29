@@ -29,8 +29,7 @@ func _run() -> void:
 	SimConstants.apply()
 	var chosen := TestUtil.small_start()
 	chosen.bups = 30
-	var m: Node = TestUtil.free_game(chosen)
-	root.add_child(m)
+	var m: Node = TestUtil.game_screen(self, chosen)
 	for i in 6:
 		await process_frame
 	var sections := _sections(m)

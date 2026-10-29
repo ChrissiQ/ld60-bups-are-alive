@@ -46,13 +46,10 @@ func check(ok: bool, what: String) -> void:
 
 
 func _make_dish(n: int, rad: float, seed_value: int, bup_limit := 2000000) -> Dish:
-	var dish := Dish.new()
-	root.add_child(dish)
-	dish.set_seed(seed_value)
 	var sc := StartConditions.new()
 	sc.bups = 250; sc.bup_limit = bup_limit; sc.dish_radius = rad; sc.nutrient_resolution = 100; sc.nutrient_density = 4.0
 	sc.spread_founders()
-	dish.strike(sc)
+	var dish := TestUtil.dish_from(self, sc, seed_value)
 	var sim := dish.sim
 	while dish.population() < n:
 		var g := Genome.founder()

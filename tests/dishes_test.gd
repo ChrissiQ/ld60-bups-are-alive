@@ -13,8 +13,7 @@ func _run() -> void:
 	var chosen := TestUtil.small_start()
 	chosen.bups = 40
 	chosen.nutrient_density = 40
-	var m: Node = TestUtil.free_game(chosen)
-	root.add_child(m)
+	var m: Node = TestUtil.game_screen(self, chosen)
 	await process_frame
 	var first: Dish = m.dish
 	TestUtil.check(m.dishes.size() == 1 and not m.dish_strip.visible, "one dish: no strip")

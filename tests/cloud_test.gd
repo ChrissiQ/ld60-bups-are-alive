@@ -9,15 +9,12 @@ const UNITS := 300.0
 
 
 func _dish(radius_mm: float, seed_value := 5) -> Dish:
-	var d := Dish.new()
-	root.add_child(d)
-	d.set_seed(seed_value)
 	var start := StartConditions.new()
 	start.dish_radius = radius_mm * 1000.0
 	start.nutrient_density = 0.0
 	start.bups = 1
 	start.bup_limit = 50000
-	d.strike(start)
+	var d := TestUtil.dish_from(self, start, seed_value)
 	d.stationary_phase = false  # (the tests below that starve bups on purpose want the old rule: a bup with no energy dies at once; the starvation test turns the phase on itself)
 	d.clear_bups()
 	return d

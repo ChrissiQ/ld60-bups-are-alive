@@ -60,8 +60,7 @@ func _init() -> void:
 	start.dish_radius = 300.0  # the tests place things by hand and count on a small dish
 	start.nutrient_density = 0
 	start.feed_density = 0.0
-	var m: Node = TestUtil.free_game(start)
-	root.add_child(m)
+	var m: Node = TestUtil.game_screen(self, start)
 	await process_frame
 	await process_frame
 	var view: Vector2 = m.get_viewport_rect().size

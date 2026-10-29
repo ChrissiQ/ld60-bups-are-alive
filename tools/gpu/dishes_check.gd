@@ -15,8 +15,7 @@ func _run() -> void:
 	start.dish_radius = 5000.0
 	start.bup_limit = 30000
 	start.spread_founders()
-	var m: Node = TestUtil.free_game(start)
-	root.add_child(m)
+	var m: Node = TestUtil.game_screen(self, start)
 	await process_frame
 	m.toolbar.set_paused(false)
 	m.sim_speed = 3000.0

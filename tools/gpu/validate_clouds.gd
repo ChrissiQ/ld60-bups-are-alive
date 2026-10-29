@@ -6,13 +6,10 @@ extends SceneTree
 ##     (clouds kept there, the CPU recording what it would have done).
 
 func _dish(rad: float, res: int, seed_value: int, bloom: float, nutrient: float) -> Dish:
-	var dish := Dish.new()
-	root.add_child(dish)
-	dish.set_seed(seed_value)
 	var sc := StartConditions.new()
 	sc.bups = 250; sc.bup_limit = 2000; sc.dish_radius = rad; sc.nutrient_resolution = res; sc.nutrient_density = nutrient; sc.bloom_density = bloom
 	sc.spread_founders()
-	dish.strike(sc)
+	var dish := TestUtil.dish_from(self, sc, seed_value)
 	dish.clear_bups()
 	return dish
 

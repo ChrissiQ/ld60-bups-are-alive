@@ -54,6 +54,23 @@ static func free_game(start: StartConditions) -> Node:
 	return load(Scenes.GAME).instantiate()
 
 
+## The game screen of `free_game(start)`, added to the tree (so its _ready runs on the next frame).
+static func game_screen(tree: SceneTree, start: StartConditions) -> Node:
+	var screen := free_game(start)
+	tree.root.add_child(screen)
+	return screen
+
+
+## A dish struck with `start`, added to the tree first; `seed_value` seeds it when it is not negative.
+static func dish_from(tree: SceneTree, start: StartConditions, seed_value := -1) -> Dish:
+	var d := Dish.new()
+	tree.root.add_child(d)
+	if seed_value >= 0:
+		d.set_seed(seed_value)
+	d.strike(start)
+	return d
+
+
 ## Units of nutrient dissolved in the dish.
 static func units(dish: Dish) -> float:
 	return dish.field.total() / Dish.NUTRIENT_ENERGY

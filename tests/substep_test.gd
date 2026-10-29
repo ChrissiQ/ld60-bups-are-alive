@@ -26,16 +26,12 @@ func _init() -> void:
 func _check_counts() -> void:
 	var expected := {0.3: 7, 10.0: 7, 20.0: 7, 25.0: 7, 30.0: 5, 40.0: 3, 60.0: 2, 90.0: 1}  # (radius in mm: sub-steps in a 20 s step)
 	for radius_mm: float in expected:
-		var d := Dish.new()
-		root.add_child(d)
 		var start := StartConditions.new()
 		start.dish_radius = maxf(radius_mm * 1000.0, StartConditions.MIN_DISH_RADIUS) if radius_mm >= 1.0 else 300.0
-		d.strike(start)
+		var d := TestUtil.dish_from(self, start)
 		TestUtil.check(d.sim.moves_for(20.0) == expected[radius_mm], "a 20 s step of the coarse motion is cut into %d sub-steps on a %s mm dish (%d)" % [expected[radius_mm], radius_mm, d.sim.moves_for(20.0)])
 		d.free()
-	var fine := Dish.new()
-	root.add_child(fine)
-	fine.strike(TestUtil.small_start())
+	var fine := TestUtil.dish_from(self, TestUtil.small_start())
 	TestUtil.check(fine.sim.moves_for(3.0) == 1 and fine.sim.moves_for(0.5) == 1, "a short step is one sub-step")
 	fine.free()
 
@@ -45,23 +41,19 @@ func _check_counts() -> void:
 func _check_solver() -> void:
 	var expected := {0.3: 4, 5.0: 4, 10.0: 3, 20.0: 1, 30.0: 1, 90.0: 1}  # (radius in mm: solves in 20 s of diffusion)
 	for radius_mm: float in expected:
-		var d := Dish.new()
-		root.add_child(d)
 		var start := StartConditions.new()
 		start.dish_radius = 300.0 if radius_mm < 1.0 else radius_mm * 1000.0
-		d.strike(start)
+		var d := TestUtil.dish_from(self, start)
 		TestUtil.check(d.sim.diffuse_pieces(20.0) == expected[radius_mm], "20 s of diffusion is solved in %d pieces on a %s mm dish (%d)" % [expected[radius_mm], radius_mm, d.sim.diffuse_pieces(20.0)])
 		TestUtil.check(d.sim.diffuse_pieces(5.0) == 1, "a 5 s stretch is one solve")
 		d.free()
 	for radius_mm in [30.0, 90.0]:  # (where the pieces are not cut: one 20 s solve against 5 s ones, a plankton cloud after ten minutes)
 		var fields := []
 		for piece in [20.0, 5.0]:
-			var d := Dish.new()
-			root.add_child(d)
 			var start := StartConditions.new()
 			start.dish_radius = radius_mm * 1000.0
 			start.nutrient_density = 0.0
-			d.strike(start)
+			var d := TestUtil.dish_from(self, start)
 			d.clear_bups()
 			d.field.deposit_disc(Vector2.ZERO, Dish.PLANKTON_PATCH_RADIUS, Dish.PLANKTON_UNITS * Dish.NUTRIENT_ENERGY)
 			for i in int(600.0 / piece):
@@ -79,16 +71,13 @@ func _check_solver() -> void:
 ## Every constant but what is overridden, with the nutrient held still and nothing eating.
 func _build_field(radius_mm: float) -> Array:  # (the grid's values and the clouds' export)
 	BupSim.configure(SimConstants.build())
-	var d := Dish.new()
-	root.add_child(d)
-	d.set_seed(7)
 	var start := StartConditions.new()
 	start.dish_radius = radius_mm * 1000.0
 	start.nutrient_density = 0.0
 	start.bloom_density = 0.25
 	start.bups = 1
 	start.bup_limit = 100
-	d.strike(start)
+	var d := TestUtil.dish_from(self, start, 7)
 	d.clear_bups()
 	d.advance(3.0 * 3600.0)
 	var state := [Array(d.field.values()), d.field.puffs_export()]  # (the grid, and the clouds not yet given to it)
@@ -99,15 +88,12 @@ func _build_field(radius_mm: float) -> Array:  # (the grid's values and the clou
 ## The mean uptake factor (c / (Ks + c)) of the nutrient the crowd ends up in.
 func _exposure(radius_mm: float, state: Array, structure: float, seed_value: int) -> float:
 	TestUtil.frozen_constants(structure)
-	var d := Dish.new()
-	root.add_child(d)
-	d.set_seed(seed_value)
 	var start := StartConditions.new()
 	start.dish_radius = radius_mm * 1000.0
 	start.nutrient_density = 0.0
 	start.bups = 1
 	start.bup_limit = 2 * BUPS
-	d.strike(start)
+	var d := TestUtil.dish_from(self, start, seed_value)
 	d.clear_bups()
 	d.field.load_values(state[0])
 	d.field.puffs_import(state[1])
