@@ -260,6 +260,15 @@ public:
 	}
 	double acetate_share(const Bup &b, double got, double delta) const; // the share of what a bup took in that it lets go of as acetate
 	void take_acetate(Bup &b, double delta); // a bup with room takes what it can of the acetate where it is
+	// The parts of `step` after the parallel swim and uptake (see settle_bups in the .cpp).
+	struct DeathCloud { // where a bup died and what its body gives back
+		float x, y, energy;
+	};
+	void settle_bups(double delta, std::vector<Bup> &newborn, std::vector<DeathCloud> &death_clouds);
+	void take_up(Bup &b, size_t i, double delta);
+	void divide(Bup &b, std::vector<Bup> &newborn);
+	void release_deaths(const std::vector<DeathCloud> &death_clouds);
+	void cull_to_limit(size_t births);
 	void conjugate(double delta); // donors that touch a bup that is not one pass on a run of genes (see Genome.DONOR_*)
 	int husk_count() const { return (int)husks.size(); }
 	PackedFloat64Array husks_export() const; // 5 numbers each: x, y, energy, age, the next piece

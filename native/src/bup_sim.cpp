@@ -1227,12 +1227,21 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 	parallel_for(&BupSim::run_uptake_block, &uptake_job, uptake_blocks, threads, bups.size() >= 4000, "bups eat");
 
 	conjugate(delta);
-	size_t keep = 0;
 	std::vector<Bup> newborn;
-	struct DeathCloud {
-		float x, y, energy;
-	};
 	std::vector<DeathCloud> death_clouds;
+	settle_bups(delta, newborn, death_clouds);
+	release_deaths(death_clouds);
+	cull_to_limit(newborn.size());
+	for (const Bup &child : newborn) {
+		bups.push_back(child);
+	}
+}
+
+// What each bup does once the parallel part of the step is done, one after another and in order (the clouds are shared, and
+// the random draws must come in one order): it takes up its nutrient, may die, and may divide. The bups that live are packed
+// to the front of `bups`; the daughters are collected in `newborn` and where each death was in `death_clouds`.
+void BupSim::settle_bups(double delta, std::vector<Bup> &newborn, std::vector<DeathCloud> &death_clouds) {
+	size_t keep = 0;
 	// Each bup that has energy left has the same small chance of dying of something else this step. Rather than a random
 	// number for each, the number of such bups until the next death is drawn (the gaps between independent chances of p are
 	// geometric): the same odds for every bup, and one draw for each death instead of one for each bup.
@@ -1240,19 +1249,8 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 	int64_t until_death = death_gap(death_chance);
 	for (size_t i = 0; i < bups.size(); i++) {
 		Bup &b = bups[i];
-		if (grid_got[i] >= 0.0) { // (the cell's part of the uptake is done; the clouds' is taken here, one bup after another, as they hold thousands of times what a bup takes in a step)
-			double got = grid_got[i];
-			if (cloud_want[i] > 0.0) {
-				got += field->take_from_clouds(b.x, b.y, cloud_want[i], shares[i].total, shares[i]);
-			}
-			double let_go = got * acetate_share(b, got, delta);
-			eat(b, got);
-			if (let_go > 0.0) {
-				int cell = acetate->uptake_cell_xy(b.x, b.y);
-				if (cell >= 0) {
-					acetate->deposit_cell(cell, let_go);
-				}
-			}
+		if (grid_got[i] >= 0.0) {
+			take_up(b, i, delta);
 		}
 		take_acetate(b, delta);
 		bool dies = stationary_phase ? starved_to_death(b, delta) : b.energy <= 0.0f;
@@ -1268,28 +1266,7 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 			continue; // died
 		}
 		if (ready_to_divide(b)) {
-			double keep_share = std::clamp(0.5 + G.division_spread * gaussian(), 0.35, 0.65);
-			Vector2 daughter = split_off(b, keep_share);
-			double daughter_mass = daughter.x, daughter_energy = daughter.y;
-			Daughter born = mutate(b.g);
-			b.divisions += 1; // (the cell left in the parent's place is a product of the division whether or not the daughter lives)
-			if (!born.lethal) { // a lethal daughter is never born; the parent still paid for her
-				Bup child;
-				child.id = next_id++;
-				child.g = born.genome;
-				derive(child);
-				child.mass = (float)daughter_mass;
-				child.birth_mass = child.mass;
-				child.energy = (float)std::min(daughter_energy, max_energy(child));
-				child.divisions = b.divisions; // (the same as the parent's: both are products of this division)
-				double a = uniform() * Math::TAU, off = body_radius(b);
-				child.x = b.x + (float)(std::cos(a) * off);
-				child.y = b.y + (float)(std::sin(a) * off);
-				child.dx = 1.0f;
-				child.dy = 0.0f;
-				make_record(child, b.id);
-				newborn.push_back(child);
-			}
+			divide(b, newborn);
 		}
 		if (keep != i) {
 			bups[keep] = b;
@@ -1297,26 +1274,75 @@ void BupSim::step(double delta, const PackedVector2Array &source_pos, const Pack
 		keep++;
 	}
 	bups.resize(keep);
-	for (const DeathCloud &c : death_clouds) { // (after the loop: a cloud made in it would be found by the bups after it, and the clouds' lookup rebuilt for each)
+}
+
+// The bup in slot `i` has had the cell's part of its uptake (`grid_got`); the clouds' is taken here, one bup after another, as they
+// hold thousands of times what a bup takes in a step. What it took in more than its growth can use it lets go of as acetate.
+void BupSim::take_up(Bup &b, size_t i, double delta) {
+	double got = grid_got[i];
+	if (cloud_want[i] > 0.0) {
+		got += field->take_from_clouds(b.x, b.y, cloud_want[i], shares[i].total, shares[i]);
+	}
+	double let_go = got * acetate_share(b, got, delta);
+	eat(b, got);
+	if (let_go > 0.0) {
+		int cell = acetate->uptake_cell_xy(b.x, b.y);
+		if (cell >= 0) {
+			acetate->deposit_cell(cell, let_go);
+		}
+	}
+}
+
+// The bup divides: the mother keeps most of her mass and energy, a mutated daughter (unless it is lethal) is added to `newborn` beside her.
+void BupSim::divide(Bup &b, std::vector<Bup> &newborn) {
+	double keep_share = std::clamp(0.5 + G.division_spread * gaussian(), 0.35, 0.65);
+	Vector2 daughter = split_off(b, keep_share);
+	double daughter_mass = daughter.x, daughter_energy = daughter.y;
+	Daughter born = mutate(b.g);
+	b.divisions += 1; // (the cell left in the parent's place is a product of the division whether or not the daughter lives)
+	if (born.lethal) { // a lethal daughter is never born; the parent still paid for her
+		return;
+	}
+	Bup child;
+	child.id = next_id++;
+	child.g = born.genome;
+	derive(child);
+	child.mass = (float)daughter_mass;
+	child.birth_mass = child.mass;
+	child.energy = (float)std::min(daughter_energy, max_energy(child));
+	child.divisions = b.divisions; // (the same as the parent's: both are products of this division)
+	double a = uniform() * Math::TAU, off = body_radius(b);
+	child.x = b.x + (float)(std::cos(a) * off);
+	child.y = b.y + (float)(std::sin(a) * off);
+	child.dx = 1.0f;
+	child.dy = 0.0f;
+	make_record(child, b.id);
+	newborn.push_back(child);
+}
+
+// What the bups that died left: a cloud of nutrient (or a husk) where each was. After the loop in `settle_bups`: a cloud made in it
+// would be found by the bups after it, and the clouds' lookup rebuilt for each.
+void BupSim::release_deaths(const std::vector<DeathCloud> &death_clouds) {
+	for (const DeathCloud &c : death_clouds) {
 		if (death_husks) {
 			add_husk(c.x, c.y, c.energy);
 		} else {
 			field->add_cloud(Vector2(c.x, c.y), 0.0, c.energy);
 		}
 	}
-	// At the carrying limit a birth takes the place of a random bup, so reproduction (not a blocked
-	// birth) is still what wins: numbers hold steady and the fitter lineage spreads (a Moran process).
+}
+
+// At the carrying limit a birth takes the place of a random bup, so reproduction (not a blocked
+// birth) is still what wins: numbers hold steady and the fitter lineage spreads (a Moran process).
+void BupSim::cull_to_limit(size_t births) {
 	int limit = cap();
-	int excess = (int)bups.size() + (int)newborn.size() - limit;
+	int excess = (int)bups.size() + (int)births - limit;
 	while (excess > 0 && !bups.empty()) {
 		size_t displaced = (size_t)(uniform() * bups.size());
 		record_death(bups[displaced]);
 		bups[displaced] = bups.back();
 		bups.pop_back();
 		excess--;
-	}
-	for (const Bup &child : newborn) {
-		bups.push_back(child);
 	}
 }
 
