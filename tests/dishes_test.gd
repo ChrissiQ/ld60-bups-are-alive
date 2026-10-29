@@ -45,14 +45,14 @@ func _run() -> void:
 	var turns := []
 	for round in 4:
 		m._let_one_dish_switch()
-		turns.append(m.dishes.filter(func(d: Dish) -> bool: return d.switch_allowed).size())
+		turns.append(m.dishes.filter(func(d: Dish) -> bool: return d.backend.switch_allowed).size())
 	TestUtil.check(turns == [1, 1, 1, 1], "exactly one dish at a time may change backend (%s)" % [turns])
-	other.switch_wanted = true
-	other.switch_wanted_gpu = true
+	other.backend.switch_wanted = true
+	other.backend.switch_wanted_gpu = true
 	m._let_one_dish_switch()
 	m._let_one_dish_switch()  # (no advance between: as for a dish the budget leaves out)
-	TestUtil.check(other.switch_allowed and other.switch_wanted and not first.switch_allowed, "a dish waiting to change backend keeps its wish and its turn until it is next advanced")
-	other.switch_wanted = false
+	TestUtil.check(other.backend.switch_allowed and other.backend.switch_wanted and not first.backend.switch_allowed, "a dish waiting to change backend keeps its wish and its turn until it is next advanced")
+	other.backend.switch_wanted = false
 	m.set_main_dish(other)
 	TestUtil.check(m.dish == other and m.graph.dish == other and m.watch_list.dishes.has(other), "a choice brings the other dish into the main view, with the graph and the watch list")
 	TestUtil.check(m.camera.position.distance_to(other.global_position) <= other.radius, "the camera is on it")
@@ -65,7 +65,7 @@ func _run() -> void:
 	m.toolbar.set_paused(true)
 	var trio: Array[Dish] = [first, other, third]
 	for d in trio:
-		d.measured_usec = 8000.0  # (each costs most of the 9 ms the simulation may spend in a frame)
+		d.backend.measured_usec = 8000.0  # (each costs most of the 9 ms the simulation may spend in a frame)
 	var before_turns := trio.map(func(d: Dish) -> float: return d.time)
 	var at_once := 0
 	var world_before: float = m.world_time()
@@ -80,7 +80,7 @@ func _run() -> void:
 	TestUtil.check(at_once == 1 and every, "when each dish costs most of the budget only one is advanced a frame, and in three frames every dish has had its turn (most in one frame: %d)" % at_once)
 	TestUtil.check(m.world_time() - world_before <= 1.0 + 0.001, "the world's clock moved by about the one step in those three frames (%.2f s), not three: it slows down together" % (m.world_time() - world_before))
 	for d in trio:
-		d.measured_usec = 0.0
+		d.backend.measured_usec = 0.0
 	m.toolbar.set_paused(false)
 	m.toolbar.set_paused(false)
 	other.clear_bups()

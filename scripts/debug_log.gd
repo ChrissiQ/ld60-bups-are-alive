@@ -75,11 +75,11 @@ static func report(dish: Dish, scene: Node, extra: Dictionary) -> String:
 ## what the GPU path has lost for want of room (clouds sent to the grid, list entries cut, births and deaths with no event slot).
 static func backend(dish: Dish) -> Dictionary:
 	var out := {
-		"setting": dish.backend_setting,
+		"setting": dish.backend.setting,
 		"running": dish.backend_running(),
 		"gpu_available": GpuWorld.available(),
 		"gpu_device": dish.gpu_world.device_name() if dish.gpu_world != null else "",
-		"gpu_wanted_seconds": dish._gpu_wanted_seconds,
+		"gpu_wanted_seconds": dish.backend.gpu_wanted_seconds,
 		"state_on_cpu": dish._gpu_on_cpu,
 		"gpu_overflows": {},
 	}
@@ -89,23 +89,12 @@ static func backend(dish: Dish) -> Dictionary:
 	return out
 
 
-## What decides where a dish runs, for every dish (the main one's `backend` has the rest): the setting, how long the rule has wanted the GPU,
-## whether Auto's one-switch-at-a-time turn is this dish's and whether it is waiting for it, the cost model's estimate and the timed cost of a
-## frame on the processor (what the dishes' turns are budgeted by), and the processor load of the other dishes the rule adds.
+## What decides where a dish runs, for every dish (the main one's `backend` has the rest): see DishBackend.debug.
 static func rule(dish: Dish) -> Dictionary:
-	return {
-		"setting": dish.backend_setting,
-		"running": dish.backend_running(),
-		"gpu_wanted_seconds": dish._gpu_wanted_seconds,
-		"cpu_votes": dish._cpu_votes,
-		"switch_allowed": dish.switch_allowed,
-		"switch_wanted": dish.switch_wanted,
-		"switch_wanted_gpu": dish.switch_wanted_gpu,
-		"cpu_cost_estimate_usec": dish.cpu_cost_estimate,
-		"measured_usec": dish.measured_usec,
-		"other_cpu_load_usec": dish.other_cpu_load,
-		"state_on_cpu": dish._gpu_on_cpu,
-	}
+	var out := dish.backend.debug()
+	out["running"] = dish.backend_running()
+	out["state_on_cpu"] = dish._gpu_on_cpu
+	return out
 
 
 ## The mean nutrient at each of RIM_FRACTIONS of the radius, averaged around the dish: where a ring or a step shows up.

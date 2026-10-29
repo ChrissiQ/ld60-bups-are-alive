@@ -2,7 +2,7 @@ extends SceneTree
 ## Switch checks (windowed: they need a RenderingDevice).
 ##   godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/switch_check.gd -- bench [reps [clouds]]
 ##       CPU against GPU, time per step at 2k-50k bups (with `clouds` plankton clouds in the dish, 0 by default), the GPU's alone (a submit and
-##       wait on a bare GpuSim, not the game's frame: Dish.GPU_STEP_MODEL is fitted by game_check.gd gpufit), and a check of the processor's model (Dish.CPU_STEP_MODEL, fitted to the whole
+##       wait on a bare GpuSim, not the game's frame: BackendRule.GPU_STEP_MODEL is fitted by game_check.gd gpufit), and a check of the processor's model (BackendRule.CPU_STEP_MODEL, fitted to the whole
 ##       `Dish.advance`) at the sizes it reaches.
 ##       BENCH_COUNTS=100000,500000 overrides the crowd sizes; BENCH_CPU_ONLY=1 times the processor alone (for the sizes past what the fit covers).
 ##   godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/switch_check.gd -- check
@@ -349,20 +349,20 @@ func _dish_switching() -> void:
 	dish._choose_backend(1.67)
 	_ok(not dish.gpu_active and dish.sim.bup_count() == pop, "Off brings them back at once")
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
-	for i in Dish.wait_frames(Dish.RULE_FRAME_SECONDS) - 1:
+	for i in BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS) - 1:
 		dish._choose_backend(1.67)
-	_ok(not dish.gpu_active and dish.sim.bup_count() == pop, "On again (the dish is no longer fresh): %d frames in a row, still the processor" % (Dish.wait_frames(Dish.RULE_FRAME_SECONDS) - 1))
+	_ok(not dish.gpu_active and dish.sim.bup_count() == pop, "On again (the dish is no longer fresh): %d frames in a row, still the processor" % (BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS) - 1))
 	dish._choose_backend(1.67)
 	_ok(dish.gpu_active and dish.sim.bup_count() == 0 and world.bup_count() == pop, "...the next one moves the %d bups to the GPU" % pop)
 	dish._choose_backend(0.1)
 	_ok(dish.gpu_active and world.bup_count() == pop, "a fine step (x1) stays on the GPU (it has a fine path)")
 	dish.set_backend_setting(StartConditions.BACKEND_CPU)
 	dish._choose_backend(1.67)
-	_ok(not dish.gpu_active and dish.sim.bup_count() == pop and dish._gpu_wanted_seconds == 0.0, "the setting Off brings them back at once: %d bups on the CPU" % dish.sim.bup_count())
+	_ok(not dish.gpu_active and dish.sim.bup_count() == pop and dish.backend.gpu_wanted_seconds == 0.0, "the setting Off brings them back at once: %d bups on the CPU" % dish.sim.bup_count())
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
-	for i in Dish.wait_frames(Dish.RULE_FRAME_SECONDS):
+	for i in BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS):
 		dish._choose_backend(1.67)
-	_ok(dish.gpu_active, "...and On sends them out again after %d frames" % Dish.wait_frames(Dish.RULE_FRAME_SECONDS))
+	_ok(dish.gpu_active, "...and On sends them out again after %d frames" % BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS))
 	# Edits while on the GPU.
 	var radius_before := dish.radius
 	dish.resize_to(radius_before * 1.5)
@@ -382,51 +382,51 @@ func _dish_switching() -> void:
 	_ok(not dish.gpu_active and dish.sim.bup_count() == pop, "the setting set to Off moves them back at the next frame")
 	# Auto at x10,000: the rule's two thresholds (the GPU takes over above AUTO_CPU_UP_USEC, hands back below AUTO_CPU_DOWN_USEC), so a
 	# dish whose estimate lies between them stays where it is. Each side is asked of the rule with where the dish is.
-	var top := Dish.backend_frame_costs(18.5, dish.field.get_size(), dish.sim.moves_for(18.5), pop, 0, dish.field.puff_count())
+	var top := BackendRule.frame_costs(18.5, dish.field.get_size(), dish.sim.moves_for(18.5), pop, 0, dish.field.puff_count())
 	dish.set_backend_setting(StartConditions.BACKEND_AUTO)
 	for i in 40:
 		dish._choose_backend(18.5)
-	var takes_over := Dish.backend_wants_gpu(StartConditions.BACKEND_AUTO, 18.5, dish.sim.moves_for(18.5), dish.field.get_size(), pop, false, true, 0, dish.field.puff_count())
-	_ok(dish.gpu_active == takes_over, "Auto with %d bups at x10,000, from the processor (its frame estimated at %.0f µs, the GPU's %.0f; the GPU takes over above %.0f): %s" % [pop, top.x, top.y, Dish.AUTO_CPU_UP_USEC, "the GPU" if takes_over else "the processor"])
+	var takes_over := BackendRule.wants_gpu(StartConditions.BACKEND_AUTO, 18.5, dish.sim.moves_for(18.5), dish.field.get_size(), pop, false, true, 0, dish.field.puff_count())
+	_ok(dish.gpu_active == takes_over, "Auto with %d bups at x10,000, from the processor (its frame estimated at %.0f µs, the GPU's %.0f; the GPU takes over above %.0f): %s" % [pop, top.x, top.y, BackendRule.AUTO_CPU_UP_USEC, "the GPU" if takes_over else "the processor"])
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
-	for i in Dish.wait_frames(Dish.RULE_FRAME_SECONDS):
+	for i in BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS):
 		dish._choose_backend(1.67)
-	_ok(dish.gpu_active, "On again: the GPU after %d coarse frames" % Dish.wait_frames(Dish.RULE_FRAME_SECONDS))
+	_ok(dish.gpu_active, "On again: the GPU after %d coarse frames" % BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS))
 	dish.set_backend_setting(StartConditions.BACKEND_AUTO)
-	for i in Dish.AUTO_DOWN_FRAMES:
+	for i in BackendRule.AUTO_DOWN_FRAMES:
 		dish._choose_backend(18.5)
-	var keeps := Dish.backend_wants_gpu(StartConditions.BACKEND_AUTO, 18.5, dish.sim.moves_for(18.5), dish.field.get_size(), pop, true, true, 0, dish.field.puff_count())
-	_ok(dish.gpu_active == keeps, "...and from the GPU (it hands back below %.0f µs): %s after %d frames" % [Dish.AUTO_CPU_DOWN_USEC, "the GPU" if keeps else "the processor", Dish.AUTO_DOWN_FRAMES])
+	var keeps := BackendRule.wants_gpu(StartConditions.BACKEND_AUTO, 18.5, dish.sim.moves_for(18.5), dish.field.get_size(), pop, true, true, 0, dish.field.puff_count())
+	_ok(dish.gpu_active == keeps, "...and from the GPU (it hands back below %.0f µs): %s after %d frames" % [BackendRule.AUTO_CPU_DOWN_USEC, "the GPU" if keeps else "the processor", BackendRule.AUTO_DOWN_FRAMES])
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
-	for i in Dish.wait_frames(Dish.RULE_FRAME_SECONDS):
+	for i in BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS):
 		dish._choose_backend(1.67)
 	# Auto's hand-back, at x100, where the rule wants the processor even from the GPU.
-	var x100 := Dish.backend_frame_costs(1.67, dish.field.get_size(), dish.sim.moves_for(1.67), pop, 0, dish.field.puff_count())
-	_ok(dish.gpu_active and not Dish.backend_wants_gpu(StartConditions.BACKEND_AUTO, 1.67, dish.sim.moves_for(1.67), dish.field.get_size(), pop, true, true, 0, dish.field.puff_count()), "on the GPU, and Auto's rule wants the processor for %d bups at x100 (its frame estimated at %.0f µs, below %.0f)" % [pop, x100.x, Dish.AUTO_CPU_DOWN_USEC])
+	var x100 := BackendRule.frame_costs(1.67, dish.field.get_size(), dish.sim.moves_for(1.67), pop, 0, dish.field.puff_count())
+	_ok(dish.gpu_active and not BackendRule.wants_gpu(StartConditions.BACKEND_AUTO, 1.67, dish.sim.moves_for(1.67), dish.field.get_size(), pop, true, true, 0, dish.field.puff_count()), "on the GPU, and Auto's rule wants the processor for %d bups at x100 (its frame estimated at %.0f µs, below %.0f)" % [pop, x100.x, BackendRule.AUTO_CPU_DOWN_USEC])
 	dish.set_backend_setting(StartConditions.BACKEND_AUTO)
-	for i in Dish.AUTO_DOWN_FRAMES - 1:
+	for i in BackendRule.AUTO_DOWN_FRAMES - 1:
 		dish._choose_backend(1.67)
-	_ok(dish.gpu_active, "the setting changed to Auto, whose rule wants the processor: %d frames, the GPU still holds them (its count may be late)" % (Dish.AUTO_DOWN_FRAMES - 1))
+	_ok(dish.gpu_active, "the setting changed to Auto, whose rule wants the processor: %d frames, the GPU still holds them (its count may be late)" % (BackendRule.AUTO_DOWN_FRAMES - 1))
 	dish._choose_backend(1.67)
-	_ok(not dish.gpu_active and dish.sim.bup_count() == pop, "...the next one (%d in a row) brings them back" % Dish.AUTO_DOWN_FRAMES)
+	_ok(not dish.gpu_active and dish.sim.bup_count() == pop, "...the next one (%d in a row) brings them back" % BackendRule.AUTO_DOWN_FRAMES)
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
-	for i in Dish.wait_frames(Dish.RULE_FRAME_SECONDS):
+	for i in BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS):
 		dish._choose_backend(1.67)
 	dish.set_backend_setting(StartConditions.BACKEND_AUTO)
 	for i in 5:
 		dish._choose_backend(1.67)
-	_ok(dish.gpu_active and dish._cpu_votes == 5, "Auto again, wanting the processor: 5 frames counted (%d), the GPU still holds them" % dish._cpu_votes)
+	_ok(dish.gpu_active and dish.backend.cpu_votes == 5, "Auto again, wanting the processor: 5 frames counted (%d), the GPU still holds them" % dish.backend.cpu_votes)
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
 	dish._choose_backend(18.5)
-	_ok(dish.gpu_active and dish._cpu_votes == 0, "...and the rule's wait starts again whenever it wants the GPU")
+	_ok(dish.gpu_active and dish.backend.cpu_votes == 0, "...and the rule's wait starts again whenever it wants the GPU")
 	dish._choose_backend(0.1)
 	_ok(dish.gpu_active, "...and a fine step keeps it there (setting On)")
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
-	for i in Dish.wait_frames(Dish.RULE_FRAME_SECONDS):
+	for i in BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS):
 		dish._choose_backend(1.67)
 	dish.strike(sc)
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
-	for i in Dish.wait_frames(Dish.RULE_FRAME_SECONDS):
+	for i in BackendRule.wait_frames(BackendRule.RULE_FRAME_SECONDS):
 		dish._choose_backend(1.67)
 	var fresh_pop := dish.sim.bup_count()
 	_ok(dish.gpu_active and world.bup_count() == 40, "a new dish while on the GPU (strike): the GPU holds the new dish's %d bups" % world.bup_count())

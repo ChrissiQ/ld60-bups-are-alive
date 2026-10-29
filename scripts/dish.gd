@@ -214,14 +214,7 @@ var _overlay: Node2D = null  ## the selection and hover rings, drawn above the b
 ## and the CPU's BupSim keeps the records, names and pins.
 ## `_choose_backend` makes `gpu_world` and switches (see the GPU path's functions at the end of this file).
 var gpu_world: GpuWorld = null
-var cpu_cost_estimate := 0.0  ## µs the processor is estimated to need for one frame of this dish (the cost model's, at the last `advance`)
-var _cpu_ratio := 1.0  ## what this machine's processor really takes per frame, as a multiple of the cost model's estimate (the model was fitted on one machine): Auto's rule uses the estimate times this
-var _frame_estimate_usec := 0.0  ## the model's estimate for the frame `measured_usec` last timed
-var measured_usec := 0.0  ## µs the processor really took the last frames this dish was advanced on it (a running average, set by the screen; 0 until it has been timed)
-var switch_allowed := true  ## whether Auto's rule may move this dish between the processor and the GPU this frame (the screen lets one dish at a time, so each choice sees the load the last left)
-var switch_wanted := false  ## Auto's rule wants this dish moved and waits for its turn (kept until the dish is next advanced, which asks again), and ...
-var switch_wanted_gpu := false  ## ... to the GPU (else to the processor)
-var other_cpu_load := 0.0  ## µs per frame the other dishes on the processor are estimated to take (the screen sets it, so that Auto weighs the processor's whole load)
+var backend := DishBackend.new()  ## where the bups run, and what Auto's rule keeps to decide it
 var gpu_active := false
 
 
@@ -313,7 +306,7 @@ func strike(start: StartConditions = null) -> void:
 	if runs_on_gpu():
 		_discard_gpu_state()  # (a new dish: what the GPU holds, and every result still on its way, is for the old one)
 	set_backend_setting(start.sim_backend)
-	_fresh = true
+	backend.fresh = true
 	flash = 1.0
 	_render_stale = true
 	edit_count += 1
@@ -1145,7 +1138,7 @@ func from_dict(d: Dictionary) -> bool:
 		return false
 	var loaded_bups: PackedByteArray = blocks[0]
 	var loaded_family: PackedByteArray = blocks[1]
-	_fresh = true
+	backend.fresh = true
 	_to_cpu_for_edit()  # (a load that is refused leaves the dish as it was: so the bups must be the CPU's, and the GPU reloads them at its next batch)
 	var loaded := DishCodec.read(d, field, global_position)
 	if loaded.is_empty():
@@ -1296,116 +1289,9 @@ func _advance_gpu(seconds: float) -> float:
 	return steps * delta
 
 
-## The setting's value as StartConditions.BACKEND_*: where the bups are simulated. Changing it (the setup screen sets it with the dish's
-## start, `set_backend_setting` is for anything that changes it while the dish runs) takes effect at the next `advance`.
-var backend_setting := StartConditions.BACKEND_AUTO
-
-## The rule that picks the backend (the measurements are in tools/gpu/switch_check.gd's bench mode):
-const AUTO_CPU_UP_USEC := 6000.0  ## Auto: the processor is left for the GPU once its steps for one frame are estimated to take more than this (two thirds of Main.FRAME_BUDGET_USEC: the picture and the rest of the frame need the remainder) ...
-const AUTO_CPU_DOWN_USEC := 3000.0  ## ... and taken back when they come below this (the gap is the hysteresis: a colony hovering about one threshold does not flip every few seconds)
-const CPU_RATIO_MIN := 0.5  ## how far the cost model's estimate may be corrected by what the processor really took (below and above 1)
-const CPU_RATIO_MAX := 8.0
-const CPU_RATIO_SMOOTHING := 0.1  ## how much of each frame's measured-to-estimated ratio is taken in
-const AUTO_MIN_POPULATION := 1  ## below this many bups (none) Auto stays on the processor: there is nothing to move. A nearly empty dish can still cost the processor most of a frame (the grid, the clouds, the nine steps), and the rule's cost test is what decides, so a small colony at x10,000 goes to the GPU as soon as the processor could not hold the speed
-const GPU_WAIT_SECONDS := 0.5  ## real seconds in a row that the rule wants the GPU before it takes over: a speed button pressed in passing, or a hitch, does not move the whole state. Counted in time, not frames: a frame costs most where the dish is heaviest, so a count of frames would be longest exactly there (a frame counts at most the 0.1 s the frames are capped at)
-const GPU_RELEASE_SECONDS := 60.0  ## real seconds a dish that has handed back to the processor keeps its GPU buffers and pipelines (about 0.2 GB a dish at the usual limit) before giving them back. Building them again costs a stall, so a dish that goes back and forth keeps them; one that has stayed on the processor this long is not coming straight back
-const AUTO_DOWN_FRAMES := 10  ## frames in a row that Auto's rule must want the processor before the GPU lets go (the GPU's count of bups arrives a few frames after a load; the setting does not wait)
-const STEPS_AT_TOP_SPEED := 9  ## steps a frame takes at x10,000 at 60 frames a second (one frame is 167 s; the step is 18.5 s): what a step this long stands for when the caller does not say how many a frame holds
-const TOP_SPEED_STEP := 17.5  ## a step this long or longer is taken for a frame of several steps (x10,000 at 60 Hz: 18.5 s), shorter ones for a frame of one (x1,000: 16.7 s). A guess: `advance` knows, and passes `steps`
-const RULE_FRAME_SECONDS := 1.0 / 60.0  ## the frame Auto's costs are for: a frame's steps are scaled to one this long (the frame just past may be any length: a 120 Hz display's, or one a switch held up, whose many steps would otherwise make the processor look slower than it is and switch straight back)
-## Measured on the M1 Pro (full `Dish.advance`, the mean over many frames, which is what `measured_usec` averages: 369 points, dishes of
-## 20, 45 and 90 mm radius, nutrient detail 100 and 400, 0, 600 and 6,000 clouds, 40 to 60,000 bups; mean error 5.5%): microseconds
-## for one step by the processor, from the cells across `c`, the share of a step that solves the diffusion `f = min(1, d / DIFFUSE_INTERVAL)`,
-## the motion sub-steps `m` (BupSim.moves_for), the bups `n`, the step's length `d` in seconds and the clouds `k`:
-## -2.8 + 0.000857 c² + f (154.3 + 0.003648 c²) + n (0.02992 + 0.007878 m + 0.000426 d) + 0.2355 n / (1 + n / 1000)
-## + k (0.009221 + 0.03929 f) + 2.93e-6 k n. The term in n / (1 + n / 1000) is what the first thousand bups cost beyond the line
-## (a small colony is dearer each than a crowd). By the GPU, measured in the game's own pipeline (a real Dish drawing, hovered and
-## asked its statistics every frame, vsync off, `k` steps a frame forced, the frame's time against its steps, dishes of 20, 45 and 90 mm
-## and 100 and 400 cells, 1,000 to 170,000 bups; the frames the GPU bounds, not those inside the engine's own ~3 ms frame, which hide it;
-## 121 points, rms error 7%, worst 20%; tools/gpu/game_check.gd gpufit): the frame is 950 + 0.015 n µs and each step
-## 244 + 0.0020 c² + n (0.0060 + 0.0016 m) + 0.045 k.
-## The frame's share (drawing, the readbacks and queries, the batch's events) is GPU_FRAME_USEC and GPU_FRAME_USEC_PER_BUP. Past the
-## measured range (170,000 bups, 3,000 clouds, up to the 1,000,000 bups a dish may hold) the rule extrapolates the lines (a 400,000-bup
-## dish measured 48 ms for nine steps against 41 ms from the lines, its clouds being a hundred thousand by the end), and the
-## processor's cost is linear in the bups by construction.
-const CPU_STEP_MODEL := [-2.8, 0.000857, 154.3, 0.003648, 0.02992, 0.2355, 0.007878, 0.000426, 0.009221, 0.03929, 0.00000293]
-const GPU_STEP_MODEL := [244.0, 0.0020, 0.0060, 0.0016, 0.045]
-const GPU_FRAME_USEC := 950.0  ## what a frame on the GPU costs besides its steps: the fixed part ...
-const GPU_FRAME_USEC_PER_BUP := 0.015  ## ... and the part for each bup (every one is drawn, the frame's questions look at every slot, and the batch's births and deaths are read back). The intercept of a GPU-bound frame's time against its steps (tools/gpu/game_check.gd gpufit); a frame shorter than the engine's own (~3 ms on the M1 Pro) hides it, so for a small crowd it is the GPU's time and not what the frame shows
-
-const TYPICAL_FRAMES := 5  ## the recent frames whose median length is the usual frame (rule_step)
-
-var _recent_frames := PackedFloat32Array()  ## the lengths of the last TYPICAL_FRAMES frames `advance` was asked for (real seconds, capped)
-var _gpu_wanted_seconds := 0.0  ## real seconds in a row that the rule wanted the GPU
-var _gpu_idle_seconds := 0.0  ## real seconds in a row on the processor with the GPU's buffers still held (see GPU_RELEASE_SECONDS)
-var _fresh := true  ## a dish just made or loaded (a new one, a save, one thawed): its first choice does not wait GPU_WAIT_SECONDS: the wait guards against a speed pressed in passing, which a loaded dish has not had
-var _cpu_votes := 0  ## frames in a row that Auto's rule wanted the processor while the GPU ran
 var _gpu_on_cpu := false  ## gpu_active, but the CPU's bups are the true ones just now (an edit or a save brought them over): the GPU reloads them before its next batch
 var _fractions_asked := {}  ## [gene, threshold] -> true for each share asked lately (fraction_with_gene_at_least): a load answers them from the CPU's bups
 
-
-## The frames of `frame_seconds` that make GPU_WAIT_SECONDS (for tools and tests that call `_choose_backend` once a frame).
-static func wait_frames(frame_seconds: float) -> int:
-	return ceili(GPU_WAIT_SECONDS / frame_seconds - 1.0e-6)
-
-
-## Estimated microseconds the steps of one frame take on the processor and on the GPU, as (cpu, gpu): `moves` the motion sub-steps of
-## a step (BupSim.moves_for(step_delta)), `step_delta` its length, `steps` how many steps the frame holds (0, when not known: the
-## length says, STEPS_AT_TOP_SPEED at TOP_SPEED_STEP or longer, else one).
-static func backend_frame_costs(step_delta: float, cells_across: int, moves: int, population: int, frame_steps := 0, clouds := 0) -> Vector2:
-	var steps := float(frame_steps if frame_steps > 0 else (STEPS_AT_TOP_SPEED if step_delta >= TOP_SPEED_STEP else 1))
-	var cells_squared := float(cells_across) * cells_across
-	var diffuse_share := minf(1.0, step_delta / DIFFUSE_INTERVAL)
-	var n := float(population)
-	var cpu: float = CPU_STEP_MODEL[0] + CPU_STEP_MODEL[1] * cells_squared + diffuse_share * (CPU_STEP_MODEL[2] + CPU_STEP_MODEL[3] * cells_squared) + n * (CPU_STEP_MODEL[4] + CPU_STEP_MODEL[6] * moves + CPU_STEP_MODEL[7] * step_delta) + CPU_STEP_MODEL[5] * n / (1.0 + n / 1000.0) + clouds * (CPU_STEP_MODEL[8] + CPU_STEP_MODEL[9] * diffuse_share) + CPU_STEP_MODEL[10] * clouds * n
-	var gpu: float = GPU_STEP_MODEL[0] + GPU_STEP_MODEL[1] * cells_squared + population * (GPU_STEP_MODEL[2] + GPU_STEP_MODEL[3] * moves) + GPU_STEP_MODEL[4] * clouds
-	return Vector2(steps * cpu, GPU_FRAME_USEC + GPU_FRAME_USEC_PER_BUP * population + steps * gpu)
-
-
-## The median of the recent frames' lengths (0 for none).
-static func typical_frame(frames: PackedFloat32Array) -> float:
-	if frames.is_empty():
-		return 0.0
-	var sorted := frames.duplicate()
-	sorted.sort()
-	return sorted[sorted.size() / 2]
-
-
-## The step the backend rule is judged on. A step is the playback speed times the frame's length, and only the speed is the player's:
-## one short frame (a stray 1.8 ms one at x100 makes a 0.18 s step) must not make the rule judge another speed and restart the takeover
-## count. So a one-step frame is judged as the same speed over the usual frame (`typical`, from `typical_frame`); pressing x1 is judged
-## at once, and a hitch (a long frame) does not make x1 faster. Frames of several steps are taken as they are, and without the frame's
-## length or its steps the step is taken as given.
-static func rule_step(step_delta: float, steps: int, real: float, typical: float) -> float:
-	if steps != 1 or real <= 0.0 or typical <= 0.0:
-		return step_delta
-	return step_delta * typical / real
-
-
-## The backend rule, as a function of what it depends on alone (so that it can be tested and re-asked after anything changes): whether the
-## GPU should run these steps. `setting` is a StartConditions.BACKEND_*; `step_delta` this frame's step; `moves` BupSim.moves_for of it;
-## `frame_steps` how many steps the frame holds (0: guess), `clouds` the plankton clouds in the dish (NutrientField.puff_count());
-## `running_gpu` where the bups are now (Auto keeps the GPU until the processor would manage with room to spare, which is
-## the hysteresis); `gpu_ok` whether the machine has a usable GPU and one that holds `limit` bups. It does not wait for GPU_WAIT_SECONDS:
-## `_choose_backend` does.
-## - off: never; on: whenever it can; auto: when the processor's estimated time for the frame is above AUTO_CPU_UP_USEC (AUTO_CPU_DOWN_USEC
-##   once the GPU is running) and the GPU's is less, with at least AUTO_MIN_POPULATION bups. The processor's time for the frame is this dish's plus
-##   `other_cpu_usec`, what the other dishes still on the processor are estimated to take (several dishes share one frame: it is their total that must fit).
-static func backend_wants_gpu(setting: String, step_delta: float, moves: int, cells_across: int, population: int, running_gpu: bool, gpu_ok: bool, frame_steps := 0, clouds := 0, other_cpu_usec := 0.0, cpu_ratio := 1.0) -> bool:
-	if not gpu_ok or setting == StartConditions.BACKEND_CPU:
-		return false
-	if setting == StartConditions.BACKEND_GPU:
-		return true
-	if population < AUTO_MIN_POPULATION:
-		return false
-	var costs := backend_frame_costs(step_delta, cells_across, moves, population, frame_steps, clouds)
-	return costs.x * cpu_ratio + other_cpu_usec > (AUTO_CPU_DOWN_USEC if running_gpu else AUTO_CPU_UP_USEC) and costs.y < costs.x
-
-
-## Whether the GPU can run a dish at all: the machine has a usable one (GpuWorld.available()) and it holds `limit` bups (`most` is
-## GpuWorld.most_bups()).
-static func backend_usable(gpu_available: bool, limit: int, most: int) -> bool:
-	return gpu_available and limit <= most
 
 
 ## Where the bups run now, "gpu" or "cpu" (the debug log and the pause menu's record of the settings say it).
@@ -1415,94 +1301,47 @@ func backend_running() -> String:
 
 ## Sets the setting (StartConditions.BACKEND_*; anything else is Auto) and has the next `advance` ask again.
 func set_backend_setting(value: String) -> void:
-	backend_setting = value if value in StartConditions.BACKENDS else StartConditions.BACKEND_AUTO
-	_gpu_wanted_seconds = 0.0
+	backend.set_setting(value)
 
 
-## Chooses where the bups run for this frame (the switch rule), from the setting (on, off, automatic),
-## `step_delta` (judged by rule_step, so one stray short frame does not count as a short step, though a whole frame's steps run as asked), `steps` (how many of them the frame holds, if
-## the caller knows: `advance` does; 0 guesses from the length; Auto's costs take them scaled to a frame of RULE_FRAME_SECONDS by the length
-## of the frame just past), the population, the dish and the limit:
-## makes `gpu_world` when first needed (if GpuWorld.available()), moves the state (gpu_world.load_from_cpu / export_to_cpu) and sets
-## `gpu_active`. Called at the top of every `advance`, before any step (never while paused). The processor takes over at once when the
-## setting or the machine says so; when only Auto's rule says so, after AUTO_DOWN_FRAMES frames of it saying so
-## (the GPU's count of bups reaches the dish a few frames after a load), or at once while a save or an edit has the bups on the CPU
-## (`_gpu_on_cpu`). A dish that stays on the GPU with `_gpu_on_cpu` set reloads it before it runs: the GPU's copy is from before the save or edit. The GPU takes over only after GPU_WAIT_SECONDS of real time in a row of the rule
-## wanting it, except for a dish just made or loaded (`_fresh`), which goes at once when the rule wants it. Asked again on every frame, so a resize, a new limit, a new speed or a new setting (all of which `advance`
-## meets here) is re-evaluated at once.
+## Chooses where the bups run for this frame (the rule is `DishBackend.choose`; this carries the answer out): makes `gpu_world` when first
+## needed (if GpuWorld.available()), moves the state (gpu_world.load_from_cpu / export_to_cpu) and sets `gpu_active`. Called at the top of
+## every `advance`, before any step (never while paused). `step_delta` and `steps` are as `choose` takes them. A dish that stays on the GPU
+## with `_gpu_on_cpu` set reloads it before it runs: the GPU's copy is from before the save or edit.
 func _choose_backend(step_delta: float, steps := 0) -> void:
 	var real := minf(get_process_delta_time(), 0.1)  # (the frame the caller advances for: main.gd's, capped as it caps it, MAX_FRAME_SECONDS)
-	var typical := 0.0
-	if steps > 0 and real > 0.0:
-		_recent_frames.append(real)
-		if _recent_frames.size() > TYPICAL_FRAMES:
-			_recent_frames = _recent_frames.slice(_recent_frames.size() - TYPICAL_FRAMES)
-		typical = typical_frame(_recent_frames)
-	var rule_delta := rule_step(step_delta, steps, real, typical)  # (the rule is judged on this; the steps that run keep step_delta)
-	var allowed := backend_setting != StartConditions.BACKEND_CPU
-	var available := backend_usable(GpuWorld.available(), bup_limit, GpuWorld.most_bups())
-	var rule_steps := steps
-	if steps > 0 and real > 0.0:
-		rule_steps = maxi(1, roundi(steps * RULE_FRAME_SECONDS / real))  # (the same work per real second, whichever backend ran the last frame and however long it took)
 	var on_gpu := runs_on_gpu()
-	_release_idle_gpu(on_gpu, real if real > 0.0 else RULE_FRAME_SECONDS)
-	var frame_estimate := backend_frame_costs(rule_delta, field.get_size(), sim.moves_for(step_delta), population(), steps, field.puff_count()).x  # (for the frame as it really was: what `measured_usec` measures)
-	if not on_gpu and measured_usec > 0.0 and _frame_estimate_usec > 0.0:
-		_cpu_ratio = lerpf(_cpu_ratio, clampf(measured_usec / _frame_estimate_usec, CPU_RATIO_MIN, CPU_RATIO_MAX), CPU_RATIO_SMOOTHING)
-	_frame_estimate_usec = frame_estimate
-	cpu_cost_estimate = backend_frame_costs(rule_delta, field.get_size(), sim.moves_for(step_delta), population(), rule_steps, field.puff_count()).x * _cpu_ratio
-	var wants := backend_wants_gpu(backend_setting, rule_delta, sim.moves_for(step_delta), field.get_size(), population(), on_gpu, available, rule_steps, field.puff_count(), other_cpu_load, _cpu_ratio)
-	_gpu_wanted_seconds = _gpu_wanted_seconds + (real if real > 0.0 else RULE_FRAME_SECONDS) if wants else 0.0  # (no frame length, as when a tool calls this directly: a frame of the rule's)
-	if not wants:
-		_fresh = false  # (a small dish: it waits like any other when it grows)
-	switch_wanted = false
-	if runs_on_gpu():
-		_cpu_votes = 0 if wants else _cpu_votes + 1
-		var rule_only := allowed and available  # (what is left to say 'no' is Auto's rule: it must say so for a while)
-		var settled := _cpu_votes >= AUTO_DOWN_FRAMES or _gpu_on_cpu  # (bups a save or an edit brought over are the true ones, and so is their count: nothing to wait for)
-		if not wants and (not rule_only or settled):
-			if rule_only and backend_setting == StartConditions.BACKEND_AUTO and not switch_allowed:
-				switch_wanted = true  # (Auto's rule wants the processor: it waits its turn)
-				switch_wanted_gpu = false
-				if _gpu_on_cpu:
-					_load_gpu()  # (it stays on the GPU until its turn, so the GPU runs the true bups meanwhile)
-				return
+	if backend.idle_release(on_gpu, gpu_world != null and gpu_world.gpu != null and gpu_world.gpu.is_main, real if real > 0.0 else BackendRule.RULE_FRAME_SECONDS):
+		_release_idle_gpu()
+	var facts := DishBackend.Facts.new()
+	facts.on_gpu = on_gpu
+	facts.available = BackendRule.usable(GpuWorld.available(), bup_limit, GpuWorld.most_bups())
+	facts.state_on_cpu = _gpu_on_cpu
+	facts.cells = field.get_size()
+	facts.moves = sim.moves_for(step_delta)
+	facts.population = population()
+	facts.clouds = field.puff_count()
+	match backend.choose(step_delta, steps, real, facts):
+		DishBackend.Action.TO_GPU:
+			if gpu_world == null:
+				gpu_world = GpuWorld.new(sim)
+			_load_gpu()
+			gpu_active = true
+			_render_stale = true
+		DishBackend.Action.TO_CPU:
 			_to_cpu_for_edit()  # (its state, brought over unless an edit has just done so)
 			gpu_active = false
 			_gpu_on_cpu = false
-			_cpu_votes = 0
 			_render_stale = true
-			if rule_only:
-				_gpu_wanted_seconds = 0.0  # (Auto's rule let go: it must want the GPU for as long again before the GPU takes over)
-		elif _gpu_on_cpu:
-			_load_gpu()  # (a save or an edit has brought the bups over; the GPU takes them back before it runs)
-	elif wants and (_gpu_wanted_seconds >= GPU_WAIT_SECONDS - 1.0e-6 or _fresh):
-		if backend_setting == StartConditions.BACKEND_AUTO and not switch_allowed:
-			switch_wanted = true  # (Auto's rule wants the GPU: it waits its turn)
-			switch_wanted_gpu = true
-			return
-		if gpu_world == null:
-			gpu_world = GpuWorld.new(sim)
-		_load_gpu()
-		gpu_active = true
-		_fresh = false
-		_cpu_votes = 0
-		_render_stale = true
+		DishBackend.Action.RELOAD:
+			_load_gpu()
 
 
-## Gives back the GPU's buffers, shaders and pipelines (on the render thread, as a freed dish does) once the dish has run on the processor for
-## GPU_RELEASE_SECONDS without the rule wanting the GPU again or a switch waiting; `_load_gpu` makes them afresh when the GPU is wanted later.
-func _release_idle_gpu(on_gpu: bool, seconds: float) -> void:
-	var held := gpu_world != null and gpu_world.gpu != null and gpu_world.gpu.is_main
-	if on_gpu or not held or _gpu_wanted_seconds > 0.0 or switch_wanted:
-		_gpu_idle_seconds = 0.0
-		return
-	_gpu_idle_seconds += seconds
-	if _gpu_idle_seconds < GPU_RELEASE_SECONDS:
-		return
+## Gives back the GPU's buffers, shaders and pipelines (on the render thread, as a freed dish does); `_load_gpu` makes them afresh when the
+## GPU is wanted later.
+func _release_idle_gpu() -> void:
 	var idle := gpu_world.gpu
 	gpu_world.gpu = null
-	_gpu_idle_seconds = 0.0
 	RenderingServer.call_on_render_thread(idle.release)
 
 

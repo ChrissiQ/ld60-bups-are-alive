@@ -48,7 +48,7 @@ static func write(dish: Dish, bloom_due: float) -> Dictionary:
 		"watched": dish.watched,
 		"history_all_factor": dish.history_all_factor,
 		"history_origin": dish.history_origin,
-		"backend": dish.backend_setting,
+		"backend": dish.backend.setting,
 		"moved_out": saved_moved_out,
 	}
 

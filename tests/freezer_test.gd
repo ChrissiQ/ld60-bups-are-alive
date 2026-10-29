@@ -46,7 +46,7 @@ func _run() -> void:
 	TestUtil.check(m.dishes.size() == 3 and m.freezer_shelf.entries.is_empty() and m._dish_numbers[back] == number, "thawing puts it among the running dishes under its old number")
 	TestUtil.check(absf(back.time - first.time) <= m.sim_speed / 60.0 + 1.0, "it is at the world's time, not the time it was frozen at (%.1f, world %.1f)" % [back.time, first.time])
 	TestUtil.check(back.population() == bups, "it has the bups it was frozen with (%d, was %d)" % [back.population(), bups])
-	TestUtil.check(back.backend_setting == StartConditions.BACKEND_CPU and back.moved_out.get(12345, -1) == 7, "it keeps its backend setting and where the pipette's bups went (%s, %s)" % [back.backend_setting, back.moved_out])
+	TestUtil.check(back.backend.setting == StartConditions.BACKEND_CPU and back.moved_out.get(12345, -1) == 7, "it keeps its backend setting and where the pipette's bups went (%s, %s)" % [back.backend.setting, back.moved_out])
 	var saved := {"time": 100.0, "bloom_due": 150.0, "plankton": [{"born_at": 10.0, "burst_at": 500.0}], "history": {"pop": [1.0, 2.0, 3.0]}, "history_all": {"pop": [5.0]}, "history_all_factor": 2}
 	m._move_saved_dish_to(saved, 100.0 + 600.0)
 	TestUtil.check(saved["time"] == 700.0 and saved["bloom_due"] == 750.0 and saved["plankton"][0]["burst_at"] == 1100.0 and saved["plankton"][0]["born_at"] == 610.0, "what was due at a time moves on with the dish: nothing is overdue when it runs again")

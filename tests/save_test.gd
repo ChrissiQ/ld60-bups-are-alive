@@ -72,8 +72,8 @@ func _init() -> void:
 	b.set_backend_setting(StartConditions.BACKEND_CPU)
 	if not d2.from_dict(JSON.parse_string(JSON.stringify(b.to_dict()))) or d2.bup_name(named_id) != "Zoë" or d2.sim.record_count() != b.sim.record_count():
 		failures.append("family records through a save (%d vs %d)" % [d2.sim.record_count(), b.sim.record_count()])
-	if d2.moved_out.get(named_id, -1) != 3 or d2.backend_setting != StartConditions.BACKEND_CPU:
-		failures.append("where the pipette's bups went, and the backend setting, through a save (%s, %s)" % [d2.moved_out, d2.backend_setting])
+	if d2.moved_out.get(named_id, -1) != 3 or d2.backend.setting != StartConditions.BACKEND_CPU:
+		failures.append("where the pipette's bups went, and the backend setting, through a save (%s, %s)" % [d2.moved_out, d2.backend.setting])
 	# A save of another version is no save at all.
 	if SaveGame.VERSION < 2: failures.append("the save version was not raised with the format")
 

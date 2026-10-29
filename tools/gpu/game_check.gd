@@ -16,7 +16,7 @@ extends SceneTree
 ##   long [hours] [founders] [limit] [feed] [bloom]   scenario D at x10,000 (setting On) for `hours` sim-hours: frame times, memory
 ##   perf [bups] [radius] [setting] [speed] [frames] [nutrient] [feed]  a dish filled with `bups` bups at `speed`, drawing: frame times, achieved speed
 ##   frame [bups] [radius] [nutrient] [feed]  the GPU frame's cost beside its steps, from one to eight steps: vsync off, frame time against steps per frame (a frame inside the engine's own ~3 ms hides the GPU's work: gpufit is the check of the cost model)
-##   gpufit [bups] [radius] [nutrient] [feed]  what Dish.GPU_STEP_MODEL and Dish.GPU_FRAME_USEC were fitted to: vsync off, frames of 9 to 72 steps (the GPU bounds them), their time against the steps by least squares (the frame's fixed cost and each step's), beside the model's. GAME_CHECK_DETAIL=400 for a fine grid
+##   gpufit [bups] [radius] [nutrient] [feed]  what BackendRule.GPU_STEP_MODEL and BackendRule.GPU_FRAME_USEC were fitted to: vsync off, frames of 9 to 72 steps (the GPU bounds them), their time against the steps by least squares (the frame's fixed cost and each step's), beside the model's. GAME_CHECK_DETAIL=400 for a fine grid
 ##   thresholds                    where Auto's rule switches (the cost model, bisected), 10 mm and 90 mm, x1,000 and x10,000
 ##   editcost [bups] [radius]      what one edit by hand (add_bup, remove_bup) costs while the GPU runs: time and buffer memory
 ## GAME_CHECK_FPS=60 caps the frame rate (Engine.max_fps), for a 60 Hz display on a faster one. GAME_CHECK_LOGS is where `edits` writes its debug log.
@@ -230,8 +230,8 @@ func frame() -> void:
 		var f := minf(delta, MAX_FRAME_SECONDS)
 		var steps := maxi(1, ceili(f * speed / Dish.MAX_STEP))
 		var step_delta := f * speed / steps
-		var rule_steps := maxi(1, roundi(steps * Dish.RULE_FRAME_SECONDS / minf(dish.get_process_delta_time(), 0.1)))
-		var c := Dish.backend_frame_costs(step_delta, dish.field.get_size(), dish.sim.moves_for(step_delta), dish.population(), rule_steps, dish.field.puff_count())
+		var rule_steps := maxi(1, roundi(steps * BackendRule.RULE_FRAME_SECONDS / minf(dish.get_process_delta_time(), 0.1)))
+		var c := BackendRule.frame_costs(step_delta, dish.field.get_size(), dish.sim.moves_for(step_delta), dish.population(), rule_steps, dish.field.puff_count())
 		rule_seen = "frame %.1f ms, %d steps of %.1f s (%d for a 60 Hz frame), %d bups, %d clouds: model CPU %.0f GPU %.0f us/frame" % [delta * 1000.0, steps, step_delta, rule_steps, dish.population(), dish.field.puff_count(), c.x, c.y]
 		var t0 := Time.get_ticks_usec()
 		var done := dish.advance(f * speed, FRAME_BUDGET_USEC)
@@ -476,19 +476,19 @@ func _auto(seed_value: int, setting: String) -> void:
 	if not switches.is_empty():
 		var pop_at: int = switches[0][3]
 		var moves := dish.sim.moves_for(166.67 / 9.0)
-		var costs := Dish.backend_frame_costs(166.67 / 9.0, dish.field.get_size(), moves, pop_at, 9, dish.field.puff_count())
+		var costs := BackendRule.frame_costs(166.67 / 9.0, dish.field.get_size(), moves, pop_at, 9, dish.field.puff_count())
 		print("     cost model at the switch (%d bups, %d clouds): CPU %.0f us/frame, GPU %.0f us/frame" % [pop_at, dish.field.puff_count(), costs.x, costs.y])
 	# x1 (fine steps, which the GPU runs too): Auto's rule decides as at any speed, and hands back only after AUTO_DOWN_FRAMES frames
 	var before := switches.size()
 	set_speed(1.0)
-	for i in Dish.AUTO_DOWN_FRAMES - 1:
+	for i in BackendRule.AUTO_DOWN_FRAMES - 1:
 		await frame()
-	_ok(dish.backend_running() == "gpu" and switches.size() == before, "x1: no hand-back before %d frames of the rule saying so" % Dish.AUTO_DOWN_FRAMES)
+	_ok(dish.backend_running() == "gpu" and switches.size() == before, "x1: no hand-back before %d frames of the rule saying so" % BackendRule.AUTO_DOWN_FRAMES)
 	await frames(40)
-	var costs1 := Dish.backend_frame_costs(0.0167, dish.field.get_size(), dish.sim.moves_for(0.0167), dish.population(), 1, dish.field.puff_count())
+	var costs1 := BackendRule.frame_costs(0.0167, dish.field.get_size(), dish.sim.moves_for(0.0167), dish.population(), 1, dish.field.puff_count())
 	print("     x1 with %d bups: the rule's costs CPU %.0f GPU %.0f us/frame; running %s" % [dish.population(), costs1.x, costs1.y, dish.backend_running()])
 	set_speed(10000.0)
-	await frames(Dish.wait_frames(1.0 / 120.0) + 2)
+	await frames(BackendRule.wait_frames(1.0 / 120.0) + 2)
 	_ok(dish.backend_running() == "gpu", "x10,000 again: the GPU")
 	await frames(60)
 	# x100: one step a frame: Auto's rule may hand back to the CPU (after AUTO_DOWN_FRAMES frames)
@@ -498,13 +498,13 @@ func _auto(seed_value: int, setting: String) -> void:
 		await frame()
 		if down_at < 0 and dish.backend_running() == "cpu":
 			down_at = i + 1
-	var costs100 := Dish.backend_frame_costs(1.667, dish.field.get_size(), dish.sim.moves_for(1.667), dish.population(), 1, dish.field.puff_count())
+	var costs100 := BackendRule.frame_costs(1.667, dish.field.get_size(), dish.sim.moves_for(1.667), dish.population(), 1, dish.field.puff_count())
 	print("     x100 with %d bups: the rule's costs CPU %.0f GPU %.0f us/frame; running %s (back to the CPU at frame %d)" % [dish.population(), costs100.x, costs100.y, dish.backend_running(), down_at])
-	_ok(down_at < 0 or down_at >= Dish.AUTO_DOWN_FRAMES, "x100: a hand-back by Auto's rule waits %d frames (it took %d)" % [Dish.AUTO_DOWN_FRAMES, down_at])
+	_ok(down_at < 0 or down_at >= BackendRule.AUTO_DOWN_FRAMES, "x100: a hand-back by Auto's rule waits %d frames (it took %d)" % [BackendRule.AUTO_DOWN_FRAMES, down_at])
 	# On / Off at x100
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
 	var up_at := -1
-	for i in Dish.wait_frames(1.0 / 120.0) + 5:
+	for i in BackendRule.wait_frames(1.0 / 120.0) + 5:
 		await frame()
 		if up_at < 0 and dish.backend_running() == "gpu":
 			up_at = i + 1
@@ -632,11 +632,11 @@ func _edits() -> void:
 	await frame()
 	_ok(dish.backend_running() == "cpu", "setting Off while on the GPU: the CPU at the next frame")
 	dish.set_backend_setting(StartConditions.BACKEND_AUTO)
-	await frames(Dish.wait_frames(1.0 / 120.0) + 2)
-	var costs := Dish.backend_frame_costs(83.3 / 5.0, dish.field.get_size(), dish.sim.moves_for(83.3 / 5.0), dish.population(), 5, dish.field.puff_count())
+	await frames(BackendRule.wait_frames(1.0 / 120.0) + 2)
+	var costs := BackendRule.frame_costs(83.3 / 5.0, dish.field.get_size(), dish.sim.moves_for(83.3 / 5.0), dish.population(), 5, dish.field.puff_count())
 	print("     Auto with %d bups, %d clouds: model CPU %.0f GPU %.0f us/frame; running %s" % [dish.population(), dish.field.puff_count(), costs.x, costs.y, dish.backend_running()])
 	dish.set_backend_setting(StartConditions.BACKEND_GPU)
-	await frames(Dish.wait_frames(1.0 / 120.0) + 2)
+	await frames(BackendRule.wait_frames(1.0 / 120.0) + 2)
 	_ok(dish.backend_running() == "gpu", "setting On again: the GPU")
 
 	# the speed across the fine threshold, again and again (the GPU has a fine path: setting On, it stays)
@@ -647,14 +647,14 @@ func _edits() -> void:
 		good = good and dish.backend_running() == "gpu"
 		await frames(4)
 		set_speed(10000.0)
-		await frames(Dish.wait_frames(1.0 / 120.0))
+		await frames(BackendRule.wait_frames(1.0 / 120.0))
 		good = good and dish.backend_running() == "gpu"
 	_ok(good, "5 times x1 then x10,000: the GPU keeps the bups across the fine threshold")
 	for k in 10:
 		set_speed(1.0 if k % 2 == 0 else 10000.0)
 		await frames(3)
 	set_speed(10000.0)
-	await frames(Dish.wait_frames(1.0 / 120.0) + 5)
+	await frames(BackendRule.wait_frames(1.0 / 120.0) + 5)
 	consistent("after speed changes every 3 frames")
 
 	# pause with a selected bup; drops and the eraser while paused
@@ -876,13 +876,13 @@ func _perf(bups: int, radius: float, setting: String, run_speed: float, count: i
 	set_speed(run_speed)
 	var settled := -1
 	var calm := 0
-	for i in Dish.wait_frames(1.0 / 120.0) + 300:
+	for i in BackendRule.wait_frames(1.0 / 120.0) + 300:
 		await frame()
 		if dish.backend_running() == "gpu" and settled < 0:
 			calm = calm + 1 if frame_ms[-1] < 25.0 else 0
 			if calm >= 5:
-				settled = i - Dish.wait_frames(1.0 / 120.0) - 4
-		if i >= Dish.wait_frames(1.0 / 120.0) + 30 and (settled >= 0 or dish.backend_running() == "cpu"):
+				settled = i - BackendRule.wait_frames(1.0 / 120.0) - 4
+		if i >= BackendRule.wait_frames(1.0 / 120.0) + 30 and (settled >= 0 or dish.backend_running() == "cpu"):
 			break
 	if dish.backend_running() == "gpu":
 		print("     frames on the GPU before its frames settled under 25 ms: %d" % settled)
@@ -905,7 +905,7 @@ func _frame_cost(bups: int, radius: float, nutrient := 32.0, feed := 3.0) -> voi
 	filled_dish(bups, radius, StartConditions.BACKEND_GPU, bups, feed, nutrient)
 	hover_world = dish.global_position
 	set_speed(10000.0)
-	await frames(Dish.wait_frames(1.0 / 120.0) + 30)
+	await frames(BackendRule.wait_frames(1.0 / 120.0) + 30)
 	var xs := PackedFloat64Array()
 	var ys := PackedFloat64Array()
 	for k: int in [0, 1, 2, 4, 6, 8]:
@@ -961,7 +961,7 @@ func _gpu_fit(bups: int, radius: float, nutrient := 32.0, feed := 3.0) -> void:
 	filled_dish(bups, radius, StartConditions.BACKEND_GPU, bups, feed, nutrient)
 	hover_world = dish.global_position
 	set_speed(10000.0)
-	await frames(Dish.wait_frames(1.0 / 120.0) + 30)
+	await frames(BackendRule.wait_frames(1.0 / 120.0) + 30)
 	var xs := PackedFloat64Array()
 	var ys := PackedFloat64Array()
 	var pops := PackedFloat64Array()
@@ -991,8 +991,8 @@ func _gpu_fit(bups: int, radius: float, nutrient := 32.0, feed := 3.0) -> void:
 	var moves := dish.sim.moves_for(step_delta)
 	var pop := _mean(pops)
 	var cells := float(dish.field.get_size())
-	var model_step := Dish.GPU_STEP_MODEL[0] + Dish.GPU_STEP_MODEL[1] * cells * cells + pop * (Dish.GPU_STEP_MODEL[2] + Dish.GPU_STEP_MODEL[3] * moves) + Dish.GPU_STEP_MODEL[4] * dish.field.puff_count()
-	var model_frame := Dish.GPU_FRAME_USEC + Dish.GPU_FRAME_USEC_PER_BUP * pop
+	var model_step := BackendRule.GPU_STEP_MODEL[0] + BackendRule.GPU_STEP_MODEL[1] * cells * cells + pop * (BackendRule.GPU_STEP_MODEL[2] + BackendRule.GPU_STEP_MODEL[3] * moves) + BackendRule.GPU_STEP_MODEL[4] * dish.field.puff_count()
+	var model_frame := BackendRule.GPU_FRAME_USEC + BackendRule.GPU_FRAME_USEC_PER_BUP * pop
 	print("GPUFIT %.0f bups, %.0f mm, %d cells, %d motion sub-steps, %d clouds: measured frame %.0f us + %.0f us a step; model frame %.0f + %.0f a step (%+.0f%%, %+.0f%%)" % [pop, radius / 1000.0, dish.field.get_size(), moves, dish.field.puff_count(), icept * 1000.0, slope * 1000.0, model_frame, model_step, 100.0 * (model_frame / (icept * 1000.0) - 1.0), 100.0 * (model_step / (slope * 1000.0) - 1.0)])
 
 
@@ -1012,12 +1012,12 @@ func _thresholds() -> void:
 				var up := -1
 				var down := -1
 				for pop in range(1000, 1000001, 250):
-					if up < 0 and Dish.backend_wants_gpu(StartConditions.BACKEND_AUTO, cfg[2], moves, d.field.get_size(), pop, false, true, cfg[1], clouds):
+					if up < 0 and BackendRule.wants_gpu(StartConditions.BACKEND_AUTO, cfg[2], moves, d.field.get_size(), pop, false, true, cfg[1], clouds):
 						up = pop
-					if Dish.backend_wants_gpu(StartConditions.BACKEND_AUTO, cfg[2], moves, d.field.get_size(), pop, true, true, cfg[1], clouds):
+					if BackendRule.wants_gpu(StartConditions.BACKEND_AUTO, cfg[2], moves, d.field.get_size(), pop, true, true, cfg[1], clouds):
 						if down < 0:
 							down = pop - 250
-				var c := Dish.backend_frame_costs(cfg[2], d.field.get_size(), moves, maxi(up, 1000), cfg[1], clouds)
+				var c := BackendRule.frame_costs(cfg[2], d.field.get_size(), moves, maxi(up, 1000), cfg[1], clouds)
 				print("THRESHOLD %s %.0f mm, x%.0f (%d steps of %.1f s, %d motion sub-steps), %d clouds: to the GPU from %s bups, back below %s (at the switch: CPU %.0f, GPU %.0f us/frame)" % ["120Hz" if cfg[2] < 8.4 or (cfg[0] == 10000.0 and cfg[1] == 10) else "60Hz", r / 1000.0, cfg[0], cfg[1], cfg[2], moves, clouds, str(up) if up > 0 else "never (to 1M)", str(down) if down > 0 else "-", c.x, c.y])
 		d.free()
 
@@ -1029,7 +1029,7 @@ func _edit_cost(bups: int, radius: float) -> void:
 	filled_dish(bups, radius, StartConditions.BACKEND_GPU, bups, 3.0, 32.0)
 	hover_world = dish.global_position
 	set_speed(10000.0)
-	await frames(Dish.wait_frames(1.0 / 120.0) + 20)
+	await frames(BackendRule.wait_frames(1.0 / 120.0) + 20)
 	var mb0 := buffer_mb()
 	var rss0 := OS.get_static_memory_usage() / 1048576.0
 	for rep in 3:

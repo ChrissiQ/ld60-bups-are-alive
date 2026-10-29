@@ -982,9 +982,9 @@ func _advance_world(asked: float) -> float:
 	var cpu_total := 0.0  # (the processor's load: what each dish still running on it is estimated to need for a frame)
 	for d in dishes:
 		if not d.gpu_active:
-			cpu_total += d.cpu_cost_estimate
+			cpu_total += d.backend.cpu_cost_estimate
 	for d in dishes:
-		d.other_cpu_load = cpu_total - (0.0 if d.gpu_active else d.cpu_cost_estimate)
+		d.backend.other_cpu_load = cpu_total - (0.0 if d.gpu_active else d.backend.cpu_cost_estimate)
 	_let_one_dish_switch()
 	var before := world_time()
 	var latest := before
@@ -1025,7 +1025,7 @@ func _within_budget(due: Array[Dish], target: float) -> Array[Dish]:
 		if d.gpu_active:
 			chosen.append(d)
 			continue
-		var cost := d.measured_usec if d.measured_usec > 0.0 else d.cpu_cost_estimate
+		var cost := d.backend.measured_usec if d.backend.measured_usec > 0.0 else d.backend.cpu_cost_estimate
 		if on_processor == 0 or cost <= left:
 			left -= cost
 			on_processor += 1
@@ -1033,33 +1033,33 @@ func _within_budget(due: Array[Dish], target: float) -> Array[Dish]:
 	return chosen
 
 
-## Advances a dish and, when it ran on the processor, notes how long that took (see Dish.measured_usec).
+## Advances a dish and, when it ran on the processor, notes how long that took (see DishBackend.measured_usec).
 func _advance_timed(d: Dish, seconds: float, budget_usec: int) -> void:
 	var started := Time.get_ticks_usec()
 	d.advance(seconds, budget_usec)
 	if d.gpu_active:
-		d.measured_usec = 0.0  # (the timing was of the processor; on the GPU it is timed afresh if the dish comes back)
+		d.backend.measured_usec = 0.0  # (the timing was of the processor; on the GPU it is timed afresh if the dish comes back)
 	else:
 		var took := float(Time.get_ticks_usec() - started)
-		d.measured_usec = took if d.measured_usec <= 0.0 else lerpf(d.measured_usec, took, COST_SMOOTHING)
+		d.backend.measured_usec = took if d.backend.measured_usec <= 0.0 else lerpf(d.backend.measured_usec, took, COST_SMOOTHING)
 
 
 ## Auto moves one dish between the processor and the GPU at a time: dishes that all decide in the same frame would each see the others' load as it was, and all go (or all come
 ## back) together. Of the dishes waiting, the one that wants the GPU and costs the processor most goes first; with none waiting, the turn goes round the dishes.
-## A dish's wish (`Dish.switch_wanted`) lasts until it is next advanced, which asks again: a dish that the budget leaves out or that is not due keeps its turn
+## A dish's wish (`DishBackend.switch_wanted`) lasts until it is next advanced, which asks again: a dish that the budget leaves out or that is not due keeps its turn
 ## until it does advance, instead of the turn passing to it in a frame it is not advanced in and being lost.
 func _let_one_dish_switch() -> void:
 	var chosen: Dish = null
 	for d in dishes:
-		if not d.switch_wanted:
+		if not d.backend.switch_wanted:
 			continue
-		if chosen == null or (d.switch_wanted_gpu and (not chosen.switch_wanted_gpu or d.cpu_cost_estimate > chosen.cpu_cost_estimate)) or (not d.switch_wanted_gpu and not chosen.switch_wanted_gpu and d.cpu_cost_estimate < chosen.cpu_cost_estimate):
+		if chosen == null or (d.backend.switch_wanted_gpu and (not chosen.backend.switch_wanted_gpu or d.backend.cpu_cost_estimate > chosen.backend.cpu_cost_estimate)) or (not d.backend.switch_wanted_gpu and not chosen.backend.switch_wanted_gpu and d.backend.cpu_cost_estimate < chosen.backend.cpu_cost_estimate):
 			chosen = d
 	if chosen == null:  # (nobody is waiting: the turn goes round, so no two dishes ever decide in the same frame)
 		_switch_turn = (_switch_turn + 1) % dishes.size()
 		chosen = dishes[_switch_turn]
 	for d in dishes:
-		d.switch_allowed = d == chosen
+		d.backend.switch_allowed = d == chosen
 
 
 ## The world's time: that of the slowest dish.

@@ -106,7 +106,7 @@ func open(dish: Dish, free_mode: bool, started_as: StartConditions = null) -> vo
 		initial_plankton_husks.value_text = Strings.t("pause.husks_value")
 		initial_limit.value_text = UiText.thousands(started_as.bup_limit)
 	if _record_shown:
-		initial_running.value_text = Strings.t("pause.running_gpu" if dish.backend_running() == "gpu" else "pause.running_cpu") + (Strings.t("pause.running_auto") if dish.backend_setting == StartConditions.BACKEND_AUTO else "")
+		initial_running.value_text = Strings.t("pause.running_gpu" if dish.backend_running() == "gpu" else "pause.running_cpu") + (Strings.t("pause.running_auto") if dish.backend.setting == StartConditions.BACKEND_AUTO else "")
 	quit_button.text = Strings.t("pause.quit") if free_mode else Strings.t("pause.save_quit")
 	if free_mode:
 		_opening = true
