@@ -10,7 +10,6 @@
 using namespace godot;
 
 void NutrientField::_bind_methods() {
-	ClassDB::bind_static_method("NutrientField", D_METHOD("size_for", "dish_radius"), &NutrientField::size_for);
 	ClassDB::bind_method(D_METHOD("size_for_radius", "dish_radius"), &NutrientField::size_for_radius);
 	ClassDB::bind_method(D_METHOD("set_max_across", "across"), &NutrientField::set_max_across);
 	ClassDB::bind_method(D_METHOD("get_max_across"), &NutrientField::get_max_across);
@@ -22,14 +21,11 @@ void NutrientField::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_spacing"), &NutrientField::get_spacing);
 	ClassDB::bind_method(D_METHOD("accepts", "local"), &NutrientField::accepts);
 	ClassDB::bind_method(D_METHOD("deposit", "local", "energy"), &NutrientField::deposit);
-	ClassDB::bind_method(D_METHOD("deposit_disc", "local", "radius", "energy"), &NutrientField::deposit_disc);
 	ClassDB::bind_method(D_METHOD("add_cloud", "local", "radius", "energy"), &NutrientField::add_cloud);
-	ClassDB::bind_method(D_METHOD("advance_puffs", "dt"), &NutrientField::advance_puffs);
 	ClassDB::bind_method(D_METHOD("flush_emitters"), &NutrientField::flush_emitters);
 	ClassDB::bind_method(D_METHOD("puff_count"), &NutrientField::puff_count);
 	ClassDB::bind_method(D_METHOD("puffs_export"), &NutrientField::puffs_export);
 	ClassDB::bind_method(D_METHOD("puffs_import", "saved"), &NutrientField::puffs_import);
-	ClassDB::bind_method(D_METHOD("min_cloud_sigma", "x", "y"), &NutrientField::min_cloud_sigma);
 	ClassDB::bind_method(D_METHOD("erase_disc", "local", "radius", "strength"), &NutrientField::erase_disc);
 	ClassDB::bind_method(D_METHOD("sample", "local"), &NutrientField::sample);
 	ClassDB::bind_method(D_METHOD("read", "local"), &NutrientField::read);
@@ -37,7 +33,6 @@ void NutrientField::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("take", "local", "energy"), &NutrientField::take);
 	ClassDB::bind_method(D_METHOD("fill", "concentration"), &NutrientField::fill);
 	ClassDB::bind_method(D_METHOD("set_patchiness", "amplitude", "largest_patch_um", "seed"), &NutrientField::set_patchiness);
-	ClassDB::bind_method(D_METHOD("diffuse", "dt"), &NutrientField::diffuse);
 	ClassDB::bind_method(D_METHOD("total"), &NutrientField::total);
 	ClassDB::bind_method(D_METHOD("is_empty"), &NutrientField::is_empty);
 	ClassDB::bind_method(D_METHOD("values"), &NutrientField::values);
@@ -49,12 +44,17 @@ void NutrientField::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("take_recorded_puffs"), &NutrientField::take_recorded_puffs);
 	ClassDB::bind_method(D_METHOD("take_recorded_cells"), &NutrientField::take_recorded_cells);
 	ClassDB::bind_method(D_METHOD("take_recorded_amounts"), &NutrientField::take_recorded_amounts);
-	ClassDB::bind_method(D_METHOD("cell_centre", "i"), &NutrientField::cell_centre);
 	ClassDB::bind_method(D_METHOD("haze_bytes", "visible_above", "alpha_scale", "max_alpha"), &NutrientField::haze_bytes);
 	ClassDB::bind_method(D_METHOD("steer_bytes", "speed", "sense_range", "max_alpha"), &NutrientField::steer_bytes);
 	ClassDB::bind_method(D_METHOD("load_values", "saved"), &NutrientField::load_values);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "size"), "", "get_size");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "spacing"), "", "get_spacing");
+	// Test-only: the tests and tools use these, the game does not.
+	ClassDB::bind_static_method("NutrientField", D_METHOD("size_for", "dish_radius"), &NutrientField::size_for);
+	ClassDB::bind_method(D_METHOD("deposit_disc", "local", "radius", "energy"), &NutrientField::deposit_disc);
+	ClassDB::bind_method(D_METHOD("min_cloud_sigma", "x", "y"), &NutrientField::min_cloud_sigma);
+	ClassDB::bind_method(D_METHOD("diffuse", "dt"), &NutrientField::diffuse);
+	ClassDB::bind_method(D_METHOD("cell_centre", "i"), &NutrientField::cell_centre);
 }
 
 int NutrientField::size_for(double dish_radius) {

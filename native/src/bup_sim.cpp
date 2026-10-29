@@ -33,7 +33,6 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_stationary_phase", "on"), &BupSim::set_stationary_phase);
 	ClassDB::bind_method(D_METHOD("conjugate", "delta"), &BupSim::conjugate);
 	ClassDB::bind_method(D_METHOD("get_acetate"), &BupSim::get_acetate);
-	ClassDB::bind_method(D_METHOD("transfer_count"), &BupSim::transfer_count);
 	ClassDB::bind_method(D_METHOD("husk_count"), &BupSim::husk_count);
 	ClassDB::bind_method(D_METHOD("husks_export"), &BupSim::husks_export);
 	ClassDB::bind_method(D_METHOD("husk_near", "at", "radius"), &BupSim::husk_near);
@@ -55,12 +54,10 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_bup", "pos", "genome", "energy", "size", "birth_mass", "divisions", "dir", "id", "parent"), &BupSim::add_bup, DEFVAL(-1), DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("set_time", "seconds"), &BupSim::set_time);
 	ClassDB::bind_method(D_METHOD("has_record", "id"), &BupSim::has_record);
-	ClassDB::bind_method(D_METHOD("record_count"), &BupSim::record_count);
 	ClassDB::bind_method(D_METHOD("lineage_info", "id"), &BupSim::lineage_info);
 	ClassDB::bind_method(D_METHOD("lineage_chain", "id"), &BupSim::lineage_chain);
 	ClassDB::bind_method(D_METHOD("pin", "id"), &BupSim::pin);
 	ClassDB::bind_method(D_METHOD("unpin", "id"), &BupSim::unpin);
-	ClassDB::bind_method(D_METHOD("lineage_export"), &BupSim::lineage_export);
 	ClassDB::bind_method(D_METHOD("lineage_export_bytes"), &BupSim::lineage_export_bytes);
 	ClassDB::bind_method(D_METHOD("lineage_import_bytes", "data", "pinned"), &BupSim::lineage_import_bytes, DEFVAL(PackedInt64Array()));
 	ClassDB::bind_method(D_METHOD("get_next_id"), &BupSim::get_next_id);
@@ -74,8 +71,6 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("living_descendants_of", "ids"), &BupSim::living_descendants_of);
 	ClassDB::bind_method(D_METHOD("add_state_bytes", "state", "shift", "keep_ids"), &BupSim::add_state_bytes, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("clear_bups"), &BupSim::clear_bups);
-	ClassDB::bind_method(D_METHOD("set_bup_energy", "id", "energy"), &BupSim::set_bup_energy);
-	ClassDB::bind_method(D_METHOD("set_bup_pos", "id", "pos"), &BupSim::set_bup_pos);
 	ClassDB::bind_method(D_METHOD("bup_steering", "id"), &BupSim::bup_steering);
 	ClassDB::bind_method(D_METHOD("bup_steer_bytes", "id", "max_alpha"), &BupSim::bup_steer_bytes);
 	ClassDB::bind_method(D_METHOD("bup_radius", "id", "pixel_um"), &BupSim::bup_radius);
@@ -84,7 +79,18 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("diffuse_pieces", "seconds"), &BupSim::diffuse_pieces);
 	ClassDB::bind_method(D_METHOD("set_custom_name", "id", "name"), &BupSim::set_custom_name);
 	ClassDB::bind_method(D_METHOD("custom_name", "id"), &BupSim::custom_name);
-	// Single-bup hooks for the tests that pin the biology (not used by the game).
+	ClassDB::bind_method(D_METHOD("population_stats"), &BupSim::population_stats);
+	ClassDB::bind_method(D_METHOD("fraction_with_gene_at_least", "name", "threshold"), &BupSim::fraction_with_gene_at_least);
+	ClassDB::bind_method(D_METHOD("pick_bup", "local", "slack", "pixel_um"), &BupSim::pick_bup);
+	ClassDB::bind_method(D_METHOD("nearest_and_count", "local", "radius"), &BupSim::nearest_and_count);
+	ClassDB::bind_method(D_METHOD("step", "delta", "source_pos", "source_rates", "feed_per_second", "sim_time"), &BupSim::step, DEFVAL(-1.0));
+	ClassDB::bind_method(D_METHOD("render_buffer", "pixel_um", "capacity"), &BupSim::render_buffer);
+	// Test-only hooks: the tests and tools that pin the biology use them, the game does not (declared together in bup_sim.h).
+	ClassDB::bind_method(D_METHOD("transfer_count"), &BupSim::transfer_count);
+	ClassDB::bind_method(D_METHOD("record_count"), &BupSim::record_count);
+	ClassDB::bind_method(D_METHOD("lineage_export"), &BupSim::lineage_export);
+	ClassDB::bind_method(D_METHOD("set_bup_energy", "id", "energy"), &BupSim::set_bup_energy);
+	ClassDB::bind_method(D_METHOD("set_bup_pos", "id", "pos"), &BupSim::set_bup_pos);
 	ClassDB::bind_method(D_METHOD("bup_uptake", "id", "concentration", "delta"), &BupSim::bup_uptake);
 	ClassDB::bind_method(D_METHOD("bup_pay_upkeep_and_grow", "id", "delta"), &BupSim::bup_pay_upkeep_and_grow);
 	ClassDB::bind_method(D_METHOD("bup_eat", "id", "food_energy"), &BupSim::bup_eat);
@@ -94,12 +100,6 @@ void BupSim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("bup_estimate_error", "id", "concentration"), &BupSim::bup_estimate_error);
 	ClassDB::bind_method(D_METHOD("mutate_genome", "genome"), &BupSim::mutate_genome);
 	ClassDB::bind_method(D_METHOD("sample_gamma", "shape"), &BupSim::sample_gamma);
-	ClassDB::bind_method(D_METHOD("population_stats"), &BupSim::population_stats);
-	ClassDB::bind_method(D_METHOD("fraction_with_gene_at_least", "name", "threshold"), &BupSim::fraction_with_gene_at_least);
-	ClassDB::bind_method(D_METHOD("pick_bup", "local", "slack", "pixel_um"), &BupSim::pick_bup);
-	ClassDB::bind_method(D_METHOD("nearest_and_count", "local", "radius"), &BupSim::nearest_and_count);
-	ClassDB::bind_method(D_METHOD("step", "delta", "source_pos", "source_rates", "feed_per_second", "sim_time"), &BupSim::step, DEFVAL(-1.0));
-	ClassDB::bind_method(D_METHOD("render_buffer", "pixel_um", "capacity"), &BupSim::render_buffer);
 }
 
 BupSim::BupSim() {
@@ -331,18 +331,6 @@ void BupSim::put_genome(Dictionary &out, const Genome &g, bool info_keys) {
 	out["mutations"] = g.mutations;
 }
 
-Dictionary BupSim::mutate_genome(const Dictionary &genome) {
-	Daughter child = mutate(genome_from_dict(genome));
-	Dictionary out;
-	put_genome(out, child.genome, false);
-	out["lethal"] = child.lethal;
-	return out;
-}
-
-double BupSim::sample_gamma(double shape) {
-	return gamma(shape);
-}
-
 // ---- bup bookkeeping ------------------------------------------------------------------------
 
 void BupSim::derive(Bup &b) const {
@@ -511,19 +499,6 @@ PackedInt64Array BupSim::add_state_bytes(const PackedByteArray &state, const Vec
 		ids.push_back(b.id);
 	}
 	return ids;
-}
-
-void BupSim::set_bup_energy(int64_t id, double energy) {
-	if (Bup *b = get(id)) {
-		b->energy = (float)energy;
-	}
-}
-
-void BupSim::set_bup_pos(int64_t id, const Vector2 &pos) {
-	if (Bup *b = get(id)) {
-		b->x = pos.x;
-		b->y = pos.y;
-	}
 }
 
 Dictionary BupSim::bup_info(int64_t id) const {
@@ -720,7 +695,7 @@ void BupSim::keep_inside(Bup &b, Rng &r) {
 	b.dy = (float)(ay / al);
 }
 
-// ---- single-bup operations for the tests ---------------------------------------------------
+// ---- single-bup reads --------------------------------------------------------------------------
 
 #define WITH_BUP(id, fallback) \
 	int _i = find(id); \
@@ -728,9 +703,6 @@ void BupSim::keep_inside(Bup &b, Rng &r) {
 		return fallback; \
 	} \
 	const Bup &b = bups[_i];
-
-double BupSim::bup_uptake(int64_t id, double concentration, double delta) const { WITH_BUP(id, 0.0) return uptake_wanted(b, concentration, delta); }
-double BupSim::bup_estimate_error(int64_t id, double concentration) const { WITH_BUP(id, 0.0) return estimate_error(b, concentration); }
 
 // Which way this bup's drift tends (the unit vector up the gradient where it is) and how surely it goes that way: the
 // chance that it ends up further up the slope after a minute of swimming (steering_chance), 0.5 when it cannot tell,
@@ -758,6 +730,13 @@ PackedByteArray BupSim::bup_steer_bytes(int64_t id, double max_alpha) const {
 	return field->steer_bytes(b.g.genes[0], sense_range(b), max_alpha);
 }
 double BupSim::bup_radius(int64_t id, double pixel_um) const { WITH_BUP(id, 0.0) return 0.5 * drawn_length(b, pixel_um); }
+
+// ---- test-only hooks --------------------------------------------------------------------------
+// Single-bup operations and bookkeeping reads for the tests and tools that pin the biology; the game does not call them
+// (declared together in bup_sim.h, bound together at the end of _bind_methods; `lineage_export` is in bup_lineage.cpp).
+
+double BupSim::bup_uptake(int64_t id, double concentration, double delta) const { WITH_BUP(id, 0.0) return uptake_wanted(b, concentration, delta); }
+double BupSim::bup_estimate_error(int64_t id, double concentration) const { WITH_BUP(id, 0.0) return estimate_error(b, concentration); }
 bool BupSim::bup_ready(int64_t id) const { WITH_BUP(id, false) return ready_to_divide(b); }
 
 void BupSim::bup_pay_upkeep_and_grow(int64_t id, double delta) {
@@ -783,6 +762,31 @@ Vector2 BupSim::bup_split(int64_t id, double keep) {
 double BupSim::bup_tumble_rate(int64_t id, double concentration, double delta, double noise) {
 	Bup *b = get(id);
 	return b ? tumble_rate(*b, concentration, delta, noise) : 0.0;
+}
+
+Dictionary BupSim::mutate_genome(const Dictionary &genome) {
+	Daughter child = mutate(genome_from_dict(genome));
+	Dictionary out;
+	put_genome(out, child.genome, false);
+	out["lethal"] = child.lethal;
+	return out;
+}
+
+double BupSim::sample_gamma(double shape) {
+	return gamma(shape);
+}
+
+void BupSim::set_bup_energy(int64_t id, double energy) {
+	if (Bup *b = get(id)) {
+		b->energy = (float)energy;
+	}
+}
+
+void BupSim::set_bup_pos(int64_t id, const Vector2 &pos) {
+	if (Bup *b = get(id)) {
+		b->x = pos.x;
+		b->y = pos.y;
+	}
 }
 
 // ---- statistics and picking ----------------------------------------------------------------

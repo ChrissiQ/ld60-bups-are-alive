@@ -250,7 +250,6 @@ public:
 	void set_stationary_phase(bool on) { stationary_phase = on; }
 	bool starved_to_death(const Bup &b, double delta);
 	int64_t transfers = 0; // conjugation events so far (for the tools that measure how often they happen)
-	int64_t transfer_count() const { return transfers; }
 	double gene_ceiling(int gene, int reach) const; // the highest value the gene can have for a bup whose ceilings are raised so far
 	static int reach_levels(int reach) {
 		int total = 0;
@@ -313,34 +312,19 @@ public:
 	}
 	void set_time(double seconds) { now_seconds = seconds; }
 	bool has_record(int64_t id) const { return records.count(id) > 0; }
-	int record_count() const { return (int)records.size(); }
 	Dictionary lineage_info(int64_t id) const;
 	PackedInt64Array lineage_chain(int64_t id) const;
 	bool pin(int64_t id);
 	void unpin(int64_t id);
-	Array lineage_export() const; // every record as lineage_info gives a dead one (for the tests and tools)
 	// The records as one block of bytes (a save; a dictionary for each of a hundred thousand records is slow to make and to write).
 	// Little-endian, and not a stable format: 32-bit count, the records (LINEAGE_BYTES each: id, parent, born, died, divisions, mutations,
 	// four genes, hue, sat, val, harm, mutator, max_energy, reach with the F factor in bit 31, mass, energy, birth mass), 32-bit count of
 	// names, and each name as id, byte length and UTF-8. `pinned`: ids to keep a hold on, whatever else is pruned.
 	PackedByteArray lineage_export_bytes() const;
 	void lineage_import_bytes(const PackedByteArray &data, const PackedInt64Array &pinned = PackedInt64Array());
-	void set_bup_energy(int64_t id, double energy);
-	void set_bup_pos(int64_t id, const Vector2 &pos);
-
-	// single-bup operations, for the tests that pin the biology
-	double bup_uptake(int64_t id, double concentration, double delta) const;
-	void bup_pay_upkeep_and_grow(int64_t id, double delta);
-	void bup_eat(int64_t id, double food_energy);
-	bool bup_ready(int64_t id) const;
-	Vector2 bup_split(int64_t id, double keep);
-	double bup_tumble_rate(int64_t id, double concentration, double delta, double noise);
-	double bup_estimate_error(int64_t id, double concentration) const;
 	Vector3 bup_steering(int64_t id) const;
 	PackedByteArray bup_steer_bytes(int64_t id, double max_alpha) const;
 	double bup_radius(int64_t id, double pixel_um) const; // half the length it is drawn at: its own, or the least that shows
-	Dictionary mutate_genome(const Dictionary &genome);
-	double sample_gamma(double shape);
 
 	Dictionary population_stats() const; // the count and the averages the readouts show, in one pass over the bups
 	double fraction_with_gene_at_least(const String &name, double threshold) const;
@@ -352,6 +336,23 @@ public:
 	Vector2 bup_pos(int64_t id) const;
 	void set_custom_name(int64_t id, const String &name);
 	String custom_name(int64_t id) const;
+
+	// Test-only hooks: the tests and tools that pin the biology use them, the game does not (bound together at the end of
+	// `_bind_methods`).
+	int64_t transfer_count() const { return transfers; }
+	int record_count() const { return (int)records.size(); }
+	Array lineage_export() const; // every record as lineage_info gives a dead one
+	void set_bup_energy(int64_t id, double energy);
+	void set_bup_pos(int64_t id, const Vector2 &pos);
+	double bup_uptake(int64_t id, double concentration, double delta) const;
+	void bup_pay_upkeep_and_grow(int64_t id, double delta);
+	void bup_eat(int64_t id, double food_energy);
+	bool bup_ready(int64_t id) const;
+	Vector2 bup_split(int64_t id, double keep);
+	double bup_tumble_rate(int64_t id, double concentration, double delta, double noise);
+	double bup_estimate_error(int64_t id, double concentration) const;
+	Dictionary mutate_genome(const Dictionary &genome);
+	double sample_gamma(double shape);
 };
 
 } // namespace godot
