@@ -72,8 +72,6 @@ class NutrientField : public RefCounted {
 	void puff_probe(double x, double y, double &c, double &gx, double &gy, double &sigma) const; // the same, and the smallest sigma among the clouds that reach it
 	void deposit_gaussian(double x, double y, double mass, double var);
 	double grid_total() const;
-	double grid_concentration_xy(double x, double y) const; // the grid's own concentration at a point (bilinear), without the clouds
-	double take_from_grid(double x, double y, double energy); // the cell the point is in gives up to this much
 	template <typename F>
 	void each_puff(double x, double y, F fn) const; // calls fn(puff index, dx, dy, r2) for each cloud that reaches the point
 	std::vector<float> view_values() const; // the grid's concentrations with the puffs' added at the cell centres, for pictures
@@ -222,9 +220,8 @@ public:
 			puff_probe(x, y, c, gx, gy, sigma);
 		}
 	}
-	double concentration_xy(double x, double y) const; // just the concentration of read_xy
-	// The concentration at a point as the grid's and the clouds' shares, and taking what a bup wants given those (as take_xy,
-	// which reads them itself): for the serial uptake pass, which reads each bup's place once.
+	// The clouds' part of the concentration at a point, and taking what a bup wants out of them: for the serial uptake pass,
+	// which reads each bup's place once.
 	struct CloudShare { // which clouds reach a point and how much of the concentration each makes (the first few; `more` if there were others)
 		int k[6];
 		double c[6];
@@ -234,19 +231,15 @@ public:
 	};
 	// The clouds' share of the concentration at a point, as the snapshot has them (safe from many threads at once).
 	void cloud_share_xy(double x, double y, CloudShare &share) const;
-	double grid_concentration(double x, double y) const { return grid_concentration_xy(x, y); } // the grid's concentration, as it is now
-	void concentration_parts_xy(double x, double y, double &from_grid, double &from_clouds, CloudShare &share) const;
-	double take_parts_xy(double x, double y, double energy, double from_grid, double from_clouds, const CloudShare &share);
 	double take_from_clouds(double x, double y, double energy, double from_clouds, const CloudShare &share); // the clouds' part of a take: this much, out of the clouds that reach the point
 	// Uptake by cell, so that the cells can be worked on at the same time. `uptake_cell_xy` is the cell a bup at the point takes from;
-	// `uptake_concentration_xy` is what `grid_concentration` gives there, but with every cell other than `own` as it was when the step
+	// `uptake_concentration_xy` is the grid's concentration there (bilinear, without the clouds), but with every cell other than `own` as it was when the step
 	// began (`snapshot`) and `own` as it is now; `take_cell` takes up to this much energy out of a cell.
 	int uptake_cell_xy(double x, double y) const { return owner[index_at(x, y)]; }
 	double uptake_concentration_xy(double x, double y, int own) const;
 	double take_cell(int cell, double energy);
 	double cell_concentration(int cell) const { return conc[cell]; }
 	void deposit_cell(int cell, double energy) { conc[cell] += (float)(energy / (spacing * spacing)); } // (the second food lives at the cell's resolution: it is let go and taken up in the cell the bup is in)
-	double take_xy(double x, double y, double energy);
 	void deposit_xy(double x, double y, double energy);
 };
 

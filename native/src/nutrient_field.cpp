@@ -708,22 +708,6 @@ void NutrientField::read_xy(double x, double y, double &c, double &gx, double &g
 	}
 }
 
-double NutrientField::concentration_xy(double x, double y) const {
-	double c = grid_concentration_xy(x, y);
-	rebuild_hash();
-	if (!puffs.empty()) {
-		double gx = 0.0, gy = 0.0;
-		puff_sum(x, y, c, gx, gy);
-	}
-	return c;
-}
-
-double NutrientField::grid_concentration_xy(double x, double y) const {
-	double c, gx, gy;
-	bilinear(x, y, [this](int ix, int iy) { return cell_value(ix, iy); }, c, gx, gy);
-	return c;
-}
-
 double NutrientField::sample(const Vector2 &local) const {
 	double c, gx, gy;
 	read_xy(local.x, local.y, c, gx, gy);
@@ -765,33 +749,6 @@ void NutrientField::cloud_share_xy(double x, double y, CloudShare &share) const 
 	});
 }
 
-void NutrientField::concentration_parts_xy(double x, double y, double &from_grid, double &from_clouds, CloudShare &share) const {
-	from_grid = grid_concentration_xy(x, y);
-	rebuild_hash();
-	cloud_share_xy(x, y, share);
-	from_clouds = share.total;
-}
-
-double NutrientField::take_xy(double x, double y, double energy) {
-	hmass.resize(puffs.size());
-	for (size_t k = 0; k < puffs.size(); k++) {
-		hmass[k] = puffs[k].mass;
-	}
-	double from_grid, from_clouds;
-	CloudShare share;
-	concentration_parts_xy(x, y, from_grid, from_clouds, share);
-	return take_parts_xy(x, y, energy, from_grid, from_clouds, share);
-}
-
-double NutrientField::take_parts_xy(double x, double y, double energy, double from_grid, double from_clouds, const CloudShare &share) {
-	if (from_clouds <= 0.0) {
-		return take_from_grid(x, y, energy);
-	}
-	double all = from_grid + from_clouds;
-	double taken = take_from_grid(x, y, energy * from_grid / all);
-	return taken + take_from_clouds(x, y, energy * from_clouds / all, from_clouds, share);
-}
-
 double NutrientField::take_from_clouds(double x, double y, double wanted, double from_clouds, const CloudShare &share) {
 	double taken = 0.0;
 	if (!share.more) {
@@ -827,19 +784,24 @@ double NutrientField::take_cell(int cell, double energy) {
 	return taken;
 }
 
-double NutrientField::take_from_grid(double x, double y, double energy) {
-	int i = owner[index_at(x, y)];
-	if (i < 0) {
+// A test hook: what the step's uptake does for one bup at a point, from the cell it is in and from the clouds that reach it
+// in proportion to how much of the concentration each makes.
+double NutrientField::take(const Vector2 &local, double energy) {
+	const double x = local.x, y = local.y;
+	snapshot();
+	int cell = uptake_cell_xy(x, y);
+	if (cell < 0) {
 		return 0.0;
 	}
-	double area = spacing * spacing;
-	double taken = std::min(energy, (double)conc[i] * area);
-	conc[i] -= (float)(taken / area);
-	return taken;
-}
-
-double NutrientField::take(const Vector2 &local, double energy) {
-	return take_xy(local.x, local.y, energy);
+	double from_grid = uptake_concentration_xy(x, y, cell);
+	CloudShare share;
+	cloud_share_xy(x, y, share);
+	if (share.total <= 0.0) {
+		return take_cell(cell, energy);
+	}
+	double all = from_grid + share.total;
+	double taken = take_cell(cell, energy * from_grid / all);
+	return taken + take_from_clouds(x, y, energy * share.total / all, share.total, share);
 }
 
 void NutrientField::set_patchiness(double amplitude, double largest_patch_um, int64_t seed) {
