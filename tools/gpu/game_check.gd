@@ -23,6 +23,7 @@ extends SceneTree
 ## Prints "GAME CHECK OK" or the failures. Every ERROR/WARNING line Godot prints is a failure too: grep the output for them.
 
 const Tools := preload("res://tools/gpu/world_tools.gd")
+const Lab := preload("res://tools/gpu/gpu_lab.gd")
 
 const FRAME_BUDGET_USEC := DishScheduler.FRAME_BUDGET_USEC
 const MAX_FRAME_SECONDS := 0.1  ## Main.MAX_FRAME_SECONDS
@@ -349,7 +350,7 @@ func gpu_side(d: Dish) -> Dictionary:
 		out["count"] = gpu.counts()[0]
 		out["next_id"] = gpu.next_id()
 		out["conc"] = gpu.read_conc()
-		out["puffs"] = gpu.read_puffs())
+		out["puffs"] = Lab.puffs(gpu))
 	var total := 0.0
 	for v: float in out["conc"]:
 		total += v

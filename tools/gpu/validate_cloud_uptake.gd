@@ -1,6 +1,8 @@
 extends SceneTree
 ## godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/validate_cloud_uptake.gd -- bups puffs mass_low mass_high reach_um
 ## One step from the same state with clouds around the bups (the nutrient frozen: no spreading): what the bups gain and what the clouds lose, CPU against GPU.
+const Lab := preload("res://tools/gpu/gpu_lab.gd")
+
 func _init() -> void:
 	var a := OS.get_cmdline_user_args()
 	var n := int(a[0]); var np := int(a[1]); var m_lo := float(a[2]); var m_hi := float(a[3]); var reach := float(a[4])
@@ -58,9 +60,9 @@ func _init() -> void:
 	state.limit = 2000000
 	state.fill_weights = field.export_fill_weights()
 	gpu.load_state(state)
-	gpu.run(20.0, 0.0, 0, false)
+	Lab.run(gpu, 20.0, 0.0, 0, false)
 	var out := gpu.read_bups().to_float32_array()
-	var gp := gpu.read_puffs()
+	var gp := Lab.puffs(gpu)
 	var gain_c := 0.0; var gain_g := 0.0; var sum_abs := 0.0; var matched := 0; var skipped := 0
 	for i in s0.size() / GpuLayout.RECORD_WORDS:
 		var j: int = idx1.get(GpuLayout.id_of(b0, i), -1)

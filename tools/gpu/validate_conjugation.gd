@@ -4,6 +4,8 @@ extends SceneTree
 ## touching pair transfers in the one step. What the recipients end up with (the share that took the first gene, and the run lengths) from each,
 ## and that a bup that is not touching a donor, and a donor, are left as they were. With `size`, both bups of a pair have that size gene and are near
 ## dividing, so that big bodies (a pair touching across more than the GPU's 20 µm cells: size 12 with a gap of 28) can be checked.
+const Lab := preload("res://tools/gpu/gpu_lab.gd")
+
 const DONOR := {"speed": 0.001, "sense": 100.0, "metabolism": 1.5, "size": 6.0}
 const PLAIN := {"speed": 0.0, "sense": 40.0, "metabolism": 0.5, "size": 3.0}
 
@@ -66,7 +68,7 @@ func _init() -> void:
 	loaded.limit = count * 2
 	loaded.next_id = count + 1
 	gpu.load_state(loaded)
-	gpu.run_steps(1)
+	Lab.run_steps(gpu, 1)
 	var out := gpu.read_bups().to_float32_array()
 	var gtally := _tally_by_id(gpu.read_bups(), out, state, n)
 	print("pairs %d: transferred   GPU %.4f  CPU %.4f" % [n, gtally[0], cpu[0]])

@@ -6,6 +6,8 @@ extends SceneTree
 ## and fraction_with_gene_at_least within 1e-5 relative. Then three tracked bups (bup_pos, bup_radius, bup_info against the CPU's), and
 ## the eraser (GpuWorld.erase_disc on the GPU's grid and clouds against NutrientField.erase_disc on a copy of the same field).
 ## godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/queries_check.gd [-- points]
+const Lab := preload("res://tools/gpu/gpu_lab.gd")
+
 
 const RADIUS := 3000.0
 const BUPS := 20000
@@ -191,7 +193,7 @@ func _process(_delta: float) -> bool:
 			return false
 		var gpu := world.gpu
 		var got := []
-		RenderingServer.call_on_render_thread(func() -> void: got.append(gpu.read_conc()); got.append(gpu.read_puffs()))
+		RenderingServer.call_on_render_thread(func() -> void: got.append(gpu.read_conc()); got.append(Lab.puffs(gpu)))
 		var conc: PackedFloat32Array = got[0]
 		var cpu_conc: PackedFloat32Array = copy_field.export_packed()["conc"]
 		var worst := 0.0

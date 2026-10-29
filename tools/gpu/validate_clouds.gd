@@ -4,6 +4,8 @@ extends SceneTree
 ## (2) clouds spreading, handed to the grid and eaten (no bups): totals, the grid and what is left, against the CPU, over several steps;
 ## (3) clouds and deposits that come from plankton bursts and sources as events: the same dish on the CPU (clouds kept there) and on the GPU
 ##     (clouds kept there, the CPU recording what it would have done).
+const Lab := preload("res://tools/gpu/gpu_lab.gd")
+
 
 func _dish(rad: float, res: int, seed_value: int, bloom: float, nutrient: float) -> Dish:
 	var sc := StartConditions.new()
@@ -40,14 +42,14 @@ func _init() -> void:
 	state.fill_weights = field.export_fill_weights()
 	state.diffusion = field.get_diffusion()
 	gpu.load_state(state)
-	gpu.build_index()
+	Lab.build_index(gpu)
 	var pts := PackedFloat32Array()
 	var probes := 20000
 	for i in probes:
 		var pick: Array = puffs[randi() % puffs.size()]  # (places near clouds, where there is something to read)
 		var r := randf_range(0.0, 3.0 * sqrt(pick[3])); var t := randf() * TAU
 		pts.append(clampf(pick[0] + r * cos(t), -rad * 0.98, rad * 0.98)); pts.append(clampf(pick[1] + r * sin(t), -rad * 0.98, rad * 0.98))
-	var out := gpu.probe(pts)
+	var out := Lab.probe(gpu, pts)
 	var worst_c := 0.0; var worst_g := 0.0; var worst_s := 0.0; var scale_c := 0.0; var scale_g := 0.0; var nonzero := 0
 	for i in probes:
 		var cpu_v: Vector3 = field.read(Vector2(pts[i * 2], pts[i * 2 + 1]))
@@ -82,7 +84,7 @@ func _init() -> void:
 	g2.load_state(state2)
 	for step in 6:
 		dish2.step(20.0)
-	g2.run_steps(6)
+	Lab.run_steps(g2, 6)
 	var conc_gpu := g2.read_conc()
 	var conc_cpu: PackedFloat32Array = f2.values()
 	var area := sp2 * sp2
@@ -91,7 +93,7 @@ func _init() -> void:
 		grid_cpu += conc_cpu[i]; grid_gpu += conc_gpu[i]; peak = maxf(peak, conc_cpu[i])
 	for i in conc_cpu.size():
 		worst = maxf(worst, absf(conc_cpu[i] - conc_gpu[i]) / peak)
-	var left_gpu := g2.read_puffs()
+	var left_gpu := Lab.puffs(g2)
 	var mass_gpu := 0.0
 	for pf in left_gpu:
 		mass_gpu += pf[2]

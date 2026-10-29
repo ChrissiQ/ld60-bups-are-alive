@@ -2,6 +2,8 @@ extends SceneTree
 ## godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/validate_mutation.gd -- M [parent mutator, default 1] [reach rate, default the game's: raises of a gene's ceiling per division]
 ## The GPU's division and mutation against the CPU's `mutate_genome`: M bups, all ready to divide, with one parent genome; what the
 ## daughters' genomes look like (mutations, per-gene change, harm, lethal share, colour) from each.
+const Lab := preload("res://tools/gpu/gpu_lab.gd")
+
 func _init() -> void:
 	var m := int(OS.get_cmdline_user_args()[0])
 	var parent_mutator := float(OS.get_cmdline_user_args()[1]) if OS.get_cmdline_user_args().size() > 1 else 1.0
@@ -48,7 +50,7 @@ func _init() -> void:
 	state.limit = m * 2
 	state.next_id = m + 1
 	gpu.load_state(state)
-	gpu.run_steps(1)
+	Lab.run_steps(gpu, 1)
 	var raw := gpu.read_bups()
 	var out := raw.to_float32_array()
 	var np := out.size() / GpuLayout.RECORD_WORDS

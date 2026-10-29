@@ -2,6 +2,8 @@ extends SceneTree
 ## The acetate key on the GPU against the CPU: 400 bups with half a reserve and no glucose in a dish full of acetate, for one 20 s step, at key level 0, 1 and 2: how much acetate is taken
 ## and how much the bups gain, from each backend. The gain at level 2 should be KEY_FACTOR times that at level 0 on both.
 ## godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/validate_key.gd
+const Lab := preload("res://tools/gpu/gpu_lab.gd")
+
 
 const COUNT := 400
 
@@ -49,7 +51,7 @@ func _initialize() -> void:
 		var ex0 := dish.sim.export_state_bytes().to_float32_array()
 		for i in COUNT:
 			energy_before += ex0[i * GpuLayout.RECORD_WORDS + 5]
-		gpu.run_steps(1)
+		Lab.run_steps(gpu, 1)
 		var after := 0.0
 		for v in gpu.rd.buffer_get_data(gpu.buffer("CONC2")).to_float32_array():
 			after += v

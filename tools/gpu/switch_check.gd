@@ -10,6 +10,7 @@ extends SceneTree
 ##       the state transfer: GPU -> CPU -> GPU round trips, rapid switches, and the saved dictionary.
 
 const Tools := preload("res://tools/gpu/world_tools.gd")
+const Lab := preload("res://tools/gpu/gpu_lab.gd")
 
 const BENCH_COUNTS := [2000, 5000, 10000, 20000, 50000]
 const BENCH_DISHES := [[10000.0, 100], [90000.0, 100], [90000.0, 400]]  ## [radius, nutrient detail]
@@ -123,7 +124,7 @@ func _gpu_batches(dish: Dish, world: CheckWorld, batches: int) -> void:
 		for st in 9:
 			dish.step(20.0)
 			events.add_step(dish.field)
-		world.gpu.run_steps(9, events.as_dict())
+		Lab.run_steps(world.gpu, 9, events.as_dict())
 		world.look(dish.time)
 	dish.gpu_active = was_active
 
@@ -136,7 +137,7 @@ func _gpu_state(world: CheckWorld) -> Dictionary:
 	for v in conc:
 		total += v
 	total *= gpu.spacing * gpu.spacing
-	var puffs := gpu.read_puffs()
+	var puffs := Lab.puffs(gpu)
 	for pf: Array in puffs:
 		total += pf[2]
 	return {"records": gpu.read_bups(), "count": gpu.counts()[0], "next_id": gpu.next_id(), "total": total, "clouds": puffs.size()}
@@ -494,22 +495,22 @@ func _bench(reps: int, clouds: int) -> void:
 				state.dish_seed = 3
 				state.next_id = dish.sim.get_next_id()
 				gpu.load_state(state)
-				gpu.run_steps(3)
+				Lab.run_steps(gpu, 3)
 				var one := []
 				var nine := []
 				for rep in reps:
 					var t1 := Time.get_ticks_usec()
-					gpu.run_steps(1)
+					Lab.run_steps(gpu, 1)
 					one.append(float(Time.get_ticks_usec() - t1))
 					var t9 := Time.get_ticks_usec()
-					gpu.run_steps(9)
+					Lab.run_steps(gpu, 9)
 					nine.append(float(Time.get_ticks_usec() - t9))
 				cpu.sort(); one.sort(); nine.sort()
 				var g1: float = (nine[0] - one[0]) / 8.0  ## marginal us per step; the rest of a one-step batch is the batch's own fixed cost
 				var f0: float = one[0] - g1
 				print("BENCH clouds=%d r=%d cells=%d delta=%.2f N=%d | cpu %.0f us/step (median %.0f, max %.0f) | gpu1 %.0f us (median %.0f) gpu9 %.0f us (median %.0f) -> marginal %.0f us/step, fixed %.0f us" % [dish.field.puff_count(), dish_cfg[0], dish_cfg[1], delta, n, cpu[0], cpu[cpu.size() / 2], cpu[-1], one[0], one[one.size() / 2], nine[0], nine[nine.size() / 2], g1, f0])
 				if OS.get_environment("BENCH_PROFILE") == "1":
-					var prof := gpu.profile()
+					var prof := Lab.profile(gpu)
 					var parts := []
 					for k in prof:
 						parts.append("%s %.0f" % [k, prof[k]])

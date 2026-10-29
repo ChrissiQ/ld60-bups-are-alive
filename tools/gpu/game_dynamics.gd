@@ -13,6 +13,7 @@ extends SceneTree
 ## sim seconds per real second, share of the asked sim time done, frames a real second), PERFTOTAL, OVERFLOWS.
 
 const Tools := preload("res://tools/gpu/world_tools.gd")
+const Lab := preload("res://tools/gpu/gpu_lab.gd")
 const HOUR := 3600.0
 const MIN_REMAINDER := 2.0  ## a rest of less than this at a mark counts as the mark (a shorter step would be taken for a fine one)
 
@@ -49,7 +50,7 @@ func _read_gpu() -> Array:
 	RenderingServer.call_on_render_thread(func() -> void:
 		var bytes := gpu.read_bups()
 		var conc := gpu.read_conc()
-		var puffs := gpu.read_puffs()
+		var puffs := Lab.puffs(gpu)
 		out.append([bytes, conc, puffs, gpu.rd.buffer_get_data(gpu.buffer("CONC2")).to_float32_array()]))
 	var bytes: PackedByteArray = out[0][0]
 	var bups := bytes.to_float32_array()

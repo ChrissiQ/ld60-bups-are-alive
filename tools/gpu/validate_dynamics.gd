@@ -10,6 +10,7 @@ extends SceneTree
 ## pop speed sense metabolism size harm energy nutrient
 
 const Tools := preload("res://tools/gpu/world_tools.gd")
+const Lab := preload("res://tools/gpu/gpu_lab.gd")
 
 
 func _hours(scenario: String) -> int:
@@ -115,7 +116,7 @@ func _init() -> void:
 					dish.step(step)
 					world_events.add_step(field)
 				events = world_events.as_dict()
-			gpu.run_steps(9, events)  # (nine steps: three minutes of sim time at 20 s)
+			Lab.run_steps(gpu, 9, events)  # (nine steps: three minutes of sim time at 20 s)
 			steps_done += 9
 			var cnt := gpu.counts()
 			if scenario == "A" and cnt[0] >= 1000:
@@ -137,7 +138,7 @@ func _init() -> void:
 					total += v
 				total *= area
 				if with_world:
-					for pf in gpu.read_puffs():
+					for pf in Lab.puffs(gpu):
 						total += pf[2]
 					total += field.total()  # (only what the sources have kept back: the recording field's own grid stays empty)
 				for k in 5:

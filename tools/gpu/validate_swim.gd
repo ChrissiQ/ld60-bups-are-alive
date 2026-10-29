@@ -2,6 +2,8 @@ extends SceneTree
 ## godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/validate_swim.gd -- N radius_um res
 ## The coarse swim on the GPU against the CPU's, from the same bups in the same (patchy) field: how far they move along and across
 ## the local gradient, by how steep a slope they face (s = speed * |grad| / (floor + c)). Random numbers differ, so it is statistics.
+const Lab := preload("res://tools/gpu/gpu_lab.gd")
+
 
 static func _grad(eff: PackedFloat32Array, n: int, sp: float, org: float, x: float, y: float) -> Vector3:
 	var fx := clampf((x + org) / sp - 0.5, 0.0, n - 1.001)
@@ -72,7 +74,7 @@ func _init() -> void:
 	var state := GpuSim.State.of_grid(field, dish.radius, b0, consts)
 	state.conc = conc0  # (the field before the CPU's step)
 	gpu.load_state(state)
-	gpu.run(20.0, 0.0, 0, true)
+	Lab.run(gpu, 20.0, 0.0, 0, true)
 	var out := gpu.read_bups().to_float32_array()
 	var idx1 := {}
 	for i in s1.size() / GpuLayout.RECORD_WORDS:

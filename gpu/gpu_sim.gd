@@ -5,7 +5,8 @@ extends RefCounted
 ## gpu/shaders/*.glsl; the bup record, P, CNT and PCNT are laid out in gpu/gpu_layout.gd.
 ##
 ## Two ways to run it:
-## - a local RenderingDevice (`GpuSim.new()`: tools and tests; needs a window, not --headless): `run_steps` records, submits and waits;
+## - a local RenderingDevice (`GpuSim.new()`: tools and tests; needs a window, not --headless): the caller records, submits and waits
+##   (tools/gpu/gpu_lab.gd: `run_steps`);
 ## - the main RenderingDevice (`GpuSim.new(RenderingServer.get_rendering_device())`: the game): `is_main` is true, nothing here may
 ##   call submit() or sync(), and every call that touches the device is made on the render thread (RenderingServer.call_on_render_thread).
 ##   A batch is `prepare_steps(steps, plan)` (uploads: before any compute list is open, since the device refuses buffer updates while one
@@ -477,15 +478,20 @@ func _record_after_diffusion(cl: int) -> void:
 		dispatch(cl, "dep_apply", n * n)
 	dispatch(cl, "snapshot", n * n)
 	if _has_clouds:
-		dispatch(cl, "bin_clear", _bins)
-		dispatch(cl, "bin_count", puff_capacity)
-		_record_scan_chain(cl, "bn", _bin_sizes)
-		dispatch(cl, "bin_cursor", _bins)
-		dispatch(cl, "bin_scatter", puff_capacity)
-		dispatch(cl, "bin_sort", _bins)
+		_record_cloud_index(cl)
 	dispatch(cl, "clear", n * n)
 	if _has_clouds:
 		dispatch(cl, "puff_clear", puff_capacity)
+
+
+## The clouds filed by place: the lists the bups' reads and the probe look in.
+func _record_cloud_index(cl: int) -> void:
+	dispatch(cl, "bin_clear", _bins)
+	dispatch(cl, "bin_count", puff_capacity)
+	_record_scan_chain(cl, "bn", _bin_sizes)
+	dispatch(cl, "bin_cursor", _bins)
+	dispatch(cl, "bin_scatter", puff_capacity)
+	dispatch(cl, "bin_sort", _bins)
 
 
 func _record_bups(cl: int) -> void:
@@ -529,24 +535,6 @@ func _record_life(cl: int, step := 0, event_set := 0) -> void:
 	dispatch(cl, "copy", capacity * 7)
 	dispatch(cl, "ev_count", 1, 0.0, float(event_set))
 	dispatch(cl, "setcount", 1)
-
-
-func _submit() -> void:
-	assert(not is_main, "submit/sync only on a local device: on the main device the frame submits what was recorded")
-	rd.submit()
-	rd.sync()
-
-
-## The core of one step with the bups where they are (no feed, division or death): for comparing the pieces with the CPU's. The
-## diffusion is `diffuse_pieces` pieces of k = `k_per_piece` (D dt / cell² each) here, not the coefficient given to load_state.
-func run(step_seconds: float, k_per_piece: float, diffuse_pieces: int, swim := true) -> void:
-	_set_step(step_seconds, swim)
-	var cl := rd.compute_list_begin()
-	_record_diffusion(cl, k_per_piece * diffuse_pieces)
-	_record_after_diffusion(cl)
-	_record_bups(cl)
-	rd.compute_list_end()
-	_submit()
 
 
 ## What comes in from outside during a batch of steps: `events` has "ranges" (4 ints per step: first cloud, clouds, first deposit, deposits),
@@ -681,78 +669,6 @@ func record_mirror(cl: int, slots: int) -> void:
 	dispatch(cl, "mirror", maxi(slots, 1), float(maxi(slots, 1)))
 
 
-## Whole steps of the current length, as many as asked, in one submit, waiting for them (a local device only: tools and tests).
-func run_steps(steps: int, events := {}) -> void:
-	prepare_steps(steps, {"events": events})
-	var cl := rd.compute_list_begin()
-	record_steps(cl, steps)
-	rd.compute_list_end()
-	_submit()
-
-
-## Time each kernel on its own (microseconds per dispatch, over `reps` dispatches in one submit; the state is not reset, so it is only for timing).
-func profile(reps := 20) -> Dictionary:
-	_set_step(_delta)
-	var out := {}
-	var plan := {}
-	if _has_clouds:
-		plan.merge({"puff_advance": puff_capacity, "dep_apply": n * n, "bin_clear": _bins, "bin_count": puff_capacity, "bin_cursor": _bins, "bin_scatter": puff_capacity, "bin_sort": _bins, "puff_clear": puff_capacity, "puff_scale": puff_capacity, "puff_commit": puff_capacity})
-	plan.merge({"feed": n * n, "diffuse_a": n * n, "snapshot": n * n, "clear": n * n, "swim": capacity, "demand": capacity, "cells": n * n, "apply": capacity, "ac_cells": n * n, "ac_apply": capacity, "life": capacity, "scan0_s": capacity, "compact": capacity * 7, "copy": capacity * 7})
-	for kname in plan:
-		var cl := rd.compute_list_begin()
-		var t0 := Time.get_ticks_usec()
-		for r in reps:
-			dispatch(cl, kname, plan[kname], float(capacity), 0.1)
-		rd.compute_list_end()
-		_submit()
-		out[kname] = float(Time.get_ticks_usec() - t0) / reps
-	out["diffuse_a"] = out["diffuse_a"] * maxi(2, 2 * ceili(_k_total / 0.4))
-	out["scans"] = out["scan0_s"] * 2.0 * 1.4  # (two scans: the first level is nearly all of each)
-	return out
-
-
-## Files the clouds by place (as at the start of a step), for tests.
-func build_index() -> void:
-	_has_clouds = true
-	var cl := rd.compute_list_begin()
-	dispatch(cl, "bin_clear", _bins)
-	dispatch(cl, "bin_count", puff_capacity)
-	_record_scan_chain(cl, "bn", _bin_sizes)
-	dispatch(cl, "bin_cursor", _bins)
-	dispatch(cl, "bin_scatter", puff_capacity)
-	dispatch(cl, "bin_sort", _bins)
-	rd.compute_list_end()
-	_submit()
-
-
-## [entries in all lists, most in one square, squares with any]: how crowded the lists of clouds by place are.
-func bin_stats() -> Array:
-	var counts_by_bin := rd.buffer_get_data(_bufs["BINC"]).to_int32_array()
-	var total := 0
-	var biggest := 0
-	var used := 0
-	for c in counts_by_bin:
-		total += c
-		biggest = maxi(biggest, c)
-		if c > 0:
-			used += 1
-	return [total, biggest, used, counts_by_bin.size()]
-
-
-## For tests: x, y of each point in, [concentration, gradient x, gradient y, smallest sigma] of the clouds there out.
-func probe(points: PackedFloat32Array) -> PackedFloat32Array:
-	var m := points.size() / 2
-	_buf("PQ", points.to_byte_array())
-	_buf("PR", _zeros(m * 16))
-	var kern: Dictionary = _kernels["probe"]
-	kern["set"] = _uniform_set(kern, kern["buffers"])
-	var cl := rd.compute_list_begin()
-	dispatch(cl, "probe", m, float(m))
-	rd.compute_list_end()
-	_submit()
-	return rd.buffer_get_data(_bufs["PR"]).to_float32_array()
-
-
 ## Frees every buffer, set, pipeline and shader this simulation made (on the device's thread; for a GpuSim no longer used).
 func release() -> void:
 	for kname: String in _kernels:
@@ -791,15 +707,6 @@ func read_clouds() -> PackedFloat32Array:
 			kept += 1
 	clouds.resize(kept * 5)
 	return clouds
-
-
-## The clouds that are there: [x, y, mass, variance, cut] each.
-func read_puffs() -> Array:
-	var clouds := read_clouds()
-	var out := []
-	for k in clouds.size() / 5:
-		out.append(Array(clouds.slice(k * 5, k * 5 + 5)))
-	return out
 
 
 ## CNT as ints (GpuLayout.CNT_*: the bups now, the next id's lo and hi words, the seed, ...).

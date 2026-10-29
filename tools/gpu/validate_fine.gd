@@ -6,6 +6,8 @@ extends SceneTree
 ## signal is log(1 + c / floor) where it is, and chemotaxis shows as a rising mean signal and a falling mean distance from the patch's
 ## centre. Random numbers differ between the backends, so it is statistics: compare the means over several seeds. The step is
 ## rounded to the nearest that makes a minute a whole number of batches of 9 steps.
+const Lab := preload("res://tools/gpu/gpu_lab.gd")
+
 
 const RADIUS := 3000.0
 const SIGMA := 600.0
@@ -107,7 +109,7 @@ func _init() -> void:
 		gpu.load_state(state)
 		for minute in range(1, minutes + 1):
 			for k in batches:
-				gpu.run_steps(9)
+				Lab.run_steps(gpu, 9)
 			var bups := gpu.read_bups().to_float32_array()
 			var np: int = gpu.counts()[0]
 			var sum_signal := 0.0
