@@ -1,5 +1,5 @@
 extends RefCounted
-## Helpers for the windowed checks of the game's GPU path (tools/gpu/events_check.gd, queries_check.gd, dish_speed.gd, validate_dynamics.gd,
+## Helpers for the windowed checks of the game's GPU path (tools/gpu/events_check.gd, queries_check.gd, validate_dynamics.gd,
 ## game_dynamics.gd): the dishes of the scenarios, their SAMPLE line, and a load of a dish onto the main RenderingDevice through
 ## GpuWorld.load_from_cpu.
 
