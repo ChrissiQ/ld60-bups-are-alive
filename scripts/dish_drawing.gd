@@ -150,31 +150,31 @@ func build_cpu_picture(pixel_um: float) -> void:
 ## gpu_world.draw_bups(its RD buffer, those slots, pixel()) records the render kernel when the picture must change (the same rule as
 ## `build_cpu_picture`: time moved, the zoom or the slots changed, the GPU's state was loaded, or trails may show).
 func draw_bups_gpu() -> void:
-	var gpu := dish.gpu_world.gpu
-	if gpu == null or gpu.capacity <= 0 or not gpu.is_main:
+	var world := dish.gpu_world
+	if not world.can_draw():
 		return  # (only the main device can write the picture's buffer: a world on a local device, as tools make, is not drawn)
 	var multimesh := bups_mesh.multimesh
-	if multimesh.instance_count != gpu.capacity:
-		multimesh.instance_count = gpu.capacity  # (a new RD buffer, all zero: the render kernel is set up again for it)
+	if multimesh.instance_count != world.draw_capacity():
+		multimesh.instance_count = world.draw_capacity()  # (a new RD buffer, all zero: the render kernel is set up again for it)
 		stale = true
 	# The slots drawn: room for the bups there are, as on the CPU path (from the last count read back, which lags a few frames, or the
 	# count loaded while none has come back), not for all the GPU holds: every slot drawn costs, an empty one too (about 2 ms a frame
 	# for a million on an M1 Pro). The render kernel writes the slots past the live count as nothing; those past `slots` are not drawn.
 	var known := dish.population()
 	if known <= 0:
-		known = gpu.count
-	var slots := mini(gpu.capacity, maxi(Dish.RENDER_MIN_CAPACITY, nearest_po2(known + known / 2)))
+		known = world.draw_count()
+	var slots := mini(world.draw_capacity(), maxi(Dish.RENDER_MIN_CAPACITY, nearest_po2(known + known / 2)))
 	if multimesh.visible_instance_count != slots:
 		multimesh.visible_instance_count = slots
 	var target := RenderingServer.multimesh_get_buffer_rd_rid(multimesh.get_rid())
 	# Never multimesh.buffer or the per-instance setters here: a CPU copy of the instances would be uploaded over the GPU's.
-	var stamp := [dish.time, dish.pixel(), target, slots, GpuDraw.of(gpu).generation]  # (a load of the GPU's state is a new picture too)
+	var stamp := [dish.time, dish.pixel(), target, slots, world.draw_generation()]  # (a load of the GPU's state is a new picture too)
 	var changed: bool = stamp != render_stamp
 	if stale or changed or trails_may_show:
 		render_stamp = stamp
 		stale = false
 		trails_may_show = changed  # (as on the CPU: a picture made as time moved may carry trails, the next still one clears them)
-		dish.gpu_world.draw_bups(target, slots, dish.pixel())
+		world.draw_bups(target, slots, dish.pixel())
 
 
 ## Builds the husks' picture again when time has moved, the husks are different or the zoom has changed (and not oftener than HUSK_REFRESH_MSEC while only time moves).

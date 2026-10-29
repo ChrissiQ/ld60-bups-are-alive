@@ -194,8 +194,8 @@ func _init() -> void:
 
 ## A dish that is freed gives back the buffers, shaders and pipelines its GPU simulation made on the main device.
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_PREDELETE and gpu_world != null and gpu_world.gpu != null and gpu_world.gpu.is_main:
-		RenderingServer.call_on_render_thread(gpu_world.gpu.release)
+	if what == NOTIFICATION_PREDELETE and gpu_world != null:
+		gpu_world.release_device()
 
 
 func _ready() -> void:
@@ -1201,8 +1201,8 @@ func set_backend_setting(value: String) -> void:
 func _choose_backend(step_delta: float, steps := 0) -> void:
 	var real := minf(get_process_delta_time(), 0.1)  # (the frame the caller advances for: main.gd's, capped as it caps it, MAX_FRAME_SECONDS)
 	var on_gpu := runs_on_gpu()
-	if backend.idle_release(on_gpu, gpu_world != null and gpu_world.gpu != null and gpu_world.gpu.is_main, real if real > 0.0 else BackendRule.RULE_FRAME_SECONDS):
-		_release_idle_gpu()
+	if backend.idle_release(on_gpu, gpu_world != null and gpu_world.holds_main_device(), real if real > 0.0 else BackendRule.RULE_FRAME_SECONDS):
+		gpu_world.release_device()  # (`_load_gpu` makes the buffers and pipelines afresh when the GPU is wanted later)
 	var facts := DishBackend.Facts.new()
 	facts.on_gpu = on_gpu
 	facts.available = BackendRule.usable(GpuWorld.available(), bup_limit, GpuWorld.most_bups())
@@ -1225,14 +1225,6 @@ func _choose_backend(step_delta: float, steps := 0) -> void:
 			drawing.stale = true
 		DishBackend.Action.RELOAD:
 			_load_gpu()
-
-
-## Gives back the GPU's buffers, shaders and pipelines (on the render thread, as a freed dish does); `_load_gpu` makes them afresh when the
-## GPU is wanted later.
-func _release_idle_gpu() -> void:
-	var idle := gpu_world.gpu
-	gpu_world.gpu = null
-	RenderingServer.call_on_render_thread(idle.release)
 
 
 ## What load_from_cpu needs of the dish, and what it shows of the bups (the selected and hovered ones, the shares of a gene a goal

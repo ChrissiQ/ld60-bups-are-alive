@@ -874,6 +874,40 @@ func draw_bups(multimesh: RID, instance_count: int, pixel_um: float) -> void:
 	GpuDraw.of(gpu).draw(gpu, multimesh, instance_count, pixel_um)
 
 
+## Whether the simulation is on the main RenderingDevice: the only one the bups' picture can be drawn from (a world on a local device, as the
+## tools make, is not drawn), and the one a dish gives back when it goes.
+func holds_main_device() -> bool:
+	return gpu != null and gpu.is_main
+
+
+## Gives back the main device's buffers, shaders and pipelines (on the render thread); `load_from_cpu` makes them afresh when they are wanted
+## later. Nothing happens for a world that does not hold the main device.
+func release_device() -> void:
+	if not holds_main_device():
+		return
+	var held := gpu
+	gpu = null
+	RenderingServer.call_on_render_thread(held.release)
+
+
+## What the drawing needs of the simulation (see DishDrawing.draw_bups_gpu): whether there is a picture to draw, the bup slots, the bups at the load,
+## and the count of loads (a load of the state is a new picture too).
+func can_draw() -> bool:
+	return holds_main_device() and gpu.capacity > 0
+
+
+func draw_capacity() -> int:
+	return gpu.capacity
+
+
+func draw_count() -> int:
+	return gpu.count
+
+
+func draw_generation() -> int:
+	return GpuDraw.of(gpu).generation
+
+
 ## The GPU's name, for the debug log and the pause menu's record of the settings ("" when there is none).
 func device_name() -> String:
 	if gpu != null:
