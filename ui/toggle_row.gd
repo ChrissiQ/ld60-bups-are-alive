@@ -8,6 +8,8 @@ extends VBoxContainer
 signal toggled(on: bool)
 signal automatic_toggled(on: bool)
 
+const AUTOMATIC_ALPHA := 0.4  ## how faint the switch is while the machine decides
+
 @export var label_text := "":
 	set(text):
 		label_text = text
@@ -99,7 +101,7 @@ func _light() -> void:
 		on_button.set_pressed_no_signal(_state)
 		off_button.set_pressed_no_signal(not _state)
 		auto_check.set_pressed_no_signal(_automatic)
-		segments.modulate.a = 0.4 if _automatic else 1.0  # (dimmed: the machine decides)
+		segments.modulate.a = AUTOMATIC_ALPHA if _automatic else 1.0  # (dimmed: the machine decides)
 		for button: Button in [on_button, off_button]:
 			button.mouse_filter = Control.MOUSE_FILTER_IGNORE if _automatic else Control.MOUSE_FILTER_STOP
 		segments.focus_mode = Control.FOCUS_NONE if _automatic else Control.FOCUS_ALL  # (Tab skips a switch the machine is deciding)

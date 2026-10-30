@@ -19,6 +19,7 @@ const SPOT_PAD := 6.0  ## screen pixels the lit part is outlined outside what is
 const CARD_GAP := 18.0  ## between the lit part and its card
 const SCREEN_MARGIN := 16.0  ## the card keeps this far from the edges
 const PULSE_SECONDS := 0.8  ## the outline fades in and out so the eye finds it
+const PULSE_LOW := 0.45  ## the opacity it fades to
 
 @onready var scrims: Array[Panel] = [$ScrimTop, $ScrimBottom, $ScrimLeft, $ScrimRight]
 @onready var spot: Panel = $Spot
@@ -56,7 +57,7 @@ func start(steps: Array[Dictionary]) -> void:
 	active = true
 	visible = true
 	_pulse = create_tween().set_loops()
-	_pulse.tween_property(spot, "modulate:a", 0.45, PULSE_SECONDS)
+	_pulse.tween_property(spot, "modulate:a", PULSE_LOW, PULSE_SECONDS)
 	_pulse.tween_property(spot, "modulate:a", 1.0, PULSE_SECONDS)
 	_show_step(0)
 

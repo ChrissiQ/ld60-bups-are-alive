@@ -1,6 +1,10 @@
 extends Node2D
 
 const BANNER_SECONDS := 7.0
+const BANNER_BRIEF_SECONDS := 1.5  ## how long a short banner stays up
+const PIPETTE_PULSE_SECONDS := 0.5  ## the pipette button's fade each way while the timer holds the game
+const PIPETTE_PULSE_LOW := 0.35  ## the opacity it fades to
+const PIPETTE_STILL_ALPHA := 0.5  ## its opacity under reduced motion (lit, not pulsing)
 const MAX_FRAME_SECONDS := 0.1  ## the longest frame the sim will catch up on, so a hitch can't snowball
 const MIN_TABS_WIDTH := 140.0  ## the least the dish tabs are given before the layer toggles make way for them
 const VITALS_MAX_SHARE := 0.55  ## the most of the window's width the top bar's readout may take
@@ -428,11 +432,11 @@ func _begin_pipette_wait() -> void:
 	holds.hold(&"pipette")
 	var button := toolbar.button_for(Toolbar.Tool.PIPETTE)
 	if UserSettings.reduce_motion:
-		button.modulate.a = 0.5  # (lit, but not pulsing)
+		button.modulate.a = PIPETTE_STILL_ALPHA
 		return
 	_pipette_pulse = create_tween().set_loops()
-	_pipette_pulse.tween_property(button, "modulate:a", 0.35, 0.5).set_trans(Tween.TRANS_SINE)
-	_pipette_pulse.tween_property(button, "modulate:a", 1.0, 0.5).set_trans(Tween.TRANS_SINE)
+	_pipette_pulse.tween_property(button, "modulate:a", PIPETTE_PULSE_LOW, PIPETTE_PULSE_SECONDS).set_trans(Tween.TRANS_SINE)
+	_pipette_pulse.tween_property(button, "modulate:a", 1.0, PIPETTE_PULSE_SECONDS).set_trans(Tween.TRANS_SINE)
 
 
 func _end_pipette_wait(resume: bool) -> void:
@@ -448,13 +452,13 @@ func _end_pipette_wait(resume: bool) -> void:
 ## goes on without them. The new dish takes its place in the strip and the main view moves to it. Returns the new dish, or null if there was nothing to move or no room.
 func pipette(world: Vector2, circle_radius: float) -> Dish:
 	if dishes.size() >= MAX_DISHES:
-		_show_banner(Strings.t("hud.banner_pipette_limit"), 1.5)
+		_show_banner(Strings.t("hud.banner_pipette_limit"), BANNER_BRIEF_SECONDS)
 		return null
 	var source := dish
 	var taken := source.take_in_disc(world, circle_radius)
 	var count := taken.size() / GpuSim.RECORD_BYTES
 	if count == 0:
-		_show_banner(Strings.t("hud.banner_pipette_empty"), 1.5)
+		_show_banner(Strings.t("hud.banner_pipette_empty"), BANNER_BRIEF_SECONDS)
 		return null
 	var start: StartConditions = Session.free_start.copy()
 	start.dish_radius = source.radius
@@ -564,7 +568,7 @@ func freeze_dish(d: Dish) -> void:
 	})
 	var number: int = _dish_numbers[d]
 	_remove_dish(d)
-	_show_banner(Strings.t("hud.banner_frozen", [number]), 1.5)
+	_show_banner(Strings.t("hud.banner_frozen", [number]), BANNER_BRIEF_SECONDS)
 
 
 ## Takes a dish out of the game: its bups die with it and nothing of it is kept. The last running dish cannot be trashed.
@@ -573,13 +577,13 @@ func trash_dish(d: Dish) -> void:
 		return
 	var number: int = _dish_numbers[d]
 	_remove_dish(d)
-	_show_banner(Strings.t("hud.banner_trashed", [number]), 1.5)
+	_show_banner(Strings.t("hud.banner_trashed", [number]), BANNER_BRIEF_SECONDS)
 
 
 ## A frozen dish runs again, as one of the running dishes, from the world's time on (the time it was frozen is not simulated), under the number it had.
 func thaw(entry: Dictionary) -> void:
 	if dishes.size() >= MAX_DISHES:
-		_show_banner(Strings.t("hud.banner_unfreeze_limit"), 1.5)
+		_show_banner(Strings.t("hud.banner_unfreeze_limit"), BANNER_BRIEF_SECONDS)
 		return
 	var world := scheduler.world_time()
 	var data: Dictionary = (entry["data"] as Dictionary).duplicate(true)
@@ -724,12 +728,12 @@ func _click(world: Vector2) -> void:
 				dish.selected.source = dish.sources[-1]
 			elif dish.contains(world):
 				if dish.sources.size() >= Dish.MAX_SOURCES:
-					_show_banner(Strings.t("hud.banner_source_limit"), 1.5)
+					_show_banner(Strings.t("hud.banner_source_limit"), BANNER_BRIEF_SECONDS)
 				else:
-					_show_banner(Strings.t("hud.banner_edge"), 1.5)
+					_show_banner(Strings.t("hud.banner_edge"), BANNER_BRIEF_SECONDS)
 		Toolbar.Tool.PLANKTON:
 			if not dish.place_plankton(world) and dish.contains(world):
-				_show_banner(Strings.t("hud.banner_plankton_limit" if dish.plankton.size() >= Dish.MAX_PLANKTON else "hud.banner_edge"), 1.5)
+				_show_banner(Strings.t("hud.banner_plankton_limit" if dish.plankton.size() >= Dish.MAX_PLANKTON else "hud.banner_edge"), BANNER_BRIEF_SECONDS)
 		Toolbar.Tool.ERASE:
 			if dish.contains(world):
 				dish.erase_nutrient(world, tool_options.brush_radius())

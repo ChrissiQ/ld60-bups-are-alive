@@ -17,3 +17,5 @@ native/.sconsign.dblite
 .DS_Store
 
 .claude/
+
+__pycache__/
