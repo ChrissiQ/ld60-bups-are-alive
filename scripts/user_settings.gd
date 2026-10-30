@@ -22,6 +22,8 @@ const MONO_SIZE := 1.0  ## Commit Mono looks bigger than Plex Sans at the same s
 static var fullscreen := true
 static var scroll_speed := 1.0  ## how fast the mouse wheel and a two-finger scroll move what they scroll (zoom the dish, scroll a list), as a multiple of the usual (a trackpad scrolls far more than a wheel)
 static var ui_scale := 1.0
+static var tray_order := PackedStringArray()  ## the names of the tray's sections, in the order the player put them (empty: the scene's own order); a section left out keeps its place after these
+static var _tray_listeners: Array[Callable] = []  ## called when the tray's order changes by anything but a drag in the tray itself
 static var reduce_motion_choice := "system"  ## "system" (follow the operating system's setting, the default), "on" or "off"
 ## Whether the game holds back its flicker, flashes and pulses: the player's choice, or the operating system's when they have not made one.
 static var reduce_motion: bool:
@@ -66,6 +68,7 @@ static func load_once() -> void:
 		fullscreen = bool(file.get_value("display", "fullscreen", fullscreen))
 		ui_scale = clampf(float(file.get_value("display", "ui_scale", ui_scale)), SCALE_MIN, SCALE_MAX)
 		scroll_speed = clampf(float(file.get_value("comfort", "scroll_speed", scroll_speed)), SCROLL_SPEED_MIN, SCROLL_SPEED_MAX)
+		tray_order = PackedStringArray(file.get_value("interface", "tray_order", tray_order))
 		reduce_motion_choice = str(file.get_value("comfort", "reduce_motion", reduce_motion_choice))
 		if not reduce_motion_choice in ["system", "on", "off"]:
 			reduce_motion_choice = "system"
@@ -225,8 +228,28 @@ static func is_fullscreen_key(event: InputEventKey) -> bool:
 
 
 ## Every preference back to what it was before the player touched it (the operating system's reduce-motion setting is followed again).
+## Keeps the order the tray's sections are in (the tray is already showing it).
+static func set_tray_order(order: PackedStringArray) -> void:
+	load_once()
+	tray_order = order
+	_commit()
+
+
+## `listener` is called when a reset puts the tray's sections back in the scene's order.
+static func listen_tray(listener: Callable) -> void:
+	if not _tray_listeners.has(listener):
+		_tray_listeners.append(listener)
+
+
+static func unlisten_tray(listener: Callable) -> void:
+	_tray_listeners.erase(listener)
+
+
 static func reset() -> void:
 	load_once()
+	tray_order = PackedStringArray()
+	for listener in _tray_listeners:
+		listener.call()
 	fullscreen = true
 	ui_scale = 1.0
 	scroll_speed = 1.0
@@ -239,6 +262,7 @@ static func _commit() -> void:
 	var file := ConfigFile.new()
 	file.set_value("display", "fullscreen", fullscreen)
 	file.set_value("display", "ui_scale", ui_scale)
+	file.set_value("interface", "tray_order", tray_order)
 	file.set_value("comfort", "scroll_speed", scroll_speed)
 	file.set_value("comfort", "reduce_motion", reduce_motion_choice)
 	file.save(path)

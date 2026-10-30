@@ -86,4 +86,27 @@ func _run() -> void:
 			await process_frame
 		TestUtil.check(is_equal_approx(m.side.size.x, open_width), "at %d%% the tray is as wide with the graph closed (%.0f) as open (%.0f)" % [int(scale * 100.0), m.side.size.x, open_width])
 		TestUtil.check(m.vitals.size.y >= m.vitals.get_content_height(), "at %d%% the top bar's readout is as tall as its text" % int(scale * 100.0))
+	# Reordering: the headings drag, the order is a user setting, and only the movable sections take part.
+	var scratch := "user://tray_order_test.cfg"
+	var real_path := UserSettings.path
+	UserSettings.path = scratch
+	var tray: Node = m.graph_section.get_parent()
+	var before := TraySection.order_of(tray)
+	TestUtil.check(not before.has("DishDetails") and before.has("GraphSection") and before.has("FreezerSection"), "the dish's own details are not among the movable sections (%s)" % [before])
+	var dragged: TraySection = m.freezer_section
+	TestUtil.check(m.graph_section._can_drop(Vector2.ZERO, dragged) and TraySection.order_of(tray).find("FreezerSection") < before.find("FreezerSection"), "dragging over a heading puts the dragged section in its place")
+	TestUtil.check(not m.graph_section._can_drop(Vector2.ZERO, m.graph_section) and not m.graph_section._can_drop(Vector2.ZERO, m.dish_details), "a section is not dropped on itself, and the dish's details do not join in")
+	dragged._dragged = true
+	dragged._notification(Node.NOTIFICATION_DRAG_END)
+	var chosen_order := TraySection.order_of(tray)
+	TestUtil.check(UserSettings.tray_order == chosen_order, "the order is kept as a user setting")
+	var kept := ConfigFile.new()
+	TestUtil.check(kept.load(scratch) == OK and PackedStringArray(kept.get_value("interface", "tray_order")) == chosen_order, "and written to the preferences file")
+	m.graph_section.get_parent().move_child(m.graph_section, tray.get_child_count() - 1)
+	TraySection.apply_order(tray)
+	TestUtil.check(TraySection.order_of(tray) == chosen_order, "applying the setting puts the sections back in it")
+	UserSettings.reset()
+	TestUtil.check(UserSettings.tray_order.is_empty() and TraySection.order_of(tray) == before, "the reset puts the sections back in the scene's order")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(scratch))
+	UserSettings.path = real_path
 	TestUtil.finish(self, "TRAY SECTIONS TESTS OK", "TRAY SECTIONS TESTS FAILED:")

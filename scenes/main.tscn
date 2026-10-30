@@ -744,6 +744,7 @@ layout_mode = 2
 unique_name_in_owner = true
 layout_mode = 2
 script = ExtResource("tray_section")
+draggable = false
 title_key = "hud.colony_title"
 tip_key = "hud.colony_tip"
 open = false

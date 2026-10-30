@@ -123,6 +123,8 @@ func _ready() -> void:
 	lineage.info_opened.connect(stage_input.stop_following)
 	_register_dish(dish)
 	dish_strip.dish_chosen.connect(set_main_dish)
+	_apply_tray_order()
+	UserSettings.listen_tray(_apply_tray_order)
 	tracker.goal_completed.connect(_on_goal_completed)
 	toolbar.tool_selected.connect(_on_tool_selected)
 	toolbar.zoom_in_requested.connect(stage_input.zoom_by.bind(StageInput.ZOOM_BUTTON_STEP))
@@ -203,7 +205,13 @@ func _ready() -> void:
 		_start_tutorial.call_deferred()  # (once the screen has been laid out, so the tour can point at it)
 
 
+## Puts the tray's sections in the order the player chose (Options' reset puts them back as the scene has them).
+func _apply_tray_order() -> void:
+	TraySection.apply_order(graph_section.get_parent())
+
+
 func _exit_tree() -> void:
+	UserSettings.unlisten_tray(_apply_tray_order)
 	Encyclopedia.set_fact("husks", false)
 	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
 
