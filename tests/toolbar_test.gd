@@ -542,7 +542,8 @@ func _init() -> void:
 	picks[Dish.PickMode.PLANKTON].button_pressed = true
 	m.dish.select_at(float_spot)
 	m.toolbar.select_tool(Toolbar.Tool.PAN)
-	TestUtil.check(m.dish.selected.plankton == null, "using another tool lets go of a selected plankton")
+	TestUtil.check(m.dish.selected.plankton == floater, "using another tool keeps a selected plankton")
+	m._clear_selection()
 	m.toolbar.select_tool(Toolbar.Tool.SELECT)
 	m.dish.select_at(float_spot)
 	floater.burst_at = m.dish.time + 1.0
@@ -664,7 +665,10 @@ func _init() -> void:
 	m.toolbar.select_tool(Toolbar.Tool.NUTRIENT)
 	await process_frame
 	await process_frame
-	TestUtil.check(m.lineage.is_empty() and m.dish.selected.bup == -1 and not m.inspector.lineage_panel.visible and not m.inspector.info_panel.visible, "choosing another tool closes every step and the info")
+	TestUtil.check(m.lineage.depth() == 3 and m.dish.selected.bup != -1, "choosing another tool keeps every step and the info open")
+	m.inspector.close_button.pressed.emit()
+	await process_frame
+	TestUtil.check(m.lineage.is_empty() and m.dish.selected.bup == -1 and not m.inspector.lineage_panel.visible and not m.inspector.info_panel.visible, "closing (as Escape does) lets go of every step and the info")
 	m.toolbar.select_tool(Toolbar.Tool.SELECT)
 	m.dish.selected.bup = kin_b
 	await process_frame
@@ -854,7 +858,7 @@ func _init() -> void:
 	spot = m.dish.global_position + Vector2(80, 20)
 	_click(m, _screen(m, spot))
 	TestUtil.check(m.dish.sources.size() == 1 and absf(m.dish.sources[0].rate - 12.5) < 0.01 and m.dish.sources[0].pos.distance_to(spot) < 0.5, "a click places a source with the chosen rate")
-	TestUtil.check(m.tool == Toolbar.Tool.SELECT and m.dish.selected.source == m.dish.sources[0] and m.dish.selected.bup == -1, "placing a source switches to the select tool with that source selected")
+	TestUtil.check(m.tool == Toolbar.Tool.SOURCE and m.dish.selected.source == m.dish.sources[0] and m.dish.selected.bup == -1, "placing a source selects it and keeps the source tool")
 	var field_before: float = TestUtil.units(m.dish)
 	m.dish.advance(60.0)
 	TestUtil.check(absf(TestUtil.units(m.dish) - field_before - 12.5) < 0.5, "a source keeps releasing nutrient into the medium at its rate (%.1f units in 1 min)" % (TestUtil.units(m.dish) - field_before))
@@ -866,7 +870,10 @@ func _init() -> void:
 	_click(m, _screen(m, m.dish.global_position + Vector2(-80, -60)))
 	TestUtil.check(m.dish.sources.size() == 2 and m.dish.pick_mode == Dish.PickMode.ALL and m.tool_options.pick_buttons[Dish.PickMode.ALL].button_pressed and m.dish.selected.source == m.dish.sources[1], "placing a source from Bups mode switches the mode back to Select all, with the source selected")
 	m.toolbar.select_tool(Toolbar.Tool.PAN)
-	TestUtil.check(m.dish.selected.source == null and not m.inspector.source_rate_row.is_visible_in_tree(), "using another tool lets go of a selected source, as it does a bup")
+	await process_frame
+	m._process(0.0)
+	TestUtil.check(m.dish.selected.source == m.dish.sources[1] and m.inspector.source_rate_row.is_visible_in_tree(), "using another tool keeps a selected source, as it does a bup")
+	m._clear_selection()
 	m.dish.remove_source(m.dish.sources[1])
 	m.toolbar.select_tool(Toolbar.Tool.SELECT)
 	_click(m, _screen(m, spot + Vector2(3, 2)))

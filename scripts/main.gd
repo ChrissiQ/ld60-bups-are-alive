@@ -277,7 +277,6 @@ func _open_watched(watched_in: Dish, id: int) -> void:
 	set_main_dish(watched_in)  # (the bup may be in another dish: the view goes there)
 	if not dish.has_record(id):
 		return
-	toolbar.select_tool(Toolbar.Tool.SELECT)
 	tool_options.show_all()  # (a mode that skips bups would let go of it again)
 	dish.selected.bup = id
 	stage_input.stop_following()
@@ -289,8 +288,6 @@ func _on_pick_mode_selected(mode: Dish.PickMode) -> void:
 
 
 func _on_tool_selected(new_tool: Toolbar.Tool) -> void:
-	if new_tool != Toolbar.Tool.SELECT and (not lineage.is_empty() or dish.selected.has_thing()):
-		_clear_selection()  # using another tool closes whatever was open on a bup or source
 	stage_input.tool = new_tool
 	tool_options.show_for(tool)
 	match tool:
@@ -728,8 +725,7 @@ func _click(world: Vector2) -> void:
 			dish.drop_nutrients(world, tool_options.nutrient_count())
 		Toolbar.Tool.SOURCE:
 			if dish.place_source(world, tool_options.source_rate()):
-				# The new source is what the player will want to look at or adjust next.
-				toolbar.select_tool(Toolbar.Tool.SELECT)
+				# The new source is what you will want to look at or adjust next: its panel opens, the tool stays.
 				tool_options.show_all()  # (a mode that skips sources would hide the one just placed)
 				dish.selected.bup = -1
 				dish.selected.source = dish.sources[-1]
