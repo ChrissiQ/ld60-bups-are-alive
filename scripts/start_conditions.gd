@@ -25,6 +25,19 @@ const BACKEND_CPU := "cpu"  ## always on the processor
 const BACKEND_GPU := "gpu"  ## on the GPU whenever the machine has one
 const BACKENDS := [BACKEND_AUTO, BACKEND_CPU, BACKEND_GPU]
 
+## The numeric settings and the range each is held to when read back (integers stay integers); a new one is a var and a row here.
+const NUMBERS := {
+	"bups": [MIN_BUPS, MAX_BUPS],
+	"nutrient_density": [0.0, MAX_NUTRIENT_DENSITY],
+	"feed_density": [0.0, MAX_FEED_DENSITY],
+	"bloom_density": [0.0, MAX_BLOOM_DENSITY],
+	"dish_radius": [MIN_DISH_RADIUS, MAX_DISH_RADIUS],
+	"medium_thickness": [MIN_MEDIUM_THICKNESS, MAX_MEDIUM_THICKNESS],
+	"nutrient_resolution": [MIN_NUTRIENT_RESOLUTION, MAX_NUTRIENT_RESOLUTION],
+	"bup_limit": [MIN_BUP_LIMIT, MAX_BUP_LIMIT],
+}
+const FLAGS := ["death_husks", "plankton_husks", "stationary_phase", "tutorial"]  ## the yes/no settings
+
 var bups := 4
 var nutrient_density := 32.0  ## units of nutrient in each mm² of the dish at the start, spread evenly: enough that a few founders grow past the first goal (1,000 bups) with room to spare (measured at 10 mm radius, 10,000 units in all, about this much: all of 110 runs reached 1,000, at about 25-27 sim-hours; twice the nutrient gets there in about 12). A density, not a total, so the dish can be made any size without choosing the nutrient again.
 var feed_density := 0.0  ## units of nutrient fed in to each mm² of the dish every hour, spread evenly (none by default: the starting nutrient is the medium they begin in)
@@ -66,27 +79,27 @@ func copy() -> StartConditions:
 
 
 func to_dict() -> Dictionary:
-	return {"bups": bups, "nutrient_density": nutrient_density, "feed_density": feed_density, "bloom_density": bloom_density, "dish_radius": dish_radius, "medium_thickness": medium_thickness, "nutrient_resolution": nutrient_resolution, "bup_limit": bup_limit, "sim_backend": sim_backend, "death_husks": death_husks, "plankton_husks": plankton_husks, "stationary_phase": stationary_phase, "tutorial": tutorial, "founders": founders.slice(0, bups).duplicate(true)}  # (only the founders there are: nothing hidden is carried over)
+	var d := {"sim_backend": sim_backend, "founders": founders.slice(0, bups).duplicate(true)}  # (only the founders there are: nothing hidden is carried over)
+	for key in NUMBERS:
+		d[key] = get(key)
+	for key in FLAGS:
+		d[key] = get(key)
+	return d
 
 
 ## Anything missing, malformed or out of range falls back to the default / the nearest valid value.
 static func from_dict(d: Dictionary) -> StartConditions:
 	var c := StartConditions.new()
-	c.bups = clampi(int(_number(d, "bups", c.bups)), MIN_BUPS, MAX_BUPS)
-	c.nutrient_density = clampf(_number(d, "nutrient_density", c.nutrient_density), 0.0, MAX_NUTRIENT_DENSITY)
-	c.feed_density = clampf(_number(d, "feed_density", c.feed_density), 0.0, MAX_FEED_DENSITY)
-	c.bloom_density = clampf(_number(d, "bloom_density", c.bloom_density), 0.0, MAX_BLOOM_DENSITY)
-	c.dish_radius = clampf(_number(d, "dish_radius", c.dish_radius), MIN_DISH_RADIUS, MAX_DISH_RADIUS)
-	c.medium_thickness = clampf(_number(d, "medium_thickness", c.medium_thickness), MIN_MEDIUM_THICKNESS, MAX_MEDIUM_THICKNESS)
-	c.nutrient_resolution = clampi(int(_number(d, "nutrient_resolution", c.nutrient_resolution)), MIN_NUTRIENT_RESOLUTION, MAX_NUTRIENT_RESOLUTION)
-	c.bup_limit = clampi(int(_number(d, "bup_limit", c.bup_limit)), MIN_BUP_LIMIT, MAX_BUP_LIMIT)
+	for key in NUMBERS:
+		var range: Array = NUMBERS[key]
+		var value := clampf(_number(d, key, float(c.get(key))), range[0], range[1])
+		c.set(key, int(value) if c.get(key) is int else value)
 	c.bup_limit = maxi(c.bup_limit, c.bups)  # the dish holds at least its founders
+	for key in FLAGS:
+		if d.get(key) is bool:
+			c.set(key, d[key])
 	var saved_backend: Variant = d.get("sim_backend")
 	c.sim_backend = saved_backend if saved_backend is String and saved_backend in BACKENDS else c.sim_backend
-	c.death_husks = d.get("death_husks") is bool and d["death_husks"]
-	c.plankton_husks = d.get("plankton_husks") is bool and d["plankton_husks"]
-	c.stationary_phase = d["stationary_phase"] if d.get("stationary_phase") is bool else c.stationary_phase
-	c.tutorial = d["tutorial"] if d.get("tutorial") is bool else c.tutorial
 	var saved_founders: Variant = d.get("founders")
 	if saved_founders is Array:
 		c.founders = []  # (what was saved replaces the default colours)
