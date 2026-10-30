@@ -8,6 +8,9 @@ extends RefCounted
 ## The follow button was pressed (the camera is the screen's).
 signal follow_pressed
 
+## The close button of the info panel was pressed (the screen lets go of the selection, as Escape does).
+signal close_pressed
+
 const WATCH_ICON := preload("res://icons/watch.svg")
 const UNWATCH_ICON := preload("res://icons/unwatch.svg")
 const FLASH_MSEC := 1500  ## how long the divisions number stays in the flash colour after the bup divides
@@ -29,6 +32,8 @@ var hover_genome: GenomeRibbon  ## the same on the card that follows the pointer
 var hover_tail: RichTextLabel
 var info_text: RichTextLabel
 var top_row: HBoxContainer
+var top_spacer: Control  ## keeps the close button at the right when there is no name row
+var close_button: Button
 var name_row: BupNameRow
 var lineage_button: Button
 var lineage_panel: PanelContainer
@@ -61,6 +66,8 @@ func bind(root: Node, lineage_view: LineageView, readouts: Readout) -> void:
 	info_text = root.get_node("%InfoText")
 	top_row = root.get_node("%InfoTopRow")
 	name_row = root.get_node("%NameRow")
+	top_spacer = root.get_node("%InfoSpacer")
+	close_button = root.get_node("%CloseButton")
 	lineage_button = root.get_node("%LineageButton")
 	lineage_panel = root.get_node("%LineagePanel")
 	lineage_back_button = root.get_node("%LineageBackButton")
@@ -76,6 +83,8 @@ func bind(root: Node, lineage_view: LineageView, readouts: Readout) -> void:
 	delete_source_button.focus_mode = Control.FOCUS_NONE
 	follow_button.pressed.connect(follow_pressed.emit)
 	follow_button.focus_mode = Control.FOCUS_NONE
+	close_button.pressed.connect(close_pressed.emit)
+	close_button.focus_mode = Control.FOCUS_NONE
 	watch_button.pressed.connect(toggle_watch)
 	watch_button.focus_mode = Control.FOCUS_NONE
 	lineage_button.pressed.connect(lineage.open_lineage)
@@ -125,7 +134,9 @@ func update(following: bool, hover_point: Variant) -> void:
 	watch_button.tooltip_text = Strings.t("hud.unwatch") if watched_now else Strings.t("hud.watch")
 	follow_button.text = Strings.t("hud.stop_following") if following else Strings.t("hud.follow")
 	follow_button.tooltip_text = Strings.t("hud.stop_following_tip" if following else "hud.follow_tip")
-	top_row.visible = pinned and bup_id >= 0
+	top_row.visible = pinned
+	name_row.visible = bup_id >= 0
+	top_spacer.visible = bup_id < 0
 	lineage_button.visible = bup_id >= 0 and bup_id == dish.selected.bup
 	watch_button.visible = lineage_button.visible  # (alive or dead: a record can be watched too)
 	var shows_bup := bup_id >= 0

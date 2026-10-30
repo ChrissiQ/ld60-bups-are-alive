@@ -114,6 +114,7 @@ func _ready() -> void:
 	inspector.number_of = func(d: Dish) -> int: return _dish_numbers[d]
 	inspector.bind(self, lineage, readout)
 	inspector.follow_pressed.connect(stage_input.toggle_follow)
+	inspector.close_pressed.connect(_clear_selection)
 	inspector.info_genome.entry_requested.connect(_open_encyclopedia)
 	lineage.info_opened.connect(stage_input.stop_following)
 	_register_dish(dish)

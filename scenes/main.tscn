@@ -37,6 +37,7 @@
 [ext_resource type="PackedScene" path="res://ui/tutorial.tscn" id="tutorial"]
 [ext_resource type="Texture2D" path="res://icons/lineage.svg" id="lineage_icon"]
 [ext_resource type="Texture2D" path="res://icons/watch.svg" id="watch_icon"]
+[ext_resource type="Texture2D" path="res://icons/close.svg" id="close_icon"]
 [ext_resource type="Texture2D" path="res://icons/back.svg" id="back_icon"]
 [ext_resource type="Texture2D" path="res://icons/pick_all.svg" id="pick_all_icon"]
 [ext_resource type="Texture2D" path="res://icons/tool_plankton.svg" id="plankton_icon"]
@@ -581,6 +582,22 @@ size_flags_vertical = 4
 theme_type_variation = &"IconButton"
 tooltip_text = "@hud.lineage_tip"
 icon = ExtResource("lineage_icon")
+icon_alignment = 1
+
+[node name="InfoSpacer" type="Control" parent="HUD/Frame/Layout/Middle/Side/Stack/InfoPanel/Box/InfoTopRow"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="CloseButton" type="Button" parent="HUD/Frame/Layout/Middle/Side/Stack/InfoPanel/Box/InfoTopRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"IconButton"
+tooltip_text = "@hud.close_info_tip"
+icon = ExtResource("close_icon")
 icon_alignment = 1
 
 [node name="InfoGauges" type="VBoxContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/InfoPanel/Box"]

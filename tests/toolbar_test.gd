@@ -690,6 +690,10 @@ func _init() -> void:
 	m.inspector.watch_button.pressed.emit()
 	m._process(0.0)
 	TestUtil.check(m.dish.is_watched(watched_one) and m.watch_list.scroll.visible and not m.watch_list.empty_note.visible and m.inspector.watch_button.tooltip_text == "Stop watching (O)" and m.watch_section.header.text == "Watching" and m.inspector.watch_button.icon == Inspector.UNWATCH_ICON, "pressing it puts the bup on the list, which appears, and the eye is crossed out to offer taking it off again")
+	TestUtil.check(m.inspector.close_button.visible and m.inspector.close_button.tooltip_text == "Close (Esc)", "the info panel of a selected bup has a close button")
+	m.inspector.close_button.pressed.emit()
+	TestUtil.check(not m.dish.has_selection(), "pressing it lets go of the selection, as Escape does")
+	m.dish.selected.bup = watched_one
 	m.dish.selected.bup = -1
 	m.dish.remove_bup(watched_one)
 	await process_frame
