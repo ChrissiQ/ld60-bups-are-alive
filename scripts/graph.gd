@@ -37,6 +37,13 @@ var span := Span.LAST_24  ## the mode the player has chosen with G (it counts on
 var chosen := false  ## whether G has been pressed: until then the graph moves up a mode by itself (see `shown_span`)
 var _drawn_key := []  ## what the graph was last drawn from (see `refresh`)
 var _drawn_msec := 0  ## when it was
+var _plot := Rect2()  ## the plot area, the window and the series as last drawn (what the pointer reads)
+var _x_min := 0.0
+var _window := 1.0
+var _pops := PackedVector2Array()
+var _vals := PackedVector2Array()
+var _hover_x := -1.0  ## the pointer's x inside the plot, or -1
+var _pinned := NAN  ## the time a click pinned the readout to, or NAN
 
 
 ## Redraws only when something it shows has changed: the history gains a sample every couple of minutes of
@@ -291,11 +298,84 @@ func _draw() -> void:
 		draw_string(font, Vector2(x - 20.0, plot.end.y + 15.0), format_time(t, in_days), HORIZONTAL_ALIGNMENT_CENTER, 40.0, tick_size, muted)
 
 	# Legend doubles as the axis titles, coloured to match the axis each belongs to.
-	var title := Strings.t("graph.bups")
-	draw_string(font, Vector2(6.0, 14.0), title, HORIZONTAL_ALIGNMENT_LEFT, -1, legend_size, population_color)
+	_plot = plot
+	_x_min = x_min
+	_window = window
+	_pops = pops
+	_vals = vals
+	var reading := _reading()
+	if reading.is_empty():
+		draw_string(font, Vector2(6.0, 14.0), Strings.t("graph.bups"), HORIZONTAL_ALIGNMENT_LEFT, -1, legend_size, population_color)
 
 	_plot_line(vals, plot, lo, hi, x_min, window, trait_color)
 	_plot_line(pops, plot, 0.0, pop_max, x_min, window, population_color)  # (last: at the cap the population sits on the top edge and must not be hidden by the trait)
+	if not reading.is_empty():
+		_draw_reading(reading, plot, lo, hi, pop_max, font, legend_size, muted, population_color, trait_color)
+
+
+## The sample the pointer (or the pin) is at: {time, pop, value}, or empty when it is at none.
+func _reading() -> Dictionary:
+	var t := _pinned
+	if is_nan(t):
+		if _hover_x < 0.0 or _pops.is_empty():
+			return {}
+		t = _x_min + (_hover_x - _plot.position.x) / _plot.size.x * _window
+	var pop := nearest(_pops, t)
+	if is_nan(pop.x) or pop.x < _x_min or pop.x > _x_min + _window:
+		return {}
+	return {"time": pop.x, "pop": pop.y, "value": nearest(_vals, pop.x).y}
+
+
+## The point of `points` (sorted by x) whose x is nearest `t`; (NAN, NAN) when there are none.
+static func nearest(points: PackedVector2Array, t: float) -> Vector2:
+	if points.is_empty():
+		return Vector2(NAN, NAN)
+	var lo := 0
+	var hi := points.size() - 1
+	while lo < hi:
+		var mid := (lo + hi) / 2
+		if points[mid].x < t:
+			lo = mid + 1
+		else:
+			hi = mid
+	if lo > 0 and absf(points[lo - 1].x - t) <= absf(points[lo].x - t):
+		lo -= 1
+	return points[lo]
+
+
+## A line down the sample, a dot on each series, and the exact numbers in the strip above the plot (the time, the population, the trait: the axes' colours).
+func _draw_reading(reading: Dictionary, plot: Rect2, lo: float, hi: float, pop_max: float, font: Font, size_: int, muted: Color, population_color: Color, trait_color: Color) -> void:
+	var x: float = plot.position.x + plot.size.x * (reading["time"] - _x_min) / _window
+	draw_line(Vector2(x, plot.position.y), Vector2(x, plot.end.y), muted, 1.0)
+	var pop_y: float = plot.end.y - plot.size.y * clampf(reading["pop"] / pop_max, 0.0, 1.0)
+	var value_y: float = plot.end.y - plot.size.y * clampf((reading["value"] - lo) / (hi - lo), 0.0, 1.0)
+	draw_circle(Vector2(x, pop_y), 3.0, population_color)
+	draw_circle(Vector2(x, value_y), 3.0, trait_color)
+	var parts := [
+		[SimClock.format(reading["time"]), muted],
+		[UiText.thousands(reading["pop"]), population_color],
+		[UiText.thousands(reading["value"], 2 if hi <= 2.5 else 1), trait_color],
+	]
+	var at := 6.0
+	for part: Array in parts:
+		draw_string(font, Vector2(at, 14.0), part[0], HORIZONTAL_ALIGNMENT_LEFT, -1, size_, part[1])
+		at += font.get_string_size(part[0], HORIZONTAL_ALIGNMENT_LEFT, -1, size_).x + 12.0
+
+
+func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		_hover_x = event.position.x if _plot.has_point(event.position) else -1.0
+		queue_redraw()
+	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and _plot.has_point(event.position):
+		_pinned = NAN if not is_nan(_pinned) else _reading().get("time", NAN)
+		accept_event()
+		queue_redraw()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_MOUSE_EXIT:
+		_hover_x = -1.0
+		queue_redraw()
 
 
 ## The samples of a series as (time, value), the ones from `x_min` on. In the whole-run view they are the whole run's (thinned: see

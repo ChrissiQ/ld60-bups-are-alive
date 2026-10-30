@@ -786,6 +786,8 @@ func _init() -> void:
 
 	# --- History graph axes.
 	TestUtil.check(HistoryGraph.nice_ceil(0.0) == 10.0 and HistoryGraph.nice_ceil(10.0) == 10.0 and HistoryGraph.nice_ceil(11.0) == 20.0, "axis max rounds up to a round number (small)")
+	var line := PackedVector2Array([Vector2(0, 5), Vector2(10, 6), Vector2(20, 7)])
+	TestUtil.check(HistoryGraph.nearest(line, 12.0) == Vector2(10, 6) and HistoryGraph.nearest(line, 16.0) == Vector2(20, 7) and HistoryGraph.nearest(line, -5.0) == Vector2(0, 5) and is_nan(HistoryGraph.nearest(PackedVector2Array(), 1.0).x), "the graph reading picks the nearest sample")
 	TestUtil.check(HistoryGraph.nice_ceil(73.0) == 100.0 and HistoryGraph.nice_ceil(101.0) == 150.0 and HistoryGraph.nice_ceil(301.0) == 500.0, "axis max rounds up to a round number (large)")
 	TestUtil.check(HistoryGraph.nice_ceil(1234.0) == 1600.0 and HistoryGraph.nice_ceil(35300.0) == 40000.0 and HistoryGraph.nice_ceil(100000.0) == 100000.0 and HistoryGraph.nice_ceil(9000.0) == 10000.0, "axis max beyond the table rounds up to a round number that halves to one (%s, %s)" % [HistoryGraph.nice_ceil(1234.0), HistoryGraph.nice_ceil(35300.0)])
 	TestUtil.check(SimClock.format(0) == "0:00" and SimClock.format(65) == "1:05" and SimClock.format(900) == "15:00" and SimClock.format(3600) == "1:00:00" and SimClock.format(3725) == "1:02:05", "the clock reads simulation time as m:ss, then h:mm:ss")
