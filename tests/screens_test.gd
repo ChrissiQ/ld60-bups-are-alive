@@ -27,6 +27,15 @@ func _init() -> void:
 	TestUtil.check(not menu.controls_panel.visible and menu.buttons.is_visible_in_tree(), "one Escape press closes it and brings the buttons back")
 
 	menu.queue_free()
+	for path in ["res://ui/options_panel.tscn", "res://ui/encyclopedia_panel.tscn", "res://ui/controls_panel.tscn"]:
+		var page: PanelPage = load(path).instantiate()
+		root.add_child(page)
+		await process_frame
+		var raised := [false]
+		page.back_requested.connect(func() -> void: raised[0] = true)
+		page.back_button.pressed.emit()
+		TestUtil.check(raised[0], "the Back button of %s raises back_requested" % path)
+		page.queue_free()
 	for scale in [1.0, 2.5]:
 		UserSettings.native_override = 0.7407  # (a 3456 x 2104 screen at twice the system scale)
 		UserSettings.ui_scale = scale

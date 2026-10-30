@@ -8,8 +8,10 @@ signal back_requested
 @onready var back_button: Button = $Box/Actions/BackButton
 
 
-func _ready() -> void:
-	back_button.pressed.connect(back_requested.emit)
+## Wired here and not in `_ready`: a subclass's own `_ready` replaces the base's, but every class in the chain gets the notification.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_READY:
+		back_button.pressed.connect(back_requested.emit)
 
 
 ## So the keyboard can go straight back.
