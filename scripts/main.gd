@@ -187,6 +187,7 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	Encyclopedia.set_fact("husks", false)
 	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
 
 
@@ -413,6 +414,7 @@ func _clear_selection() -> void:
 func _open_menu() -> void:
 	hud_layer.process_mode = Node.PROCESS_MODE_DISABLED  # no toolbar shortcuts or clicks behind the menu
 	dish.clear_hover()
+	Encyclopedia.set_fact("husks", dishes.any(func(d: Dish) -> bool: return d.has_husks()))  # (the game's husk options: any running dish having one)
 	pause_menu.open(dish, free_mode, Session.free_start)
 
 

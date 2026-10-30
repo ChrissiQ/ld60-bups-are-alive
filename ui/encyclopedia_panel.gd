@@ -28,6 +28,7 @@ const HEIGHT_GROWTH := 0.2
 
 func _ready() -> void:
 	visibility_changed.connect(_fit)
+	visibility_changed.connect(_on_visibility_changed)
 	get_viewport().size_changed.connect(_fit)
 	_fit()
 	for category: Array in Encyclopedia.CATEGORIES:
@@ -54,7 +55,13 @@ func _ready() -> void:
 		body.meta_clicked.connect(func(meta: Variant) -> void: show_entry(str(meta)))
 	about_heading.text = Strings.t("encyclopedia.heading_about")
 	game_heading.text = Strings.t("encyclopedia.heading_game")
-	show_entry(Encyclopedia.all_entries()[0])
+	show_entry(Encyclopedia.listed_entries()[0])
+
+
+## The index is made again each time the panel opens: what the game has decides which entries it lists.
+func _on_visibility_changed() -> void:
+	if visible:
+		_filter(search_field.text)
 
 
 ## The panel's size: a part of the window that grows with the interface size setting (an article at the usual size needs little room, and one in large text more).

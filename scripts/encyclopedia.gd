@@ -24,6 +24,31 @@ static func all_entries() -> Array[String]:
 	return out
 
 
+## Entries the index leaves out until the game has the fact named (set with `set_fact`). An unlisted entry is still an entry: links to it and
+## `show_entry` open it.
+const UNLISTED_UNTIL := {"husks": "husks"}
+
+static var _facts := {}  ## fact name -> whether the game has it; a fact nothing has set is off
+
+
+static func set_fact(fact: String, on: bool) -> void:
+	_facts[fact] = on
+
+
+## Whether the index lists an entry now.
+static func is_listed(id: String) -> bool:
+	return not UNLISTED_UNTIL.has(id) or _facts.get(UNLISTED_UNTIL[id], false)
+
+
+## The entries the index lists now, in order.
+static func listed_entries() -> Array[String]:
+	var out: Array[String] = []
+	for id in all_entries():
+		if is_listed(id):
+			out.append(id)
+	return out
+
+
 ## The entry a locus of the genome map opens.
 static func entry_for_locus(locus: String) -> String:
 	return locus
@@ -51,11 +76,11 @@ static func category_title(id: String) -> String:
 	return Strings.t("encyclopedia.cat_%s" % id)
 
 
-## The ids of the entries whose title or text holds `query` (any case); every entry for an empty query.
+## The ids of the listed entries whose title or text holds `query` (any case); every listed entry for an empty query.
 static func search(query: String) -> Array[String]:
 	var out: Array[String] = []
 	var wanted := query.strip_edges().to_lower()
-	for id in all_entries():
+	for id in listed_entries():
 		if wanted.is_empty() or title(id).to_lower().contains(wanted) or about(id).to_lower().contains(wanted) or game(id).to_lower().contains(wanted):
 			out.append(id)
 	return out

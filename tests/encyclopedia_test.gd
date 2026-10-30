@@ -29,7 +29,7 @@ func _run() -> void:
 		TestUtil.check(seen.has(Encyclopedia.entry_for_locus(locus)), "the band of %s has an entry" % locus)
 	for category: Array in Encyclopedia.CATEGORIES:
 		TestUtil.check(not Encyclopedia.category_title(category[0]).is_empty(), "heading %s has a title" % category[0])
-	TestUtil.check(Encyclopedia.search("").size() == ids.size(), "an empty search finds every entry")
+	TestUtil.check(Encyclopedia.search("").size() == Encyclopedia.listed_entries().size(), "an empty search finds every listed entry")
 	TestUtil.check(Encyclopedia.search("MUTATOR").has("mutator") and Encyclopedia.search("fertility").has("donor"), "the search looks in titles and articles, in any case")
 	TestUtil.check(Encyclopedia.search("zzzz-nothing").is_empty(), "a search with no match finds none")
 
@@ -52,6 +52,14 @@ func _run() -> void:
 		if how_to.search(Encyclopedia.about(id) + " " + Encyclopedia.game(id)) != null:
 			mixed.append(id)
 	TestUtil.check(mixed.is_empty(), "no entry tells the player what to click: that is the tutorial's (%s)" % [mixed])
+	TestUtil.check(not Encyclopedia.is_listed("husks") and not Encyclopedia.search("").has("husks") and not panel._buttons["husks"].visible, "the Husks entry is unlisted while the game has no husk option")
+	panel.show_entry("husks")
+	TestUtil.check(panel.current == "husks" and panel.game_body.text == Encyclopedia.game("husks"), "...and still opens, as a link or a click on the genome map would")
+	Encyclopedia.set_fact("husks", true)
+	panel.visible = false
+	panel.visible = true
+	TestUtil.check(Encyclopedia.is_listed("husks") and panel._buttons["husks"].visible and Encyclopedia.search("husk").has("husks"), "it is listed once the game has one")
+	Encyclopedia.set_fact("husks", false)
 	panel.queue_free()
 
 	var tip := "A very long tooltip that would run across the whole window if it were left on one line, which is what the engine does"
