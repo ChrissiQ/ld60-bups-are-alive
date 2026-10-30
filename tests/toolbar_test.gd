@@ -391,13 +391,13 @@ func _init() -> void:
 	await process_frame
 	TestUtil.check(m.inspector.follow_button.visible and m.inspector.follow_button.text == "Follow", "a selected bup offers a Follow button")
 	m.inspector.follow_button.pressed.emit()
-	TestUtil.check(m.camera.position.is_equal_approx(m.dish.bup_world_pos(tracked)), "Follow centres the view on the bup at once")
+	TestUtil.check(_in_stage_middle(m, tracked), "Follow centres the view on the bup at once")
 	m.dish.sim.set_bup_pos(tracked, Vector2(-120, 80))
 	await process_frame
 	await process_frame
-	TestUtil.check(m.camera.position.is_equal_approx(m.dish.bup_world_pos(tracked)) and m.inspector.follow_button.text == "Stop following", "...and the view stays on it as it moves")
+	TestUtil.check(_in_stage_middle(m, tracked) and m.inspector.follow_button.text == "Stop following", "...and the view stays on it as it moves")
 	m.toolbar.zoom_in_button.pressed.emit()
-	TestUtil.check(m.camera.position.is_equal_approx(m.dish.bup_world_pos(tracked)), "...also when zooming")
+	TestUtil.check(_in_stage_middle(m, tracked), "...also when zooming")
 	_drag(m, centre, Vector2(30, 0), MOUSE_BUTTON_MIDDLE)
 	m.dish.sim.set_bup_pos(tracked, Vector2(100, 100))
 	await process_frame
@@ -1021,3 +1021,9 @@ func _exclusive(toolbar: Toolbar) -> bool:
 		if b.button_pressed:
 			lit += 1
 	return lit == 1
+
+
+## Whether a bup is in the middle of the stage (what the tray leaves clear), which is where Follow keeps it.
+func _in_stage_middle(m: Node, id: int) -> bool:
+	var on_screen: Vector2 = (m.dish.bup_world_pos(id) - m.camera.position) * m.camera.zoom.x + m.get_viewport().get_visible_rect().size * 0.5
+	return on_screen.distance_to(m.stage.get_global_rect().get_center()) < 1.0

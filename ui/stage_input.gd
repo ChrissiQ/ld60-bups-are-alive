@@ -56,8 +56,12 @@ func fit_camera() -> void:
 	var room := minf((area.size.x - 2.0 * FIT_MARGIN) * 0.5, (area.size.y - 2.0 * FIT_MARGIN) * 0.5)
 	room = maxf(room, 40.0)
 	camera.zoom = Vector2.ONE * clampf(room / dish.radius, ZOOM_MIN, 1.0)
-	var shift := area.get_center() - view * 0.5  # (screen pixels the dish's centre sits from the window's centre)
-	camera.position = dish.global_position - shift / camera.zoom.x
+	camera.position = dish.global_position - _centre_shift(area, view) / camera.zoom.x
+
+
+## Screen pixels the middle of `area` (what the tray and rail leave clear) sits from the window's middle, which is where the camera looks.
+func _centre_shift(area: Rect2, view: Vector2) -> Vector2:
+	return area.get_center() - view * 0.5
 
 
 ## The panels know their sizes a frame or two after the screen is made: frames the dish again then (unless the player has moved the view).
@@ -117,7 +121,11 @@ func follow_selected() -> void:
 	if following_id >= 0 and (following_id != dish.selected.bup or not dish.has_bup(following_id)):
 		following_id = -1
 	if following_id >= 0:
-		camera.position = dish.bup_world_pos(following_id)
+		var view := host.get_viewport_rect().size
+		var shift := Vector2.ZERO  # (the bup is kept in the middle of what the tray leaves clear, not of the window)
+		if host.is_node_ready() and stage.size.x > 0.0:
+			shift = _centre_shift(stage.get_global_rect(), view)
+		camera.position = dish.bup_world_pos(following_id) - shift / camera.zoom.x
 
 
 func pick_slack() -> float:

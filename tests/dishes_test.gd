@@ -232,6 +232,12 @@ func _run() -> void:
 	TestUtil.check(viewed.layer_shown(Dish.Layer.MEDIUM) == not shown, "a layer key works with its buttons hidden")
 	m._on_key(key)
 	m.layers_panel.get_parent().get_parent().visible = true
+	var followed: Dish = m.dish
+	followed.select_at(followed.bup_world_pos(followed.bup_ids()[0]), 5.0)
+	m.stage_input.toggle_follow()
+	var cam: Camera2D = m.stage_input.camera
+	var on_screen: Vector2 = (followed.bup_world_pos(m.stage_input.following_id) - cam.position) * cam.zoom.x + m.get_viewport().get_visible_rect().size * 0.5
+	TestUtil.check(m.stage_input.following_id >= 0 and on_screen.distance_to(m.stage.get_global_rect().get_center()) < 1.0, "Follow puts the bup in the middle of the stage the tray leaves clear (%s, %s)" % [on_screen, m.stage.get_global_rect().get_center()])
 	m.queue_free()
 	await process_frame
 	TestUtil.finish(self, "DISHES TESTS OK")
