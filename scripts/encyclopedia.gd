@@ -11,7 +11,7 @@ const CATEGORIES := [
 	["genome", ["chromosome", "allele", "speed", "sense", "metabolism", "size", "mutator", "donor", "key", "ceilings"]],
 	["evolution", ["mutation", "harm", "selection", "conjugation", "generation", "founders"]],
 	["bups", ["mass", "energy", "steering", "starvation"]],
-	["dish", ["nutrient", "acetate", "sources", "plankton", "husks", "population_cap"]],
+	["dish", ["nutrient", "acetate", "sources", "plankton", "husks", "population_cap", "freezer"]],
 ]
 
 
