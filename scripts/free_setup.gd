@@ -4,6 +4,7 @@ extends Control
 const PREVIEW_RADIUS := 260.0  ## on-screen size the preview dish is shrunk to fit
 const PREVIEW_MARGIN := 40.0  ## the least space kept between the preview dish and the panel, the window's edge, its top and its bottom
 const PREVIEW_SEED := 1964  ## fixed so the preview doesn't reshuffle on every nudge
+const WARNING_ICON_SHARE := 0.64  ## the warning icon's width as a share of a text line: about the height of a capital letter
 const SLIDER_WIDTH := 300.0  ## how long every slider is, at the interface size there is
 const PREVIEW_MIN_RADIUS := 120.0  ## the preview dish is left out, and the panel fills the page, when the room beside the panel would make it smaller than this
 const BOTTOM_CLEARANCE := 24.0  ## and from the bottom
@@ -170,7 +171,7 @@ func _fit_scroll() -> void:
 	if not is_inside_tree():
 		return  # (the screen has been left in the meantime)
 	var line := warning_note.get_theme_font("font").get_height(warning_note.get_theme_font_size("font_size"))
-	warning_icon.custom_minimum_size = Vector2(line, line)
+	warning_icon.custom_minimum_size = Vector2(line * WARNING_ICON_SHARE, line)  # (as wide as the capitals are tall, centred on the first line: the icon fills its box, so a full-line box stuck out above the text)
 	var on_advanced := advanced.visible
 	var page_height := 0.0  # (both pages are measured, and the panel is as tall as the taller one, so changing tab moves nothing)
 	var page_width := 0.0

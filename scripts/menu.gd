@@ -29,6 +29,7 @@ func _ready() -> void:
 	var quips := Strings.list("menu", "quip")
 	tagline.text = quips[randi() % quips.size()] if not quips.is_empty() else ""
 	get_viewport().size_changed.connect(_fit_buttons)
+	buttons.minimum_size_changed.connect(_fit_buttons)  # (a new interface size changes the buttons' height with no window resize, even while a panel hides them)
 	_fit_buttons()
 	dish.position = _dish_center()
 	dish.strike(_ambient_start())
