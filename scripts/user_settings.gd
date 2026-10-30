@@ -12,15 +12,15 @@ const HEADLESS_SIZE := Vector2i(1280, 720)
 const LARGE_TEXT := 40  ## font sizes from this up (the titles) grow only half as fast as the rest
 const ROOM_EXPONENT := 0.35  ## the room round the text grows with the interface size to this power; the text itself grows to the whole of it
 const SCALE_STEP := 0.05
-const ZOOM_SPEED_MIN := 0.25
-const ZOOM_SPEED_MAX := 4.0
-const ZOOM_SPEED_STEP := 0.25
+const SCROLL_SPEED_MIN := 0.25
+const SCROLL_SPEED_MAX := 4.0
+const SCROLL_SPEED_STEP := 0.25
 const WINDOWS_BASE_DPI := 96.0  ## the dpi Windows reports at a display scaling of 100%
 const PLEX_SIZE := 1.3  ## Plex Sans is drawn at this multiple of a theme size (and an icon of its box) at 100%
 const MONO_SIZE := 1.0  ## Commit Mono looks bigger than Plex Sans at the same size, so it is drawn at the theme size itself
 
 static var fullscreen := true
-static var zoom_speed := 1.0  ## how fast the mouse wheel and a two-finger scroll zoom the dish, as a multiple of the usual (a trackpad scrolls far more than a wheel)
+static var scroll_speed := 1.0  ## how fast the mouse wheel and a two-finger scroll move what they scroll (zoom the dish, scroll a list), as a multiple of the usual (a trackpad scrolls far more than a wheel)
 static var ui_scale := 1.0
 static var reduce_motion_choice := "system"  ## "system" (follow the operating system's setting, the default), "on" or "off"
 ## Whether the game holds back its flicker, flashes and pulses: the player's choice, or the operating system's when they have not made one.
@@ -65,7 +65,7 @@ static func load_once() -> void:
 	if DisplayServer.get_name() != "headless" and file.load(path) == OK:  # (headless runs are tests: they are not to depend on the player's own preferences)
 		fullscreen = bool(file.get_value("display", "fullscreen", fullscreen))
 		ui_scale = clampf(float(file.get_value("display", "ui_scale", ui_scale)), SCALE_MIN, SCALE_MAX)
-		zoom_speed = clampf(float(file.get_value("comfort", "zoom_speed", zoom_speed)), ZOOM_SPEED_MIN, ZOOM_SPEED_MAX)
+		scroll_speed = clampf(float(file.get_value("comfort", "scroll_speed", scroll_speed)), SCROLL_SPEED_MIN, SCROLL_SPEED_MAX)
 		reduce_motion_choice = str(file.get_value("comfort", "reduce_motion", reduce_motion_choice))
 		if not reduce_motion_choice in ["system", "on", "off"]:
 			reduce_motion_choice = "system"
@@ -83,9 +83,9 @@ static func set_ui_scale(scale: float) -> void:
 	_commit()
 
 
-static func set_zoom_speed(speed: float) -> void:
+static func set_scroll_speed(speed: float) -> void:
 	load_once()
-	zoom_speed = clampf(snappedf(speed, ZOOM_SPEED_STEP), ZOOM_SPEED_MIN, ZOOM_SPEED_MAX)
+	scroll_speed = clampf(snappedf(speed, SCROLL_SPEED_STEP), SCROLL_SPEED_MIN, SCROLL_SPEED_MAX)
 	_commit()
 
 
@@ -229,7 +229,7 @@ static func reset() -> void:
 	load_once()
 	fullscreen = true
 	ui_scale = 1.0
-	zoom_speed = 1.0
+	scroll_speed = 1.0
 	reduce_motion_choice = "system"
 	_commit()
 
@@ -239,6 +239,6 @@ static func _commit() -> void:
 	var file := ConfigFile.new()
 	file.set_value("display", "fullscreen", fullscreen)
 	file.set_value("display", "ui_scale", ui_scale)
-	file.set_value("comfort", "zoom_speed", zoom_speed)
+	file.set_value("comfort", "scroll_speed", scroll_speed)
 	file.set_value("comfort", "reduce_motion", reduce_motion_choice)
 	file.save(path)

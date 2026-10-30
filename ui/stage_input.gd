@@ -149,17 +149,17 @@ func handle(event: InputEvent) -> void:
 			zoom_by(pow(event.factor, ZOOM_PINCH_GAIN))
 	elif event is InputEventPanGesture:  # a trackpad's two-finger scroll, which stands in for the mouse wheel (up zooms in)
 		if not over_hud():
-			zoom_by(pow(ZOOM_WHEEL_STEP, -event.delta.y * ZOOM_TRACKPAD_SCROLL * UserSettings.zoom_speed))
+			zoom_by(pow(ZOOM_WHEEL_STEP, -event.delta.y * ZOOM_TRACKPAD_SCROLL * UserSettings.scroll_speed))
 
 
 func _on_mouse_button(event: InputEventMouseButton) -> void:
 	match event.button_index:
 		MOUSE_BUTTON_WHEEL_UP:
 			if event.pressed and not over_hud():
-				zoom_by(pow(ZOOM_WHEEL_STEP, UserSettings.zoom_speed))
+				zoom_by(pow(ZOOM_WHEEL_STEP, UserSettings.scroll_speed))
 		MOUSE_BUTTON_WHEEL_DOWN:
 			if event.pressed and not over_hud():
-				zoom_by(pow(ZOOM_WHEEL_STEP, -UserSettings.zoom_speed))
+				zoom_by(pow(ZOOM_WHEEL_STEP, -UserSettings.scroll_speed))
 		MOUSE_BUTTON_LEFT, MOUSE_BUTTON_MIDDLE:
 			if event.pressed:
 				host.get_viewport().gui_release_focus()  # so keys go to shortcuts, not the nutrient box

@@ -64,4 +64,20 @@ func _run() -> void:
 		_wheel(on_short, MOUSE_BUTTON_WHEEL_DOWN)
 		await process_frame
 	TestUtil.check(outer.scroll_vertical > before, "over a list that has nothing to scroll the panel does scroll (%d)" % outer.scroll_vertical)
+
+	# The scroll speed setting scales a list's scroll too.
+	var speed_was := UserSettings.scroll_speed
+	outer.scroll_vertical = 0
+	await process_frame
+	on_long = long_list.get_global_rect().get_center()
+	var moved := []
+	for speed in [1.0, 2.0, 0.5]:
+		UserSettings.scroll_speed = speed
+		long_list.scroll_vertical = 0
+		_wheel(on_long, MOUSE_BUTTON_WHEEL_DOWN)
+		await process_frame
+		moved.append(long_list.get_v_scroll_bar().value)
+	UserSettings.scroll_speed = speed_was
+	var page: float = long_list.get_v_scroll_bar().page
+	TestUtil.check(is_equal_approx(moved[0], page / 8.0) and is_equal_approx(moved[1], 2.0 * moved[0]) and is_equal_approx(moved[2], 0.5 * moved[0]), "a click of the wheel moves a list an eighth of a page at the usual speed, and the setting scales it (%s)" % [moved])
 	TestUtil.finish(self, "SCROLL KEEP TESTS OK", "SCROLL KEEP TESTS FAILED:")
