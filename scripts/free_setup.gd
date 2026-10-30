@@ -5,7 +5,7 @@ const PREVIEW_RADIUS := 260.0  ## on-screen size the preview dish is shrunk to f
 const PREVIEW_MARGIN := 40.0  ## the least space kept between the preview dish and the panel, the window's edge, its top and its bottom
 const PREVIEW_SEED := 1964  ## fixed so the preview doesn't reshuffle on every nudge
 const SLIDER_WIDTH := 300.0  ## how long every slider is, at the interface size there is
-const PREVIEW_MIN_RADIUS := 70.0  ## the preview dish is left out when the room beside the panel would make it smaller than this
+const PREVIEW_MIN_RADIUS := 120.0  ## the preview dish is left out, and the panel fills the page, when the room beside the panel would make it smaller than this
 const BOTTOM_CLEARANCE := 24.0  ## and from the bottom
 const PLANKTON_SETTLE_SECONDS := 0.5  ## how long the settings are still before the preview fills with plankton (up to thousands, so not on every nudge of a slider)
 
@@ -13,6 +13,8 @@ const PLANKTON_SETTLE_SECONDS := 0.5  ## how long the settings are still before 
 @onready var panel: PanelContainer = $Panel
 @onready var scroll: ScrollContainer = $Panel/Box/Scroll  ## the rows, which scroll when there are more than fit below the title
 @onready var rows: VBoxContainer = $Panel/Box/Scroll/Rows
+@onready var warning_icon: Button = $Panel/Box/Scroll/Rows/Advanced/NoteRow/WarningIcon  ## as tall as a line of the note beside it, so it grows with the text and sits on its first line
+@onready var warning_note: Label = $Panel/Box/Scroll/Rows/Advanced/NoteRow/Note
 @onready var bups_row: SettingRow = $Panel/Box/Scroll/Rows/BupsRow
 @onready var nutrients_row: SettingRow = $Panel/Box/Scroll/Rows/NutrientsGroup/NutrientsRow
 @onready var rate_row: SettingRow = $Panel/Box/Scroll/Rows/RateGroup/RateRow
@@ -35,6 +37,7 @@ const PLANKTON_SETTLE_SECONDS := 0.5  ## how long the settings are still before 
 @onready var reset_button: Button = $Panel/Box/Actions/ResetButton
 
 var _start: StartConditions  ## working copy; only committed on GO
+var _filled := false  ## the panel fills the window's width because the preview dish would be too small beside it
 var _refreshes := 0  ## how many times the preview has been rebuilt: a pause after the latest one is what adds its plankton
 
 
@@ -146,13 +149,16 @@ func _align_rows() -> void:
 		value_width = maxf(value_width, widest + row.value_field.get_theme_stylebox("normal").get_minimum_size().x + 8.0)
 	# The sliders give way when the window is narrow (a big interface size): the panel keeps to the window.
 	var fixed := ceilf(name_width) + 16.0 + ceilf(value_width) + ceilf(unit_width) + 3.0 * 12.0 + (panel.get_theme_stylebox("panel").get_minimum_size().x) + 24.0  # (the scrollbar's strip too)
-	var slider_width := clampf(get_viewport_rect().size.x - 2.0 * panel.offset_left - fixed, 80.0, SLIDER_WIDTH)
+	var slider_room := get_viewport_rect().size.x - 2.0 * panel.offset_left - fixed
 	for row in setting_rows:
 		row.label.custom_minimum_size.x = ceilf(name_width) + 16.0
 		row.value_min_width = ceilf(value_width)  # (the row keeps this width itself, whatever number it shows: it would otherwise size its box to its own number and undo the alignment)
 		row.value_field.custom_minimum_size.x = ceilf(value_width)
 		row.unit_label.custom_minimum_size.x = ceilf(unit_width)
-		row.slider.custom_minimum_size.x = slider_width
+		row.slider.custom_minimum_size.x = clampf(slider_room, 80.0, SLIDER_WIDTH)
+	if _filled:  # (the dish is left out: the sliders take the page)
+		for row in setting_rows:
+			row.slider.custom_minimum_size.x = maxf(slider_room, 80.0)
 
 
 ## The rows take the height they need, up to what fits between the title and the bottom of the screen with the heading and the
@@ -163,16 +169,26 @@ func _fit_scroll() -> void:
 	await get_tree().process_frame  # (the sizes of what has just changed are known a frame later)
 	if not is_inside_tree():
 		return  # (the screen has been left in the meantime)
-	_align_rows()
+	var line := warning_note.get_theme_font("font").get_height(warning_note.get_theme_font_size("font_size"))
+	warning_icon.custom_minimum_size = Vector2(line, line)
 	var on_advanced := advanced.visible
 	var page_height := 0.0  # (both pages are measured, and the panel is as tall as the taller one, so changing tab moves nothing)
 	var page_width := 0.0
-	for want_advanced in [false, true]:
-		for row in rows.get_children():
-			row.visible = (row == advanced) == want_advanced
-		rows.custom_minimum_size.x = 0.0
-		page_width = maxf(page_width, rows.get_combined_minimum_size().x)  # (the panel is as wide as the widest row of either page)
-		page_height = maxf(page_height, rows.get_combined_minimum_size().y)
+	# With the usual sliders, is there room beside the panel for a useful dish? If not the dish goes and the sliders take the whole page.
+	for pass_number in 2:
+		_filled = pass_number == 1
+		_align_rows()
+		page_height = 0.0
+		page_width = 0.0
+		for want_advanced in [false, true]:
+			for row in rows.get_children():
+				row.visible = (row == advanced) == want_advanced
+			rows.custom_minimum_size.x = 0.0
+			page_width = maxf(page_width, rows.get_combined_minimum_size().x)  # (the panel is as wide as the widest row of either page)
+			page_height = maxf(page_height, rows.get_combined_minimum_size().y)
+		if pass_number == 0 and _room_radius(panel.offset_left + page_width + panel.get_theme_stylebox("panel").get_minimum_size().x) >= PREVIEW_MIN_RADIUS:
+			_filled = false
+			break
 	for row in rows.get_children():
 		row.visible = (row == advanced) == on_advanced
 	rows.custom_minimum_size.x = page_width
@@ -234,9 +250,9 @@ func _preview_space() -> Rect2:
 
 
 ## The radius the room beside the panel allows, before any limit.
-func _room_radius() -> float:
+func _room_radius(panel_edge := panel.global_position.x + panel.size.x) -> float:
 	var height := get_viewport_rect().size.y - _panel_top() - BOTTOM_CLEARANCE
-	return minf(_preview_space().size.x - 2.0 * PREVIEW_MARGIN, height - 2.0 * PREVIEW_MARGIN) * 0.5
+	return minf(get_viewport_rect().size.x - panel_edge - 2.0 * PREVIEW_MARGIN, height - 2.0 * PREVIEW_MARGIN) * 0.5
 
 
 func _preview_radius() -> float:
@@ -245,7 +261,7 @@ func _preview_radius() -> float:
 
 ## Whether there is room for the preview dish: it is shown whenever it can be a useful size, and left out only when it cannot.
 func _preview_fits() -> bool:
-	return _room_radius() >= PREVIEW_MIN_RADIUS
+	return not _filled and _room_radius() >= PREVIEW_MIN_RADIUS
 
 
 func _dish_center() -> Vector2:

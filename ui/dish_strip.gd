@@ -196,12 +196,27 @@ func _fit() -> void:
 	var overflow := needed > max_width
 	previous_button.visible = overflow
 	next_button.visible = overflow
-	var arrows := 0.0
-	if overflow:
-		arrows = previous_button.get_combined_minimum_size().x + next_button.get_combined_minimum_size().x + 2.0 * float($Bar.get_theme_constant("separation"))
-	scroll.custom_minimum_size.x = maxf(minf(needed, max_width - arrows), 24.0)
+	scroll.custom_minimum_size.x = maxf(minf(needed, max_width - (_arrows_width() if overflow else 0.0)), 24.0)
 
 
 ## The width all the tabs together would need.
 func full_width() -> float:
 	return row.get_combined_minimum_size().x
+
+
+## What the two arrows take with their gaps.
+func _arrows_width() -> float:
+	return previous_button.get_combined_minimum_size().x + next_button.get_combined_minimum_size().x + 2.0 * float($Bar.get_theme_constant("separation"))
+
+
+## The least the strip is given by choice: its arrows and two tabs (the arrows reach the rest).
+func shortest_width() -> float:
+	var tabs := 0.0
+	for entry in _entries.slice(0, 2):
+		tabs += entry["button"].get_combined_minimum_size().x + float(row.get_theme_constant("separation"))
+	return minf(_arrows_width() + tabs, full_width())
+
+
+## The least it can be at all, when the window leaves no more: its arrows and a sliver of a tab.
+func narrowest_width() -> float:
+	return minf(_arrows_width() + 24.0, full_width())

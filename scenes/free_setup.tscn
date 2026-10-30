@@ -163,7 +163,6 @@ theme_type_variation = &"SectionStack"
 layout_mode = 2
 
 [node name="WarningIcon" type="Button" parent="Panel/Box/Scroll/Rows/Advanced/NoteRow"]
-custom_minimum_size = Vector2(24, 22)
 layout_mode = 2
 size_flags_vertical = 0
 theme_type_variation = &"WarningIcon"
@@ -172,6 +171,7 @@ focus_mode = 0
 mouse_filter = 2
 icon = ExtResource("warning_icon")
 icon_alignment = 1
+expand_icon = true
 
 [node name="Note" type="Label" parent="Panel/Box/Scroll/Rows/Advanced/NoteRow"]
 custom_minimum_size = Vector2(1, 0)

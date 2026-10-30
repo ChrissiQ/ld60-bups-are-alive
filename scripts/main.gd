@@ -6,8 +6,6 @@ const PIPETTE_PULSE_SECONDS := 0.5  ## the pipette button's fade each way while 
 const PIPETTE_PULSE_LOW := 0.35  ## the opacity it fades to
 const PIPETTE_STILL_ALPHA := 0.5  ## its opacity under reduced motion (lit, not pulsing)
 const MAX_FRAME_SECONDS := 0.1  ## the longest frame the sim will catch up on, so a hitch can't snowball
-const MIN_TABS_WIDTH := 140.0  ## the least the dish tabs are given before the layer toggles make way for them
-const VITALS_MAX_SHARE := 0.55  ## the most of the window's width the top bar's readout may take
 const TUTORIAL_ZOOM := 6.0  ## how close the tutorial brings the camera to a bup it asks the player to click
 const TUTORIAL_BUP_PIXELS := 18.0  ## the lit square round that bup is this far out on each side
 const MAX_DISHES := 20  ## the most dishes at once (the strip holds that many)
@@ -38,6 +36,9 @@ const VIEW_BITS := 19  ## render layers there are for dishes (the 2D world has t
 @onready var graph_controls: GraphControls = %GraphControls  ## the graph's switches and trait drop-down
 @onready var playback_panel: Control = %Playback  ## the pause and speed buttons in the top bar
 @onready var views: Control = %Views  ## the graph and layer toggles in the top bar
+@onready var top_bar_row: HBoxContainer = %TopBar.get_node("Rows/Bar")  ## the top bar's first row: readout, dish tabs, toggles, playback, menu
+@onready var speed_readout: RichTextLabel = %SpeedReadout  ## the playback speed, in the second row (instead of the readout's end) while there is one
+@onready var top_bar_more_row: HBoxContainer = %MoreRow  ## its second row, there while the toggles do not fit in the first (the playback and the dish tabs join them in it)
 @onready var menu_button: Button = %MenuButton
 @onready var side: ScrollContainer = %Side  ## the side column: the goal, what is picked or the dish, the watch list (it scrolls when the window is too short for all of it)
 @onready var stage: Control = %Stage  ## the free middle of the screen, between the rail, the side column, the top bar and the bottom bar: the dish is framed in it
@@ -79,6 +80,9 @@ var paused := false
 var _old_dish: Dish  ## the dish a pipette took bups from, while the question about it is up (null: no question)
 var _stats_cache := {}  ## Dish -> [its time, its edit count, the msec it was worked out, its population_stats]: a scan of every bup, so not worked out again for the same moment (see _stats_of)
 var _vitals_width := 0.0  ## the widest the top bar's readout has been (see _update_hud)
+var _vitals_full_width := 0.0  ## the same with the playback speed at its end, whether or not it is there (what the top bar's row has to hold)
+var _speed_width := 0.0  ## the width the speed readout keeps in the second row: its longest possible text (see _reserve_speed_width)
+var _speed_width_at := 0  ## the readout font size _speed_width (and the readout's widths) were measured at
 var menu_open: bool:  ## the Escape menu is up: the game is frozen behind it and takes no input
 	get:
 		return pause_menu.visible
@@ -836,11 +840,18 @@ func _update_hud() -> void:
 	var about := "hud %s" % sim_speed
 	if not readout.due(vitals, about):
 		return  # (nothing below is worth working out: the text would not be shown yet)
-	readout.set_text(vitals, Strings.t("hud.vitals", [_dish_lines(), SimClock.format(dish.time), _playback_text()]), about)
+	var wrapped := top_bar_more_row.visible
+	if wrapped:
+		readout.set_text(vitals, Strings.t("hud.vitals_short", [_dish_lines(), SimClock.format(dish.time)]), about)
+		readout.set_text(speed_readout, _playback_text(), about)
+		speed_readout.custom_minimum_size = Vector2(_speed_width, speed_readout.get_content_height())
+	else:
+		readout.set_text(vitals, Strings.t("hud.vitals", [_dish_lines(), SimClock.format(dish.time), _playback_text()]), about)
 	# The readout takes the width its text needs (never less than it has needed, so it does not shrink and grow as the figures change), up to
 	# a share of the bar; the hint beside it gets all the rest.
 	_vitals_width = maxf(_vitals_width, vitals.get_content_width())
-	vitals.custom_minimum_size.x = minf(_vitals_width, get_viewport_rect().size.x * VITALS_MAX_SHARE)
+	_vitals_full_width = maxf(_vitals_full_width, vitals.get_content_width() + (_speed_width + 12.0 if wrapped else 0.0))
+	vitals.custom_minimum_size = Vector2(minf(_vitals_width, _vitals_room()), vitals.get_content_height())  # (as tall as its text, which grows with the interface size)
 	_fit_top_bar()
 	placed_row.value_text = UiText.thousands(dish.nutrients_placed)
 	colony.show_stats(_stats_of(dish))
@@ -975,20 +986,74 @@ func _adapt_layout() -> void:
 	_fit_top_bar()  # (a narrow top bar keeps its room for the vitals and the playback)
 
 
+## The most width the readout may take: what the playback and the menu leave in the bar's row (it is never cut short for any other reason).
+func _vitals_room() -> float:
+	var bar_width := top_bar_row.size.x if top_bar_row.size.x > 0.0 else get_viewport_rect().size.x - 64.0  # (before the first layout: the window less its margins)
+	return bar_width - playback_panel.get_combined_minimum_size().x - menu_button.get_combined_minimum_size().x - 12.0 * 4.0  # (four gaps: the readout, the two spacers, the playback and the menu)
+
+
 ## The top bar never needs more than the window has. The readout and the controls come first; the dish tabs take everything that is left (they scroll
-## when there are more than fit), and when even a short strip does not fit, the layer toggles go (their keys still work).
+## when there are more than fit), and when not even two tabs and the strip's arrows fit beside the layer toggles, the playback speed (the readout's end),
+## the tabs and the toggles move to a second row (never away): the speed at its left, the tabs centred in what is between, the toggles at its right.
 func _fit_top_bar() -> void:
+	_reserve_speed_width()
 	var room := get_viewport_rect().size.x - 64.0  # (the screen's margin, the bar's padding and the frames of the tabs and toggles)
 	var fixed := playback_panel.get_combined_minimum_size().x + menu_button.get_combined_minimum_size().x
-	var vitals_w := minf(_vitals_width, get_viewport_rect().size.x * VITALS_MAX_SHARE)
+	var vitals_w := minf(_vitals_full_width, _vitals_room())
 	var tabs_full := dish_strip.full_width() if dish_strip.visible else 0.0
 	var views_w := views.get_combined_minimum_size().x
 	var gaps := 12.0 * (4.0 if tabs_full == 0.0 else 5.0)  # (between the readout, the tabs, the spacer, the toggles, the playback and the menu)
 	var left_with_views := room - vitals_w - fixed - views_w - gaps
-	var show_views := tabs_full == 0.0 or left_with_views >= minf(tabs_full, MIN_TABS_WIDTH)
+	var tabs_least := dish_strip.shortest_width() if tabs_full > 0.0 else 0.0
+	var beside := left_with_views >= tabs_least
 	if tabs_full > 0.0:
-		dish_strip.max_width = maxf(left_with_views if show_views else left_with_views + views_w + 12.0, 60.0)
-	views.visible = show_views
+		var second_row_room := room - _speed_width - views_w - 12.0 * 3.0
+		dish_strip.max_width = maxf(left_with_views if beside else second_row_room, dish_strip.narrowest_width())
+	var centred := not beside and dish_strip.full_width() <= dish_strip.max_width  # (when the tabs fill the row they are against the toggles whatever)
+	top_bar_more_row.get_node("MoreSpacer").size_flags_horizontal = Control.SIZE_EXPAND_FILL if centred else Control.SIZE_FILL
+	if beside:
+		_move_to(views, top_bar_row, top_bar_row.get_node("Spacer").get_index() + 1)
+		_move_to(dish_strip, top_bar_row, top_bar_row.get_node("LeadSpacer").get_index() + 1)
+	else:
+		_move_to(dish_strip, top_bar_more_row, top_bar_more_row.get_node("MoreLead").get_index() + 1)
+		_move_to(views, top_bar_more_row, -1)
+	if top_bar_more_row.visible == beside:  # (the readout's text changes with where the speed is: it is written afresh, and measured afresh)
+		top_bar_more_row.visible = not beside
+		readout.forget(vitals)
+		readout.forget(speed_readout)
+		_vitals_width = 0.0
+	speed_readout.visible = not beside
+
+
+## The speed readout holds the width of its longest possible text (the speed at its highest, running slower, paused, or waiting for the pipette) so the
+## second row never moves as the speed changes: the tabs are placed from this, and only the number of dishes moves them. Measured again, with the readout's
+## widths, when the readout's font size changes (the label's own size, not the setting: the setting changes a moment before the theme does).
+func _reserve_speed_width() -> void:
+	var font_size := speed_readout.get_theme_font_size("normal_font_size")
+	if font_size == _speed_width_at:
+		return
+	_speed_width_at = font_size
+	_vitals_width = 0.0  # (the readout's widths were for the old size)
+	_vitals_full_width = 0.0
+	readout.forget(vitals)
+	_speed_width = 0.0
+	for text: String in [Strings.t("hud.playback_slow_paused", [10000, 10000]), Strings.t("hud.pipette_paused")]:
+		speed_readout.text = UiText.numbers(text, "")
+		_speed_width = maxf(_speed_width, speed_readout.get_content_width())
+	readout.forget(speed_readout)
+
+
+## A top bar part sits in the bar's row or in the second row under it.
+func _move_to(node: Control, row: Control, index: int) -> void:
+	if node.get_parent() == row:
+		return
+	var scene_owner := node.owner
+	var owned := [node] + node.find_children("*", "", true, true).filter(func(n: Node) -> bool: return n.owner == scene_owner)
+	node.get_parent().remove_child(node)
+	row.add_child(node)
+	row.move_child(node, index)
+	for n: Node in owned:
+		n.owner = scene_owner  # (taking a node out of the tree lets go of its owner: the scene's % names need it)
 
 
 ## The top bar's bups: how many there are, and (in free mode, where you can change it) the dish's bup limit.

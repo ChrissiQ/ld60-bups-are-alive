@@ -74,4 +74,16 @@ func _run() -> void:
 		for i in 6:
 			await process_frame
 		_same_width(m, "at an interface size of %d%%" % int(scale * 100.0))
+	for scale in [1.0, 2.05, 2.5]:
+		UserSettings.ui_scale = scale
+		UserSettings.apply()
+		m.graph_section.open = true
+		for i in 6:
+			await process_frame
+		var open_width: float = m.side.size.x
+		m.graph_section.open = false
+		for i in 6:
+			await process_frame
+		TestUtil.check(is_equal_approx(m.side.size.x, open_width), "at %d%% the tray is as wide with the graph closed (%.0f) as open (%.0f)" % [int(scale * 100.0), m.side.size.x, open_width])
+		TestUtil.check(m.vitals.size.y >= m.vitals.get_content_height(), "at %d%% the top bar's readout is as tall as its text" % int(scale * 100.0))
 	TestUtil.finish(self, "TRAY SECTIONS TESTS OK", "TRAY SECTIONS TESTS FAILED:")

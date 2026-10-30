@@ -56,9 +56,10 @@ func start(steps: Array[Dictionary]) -> void:
 	_steps = steps
 	active = true
 	visible = true
-	_pulse = create_tween().set_loops()
-	_pulse.tween_property(spot, "modulate:a", PULSE_LOW, PULSE_SECONDS)
-	_pulse.tween_property(spot, "modulate:a", 1.0, PULSE_SECONDS)
+	if not UserSettings.reduce_motion:
+		_pulse = create_tween().set_loops()
+		_pulse.tween_property(spot, "modulate:a", PULSE_LOW, PULSE_SECONDS)
+		_pulse.tween_property(spot, "modulate:a", 1.0, PULSE_SECONDS)
 	_show_step(0)
 
 

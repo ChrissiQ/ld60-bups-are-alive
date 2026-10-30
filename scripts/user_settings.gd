@@ -16,7 +16,8 @@ const ZOOM_SPEED_MIN := 0.25
 const ZOOM_SPEED_MAX := 4.0
 const ZOOM_SPEED_STEP := 0.25
 const WINDOWS_BASE_DPI := 96.0  ## the dpi Windows reports at a display scaling of 100%
-const BASE_SCALE := 1.3  ## the interface at 100% is the size the first version's 130% was: Plex Sans at its old 100% read a little too small
+const PLEX_SIZE := 1.3  ## Plex Sans is drawn at this multiple of a theme size (and an icon of its box) at 100%
+const MONO_SIZE := 1.0  ## Commit Mono looks bigger than Plex Sans at the same size, so it is drawn at the theme size itself
 
 static var fullscreen := true
 static var zoom_speed := 1.0  ## how fast the mouse wheel and a two-finger scroll zoom the dish, as a multiple of the usual (a trackpad scrolls far more than a wheel)
@@ -130,18 +131,17 @@ static func native_scale() -> float:
 ## not make bigger buttons and panels all the way too. The window's content scale carries the room, and the theme's font
 ## sizes carry the rest of what the text needs.
 static func layout_scale() -> float:
-	return native_scale() * pow(ui_scale * BASE_SCALE, ROOM_EXPONENT)
+	return native_scale() * pow(ui_scale, ROOM_EXPONENT)
 
 
-## What the sizes of the interface's text are multiplied by (Plex Sans).
+## What text grows by on top of the room: the rest of the setting.
+static func _growth() -> float:
+	return pow(ui_scale, 1.0 - ROOM_EXPONENT)
+
+
+## What the sizes of the interface's text are multiplied by (Plex Sans), and what an icon's box is.
 static func text_factor() -> float:
-	return pow(ui_scale * BASE_SCALE, 1.0 - ROOM_EXPONENT)
-
-
-## ... and Commit Mono's: it looks bigger than Plex Sans at the same size, so the numbers keep the size they had before the base scale went up (the window's
-## content scale already makes everything bigger by the room factor, so the sizes here take that back out).
-static func mono_text_factor() -> float:
-	return ui_scale / pow(ui_scale * BASE_SCALE, ROOM_EXPONENT)
+	return PLEX_SIZE * _growth()
 
 
 ## Whether a font size of the theme is for text set in Commit Mono (looked up from the font the same type uses).
@@ -170,8 +170,8 @@ static func _scale_theme_text() -> void:
 	for key: String in _designed_sizes:
 		var designed := float(_designed_sizes[key])
 		var parts := key.split("/")
-		var factor := mono_text_factor() if key != "default" and _is_mono_size(theme, parts[0], parts[1]) else text_factor()
-		var size := roundi(designed * (pow(factor, 0.5) if designed >= LARGE_TEXT else factor))  # (big display type grows by half as much: it is already big)
+		var ratio := MONO_SIZE if key != "default" and _is_mono_size(theme, parts[0], parts[1]) else PLEX_SIZE
+		var size := roundi(designed * ratio * (sqrt(_growth()) if designed >= LARGE_TEXT else _growth()))  # (big display type grows by half as much: it is already big)
 		if key == "default":
 			theme.default_font_size = size
 		else:

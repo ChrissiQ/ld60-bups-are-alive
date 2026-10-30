@@ -26,9 +26,7 @@ def gd(path, name):
 
 def num(x): return "%g" % x
 def secs(x): return num(x) + " s"
-SCALE_MIN, SCALE_MAX, ROOM, BASE = (setting(n) for n in ("SCALE_MIN", "SCALE_MAX", "ROOM_EXPONENT", "BASE_SCALE"))
-PLEX_FACTOR = BASE ** ROOM * BASE ** (1 - ROOM)  # content scale (the room) times the theme's text factor, at 100%
-MONO_FACTOR = 1.0  # the numbers' own factor takes the room back out (UserSettings.mono_text_factor)
+SCALE_MIN, SCALE_MAX, ROOM, PLEX_FACTOR, MONO_FACTOR = (setting(n) for n in ("SCALE_MIN", "SCALE_MAX", "ROOM_EXPONENT", "PLEX_SIZE", "MONO_SIZE"))
 
 def rem(px): return "%g" % (px / 16)  # 1rem is 16 px, the game's text size at 100%
 
@@ -52,6 +50,8 @@ def tokens_css():
     for g in D["colors"]:
         L.append("  /* %s */" % g["group"])
         for t in g["tokens"]: L.append("  --%s: %s;" % (css(t["name"]), design_tokens.hexcode(t["rgba"])))
+    L.append("  /* White at set opacities */")
+    for o in D["opacities"]: L.append("  --%s: %s;" % (css(o["name"]), design_tokens.hexcode(COL[o["name"]])))
     L.append("  /* Type */")
     for f in TYPE["families"]:
         fallback = "system-ui, sans-serif" if f["id"] == "text" else "ui-monospace, monospace"
@@ -92,15 +92,14 @@ W_SHAPE = ["6rem", "12rem", "6rem", None]
 W_SPACE = ["6rem", "10rem", "6rem", None]
 
 def shade_key(t):
-    """Neutrals first, then hue families in hue order; lighter to darker in each (translucent colours seen over the ground)."""
+    """Neutrals first, lightest to darkest, then the rest by hue."""
     r, g, b = t["rgba"][:3]
-    seen = over(t["rgba"], GROUND[:3])
-    light = luminance(seen)
+    light = luminance(t["rgba"][:3])
     chroma = max(r, g, b) - min(r, g, b)
     if chroma < 0.06: return (0, 0, -light, -t["rgba"][3])
     mx = max(r, g, b)
     hue = (60 * ((g - b) / chroma % 6) if mx == r else 60 * ((b - r) / chroma + 2) if mx == g else 60 * ((r - g) / chroma + 4)) % 360
-    return (1, round(((hue + 15) % 360) / 30), -light, -t["rgba"][3])
+    return (1, hue, -light, -t["rgba"][3])
 
 def colour_section():
     tokens = sorted((t for g in D["colors"] for t in g["tokens"] if t["name"] != "none"), key=shade_key)
@@ -233,7 +232,7 @@ def component_size_section():
 def motion_section():
     tl, ts = gd("ui/tutorial.gd", "PULSE_LOW"), gd("ui/tutorial.gd", "PULSE_SECONDS")
     pl, ps, pa = (gd("scripts/main.gd", n) for n in ("PIPETTE_PULSE_LOW", "PIPETTE_PULSE_SECONDS", "PIPETTE_STILL_ALPHA"))
-    pulses = [("Tutorial outline", "1 to %s" % num(tl), secs(ts), "Keeps pulsing"),
+    pulses = [("Tutorial outline", "1 to %s" % num(tl), secs(ts), "Stops, held at 1"),
               ("Pipette button, while the timer holds the game", "1 to %s" % num(pl), secs(ps), "Stops, held at %s" % num(pa))]
     times = [("Divisions number flash", secs(gd("ui/inspector.gd", "FLASH_MSEC") / 1000)),
              ("Banner on screen", secs(gd("scripts/main.gd", "BANNER_BRIEF_SECONDS")) + "; a completed goal's, " + secs(gd("scripts/main.gd", "BANNER_SECONDS"))),
@@ -261,7 +260,7 @@ def size_section():
             '<li><span>Setting:</span> %s to %s. Text scales fully.</li>'
             '<li><span>Text:</span> IBM Plex Sans is the baseline; Commit Mono is drawn at %s of it.</li>'
             '<li><span>Room:</span> paddings, gaps and control heights grow at power %g.</li></ul></div>'
-            % (pct(SCALE_MIN), pct(SCALE_MAX), pct(1 / BASE), ROOM))
+            % (pct(SCALE_MIN), pct(SCALE_MAX), pct(MONO_FACTOR / PLEX_FACTOR), ROOM))
 
 def floating_section():
     rows = [

@@ -19,26 +19,28 @@ script = ExtResource("1")
 modulate = Color(1, 1, 1, 0.45)
 script = ExtResource("2")
 
-[node name="Column" type="VBoxContainer" parent="."]
+[node name="Center" type="CenterContainer" parent="."]
 layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_type_variation = &"RoomyStack"
 mouse_filter = 2
 
-[node name="Title" type="Label" parent="Column"]
+[node name="Column" type="VBoxContainer" parent="Center"]
+theme_type_variation = &"RoomyStack"
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Title" type="Label" parent="Center/Column"]
 theme_type_variation = &"Display"
 layout_mode = 2
 text = "@menu.title"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="Tagline" type="Label" parent="Column"]
+[node name="Tagline" type="Label" parent="Center/Column"]
 custom_minimum_size = Vector2(1, 0)
 theme_type_variation = &"Tagline"
 layout_mode = 2
@@ -46,42 +48,47 @@ horizontal_alignment = 1
 vertical_alignment = 1
 autowrap_mode = 3
 
-[node name="Buttons" type="VBoxContainer" parent="Column"]
+[node name="Scroll" type="ScrollContainer" parent="Center/Column"]
+layout_mode = 2
+size_flags_horizontal = 4
+horizontal_scroll_mode = 0
+
+[node name="Buttons" type="VBoxContainer" parent="Center/Column/Scroll"]
 layout_mode = 2
 size_flags_horizontal = 4
 
-[node name="LoadButton" type="Button" parent="Column/Buttons"]
+[node name="LoadButton" type="Button" parent="Center/Column/Scroll/Buttons"]
 theme_type_variation = &"PrimaryButton"
 custom_minimum_size = Vector2(320, 48)
 layout_mode = 2
 text = "@menu.load_experiment"
 
-[node name="NewButton" type="Button" parent="Column/Buttons"]
+[node name="NewButton" type="Button" parent="Center/Column/Scroll/Buttons"]
 custom_minimum_size = Vector2(320, 48)
 layout_mode = 2
 text = "@menu.new_experiment"
 
-[node name="FreeButton" type="Button" parent="Column/Buttons"]
+[node name="FreeButton" type="Button" parent="Center/Column/Scroll/Buttons"]
 custom_minimum_size = Vector2(320, 48)
 layout_mode = 2
 text = "@menu.free_mode"
 
-[node name="ControlsButton" type="Button" parent="Column/Buttons"]
+[node name="ControlsButton" type="Button" parent="Center/Column/Scroll/Buttons"]
 custom_minimum_size = Vector2(320, 48)
 layout_mode = 2
 text = "@menu.controls"
 
-[node name="EncyclopediaButton" type="Button" parent="Column/Buttons"]
+[node name="EncyclopediaButton" type="Button" parent="Center/Column/Scroll/Buttons"]
 custom_minimum_size = Vector2(320, 48)
 layout_mode = 2
 text = "@menu.encyclopedia"
 
-[node name="OptionsButton" type="Button" parent="Column/Buttons"]
+[node name="OptionsButton" type="Button" parent="Center/Column/Scroll/Buttons"]
 custom_minimum_size = Vector2(320, 48)
 layout_mode = 2
 text = "@options.button"
 
-[node name="QuitButton" type="Button" parent="Column/Buttons"]
+[node name="QuitButton" type="Button" parent="Center/Column/Scroll/Buttons"]
 custom_minimum_size = Vector2(320, 48)
 layout_mode = 2
 text = "@menu.quit"

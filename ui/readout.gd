@@ -37,6 +37,7 @@ func stamp(label: Control, about: String) -> void:
 ## Makes the next set_text on a readout take its text even when it is the same as the one shown (the text is for something else now).
 func forget(label: Control) -> void:
 	label.set_meta("raw", "")
+	label.set_meta("set_at", 0)  # (and no waiting for it)
 
 
 ## set_text with the text worked out (by `make_text`) only if it is due.

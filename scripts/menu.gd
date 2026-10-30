@@ -2,20 +2,23 @@ extends Control
 ## Title screen. A live dish of bups multiplies quietly behind the buttons.
 
 @onready var dish: Dish = $Dish
-@onready var title: Label = $Column/Title
-@onready var buttons: VBoxContainer = $Column/Buttons
-@onready var tagline: Label = $Column/Tagline
-@onready var new_button: Button = $Column/Buttons/NewButton
-@onready var load_button: Button = $Column/Buttons/LoadButton
-@onready var free_button: Button = $Column/Buttons/FreeButton
-@onready var controls_button: Button = $Column/Buttons/ControlsButton
-@onready var quit_button: Button = $Column/Buttons/QuitButton
-@onready var options_button: Button = $Column/Buttons/OptionsButton
+@onready var title: Label = $Center/Column/Title
+@onready var button_scroll: ScrollContainer = $Center/Column/Scroll  ## the buttons scroll when they are taller than what is left under the title and the tagline
+@onready var buttons: VBoxContainer = $Center/Column/Scroll/Buttons
+@onready var tagline: Label = $Center/Column/Tagline
+@onready var new_button: Button = $Center/Column/Scroll/Buttons/NewButton
+@onready var load_button: Button = $Center/Column/Scroll/Buttons/LoadButton
+@onready var free_button: Button = $Center/Column/Scroll/Buttons/FreeButton
+@onready var controls_button: Button = $Center/Column/Scroll/Buttons/ControlsButton
+@onready var quit_button: Button = $Center/Column/Scroll/Buttons/QuitButton
+@onready var options_button: Button = $Center/Column/Scroll/Buttons/OptionsButton
 @onready var controls_panel: ControlsPanel = $ControlsPanel
 @onready var options_panel: OptionsPanel = $OptionsPanel
-@onready var encyclopedia_button: Button = $Column/Buttons/EncyclopediaButton
+@onready var encyclopedia_button: Button = $Center/Column/Scroll/Buttons/EncyclopediaButton
 @onready var encyclopedia_panel: EncyclopediaPanel = $EncyclopediaPanel
 @onready var confirm: ConfirmationDialog = $ConfirmDialog
+
+const BOTTOM_CLEARANCE := 32.0  ## the room kept under the buttons
 
 var _flicker_left := 0.0
 
@@ -25,6 +28,8 @@ func _ready() -> void:
 	UserSettings.load_once()
 	var quips := Strings.list("menu", "quip")
 	tagline.text = quips[randi() % quips.size()] if not quips.is_empty() else ""
+	get_viewport().size_changed.connect(_fit_buttons)
+	_fit_buttons()
 	dish.position = _dish_center()
 	dish.strike(_ambient_start())
 	dish.extinct.connect(func() -> void: dish.strike(_ambient_start()), CONNECT_DEFERRED)  # (each time in new colours)
@@ -113,9 +118,20 @@ func _show_options(visible_now: bool) -> void:
 		options_button.grab_focus()
 
 
+## The buttons take the height they need, up to what the window leaves under the title and the tagline, which stay where they are: past that only the buttons scroll.
+func _fit_buttons() -> void:
+	await get_tree().process_frame  # (the sizes of what has just changed are known a frame later)
+	if not is_inside_tree():
+		return
+	button_scroll.custom_minimum_size.y = 0.0
+	var chrome: float = (button_scroll.get_parent() as Control).get_combined_minimum_size().y
+	var room: float = get_viewport_rect().size.y - chrome - BOTTOM_CLEARANCE
+	button_scroll.custom_minimum_size.y = clampf(buttons.get_combined_minimum_size().y, 0.0, maxf(room, 120.0))
+
+
 ## A panel is up in place of the title and its buttons (or gone again).
 func _show_panel(up: bool) -> void:
-	buttons.visible = not up
+	button_scroll.visible = not up
 	title.visible = not up
 	tagline.visible = not up
 

@@ -21,7 +21,7 @@ ACCENT,ACCENT_HI,ACCENT_DIM,ACCENT_PRESSED,ON_ACCENT=(COL[k] for k in ("accent",
 EMPHASIS,WARNING,WARNING_TEXT,DANGER,DANGER_PRESSED,DANGER_TEXT,ON_DANGER=(COL[k] for k in ("emphasis","warning","warning_text","danger","danger_pressed","danger_text","on_danger"))
 SCRIM,SCRIM_TUTORIAL,VEIL,TOOLTIP_FILL,DECEASED_FILL,GOAL_FILL,DISABLED_FILL=(COL[k] for k in ("scrim","scrim_tutorial","veil","tooltip_fill","deceased_fill","goal_fill","disabled_fill"))
 DECEASED_TEXT,DECEASED_TEXT_HI,OUTLINE,ON_BAND=(COL[k] for k in ("deceased_text","deceased_text_hi","outline","on_band"))
-HAIR,PICTURE,NONE=(COL[k] for k in ("hair","picture","none"))
+HAIR,WHITE,NONE=(COL[k] for k in ("hair","white","none"))
 FS={s["name"]:s["px"] for s in D["typography"]["sizes"]}
 FONT_WEIGHTS={w["name"]:w for w in D["typography"]["weights"]}
 def font_id(w): return ("p" if w["family"]=="text" else "m")+str(w["weight"])
@@ -291,7 +291,7 @@ T("Button",colors={"font_color":TEXT,"font_disabled_color":FAINT,"font_focus_col
 T("PrimaryButton","Button",colors={k:ON_ACCENT for k in("font_color","font_focus_color","font_hover_color","font_hover_pressed_color","font_pressed_color")},
  styles={"focus":"primary_focus","hover":"primary_hover","hover_pressed":"primary_pressed","normal":"primary_normal","pressed":"primary_pressed","disabled":"primary_disabled"})
 T("SmallButton","Button",sizes={"font_size":FS["m"]},consts={"icon_max_width":ICON["s"],"h_separation":6})
-T("PictureButton","Button",colors={**{k:PICTURE for k in ("icon_normal_color","icon_hover_color","icon_pressed_color","icon_hover_pressed_color","icon_focus_color","icon_disabled_color")}},sizes={"font_size":FS["m"]},consts={"icon_max_width":ICON["2xl"],"h_separation":8})
+T("PictureButton","Button",colors={**{k:WHITE for k in ("icon_normal_color","icon_hover_color","icon_pressed_color","icon_hover_pressed_color","icon_focus_color","icon_disabled_color")}},sizes={"font_size":FS["m"]},consts={"icon_max_width":ICON["2xl"],"h_separation":8})
 T("SmallPrimaryButton","Button",colors={**{k:ON_ACCENT for k in("font_color","font_focus_color","font_hover_color","font_hover_pressed_color","font_pressed_color")},"font_disabled_color":(ACCENT[0],ACCENT[1],ACCENT[2],0.5)},
  sizes={"font_size":FS["m"]},styles={"focus":"primary_focus","hover":"primary_hover","hover_pressed":"primary_pressed","normal":"primary_normal","pressed":"primary_pressed","disabled":"primary_disabled"})
 T("DialogButton","Button",sizes={"font_size":FS["base"]},styles={"focus":"dialog_btn_focus","hover":"dialog_btn_hover","hover_pressed":"dialog_btn_pressed","normal":"dialog_btn_normal","pressed":"dialog_btn_pressed"})
@@ -306,7 +306,7 @@ T("SectionButton","Button",colors={"font_color":TEXT,"font_hover_color":TEXT,"fo
 T("TraitSelect","OptionButton",colors={"font_color":ACCENT,"font_hover_color":ACCENT_HI,"font_pressed_color":ACCENT_HI,"font_hover_pressed_color":ACCENT_HI,"font_focus_color":ACCENT},sizes={"font_size":FS["s"]},fonts={"font":REG},consts={"arrow_margin":6,"h_separation":6},icons={"arrow":'ExtResource("chevron_small")'},styles={"disabled":"select_normal","focus":"btn_focus","hover":"select_hover","hover_pressed":"select_hover","normal":"select_normal","pressed":"select_hover"})
 T("PopupMenu",colors={"font_color":MUTED,"font_hover_color":TEXT,"font_focus_color":TEXT,"font_accelerator_color":FAINT},sizes={"font_size":FS["s"]},fonts={"font":REG},consts={"v_separation":2,"h_separation":8,"item_start_padding":6,"item_end_padding":6},styles={"panel":"popup_panel","hover":"popup_item_hover","focus":"popup_item_hover"})
 T("SwitchButton","Button",colors={"font_color":MUTED,"font_hover_color":TEXT,"font_pressed_color":ON_ACCENT,"font_hover_pressed_color":ON_ACCENT,"font_focus_color":MUTED},sizes={"font_size":FS["s"]},styles={"disabled":"sw_normal","hover":"sw_hover","hover_pressed":"sw_hover_pressed","normal":"sw_normal","pressed":"sw_pressed"})
-T("ChoiceButton","Button",colors={**{k:PICTURE for k in ("icon_normal_color","icon_hover_color","icon_pressed_color","icon_hover_pressed_color","icon_focus_color","icon_disabled_color")},"font_color":MUTED,"font_hover_color":TEXT,"font_pressed_color":ON_ACCENT,"font_hover_pressed_color":ON_ACCENT,"font_focus_color":MUTED},sizes={"font_size":FS["m"]},consts={"icon_max_width":ICON["xl"],"h_separation":6},styles={"disabled":"choice_disabled","hover":"choice_hover","hover_pressed":"choice_hover_pressed","normal":"choice_normal","pressed":"choice_pressed"})
+T("ChoiceButton","Button",colors={**{k:WHITE for k in ("icon_normal_color","icon_hover_color","icon_pressed_color","icon_hover_pressed_color","icon_focus_color","icon_disabled_color")},"font_color":MUTED,"font_hover_color":TEXT,"font_pressed_color":ON_ACCENT,"font_hover_pressed_color":ON_ACCENT,"font_focus_color":MUTED},sizes={"font_size":FS["m"]},consts={"icon_max_width":ICON["xl"],"h_separation":6},styles={"disabled":"choice_disabled","hover":"choice_hover","hover_pressed":"choice_hover_pressed","normal":"choice_normal","pressed":"choice_pressed"})
 T("Badge","PanelContainer",styles={"panel":"badge_plain"})
 T("BadgeCurrent","PanelContainer",styles={"panel":"badge_current"})
 T("BadgeDone","PanelContainer",styles={"panel":"badge_done"})
@@ -340,7 +340,7 @@ T("StatStarving","Label",colors={"font_color":DANGER},sizes={"font_size":FS["s"]
 T("StatLeader",colors={"line":COL["stat_leader"]})  # the dotted line between a stat's name and its value (ui/stat_leader.gd)
 T("GenomeSlot",colors={"track":COL["track"],"symbol":ON_BAND,"symbol_dim":COL["gene_symbol_dim"]},sizes={"font_size":FS["xs"]},fonts={"font":MONO})  # the chromosome map's slots (ui/genome_slot.gd)
 T("GenomeGrid","GridContainer",consts={"h_separation":10,"v_separation":0})
-T("HistoryGraph",styles={"pill":"graph_pill","pill_hover":"graph_pill_hover"},fonts={"font":MONO},colors={"background":(*SURFACE[:3],0.0),"border":(*PICTURE[:3],0.0),"grid":COL["grid"],"grid_faint":COL["grid_faint"],"muted":MUTED,"population":EMPHASIS,"trait":ACCENT},sizes={"legend":FS["s"],"tick":FS["xs"]})
+T("HistoryGraph",styles={"pill":"graph_pill","pill_hover":"graph_pill_hover"},fonts={"font":MONO},colors={"background":(*SURFACE[:3],0.0),"border":(*WHITE[:3],0.0),"grid":COL["grid"],"grid_faint":COL["grid_faint"],"muted":MUTED,"population":EMPHASIS,"trait":ACCENT},sizes={"legend":FS["s"],"tick":FS["xs"]})
 
 text=ext+"\n".join(subs)+"\n[resource]\n"+"\n".join(res)+"\n"
 if "--check" in sys.argv:  # exit 1 when scenes/menu_theme.tres is not what the tokens and variations here make

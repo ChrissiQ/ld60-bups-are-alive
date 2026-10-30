@@ -76,13 +76,17 @@ unique_name_in_owner = true
 theme_type_variation = &"TopBar"
 layout_mode = 2
 
-[node name="Bar" type="HBoxContainer" parent="HUD/Frame/Layout/TopBar"]
+[node name="Rows" type="VBoxContainer" parent="HUD/Frame/Layout/TopBar"]
+theme_type_variation = &"TightStack"
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Bar" type="HBoxContainer" parent="HUD/Frame/Layout/TopBar/Rows"]
 layout_mode = 2
 
-[node name="Readout" type="RichTextLabel" parent="HUD/Frame/Layout/TopBar/Bar" unique_id=945527870]
+[node name="Readout" type="RichTextLabel" parent="HUD/Frame/Layout/TopBar/Rows/Bar" unique_id=945527870]
 unique_name_in_owner = true
 theme_type_variation = &"Readout"
-custom_minimum_size = Vector2(0, 24)
 layout_mode = 2
 size_flags_horizontal = 0
 size_flags_vertical = 4
@@ -92,39 +96,44 @@ bbcode_enabled = true
 scroll_active = false
 autowrap_mode = 0
 
-[node name="DishStrip" parent="HUD/Frame/Layout/TopBar/Bar" instance=ExtResource("dish_strip")]
-unique_name_in_owner = true
-layout_mode = 2
-
-[node name="Spacer" type="Control" parent="HUD/Frame/Layout/TopBar/Bar"]
+[node name="LeadSpacer" type="Control" parent="HUD/Frame/Layout/TopBar/Rows/Bar"]
 layout_mode = 2
 size_flags_horizontal = 3
 mouse_filter = 2
 
-[node name="Views" type="PanelContainer" parent="HUD/Frame/Layout/TopBar/Bar"]
+[node name="DishStrip" parent="HUD/Frame/Layout/TopBar/Rows/Bar" instance=ExtResource("dish_strip")]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="Spacer" type="Control" parent="HUD/Frame/Layout/TopBar/Rows/Bar"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Views" type="PanelContainer" parent="HUD/Frame/Layout/TopBar/Rows/Bar"]
 unique_name_in_owner = true
 theme_type_variation = &"Segments"
 layout_mode = 2
 size_flags_vertical = 4
 
-[node name="Row" type="HBoxContainer" parent="HUD/Frame/Layout/TopBar/Bar/Views"]
+[node name="Row" type="HBoxContainer" parent="HUD/Frame/Layout/TopBar/Rows/Bar/Views"]
 theme_type_variation = &"SegmentRow"
 layout_mode = 2
 
-[node name="LayersPanel" parent="HUD/Frame/Layout/TopBar/Bar/Views/Row" instance=ExtResource("layers_panel")]
+[node name="LayersPanel" parent="HUD/Frame/Layout/TopBar/Rows/Bar/Views/Row" instance=ExtResource("layers_panel")]
 unique_name_in_owner = true
 layout_mode = 2
 
-[node name="Playback" type="PanelContainer" parent="HUD/Frame/Layout/TopBar/Bar"]
+[node name="Playback" type="PanelContainer" parent="HUD/Frame/Layout/TopBar/Rows/Bar"]
 unique_name_in_owner = true
 theme_type_variation = &"Segments"
 layout_mode = 2
 
-[node name="Speeds" type="HBoxContainer" parent="HUD/Frame/Layout/TopBar/Bar/Playback"]
+[node name="Speeds" type="HBoxContainer" parent="HUD/Frame/Layout/TopBar/Rows/Bar/Playback"]
 theme_type_variation = &"SegmentRow"
 layout_mode = 2
 
-[node name="PauseButton" type="Button" parent="HUD/Frame/Layout/TopBar/Bar/Playback/Speeds"]
+[node name="PauseButton" type="Button" parent="HUD/Frame/Layout/TopBar/Rows/Bar/Playback/Speeds"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(36, 28)
 layout_mode = 2
@@ -132,7 +141,7 @@ theme_type_variation = &"ToolButton"
 icon = ExtResource("11")
 icon_alignment = 1
 
-[node name="Speed1Button" type="Button" parent="HUD/Frame/Layout/TopBar/Bar/Playback/Speeds"]
+[node name="Speed1Button" type="Button" parent="HUD/Frame/Layout/TopBar/Rows/Bar/Playback/Speeds"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(36, 28)
 layout_mode = 2
@@ -140,7 +149,7 @@ theme_type_variation = &"ToolButton"
 icon = ExtResource("12")
 icon_alignment = 1
 
-[node name="Speed100Button" type="Button" parent="HUD/Frame/Layout/TopBar/Bar/Playback/Speeds"]
+[node name="Speed100Button" type="Button" parent="HUD/Frame/Layout/TopBar/Rows/Bar/Playback/Speeds"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(36, 28)
 layout_mode = 2
@@ -148,7 +157,7 @@ theme_type_variation = &"ToolButton"
 icon = ExtResource("13")
 icon_alignment = 1
 
-[node name="Speed1000Button" type="Button" parent="HUD/Frame/Layout/TopBar/Bar/Playback/Speeds"]
+[node name="Speed1000Button" type="Button" parent="HUD/Frame/Layout/TopBar/Rows/Bar/Playback/Speeds"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(36, 28)
 layout_mode = 2
@@ -156,7 +165,7 @@ theme_type_variation = &"ToolButton"
 icon = ExtResource("14")
 icon_alignment = 1
 
-[node name="SpeedUltraButton" type="Button" parent="HUD/Frame/Layout/TopBar/Bar/Playback/Speeds"]
+[node name="SpeedUltraButton" type="Button" parent="HUD/Frame/Layout/TopBar/Rows/Bar/Playback/Speeds"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(36, 28)
 layout_mode = 2
@@ -164,12 +173,40 @@ theme_type_variation = &"ToolButton"
 icon = ExtResource("ultra_icon")
 icon_alignment = 1
 
-[node name="MenuButton" type="Button" parent="HUD/Frame/Layout/TopBar/Bar"]
+[node name="MenuButton" type="Button" parent="HUD/Frame/Layout/TopBar/Rows/Bar"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_type_variation = &"IconButton"
 icon = ExtResource("menu_icon")
 icon_alignment = 1
+
+[node name="MoreRow" type="HBoxContainer" parent="HUD/Frame/Layout/TopBar/Rows"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+mouse_filter = 2
+
+[node name="SpeedReadout" type="RichTextLabel" parent="HUD/Frame/Layout/TopBar/Rows/MoreRow"]
+unique_name_in_owner = true
+theme_type_variation = &"Readout"
+layout_mode = 2
+size_flags_horizontal = 0
+size_flags_vertical = 4
+clip_contents = true
+mouse_filter = 2
+bbcode_enabled = true
+scroll_active = false
+autowrap_mode = 0
+
+[node name="MoreLead" type="Control" parent="HUD/Frame/Layout/TopBar/Rows/MoreRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="MoreSpacer" type="Control" parent="HUD/Frame/Layout/TopBar/Rows/MoreRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
 
 [node name="Middle" type="HBoxContainer" parent="HUD/Frame/Layout"]
 theme_type_variation = &"TightGroup"
@@ -724,9 +761,9 @@ theme_type_variation = &"SwitchSegments"
 layout_mode = 2
 theme_type_variation = &"SegmentRow"
 
-[node name="Controls" type="HBoxContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/GraphSection/GraphControls"]
+[node name="Controls" type="HFlowContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/GraphSection/GraphControls"]
 layout_mode = 2
-theme_type_variation = &"TightRow"
+theme_type_variation = &"TightFlow"
 
 [node name="SpanSwitch" type="PanelContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/GraphSection/GraphControls/Controls"]
 unique_name_in_owner = true

@@ -107,7 +107,7 @@ func _init() -> void:
 	var message_size: int = dialog.get_label().get_theme_font_size("font_size")
 	TestUtil.check(message_size == sized.call(16) and message_size <= title_size - 3, "dialog message is clearly smaller than the title (%d vs %d)" % [message_size, title_size])
 	TestUtil.check(ok_button.get_theme_font_size("font_size") == sized.call(15) and ok_button.get_theme_font_size("font_size") < title_size, "dialog button text is smaller than the title (%d)" % ok_button.get_theme_font_size("font_size"))
-	TestUtil.check(absf(ok_button.size.y - 41.0) <= 3.0, "dialog buttons keep about the same height (%.0f, was 41)" % ok_button.size.y)
+	TestUtil.check(absf(ok_button.size.y - 47.0) <= 3.0, "dialog buttons keep about the same height (%.0f, was 47)" % ok_button.size.y)
 	TestUtil.check(dialog.get_cancel_button().get_theme_font("font").resource_path.ends_with("-400.ttf"), "dialog buttons are Regular")
 	dialog.hide()
 
