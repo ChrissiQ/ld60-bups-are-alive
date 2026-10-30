@@ -33,6 +33,7 @@
 [ext_resource type="Script" path="res://ui/tray_section.gd" id="tray_section"]
 [ext_resource type="Script" path="res://ui/graph_controls.gd" id="graph_controls"]
 [ext_resource type="Script" path="res://ui/freezer_shelf.gd" id="freezer_shelf"]
+[ext_resource type="PackedScene" path="res://ui/dish_actions.tscn" id="dish_actions"]
 [ext_resource type="Script" path="res://ui/trait_rows.gd" id="trait_rows"]
 [ext_resource type="PackedScene" path="res://ui/tutorial.tscn" id="tutorial"]
 [ext_resource type="Texture2D" path="res://icons/lineage.svg" id="lineage_icon"]
@@ -735,6 +736,10 @@ slider_min_width = 80.0
 value_min_width = 52.0
 unit_min_width = 62.0
 
+[node name="CardActions" parent="HUD/Frame/Layout/Middle/Side/Stack/DishCard/Rows" instance=ExtResource("dish_actions")]
+unique_name_in_owner = true
+layout_mode = 2
+
 [node name="DishDetails" type="PanelContainer" parent="HUD/Frame/Layout/Middle/Side/Stack"]
 unique_name_in_owner = true
 layout_mode = 2
@@ -842,13 +847,9 @@ layout_mode = 2
 theme_type_variation = &"TightStack"
 script = ExtResource("freezer_shelf")
 
-[node name="FreezeButton" type="Button" parent="HUD/Frame/Layout/Middle/Side/Stack/FreezerSection/FreezerShelf"]
+[node name="FreezerActions" parent="HUD/Frame/Layout/Middle/Side/Stack/FreezerSection/FreezerShelf" instance=ExtResource("dish_actions")]
 unique_name_in_owner = true
 layout_mode = 2
-size_flags_horizontal = 0
-theme_type_variation = &"SmallButton"
-text = "@hud.freeze_this"
-tooltip_text = "@hud.freeze_tip"
 
 [node name="FreezerEmpty" type="Label" parent="HUD/Frame/Layout/Middle/Side/Stack/FreezerSection/FreezerShelf"]
 unique_name_in_owner = true
@@ -951,6 +952,16 @@ size = Vector2i(520, 130)
 visible = false
 dialog_autowrap = true
 dialog_close_on_escape = false
+
+[node name="TrashDishDialog" type="ConfirmationDialog" parent="MenuLayer"]
+title = "@hud.trash_title"
+initial_position = 2
+size = Vector2i(520, 130)
+visible = false
+ok_button_text = "@hud.trash_confirm"
+cancel_button_text = "@hud.trash_cancel"
+dialog_autowrap = true
+metadata/destructive = true
 
 [node name="EndDialog" type="ConfirmationDialog" parent="MenuLayer"]
 title = "@hud.end_title"

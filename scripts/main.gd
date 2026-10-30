@@ -33,6 +33,8 @@ const VIEW_BITS := 19  ## render layers there are for dishes (the 2D world has t
 @onready var freezer_section: TraySection = %FreezerSection  ## the frozen dishes (hidden while there are none)
 @onready var freezer_shelf: FreezerShelf = %FreezerShelf  ## the freezer's content: the frozen dishes and the button that freezes the one in view
 @onready var old_dish_dialog: AcceptDialog = $MenuLayer/OldDishDialog
+@onready var trash_dialog: ConfirmationDialog = $MenuLayer/TrashDishDialog  ## asks before a dish is trashed from its card or the freezer
+@onready var card_actions: DishActions = %CardActions  ## freeze or trash, on the dish card
 @onready var graph_controls: GraphControls = %GraphControls  ## the graph's switches and trait drop-down
 @onready var playback_panel: Control = %Playback  ## the pause and speed buttons in the top bar
 @onready var views: Control = %Views  ## the graph and layer toggles in the top bar
@@ -77,6 +79,7 @@ var tool: Toolbar.Tool:  ## the selected tool (kept in step with the toolbar's s
 var sim_speed := 1.0  ## seconds of simulation per real second (the toolbar sets it)
 var achieved_speed := 1.0  ## what the simulation actually managed lately: lower than sim_speed when the frame budget cut a step short
 var paused := false
+var _to_trash: Dish  ## the dish the trash question (from its card or the freezer) is about
 var _old_dish: Dish  ## the dish a pipette took bups from, while the question about it is up (null: no question)
 var _stats_cache := {}  ## Dish -> [its time, its edit count, the msec it was worked out, its population_stats]: a scan of every bup, so not worked out again for the same moment (see _stats_of)
 var _vitals_width := 0.0  ## the widest the top bar's readout has been (see _update_hud)
@@ -161,8 +164,15 @@ func _ready() -> void:
 	all_rows.set_lead("bups", Strings.t("hud.all_bups"))
 	_setup_old_dish_dialog()
 	freezer_shelf.freeze_requested.connect(func() -> void: freeze_dish(dish))
+	freezer_shelf.trash_requested.connect(_ask_to_trash)
+	card_actions.freeze_requested.connect(func() -> void: freeze_dish(dish))
+	card_actions.trash_requested.connect(_ask_to_trash)
+	trash_dialog.confirmed.connect(func() -> void:
+		if is_instance_valid(_to_trash):
+			trash_dish(_to_trash))
 	freezer_shelf.thaw_requested.connect(thaw)
 	freezer_section.visible = free_mode  # (the goals' dish is the only one: nothing to freeze)
+	card_actions.visible = free_mode
 	menu_button.pressed.connect(_open_menu)
 	menu_button.tooltip_text = Strings.t("hud.menu_tip")
 	_on_tool_selected(toolbar.current_tool())  # the toolbar decides the starting tool
@@ -575,6 +585,16 @@ func freeze_dish(d: Dish) -> void:
 	_show_banner(Strings.t("hud.banner_frozen", [number]), BANNER_BRIEF_SECONDS)
 
 
+## Asks before the dish in the main view is trashed (it cannot be got back).
+func _ask_to_trash() -> void:
+	if dishes.size() < 2:
+		return
+	_to_trash = dish
+	trash_dialog.title = Strings.t("hud.trash_title", [_dish_numbers[dish]])
+	trash_dialog.dialog_text = Strings.t("hud.trash_text", [UiText.thousands(dish.population())])
+	trash_dialog.popup_centered()
+
+
 ## Takes a dish out of the game: its bups die with it and nothing of it is kept. The last running dish cannot be trashed.
 func trash_dish(d: Dish) -> void:
 	if not dishes.has(d) or dishes.size() < 2:
@@ -676,7 +696,8 @@ func _tutorial_show_graph() -> void:
 func _show_graph_choices() -> void:
 	graph_controls.show_choices(graph, dishes.size(), _dish_numbers.get(dish, 0))
 	all_details.visible = dishes.size() > 1  # (with one dish there is no "all")
-	freezer_shelf.freeze_button.disabled = dishes.size() < 2  # (the last running dish stays)
+	freezer_shelf.actions.set_available(dishes.size() > 1)  # (the last running dish stays)
+	card_actions.set_available(dishes.size() > 1)
 
 
 ## Brings another dish into the main view: the panels and the graph follow it, and the camera goes back to where (and how close) it last looked at that dish, or frames the dish if it has not looked yet; what was open on the old dish (a selection, a lineage) is closed.

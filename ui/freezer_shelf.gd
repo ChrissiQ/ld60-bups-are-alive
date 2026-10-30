@@ -1,13 +1,14 @@
 class_name FreezerShelf
 extends VBoxContainer
-## What is inside the tray's "Freezer" section: the button that freezes the dish in view, a note while nothing is frozen, and a button for each frozen dish (its picture and
+## What is inside the tray's "Freezer" section: the buttons that freeze or trash the dish in view, a note while nothing is frozen, and a button for each frozen dish (its picture and
 ## number; a click asks for it to be unfrozen). The section itself is a plain TraySection that holds this as its content. It keeps the frozen dishes (`entries`, in the order
 ## they went in): {number, data (Dish.to_dict), picture (a texture), bups}. The screen does the freezing and thawing; this only holds and shows.
 
 signal freeze_requested
+signal trash_requested
 signal thaw_requested(entry: Dictionary)
 
-@onready var freeze_button: Button = %FreezeButton  ## freezes the dish in the main view
+@onready var actions: DishActions = %FreezerActions  ## freeze or trash the dish in the main view
 @onready var empty_note: Label = %FreezerEmpty
 @onready var flow: HFlowContainer = %FreezerFlow
 
@@ -15,7 +16,8 @@ var entries: Array[Dictionary] = []
 
 
 func _ready() -> void:
-	freeze_button.pressed.connect(freeze_requested.emit)
+	actions.freeze_requested.connect(freeze_requested.emit)
+	actions.trash_requested.connect(trash_requested.emit)
 	refresh()
 
 

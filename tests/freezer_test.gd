@@ -17,14 +17,25 @@ func _run() -> void:
 	await process_frame
 	var first: Dish = m.dish
 	await process_frame
-	TestUtil.check(m.freezer_section.visible and m.freezer_shelf.freeze_button.disabled, "free mode has the freezer section, and the one running dish cannot be frozen")
+	TestUtil.check(m.freezer_section.visible and m.freezer_shelf.actions.freeze_button.disabled, "free mode has the freezer section, and the one running dish cannot be frozen")
 	TestUtil.check(not m.all_details.visible and not m.graph_controls.scope_switch.visible, "with one dish there is no all-dishes section and no dish switch on the graph")
 	m.toolbar.set_paused(false)
 	var second: Dish = m.add_dish(chosen)
 	var third: Dish = m.add_dish(chosen)
 	for i in 30:
 		await process_frame
-	TestUtil.check(not m.freezer_shelf.freeze_button.disabled and m.all_details.visible and m.graph_controls.scope_switch.visible, "with several dishes the button is on, and the all-dishes section and the graph's dish switch show")
+	TestUtil.check(not m.freezer_shelf.actions.freeze_button.disabled and m.all_details.visible and m.graph_controls.scope_switch.visible, "with several dishes the button is on, and the all-dishes section and the graph's dish switch show")
+	TestUtil.check(m.card_actions.visible and not m.card_actions.trash_button.disabled and m.card_actions.freeze_button.text == "Freeze this dish" and m.card_actions.trash_button.text == "Trash this dish", "the dish card has Freeze and Trash buttons too")
+	var extra: Dish = m.add_dish(chosen)
+	m.set_main_dish(extra)
+	m.card_actions.trash_button.pressed.emit()
+	TestUtil.check(m.trash_dialog.visible and m.trash_dialog.title == "Trash dish %d?" % m._dish_numbers[extra] and m.dishes.has(extra), "Trash asks first, and nothing is deleted yet")
+	m.trash_dialog.get_cancel_button().pressed.emit()
+	TestUtil.check(m.dishes.has(extra), "keeping it leaves it running")
+	m.freezer_shelf.trash_requested.emit()
+	m.trash_dialog.confirmed.emit()
+	TestUtil.check(not m.dishes.has(extra) and m.dishes.size() == 3, "confirming trashes the dish in the main view, from the freezer's button too")
+	m.set_main_dish(first)
 	var number: int = m._dish_numbers[second]
 	var bups := second.population()
 	var frozen_time := second.time
