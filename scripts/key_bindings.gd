@@ -17,6 +17,7 @@ const DEFAULTS := {
 	"layer_medium": KEY_Z, "layer_sources": KEY_X, "layer_plankton": KEY_C, "layer_husks": KEY_M, "layer_bups": KEY_V, "layer_steering": KEY_B,
 	"graph_trait": KEY_T, "graph_span": KEY_G, "graph_show": KEY_Y, "details": KEY_TAB,
 	"follow": KEY_R, "watch": KEY_O, "lineage": KEY_L,
+	"dish_prev": KEY_PAGEUP, "dish_next": KEY_PAGEDOWN,
 }
 ## Keys that mean something fixed, which no action may take.
 const RESERVED := [KEY_ESCAPE, KEY_F1, KEY_F11, KEY_F12, KEY_ENTER, KEY_KP_ENTER, KEY_DELETE, KEY_BACKSPACE]

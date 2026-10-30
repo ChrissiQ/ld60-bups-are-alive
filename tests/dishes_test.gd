@@ -23,6 +23,13 @@ func _run() -> void:
 	TestUtil.check(other.global_position.distance_to(first.global_position) >= m.DISH_SPACING, "it is far from the first in the shared world")
 	TestUtil.check(first.visibility_layer != other.visibility_layer and (m.get_viewport().canvas_cull_mask & other.visibility_layer) == 0 and (m.get_viewport().canvas_cull_mask & first.visibility_layer) != 0 and (m.get_viewport().canvas_cull_mask & 1) != 0, "the main view shows its own dish and the screen, and no other dish, however far it is zoomed out")
 	TestUtil.check(first.drawing.overlay.visibility_layer == first.visibility_layer and first.drawing.bups_mesh.visibility_layer == first.visibility_layer, "everything a dish draws is on its layer")
+	m._step_dish(1)
+	TestUtil.check(m.dish == other, "the next-dish step goes to the second dish")
+	m._step_dish(1)
+	TestUtil.check(m.dish == first, "the next-dish step wraps to the first")
+	m._step_dish(-1)
+	TestUtil.check(m.dish == other, "the previous-dish step wraps to the last")
+	m.set_main_dish(first)
 	var t0 := other.time
 	var t1 := first.time
 	for i in 30:

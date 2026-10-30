@@ -396,6 +396,10 @@ func _on_key(event: InputEventKey) -> void:
 		lineage.open_lineage()
 	elif layers_panel.toggle_for_key(event):
 		pass
+	elif KeyBindings.matches("dish_prev", event):
+		_step_dish(-1)
+	elif KeyBindings.matches("dish_next", event):
+		_step_dish(1)
 	elif KeyBindings.matches("slower", event):
 		toolbar.step_speed(-1)
 	elif KeyBindings.matches("faster", event):
@@ -698,6 +702,12 @@ func _show_graph_choices() -> void:
 	all_details.visible = dishes.size() > 1  # (with one dish there is no "all")
 	freezer_shelf.actions.set_available(dishes.size() > 1)  # (the last running dish stays)
 	card_actions.set_available(dishes.size() > 1)
+
+
+## Brings the dish `by` places along the tabs (wrapping round) into the main view.
+func _step_dish(by: int) -> void:
+	if dishes.size() > 1:
+		set_main_dish(dishes[posmod(dishes.find(dish) + by, dishes.size())])
 
 
 ## Brings another dish into the main view: the panels and the graph follow it, and the camera goes back to where (and how close) it last looked at that dish, or frames the dish if it has not looked yet; what was open on the old dish (a selection, a lineage) is closed.
