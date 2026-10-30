@@ -84,7 +84,7 @@ func _init() -> void:
 			tour.next()
 		seen_steps += 1
 	TestUtil.check(not tour.active and not tour.visible, "the tour ends after the last step")
-	TestUtil.check(seen_steps == 17, "a free-mode tutorial has 17 steps (%d)" % seen_steps)
+	TestUtil.check(seen_steps == 18, "a free-mode tutorial has 18 steps (%d)" % seen_steps)
 	TestUtil.check(m.paused and m.dish.selected.bup < 0 and not m.dish.is_watched(m._tutorial_bup) and m.camera.zoom.is_equal_approx(was_zoom) and m.camera.position.distance_to(was_position) < 4.0, "afterwards it is paused as before, with nothing selected or watched and the camera where it was (%s %s, was %s %s)" % [m.camera.zoom, m.camera.position, was_zoom, was_position])
 	await process_frame
 	await process_frame
@@ -104,13 +104,13 @@ func _init() -> void:
 	TestUtil.check(nt.index == 2, "Back goes one step back")
 	nt._input(TestUtil.key_event(KEY_LEFT))
 	TestUtil.check(nt.index == 1, "so does the left arrow")
-	while nt.index < 9:
+	while nt.index < 10:
 		nt.next()
 	TestUtil.check(not nt.blocking, "on the click step")
 	var tool_key := TestUtil.key_event(KEY_H)
 	nt._input(tool_key)
 	TestUtil.check(n.tool == Toolbar.Tool.SELECT, "a tool key does nothing while the tour waits for a click (the tool stays Inspect)")
-	TestUtil.check(nt.index == 9 and nt.next_button.disabled, "Next is shut until the click is made")
+	TestUtil.check(nt.index == 10 and nt.next_button.disabled, "Next is shut until the click is made")
 	var full := InputEventKey.new()
 	full.keycode = KEY_F if OS.get_name() == "macOS" else KEY_F11
 	full.ctrl_pressed = OS.get_name() == "macOS"
@@ -120,26 +120,26 @@ func _init() -> void:
 	n.dish.select_at(n.dish.bup_world_pos(n._tutorial_bup), 2.0)
 	await process_frame
 	await process_frame
-	TestUtil.check(nt.index == 10, "making the click goes straight on")
+	TestUtil.check(nt.index == 11, "making the click goes straight on")
 	nt.next()
-	TestUtil.check(nt.index == 11 and nt.text_label.text.begins_with("Its genome"), "after the inspect panel comes the genome step")
+	TestUtil.check(nt.index == 12 and nt.text_label.text.begins_with("Its genome"), "after the inspect panel comes the genome step")
 	nt.next()
-	TestUtil.check(nt.index == 12 and nt.next_button.disabled, "the watch step is shut until the eye is pressed")
+	TestUtil.check(nt.index == 13 and nt.next_button.disabled, "the watch step is shut until the eye is pressed")
 	n.inspector.toggle_watch()
 	await process_frame
 	await process_frame
-	TestUtil.check(nt.index == 13, "pressing the eye goes straight on to the watch list")
+	TestUtil.check(nt.index == 14, "pressing the eye goes straight on to the watch list")
 	nt.back_button.pressed.emit()
 	await process_frame
-	TestUtil.check(nt.index == 12 and not nt.next_button.disabled and nt.text_label.text.contains("eye"), "Back shows the watch step again, with Next open because the bup is still watched")
+	TestUtil.check(nt.index == 13 and not nt.next_button.disabled and nt.text_label.text.contains("eye"), "Back shows the watch step again, with Next open because the bup is still watched")
 	nt.back_button.pressed.emit()
 	nt.back_button.pressed.emit()
 	nt.back_button.pressed.emit()
 	await process_frame
-	TestUtil.check(nt.index == 9 and not nt.next_button.disabled, "and the click step too, with Next open because the bup is still selected (it does not go on again by itself)")
+	TestUtil.check(nt.index == 10 and not nt.next_button.disabled, "and the click step too, with Next open because the bup is still selected (it does not go on again by itself)")
 	n.dish.clear_selection()
 	await process_frame
-	TestUtil.check(nt.index == 9 and nt.next_button.disabled, "if the bup is let go, Next is shut again")
+	TestUtil.check(nt.index == 10 and nt.next_button.disabled, "if the bup is let go, Next is shut again")
 	nt.skip()
 	await process_frame
 	TestUtil.check(n.dish.watched.is_empty(), "skipping takes the bup the tour had watched off the list again")
@@ -157,7 +157,7 @@ func _init() -> void:
 
 	# Skipped on a step that asked for something, after the view was changed for it.
 	var t: Node = await _screen(Session.Mode.FREE, true)
-	while t.tutorial.index < 9:
+	while t.tutorial.index < 10:
 		t.tutorial.next()
 	await process_frame
 	TestUtil.check(t.camera.zoom.x > was_zoom.x, "on the step that asks for a click the camera is close")
@@ -169,7 +169,7 @@ func _init() -> void:
 
 	# Goal mode: the goal's own step is there, and a game that was playing plays again afterwards.
 	var g: Node = await _screen(Session.Mode.GOALS, true)
-	TestUtil.check(g.tutorial.active and g.tutorial._steps.size() == 18, "goal mode's tour has the goal step as well (%d steps)" % g.tutorial._steps.size())
+	TestUtil.check(g.tutorial.active and g.tutorial._steps.size() == 19, "goal mode's tour has the goal step as well (%d steps)" % g.tutorial._steps.size())
 	TestUtil.check(g.tutorial._steps[1]["text"].begins_with("Your experiment") and g.tutorial._steps[6]["text"].contains("experiment 2"), "it explains the goal and that the nutrient tools unlock later")
 	TestUtil.check(g.paused, "goal mode is held for the tour")
 	g.tutorial.skip()

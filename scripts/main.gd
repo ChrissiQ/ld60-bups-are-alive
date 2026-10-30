@@ -978,6 +978,7 @@ func _start_tutorial() -> void:
 	steps.append(_tour("graph", func() -> Rect2: return _in_tray(graph_section), Callable(), _tutorial_show_graph))
 	steps.append(_tour("tools", func() -> Rect2: return toolbar.select_button.get_global_rect().merge(toolbar.plankton_button.get_global_rect()), Callable(), Callable(), "" if free_mode else Strings.t("tutorial.tools_locked")))
 	steps.append(_tour("tray", func() -> Rect2: return tool_options.get_global_rect()))
+	steps.append(_tour("sections", func() -> Rect2: return _in_tray(graph_section)))
 	steps.append(_tour("time", func() -> Rect2: return toolbar.pause_button.get_global_rect().merge(toolbar.speed_ultra_button.get_global_rect()).grow(4.0)))
 	steps.append(_tour("layers", func() -> Rect2: return layers_panel.get_global_rect().grow(4.0)))
 	steps.append(_tour("pick_bup", _tutorial_bup_rect, func() -> bool: return dish.selected.bup >= 0, _tutorial_show_bup))
