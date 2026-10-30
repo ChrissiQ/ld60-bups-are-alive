@@ -20,7 +20,7 @@ var number_of: Callable  ## a dish's number (Callable: Dish -> int)
 var lineage: LineageView
 var readout: Readout
 
-var dish_card: PanelContainer  ## the side column's slot for the dish, when nothing is picked
+var dish_card: TraySection  ## the dish's section of the side column (it stays when something is picked)
 var info_panel: PanelContainer  ## what is picked (a bup, a source, a plankton)
 var hover_card: PanelContainer  ## what the pointer rests on, next to the pointer (it never moves the side column)
 var hover_text: RichTextLabel
@@ -32,7 +32,7 @@ var hover_genome: GenomeRibbon  ## the same on the card that follows the pointer
 var hover_tail: RichTextLabel
 var info_text: RichTextLabel
 var top_row: HBoxContainer
-var top_spacer: Control  ## keeps the close button at the right when there is no name row
+var info_title: Label  ## the title of a source, plankton or husk, at the left of the close button (a bup has its name row)
 var close_button: Button
 var name_row: BupNameRow
 var lineage_button: Button
@@ -66,7 +66,7 @@ func bind(root: Node, lineage_view: LineageView, readouts: Readout) -> void:
 	info_text = root.get_node("%InfoText")
 	top_row = root.get_node("%InfoTopRow")
 	name_row = root.get_node("%NameRow")
-	top_spacer = root.get_node("%InfoSpacer")
+	info_title = root.get_node("%InfoTitle")
 	close_button = root.get_node("%CloseButton")
 	lineage_button = root.get_node("%LineageButton")
 	lineage_panel = root.get_node("%LineagePanel")
@@ -98,10 +98,16 @@ func update(following: bool, hover_point: Variant) -> void:
 		dish.selected.bup = -1  # its record is gone
 	if dish.hovered.bup >= 0 and not dish.has_record(dish.hovered.bup):
 		dish.hovered.bup = -1  # (a hover left over in a dish that has come into view: it has no record of that bup, and `PanelText.deceased` needs one)
-	# A clicked bup, source or plankton is pinned to the info panel in the side column. Until one is, what the pointer
-	# is over (or else the nutrient at that spot) shows on a small card beside the pointer, which never moves the column.
-	var pinned := dish.has_selection()
-	var picked := dish.selected if pinned else dish.hovered
+	# A clicked bup, source, plankton or husk is pinned to the info panel in the side column and stays there. What the
+	# select tool's pointer rests on (or else the nutrient at that spot) shows on a small card beside the pointer, which
+	# never moves the column, whether or not something is pinned.
+	_show_info(following)
+	_show_hover(hover_point)
+
+
+## The info panel: what is selected.
+func _show_info(following: bool) -> void:
+	var picked := dish.selected
 	var bup_id := picked.bup
 	var source := picked.source
 	var floating := picked.plankton
@@ -110,78 +116,117 @@ func update(following: bool, hover_point: Variant) -> void:
 	if husk_place != Dish.NO_HUSK and husk.is_empty():  # (it has leaked away)
 		picked.husk = Dish.NO_HUSK
 		husk_place = Dish.NO_HUSK
-	var editing := dish.selected.source != null and dish.selected.bup < 0
+	var pinned := dish.has_selection()
+	var editing := source != null and bup_id < 0
 	var alive_info: Dictionary = dish.bup_info(bup_id) if bup_id >= 0 else {}  # (fetched once: the panels below are built from it)
 	if bup_id >= 0 and alive_info.is_empty() and dish.has_bup(bup_id):
 		alive_info = dish.lineage_info(bup_id)  # (alive, but on the GPU its record has not come back yet: its family record stands in, rather than showing it as deceased)
 	var dead := bup_id >= 0 and alive_info.is_empty()  # a selected bup that has died stays up, as a record
 	var lineage_open := lineage.is_open_on(bup_id)
 	var something := bup_id >= 0 or source != null or floating != null or not husk.is_empty()
-	var target: RichTextLabel = info_text if pinned else hover_text
 	var panel_look := &"DeceasedPanel" if dead else &"HudPanel"
 	info_panel.visible = pinned and something and not lineage_open
-	hover_card.visible = not pinned and (something or hover_point != null)
-	dish_card.visible = not (info_panel.visible or lineage_panel.visible)  # (one slot in the side column: the dish, or what is picked)
-	hover_card.theme_type_variation = panel_look
 	info_panel.theme_type_variation = panel_look
 	lineage_panel.visible = lineage_open
 	lineage_panel.theme_type_variation = panel_look
 	source_rate_row.visible = editing
 	delete_source_button.visible = editing
-	follow_button.visible = dish.selected.bup >= 0 and not dead  # a bup can be followed once it is selected, not just hovered
-	var watched_now := dish.is_watched(dish.selected.bup)
+	follow_button.visible = bup_id >= 0 and not dead  # a bup can be followed once it is selected
+	var watched_now := dish.is_watched(bup_id)
 	watch_button.icon = UNWATCH_ICON if watched_now else WATCH_ICON  # (an eye; crossed out while the bup is on the list, as that is what pressing it does)
 	watch_button.tooltip_text = Strings.t("hud.unwatch") if watched_now else Strings.t("hud.watch")
 	follow_button.text = Strings.t("hud.stop_following") if following else Strings.t("hud.follow")
 	follow_button.tooltip_text = Strings.t("hud.stop_following_tip" if following else "hud.follow_tip")
 	top_row.visible = pinned
 	name_row.visible = bup_id >= 0
-	top_spacer.visible = bup_id < 0
-	lineage_button.visible = bup_id >= 0 and bup_id == dish.selected.bup
+	info_title.visible = bup_id < 0
+	lineage_button.visible = bup_id >= 0
 	watch_button.visible = lineage_button.visible  # (alive or dead: a record can be watched too)
 	var shows_bup := bup_id >= 0
-	info_genome.visible = shows_bup and pinned
-	info_tail.visible = info_genome.visible
-	info_gauges.visible = shows_bup and pinned
-	hover_gauges.visible = shows_bup and not pinned
-	hover_genome.visible = shows_bup and not pinned
-	hover_tail.visible = hover_genome.visible
+	info_genome.visible = shows_bup
+	info_tail.visible = shows_bup
+	info_gauges.visible = shows_bup
 	if bup_id < 0:
 		name_row.cancel_editing()
 	if lineage_open:
 		lineage.show(bup_id)
 	if bup_id >= 0:
+		var record := dish.lineage_info(bup_id) if dead else alive_info
+		var body := PanelText.deceased(record, number_of.call(dish)) if dead else PanelText.bup(alive_info, number_of.call(dish))
+		info_genome.show_bup(record, true)
+		readout.set_text(info_tail, PanelText.tail(record), "tail %d" % bup_id)
+		var divided := note_divisions(bup_id, record) and not dead
+		info_gauges.show_bup(record, dish.stationary_phase, not dead)
+		name_row.show_bup(dish, bup_id, true)  # a bup can be renamed once it is clicked, not just hovered
+		readout.set_text(info_text, body, "bup %d" % bup_id, divided)
+	elif source != null:
+		if editing:
+			_show_source_rate(source)
+		info_title.text = Strings.t("panel.source_title")
+		readout.set_text_when_due(info_text, "source %d" % source.get_instance_id(), func() -> String: return PanelText.source(dish.source_details(source)))
+	elif floating != null:
+		info_title.text = Strings.t("panel.plankton_title")
+		readout.set_text_when_due(info_text, "plankton %d" % floating.get_instance_id(), func() -> String: return PanelText.plankton(dish.plankton_details(floating)))
+	elif not husk.is_empty():
+		info_title.text = Strings.t("panel.husk_title")
+		readout.set_text_when_due(info_text, "husk %s" % husk_place, func() -> String: return PanelText.husk(husk))
+
+
+## The card beside the pointer: what the select tool's pointer rests on, or else the nutrient at that spot. Not the
+## thing the info panel already shows.
+func _show_hover(hover_point: Variant) -> void:
+	var picked := dish.hovered
+	var bup_id := picked.bup
+	var source := picked.source
+	var floating := picked.plankton
+	var husk_place := picked.husk
+	var husk := dish.husk_details(husk_place) if husk_place != Dish.NO_HUSK else {}
+	if husk_place != Dish.NO_HUSK and husk.is_empty():  # (it has leaked away)
+		picked.husk = Dish.NO_HUSK
+		husk_place = Dish.NO_HUSK
+	var chosen := dish.selected
+	if (bup_id >= 0 and bup_id == chosen.bup) or (source != null and source == chosen.source) or (floating != null and floating == chosen.plankton) or (husk_place != Dish.NO_HUSK and husk_place == chosen.husk):
+		hover_card.visible = false  # (the pointer is over what the info panel shows)
+		return
+	var alive_info: Dictionary = dish.bup_info(bup_id) if bup_id >= 0 else {}
+	if bup_id >= 0 and alive_info.is_empty() and dish.has_bup(bup_id):
+		alive_info = dish.lineage_info(bup_id)
+	var dead := bup_id >= 0 and alive_info.is_empty()
+	var something := bup_id >= 0 or source != null or floating != null or not husk.is_empty()
+	hover_card.visible = something or hover_point != null
+	hover_card.theme_type_variation = &"DeceasedPanel" if dead else &"HudPanel"
+	var shows_bup := bup_id >= 0
+	hover_gauges.visible = shows_bup
+	hover_genome.visible = shows_bup
+	hover_tail.visible = shows_bup
+	if bup_id >= 0:
 		_point_stamp = []
 		var record := dish.lineage_info(bup_id) if dead else alive_info
 		var body := PanelText.deceased(record, number_of.call(dish)) if dead else PanelText.bup(alive_info, number_of.call(dish))
-		var genome_map: GenomeRibbon = info_genome if pinned else hover_genome
-		var tail: RichTextLabel = info_tail if pinned else hover_tail
-		genome_map.show_bup(record, pinned)
-		readout.set_text(tail, PanelText.tail(record), "tail %d" % bup_id)
-		var divided := note_divisions(bup_id, record) and not dead and pinned  # (the hover card does not flash)
-		var gauges: BupGauges = info_gauges if pinned else hover_gauges
-		gauges.show_bup(record, dish.stationary_phase, not dead)
-		if pinned:
-			name_row.show_bup(dish, bup_id, true)  # a bup can be renamed once it is clicked, not just hovered
-		else:
-			body = "%s\n%s" % [dish.bup_display(bup_id).get("name", ""), body]  # (the hover card has no name row)
-		readout.set_text(target, body, "bup %d" % bup_id, divided)
+		hover_genome.show_bup(record, false)
+		readout.set_text(hover_tail, PanelText.tail(record), "tail %d" % bup_id)
+		hover_gauges.show_bup(record, dish.stationary_phase, not dead)
+		body = "%s\n%s" % [dish.bup_display(bup_id).get("name", ""), body]  # (the hover card has no name row)
+		readout.set_text(hover_text, body, "bup %d" % bup_id)
 	elif source != null:
 		_point_stamp = []
-		if editing:
-			_show_source_rate(source)
-		readout.set_text_when_due(target, "source %d" % source.get_instance_id(), func() -> String: return PanelText.source(dish.source_details(source)))
+		readout.set_text_when_due(hover_text, "source %d" % source.get_instance_id(), func() -> String: return _titled("panel.source_title", PanelText.source(dish.source_details(source))))
 	elif floating != null:
 		_point_stamp = []
-		readout.set_text_when_due(target, "plankton %d" % floating.get_instance_id(), func() -> String: return PanelText.plankton(dish.plankton_details(floating)))
+		readout.set_text_when_due(hover_text, "plankton %d" % floating.get_instance_id(), func() -> String: return _titled("panel.plankton_title", PanelText.plankton(dish.plankton_details(floating))))
 	elif not husk.is_empty():
 		_point_stamp = []
-		readout.set_text_when_due(target, "husk %s" % husk_place, func() -> String: return PanelText.husk(husk))
+		readout.set_text_when_due(hover_text, "husk %s" % husk_place, func() -> String: return _titled("panel.husk_title", PanelText.husk(husk)))
 	elif hover_point != null:
 		var point_stamp := [hover_point, dish.time, dish.edit_count]
 		if point_stamp != _point_stamp:  # (the readout is worked out again only when the spot or the dish has changed)
 			_point_stamp = point_stamp
-			readout.set_text(target, PanelText.point(dish.nutrient_at(hover_point)), "point")
+			readout.set_text(hover_text, PanelText.point(dish.nutrient_at(hover_point)), "point")
+
+
+## A card's words under their title (the info panel has the title beside its close button instead).
+func _titled(title_key: String, body: String) -> String:
+	return "%s\n%s" % [Strings.t(title_key), body]
 
 
 ## The hover card follows the pointer, kept inside the window.

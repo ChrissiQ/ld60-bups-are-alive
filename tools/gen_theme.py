@@ -45,6 +45,8 @@ def flat(i,bg,m=(0,0,0,0),r=R_CTRL,bw=0,bc=None,center=True,expand=0,bw_sides=No
         sides=bw_sides or (bw,bw,bw,bw)
         for k,v in zip(("left","top","right","bottom"),sides):
             if v: L.append("border_width_%s = %d"%(k,v))
+        if center and bc[3]<1:  # (a translucent border over its own fill brightens along the rounded corners: use the colour it would show as)
+            bc=tuple(bg[k]*(1-bc[3])+bc[k]*bc[3] for k in range(3))+(1,)
         L.append("border_color = "+rgba(bc))
     for k in ("top_left","top_right","bottom_right","bottom_left"): L.append("corner_radius_%s = %d"%(k,r))
     if expand:
@@ -70,6 +72,7 @@ flat("goal_card",GOAL_FILL,(14,12,14,12),R_PANEL,BORDER["hairline"],(*EMPHASIS[:
 flat("popup_panel",SURFACE_SOLID,(8,8,8,8),R_PANEL,BORDER["hairline"],COL["popup_border"])
 flat("tooltip_panel",TOOLTIP_FILL,(10,6,10,6),R_CTRL,BORDER["hairline"],COL["popup_border"])
 flat("dialog_panel",SURFACE_SOLID,(24,56,24,24),12,BORDER["hairline"],COL["popup_border"])
+empty("drop_slot",(SP["tight"],SP["tight"],SP["tight"],SP["tight"]))
 empty("embedded_border",(0,0,0,0))
 empty("embedded_unfocused_border",(0,0,0,0))
 flat("tutorial_card",SURFACE_SOLID,(20,16,20,16),R_PANEL,BORDER["hairline"],(*EMPHASIS[:3],0.8))
@@ -211,6 +214,7 @@ res.append('default_font_size = %d'%FS["base"])
 T("Label",colors={"font_color":TEXT})
 T("Bright","Label",colors={"font_color":TEXT},fonts={"font":REG})
 T("BrightFlash","Label",colors={"font_color":ACCENT_HI},fonts={"font":REG})  # the first number of a readout while it has just changed (see UiText.numbers)
+T("InfoTitle","Label",colors={"font_color":TEXT},sizes={"font_size":FS["l"]},fonts={"font":EMPH})  # the title of a picked source, plankton or husk
 T("CardTitle","Label",colors={"font_color":EMPHASIS},sizes={"font_size":FS["2xl"]},fonts={"font":LIGHT})
 T("CardText","Label",colors={"font_color":TEXT},sizes={"font_size":FS["base"]},fonts={"font":LIGHT},consts={"line_spacing":3})
 T("FocusLabel","Label",colors={"font_color":ACCENT})
@@ -247,6 +251,7 @@ T("StoryHeading","RichTextLabel",colors={"default_color":EMPHASIS},fonts={"norma
 T("PanelContainer",styles={"panel":"panel"})
 T("CompactPanel","PanelContainer",styles={"panel":"compact_panel"})
 T("HudPanel","PanelContainer",styles={"panel":"hud_panel"})
+T("DropSlot","PanelContainer",colors={"line":FAINT},consts={"dash":SP["tight"],"width":BORDER["focus"],"radius":R_PANEL},styles={"panel":"drop_slot"})  # the dotted outline where a dragged thing will land (ui/drop_slot.gd)
 T("DeceasedPanel","PanelContainer",styles={"panel":"deceased_panel"})
 T("Bare","PanelContainer",styles={"panel":"bare_empty"})
 T("TopBar","PanelContainer",styles={"panel":"topbar_panel"})

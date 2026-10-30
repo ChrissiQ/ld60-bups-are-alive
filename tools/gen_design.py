@@ -293,6 +293,7 @@ def component_section():
         ("Picture button", "PictureButton", "Icon button"),
         ("Icon button", "IconButton", "Icon-only action in a row (unfreeze, info, trash, close); its name is its tooltip"),
         ("Tab", "TabButton in Segments", "Pages of a panel"),
+        ("Drop slot", "DropSlot", "Dotted outline with \"Move here\" where a dragged section will land; the dragged section leaves its place and a lifted copy of its heading follows the pointer; Esc or a release outside the column puts it back"),
         ("Section heading", "SectionButton, TraySection", "Collapses its content; has a chevron; dragged by its heading to a new place in the tray"),
         ("Yes or no setting", "ToggleRow", "On/Off, with a description below"),
         ("Number setting", "SettingRow", "Number, with slider or field"),

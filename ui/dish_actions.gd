@@ -21,3 +21,5 @@ func _ready() -> void:
 func set_available(available: bool) -> void:
 	freeze_button.disabled = not available
 	trash_button.disabled = not available
+	freeze_button.tooltip_text = Strings.t("hud.freeze_tip" if available else "hud.freeze_last_tip")
+	trash_button.tooltip_text = Strings.t("hud.trash_tip" if available else "hud.trash_last_tip")

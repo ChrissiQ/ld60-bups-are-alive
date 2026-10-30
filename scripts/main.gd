@@ -349,7 +349,7 @@ func debug_state() -> Dictionary:
 			"trait": HistoryGraph.TRAITS[graph.trait_index],
 			"shown_time_s": graph._now(),
 		},
-		"tray_open": {"graph": graph_section.open, "dish_details": dish_details.open, "all_details": all_details.open},
+		"tray_open": {"dish": inspector.dish_card.open, "graph": graph_section.open, "dish_details": dish_details.open, "all_details": all_details.open},
 		"dish_strip": {"visible": dish_strip.visible, "main_zoomed_in": dish_strip.main_zoomed_in},
 		"watched_total": dishes.reduce(func(n: int, d: Dish) -> int: return n + d.watched.size(), 0),
 		"world_time": scheduler.world_time(),

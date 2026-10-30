@@ -232,7 +232,7 @@ static func is_fullscreen_key(event: InputEventKey) -> bool:
 static func set_tray_order(order: PackedStringArray) -> void:
 	load_once()
 	tray_order = order
-	_commit()
+	_save()
 
 
 ## `listener` is called when a reset puts the tray's sections back in the scene's order.
@@ -259,6 +259,11 @@ static func reset() -> void:
 
 static func _commit() -> void:
 	apply()
+	_save()
+
+
+## Writes the preferences without applying them (a setting the screens have already acted on, as the tray's order is when a section is dropped: applying re-lays-out the whole window).
+static func _save() -> void:
 	var file := ConfigFile.new()
 	file.set_value("display", "fullscreen", fullscreen)
 	file.set_value("display", "ui_scale", ui_scale)

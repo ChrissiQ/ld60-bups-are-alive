@@ -585,12 +585,14 @@ tooltip_text = "@hud.lineage_tip"
 icon = ExtResource("lineage_icon")
 icon_alignment = 1
 
-[node name="InfoSpacer" type="Control" parent="HUD/Frame/Layout/Middle/Side/Stack/InfoPanel/Box/InfoTopRow"]
+[node name="InfoTitle" type="Label" parent="HUD/Frame/Layout/Middle/Side/Stack/InfoPanel/Box/InfoTopRow"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
 size_flags_horizontal = 3
+size_flags_vertical = 4
 mouse_filter = 2
+theme_type_variation = &"InfoTitle"
 
 [node name="CloseButton" type="Button" parent="HUD/Frame/Layout/Middle/Side/Stack/InfoPanel/Box/InfoTopRow"]
 unique_name_in_owner = true
@@ -704,17 +706,13 @@ size_flags_horizontal = 3
 
 [node name="DishCard" type="PanelContainer" parent="HUD/Frame/Layout/Middle/Side/Stack"]
 unique_name_in_owner = true
-theme_type_variation = &"HudPanel"
 layout_mode = 2
+script = ExtResource("tray_section")
+title_key = "hud.dish_title"
 
 [node name="Rows" type="VBoxContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/DishCard"]
 theme_type_variation = &"TightStack"
 layout_mode = 2
-
-[node name="DishTitle" type="Label" parent="HUD/Frame/Layout/Middle/Side/Stack/DishCard/Rows"]
-theme_type_variation = &"SmallBright"
-layout_mode = 2
-text = "@hud.dish_title"
 
 [node name="BloomRow" parent="HUD/Frame/Layout/Middle/Side/Stack/DishCard/Rows" instance=ExtResource("setting_row")]
 unique_name_in_owner = true
@@ -744,7 +742,6 @@ layout_mode = 2
 unique_name_in_owner = true
 layout_mode = 2
 script = ExtResource("tray_section")
-draggable = false
 title_key = "hud.colony_title"
 tip_key = "hud.colony_tip"
 open = false

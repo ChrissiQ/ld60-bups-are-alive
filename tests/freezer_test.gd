@@ -17,6 +17,7 @@ func _run() -> void:
 	await process_frame
 	var first: Dish = m.dish
 	await process_frame
+	TestUtil.check(m.card_actions.freeze_button.tooltip_text == "You can't freeze the last dish" and m.card_actions.trash_button.tooltip_text == "You can't trash the last dish", "the last dish's tips say why the buttons are off")
 	TestUtil.check(m.freezer_section.visible and m.freezer_shelf.actions.freeze_button.disabled, "free mode has the freezer section, and the one running dish cannot be frozen")
 	TestUtil.check(not m.all_details.visible and not m.graph_controls.scope_switch.visible, "with one dish there is no all-dishes section and no dish switch on the graph")
 	m.toolbar.set_paused(false)
@@ -26,6 +27,7 @@ func _run() -> void:
 		await process_frame
 	TestUtil.check(not m.freezer_shelf.actions.freeze_button.disabled and m.all_details.visible and m.graph_controls.scope_switch.visible, "with several dishes the button is on, and the all-dishes section and the graph's dish switch show")
 	TestUtil.check(m.card_actions.visible and not m.card_actions.trash_button.disabled and m.card_actions.freeze_button.text == "Freeze this dish" and m.card_actions.trash_button.text == "Trash this dish", "the dish card has Freeze and Trash buttons too")
+	TestUtil.check(m.card_actions.freeze_button.tooltip_text == "Stash this dish in the freezer for later" and m.card_actions.trash_button.tooltip_text == "Throw this dish out for good", "with several dishes the tips say what the buttons do")
 	var extra: Dish = m.add_dish(chosen)
 	m.set_main_dish(extra)
 	m.card_actions.trash_button.pressed.emit()

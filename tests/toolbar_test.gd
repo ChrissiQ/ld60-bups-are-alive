@@ -302,6 +302,10 @@ func _init() -> void:
 	_hover_over(m, m.dish.sources[0].pos)
 	TestUtil.check(m.inspector.hover_text.get_parsed_text().begins_with("NUTRIENT SOURCE") and not m.inspector.source_rate_row.visible, "hovering a source shows it, read-only")
 	m.dish.select_at(near_pos)
+	_hover_over(m, m.dish.sources[0].pos)
+	TestUtil.check(m.inspector.info_panel.visible and m.inspector.hover_card.visible and m.inspector.hover_text.get_parsed_text().begins_with("NUTRIENT SOURCE"), "with a bup pinned the select tool's hover card still shows what the pointer is over")
+	_hover_over(m, near_pos)
+	TestUtil.check(m.inspector.info_panel.visible and not m.inspector.hover_card.visible, "...but not over the pinned bup itself")
 	_hover_over(m, spot)
 	TestUtil.check(m.inspector.name_row.visible and m.inspector.info_text.get_parsed_text().contains("divisions") and not m.inspector.info_text.get_parsed_text().contains("NUTRIENT") and m.inspector.name_row.rename_button.visible, "a clicked bup stays on the panel while the pointer moves away, and can be renamed")
 	m.dish.select_at(m.dish.global_position + Vector2(-200, -200))
@@ -879,7 +883,7 @@ func _init() -> void:
 	_click(m, _screen(m, spot + Vector2(3, 2)))
 	await process_frame
 	await process_frame
-	TestUtil.check(m.dish.selected.source == m.dish.sources[0] and m.inspector.info_panel.visible and m.inspector.info_text.get_parsed_text().begins_with("NUTRIENT SOURCE"), "the select tool selects a source and shows its box")
+	TestUtil.check(m.dish.selected.source == m.dish.sources[0] and m.inspector.info_panel.visible and m.inspector.info_title.visible and m.inspector.info_title.text == "NUTRIENT SOURCE" and not m.inspector.info_text.get_parsed_text().contains("NUTRIENT SOURCE"), "the select tool selects a source and shows its box, titled beside the close button")
 	TestUtil.check(m.inspector.source_rate_row.is_visible_in_tree() and m.inspector.delete_source_button.is_visible_in_tree(), "a selected source has a rate row and a delete button")
 	TestUtil.check(is_equal_approx(m.inspector.source_rate_row.value, 12.5), "the rate row shows the source's rate (%.1f)" % m.inspector.source_rate_row.value)
 	m.inspector.source_rate_row.value = 20

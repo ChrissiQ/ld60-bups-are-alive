@@ -34,7 +34,7 @@ func _run() -> void:
 		await process_frame
 	var sections := _sections(m)
 	var names := sections.map(func(s: TraySection) -> String: return s.name)
-	for expected in ["DishDetails", "GraphSection", "AllDetails", "WatchSection", "FreezerSection"]:
+	for expected in ["DishCard", "DishDetails", "GraphSection", "AllDetails", "WatchSection", "FreezerSection"]:
 		TestUtil.check(names.has(expected), "the tray has the %s section (%s)" % [expected, names])
 	var first := sections[0]
 	for section in sections:
@@ -92,12 +92,20 @@ func _run() -> void:
 	UserSettings.path = scratch
 	var tray: Node = m.graph_section.get_parent()
 	var before := TraySection.order_of(tray)
-	TestUtil.check(not before.has("DishDetails") and before.has("GraphSection") and before.has("FreezerSection"), "the dish's own details are not among the movable sections (%s)" % [before])
+	TestUtil.check(before.has("DishDetails") and before.has("GraphSection") and before.has("FreezerSection"), "the dish's details are among the sections that can be moved (%s)" % [before])
 	var dragged: TraySection = m.freezer_section
-	TestUtil.check(m.graph_section._can_drop(Vector2.ZERO, dragged) and TraySection.order_of(tray).find("FreezerSection") < before.find("FreezerSection"), "dragging over a heading puts the dragged section in its place")
-	TestUtil.check(not m.graph_section._can_drop(Vector2.ZERO, m.graph_section) and not m.graph_section._can_drop(Vector2.ZERO, m.dish_details), "a section is not dropped on itself, and the dish's details do not join in")
-	dragged._dragged = true
-	dragged._notification(Node.NOTIFICATION_DRAG_END)
+	TestUtil.check(m.graph_section._can_drop(Vector2.ZERO, dragged) and not m.graph_section._can_drop(Vector2.ZERO, m.graph_section) and m.graph_section._can_drop(Vector2.ZERO, m.dish_details), "a section can be dropped on another's heading, not on itself, and the dish's details take part like the rest")
+	dragged._drag_data(Vector2(5, 5))
+	var slot: DropSlot = dragged._slot
+	TestUtil.check(not dragged.visible and slot != null and slot.get_parent() == tray and slot.get_index() == dragged.get_index() - 1 + 0 or slot.get_index() < dragged.get_index(), "dragging leaves a slot in the section's place and lifts the section out")
+	TestUtil.check(TraySection.order_of(tray) == before, "the order does not change while dragging")
+	TestUtil.check(TraySection._movable(tray).all(func(s: TraySection) -> bool: return not dragged._accepting.has(s.header)), "a drag leaves every heading's own drag handlers alone")
+	dragged._finish_drag(false)
+	TestUtil.check(dragged.visible and TraySection.order_of(tray) == before and UserSettings.tray_order.is_empty() and not is_instance_valid(slot) or slot.is_queued_for_deletion(), "cancelling puts it back and keeps nothing")
+	dragged._drag_data(Vector2(5, 5))
+	tray.move_child(dragged._slot, m.graph_section.get_index())
+	dragged._finish_drag(true)
+	TestUtil.check(dragged.visible and TraySection.order_of(tray).find("FreezerSection") < before.find("FreezerSection"), "letting go puts the section in the slot")
 	var chosen_order := TraySection.order_of(tray)
 	TestUtil.check(UserSettings.tray_order == chosen_order, "the order is kept as a user setting")
 	var kept := ConfigFile.new()
