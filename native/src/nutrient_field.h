@@ -1,6 +1,6 @@
 #pragma once
 // The dissolved nutrient: a concentration over the dish (energy per µm^2), diffusing by an implicit
-// scheme that stays stable at long steps. Same method names as the GDScript class it replaced.
+// scheme that stays stable at long steps.
 #include "params.h"
 
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -114,7 +114,7 @@ class NutrientField : public RefCounted {
 	double fill_weight_total = 0.0;
 	bool fill_weights_valid = false;
 	void ensure_fill_weights();
-	// Recording (for the GPU spike): the clouds and deposits that would change this field are kept as events instead, for the GPU,
+	// Recording: the clouds and deposits that would change this field are kept as events instead, for the GPU,
 	// which holds the clouds and the grid. A cloud is x, y, mass, variance, cut; a deposit is a cell and a concentration to add to it.
 	bool recording = false;
 	std::vector<float> rec_puffs;
@@ -187,8 +187,8 @@ public:
 	PackedFloat32Array take_recorded_puffs();
 	PackedInt32Array take_recorded_cells();
 	PackedFloat32Array take_recorded_amounts();
-	PackedFloat32Array export_fill_weights(); // what fill(1.0) adds to each cell: for the GPU spike's tests
-	PackedInt32Array export_owner() const; // for each cell the cell whose nutrient it has (-1: none): for the GPU spike's tests
+	PackedFloat32Array export_fill_weights(); // what fill(1.0) adds to each cell: for the tests
+	PackedInt32Array export_owner() const; // for each cell the cell whose nutrient it has (-1: none): for the tests
 	// The grid and the clouds as packed arrays, for moving them to and from the GPU (and for the copy of the GPU's field the dish
 	// reads while the GPU runs): {"conc": the n*n concentrations, "puffs": 5 floats a cloud, x, y, mass, variance, cut}.
 	// import_packed replaces both (cells outside the dish stay empty, clouds with nothing in them are dropped); the sources'

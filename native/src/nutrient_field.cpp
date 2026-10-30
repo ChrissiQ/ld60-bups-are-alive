@@ -877,7 +877,7 @@ void NutrientField::ensure_fill_weights() {
 	}
 }
 
-// What `fill(1.0)` adds to each cell (nothing outside the dish): for the GPU spike's tests.
+// What `fill(1.0)` adds to each cell (nothing outside the dish): for the tests.
 PackedFloat32Array NutrientField::export_fill_weights() {
 	PackedFloat32Array out;
 	out.resize((int64_t)conc.size());
