@@ -858,10 +858,10 @@ theme_type_variation = &"Note"
 text = "@hud.freezer_empty"
 autowrap_mode = 3
 
-[node name="FreezerFlow" type="HFlowContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/FreezerSection/FreezerShelf"]
+[node name="FreezerList" type="VBoxContainer" parent="HUD/Frame/Layout/Middle/Side/Stack/FreezerSection/FreezerShelf"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_type_variation = &"TightFlow"
+theme_type_variation = &"TightStack"
 
 [node name="HoverCard" type="PanelContainer" parent="HUD"]
 unique_name_in_owner = true

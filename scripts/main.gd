@@ -79,6 +79,7 @@ var tool: Toolbar.Tool:  ## the selected tool (kept in step with the toolbar's s
 var sim_speed := 1.0  ## seconds of simulation per real second (the toolbar sets it)
 var achieved_speed := 1.0  ## what the simulation actually managed lately: lower than sim_speed when the frame budget cut a step short
 var paused := false
+var _entry_to_trash := {}  ## the frozen dish (a freezer entry) the trash question is about, or empty when it is about `_to_trash`
 var _to_trash: Dish  ## the dish the trash question (from its card or the freezer) is about
 var _old_dish: Dish  ## the dish a pipette took bups from, while the question about it is up (null: no question)
 var _stats_cache := {}  ## Dish -> [its time, its edit count, the msec it was worked out, its population_stats]: a scan of every bup, so not worked out again for the same moment (see _stats_of)
@@ -168,8 +169,13 @@ func _ready() -> void:
 	card_actions.freeze_requested.connect(func() -> void: freeze_dish(dish))
 	card_actions.trash_requested.connect(_ask_to_trash)
 	trash_dialog.confirmed.connect(func() -> void:
-		if is_instance_valid(_to_trash):
-			trash_dish(_to_trash))
+		if not _entry_to_trash.is_empty():
+			_trash_frozen(_entry_to_trash)
+		elif is_instance_valid(_to_trash):
+			trash_dish(_to_trash)
+		_entry_to_trash = {})
+	trash_dialog.canceled.connect(func() -> void: _entry_to_trash = {})
+	freezer_shelf.trash_entry_requested.connect(_ask_to_trash_frozen)
 	freezer_shelf.thaw_requested.connect(thaw)
 	freezer_section.visible = free_mode  # (the goals' dish is the only one: nothing to freeze)
 	card_actions.visible = free_mode
@@ -589,10 +595,26 @@ func freeze_dish(d: Dish) -> void:
 	_show_banner(Strings.t("hud.banner_frozen", [number]), BANNER_BRIEF_SECONDS)
 
 
+## Asks before a frozen dish is trashed.
+func _ask_to_trash_frozen(entry: Dictionary) -> void:
+	_entry_to_trash = entry
+	trash_dialog.title = Strings.t("hud.trash_title", [entry["number"]])
+	trash_dialog.dialog_text = Strings.t("hud.trash_text_frozen", [UiText.thousands(entry["bups"])])
+	trash_dialog.popup_centered()
+
+
+## Takes a frozen dish out of the freezer for good.
+func _trash_frozen(entry: Dictionary) -> void:
+	if freezer_shelf.entries.has(entry):
+		freezer_shelf.remove(entry)
+		_show_banner(Strings.t("hud.banner_trashed", [entry["number"]]), BANNER_BRIEF_SECONDS)
+
+
 ## Asks before the dish in the main view is trashed (it cannot be got back).
 func _ask_to_trash() -> void:
 	if dishes.size() < 2:
 		return
+	_entry_to_trash = {}
 	_to_trash = dish
 	trash_dialog.title = Strings.t("hud.trash_title", [_dish_numbers[dish]])
 	trash_dialog.dialog_text = Strings.t("hud.trash_text", [UiText.thousands(dish.population())])
