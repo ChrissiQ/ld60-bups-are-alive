@@ -15,18 +15,19 @@ layout(set = 0, binding = 8, std430) buffer B_OWNER { int OWNER[]; };
 layout(set = 0, binding = 9, std430) buffer B_CONC { float CONC[]; };
 layout(set = 0, binding = 10, std430) buffer B_WANT { float WANT[]; };
 layout(set = 0, binding = 11, std430) buffer B_WANTC { float WANTC[]; };
-layout(set = 0, binding = 12, std430) buffer B_CELLOF { int CELLOF[]; };
-layout(set = 0, binding = 13, std430) buffer B_DLO { uint DLO[]; };
-layout(set = 0, binding = 14, std430) buffer B_DHI { uint DHI[]; };
-layout(set = 0, binding = 15, std430) buffer B_RLO { uint RLO[]; };
-layout(set = 0, binding = 16, std430) buffer B_RHI { uint RHI[]; };
-layout(set = 0, binding = 17, std430) buffer B_ALO { uint ALO[]; };
-layout(set = 0, binding = 18, std430) buffer B_AHI { uint AHI[]; };
-layout(set = 0, binding = 19, std430) buffer B_ENTD { vec4 ENTD[]; };
-layout(set = 0, binding = 20, std430) buffer B_BINS { uint BINS[]; };
-layout(set = 0, binding = 21, std430) buffer B_BINC { uint BINC[]; };
-layout(set = 0, binding = 22, std430) buffer B_PDLO { uint PDLO[]; };
-layout(set = 0, binding = 23, std430) buffer B_PDHI { uint PDHI[]; };
+layout(set = 0, binding = 12, std430) buffer B_CLOUDC { float CLOUDC[]; };
+layout(set = 0, binding = 13, std430) buffer B_CELLOF { int CELLOF[]; };
+layout(set = 0, binding = 14, std430) buffer B_DLO { uint DLO[]; };
+layout(set = 0, binding = 15, std430) buffer B_DHI { uint DHI[]; };
+layout(set = 0, binding = 16, std430) buffer B_RLO { uint RLO[]; };
+layout(set = 0, binding = 17, std430) buffer B_RHI { uint RHI[]; };
+layout(set = 0, binding = 18, std430) buffer B_ALO { uint ALO[]; };
+layout(set = 0, binding = 19, std430) buffer B_AHI { uint AHI[]; };
+layout(set = 0, binding = 20, std430) buffer B_ENTD { vec4 ENTD[]; };
+layout(set = 0, binding = 21, std430) buffer B_BINS { uint BINS[]; };
+layout(set = 0, binding = 22, std430) buffer B_BINC { uint BINC[]; };
+layout(set = 0, binding = 23, std430) buffer B_PDLO { uint PDLO[]; };
+layout(set = 0, binding = 24, std430) buffer B_PDHI { uint PDHI[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -394,7 +395,7 @@ void demand(uint i, uint d, uint l) {
 					add_fixed(uint(o), wg * own_share, 2);
 				}
 				if (wc > 0.0 && cc > 0.0) {
-					WANTC[i] = wc;
+					WANTC[i] = wc; CLOUDC[i] = cc;
 					uint e0, e1; bin_list(d, x, y, e0, e1);
 					for (uint e = e0; e < e1; e++) {
 						vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];

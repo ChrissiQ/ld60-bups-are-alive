@@ -27,9 +27,10 @@ layout(set = 0, binding = 20, std430) buffer B_AWLO { uint AWLO[]; };
 layout(set = 0, binding = 21, std430) buffer B_AWHI { uint AWHI[]; };
 layout(set = 0, binding = 22, std430) buffer B_ADLO { uint ADLO[]; };
 layout(set = 0, binding = 23, std430) buffer B_ADHI { uint ADHI[]; };
-layout(set = 0, binding = 24, std430) buffer B_CBKT { uint CBKT[]; };
-layout(set = 0, binding = 25, std430) buffer B_DCNT { uint DCNT[]; };
-layout(set = 0, binding = 26, std430) buffer B_DBIT { uint DBIT[]; };
+layout(set = 0, binding = 24, std430) buffer B_CLOUDC { float CLOUDC[]; };
+layout(set = 0, binding = 25, std430) buffer B_CBKT { uint CBKT[]; };
+layout(set = 0, binding = 26, std430) buffer B_DCNT { uint DCNT[]; };
+layout(set = 0, binding = 27, std430) buffer B_DBIT { uint DBIT[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -187,7 +188,7 @@ void apply_bup(uint i, uint d, uint l) {
 	if (wg > 0.0 || wc > 0.0) {
 		float got = wg > 0.0 ? wg * SCALE[CELLOF[i]] : 0.0;
 		if (wc > 0.0) {
-			float cc, pgx, pgy, psig; puffs_at_d(d, x, y, cc, pgx, pgy, psig);
+			float cc = CLOUDC[i];
 			uint e0, e1; bin_list(d, x, y, e0, e1);
 			for (uint e = e0; e < e1; e++) {
 				vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];

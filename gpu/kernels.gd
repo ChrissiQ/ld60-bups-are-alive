@@ -33,6 +33,8 @@ const TYPES := {
 	# by their bits; DSTATE: DS_* words), the dish row of each block of BLK_SLOTS slots for the records in BUPS (BLKDISH) and in BUPS2
 	# (BLKDISH2), the dish row of each field cell (CELLDISH), and the pipette's scratch (PIPDST).
 	"WORLD": "uint", "DISHP": "uint", "DSTATE": "uint", "BLKDISH": "uint", "BLKDISH2": "uint", "CELLDISH": "uint", "PIPDST": "uint",
+	# the clouds' concentration a bup read in the pooled demand, which the pooled uptake reads again (CLOUDC)
+	"CLOUDC": "float",
 }
 
 ## Buffers that are another type's view of a buffer: a binding of the view's name binds the buffer named here.

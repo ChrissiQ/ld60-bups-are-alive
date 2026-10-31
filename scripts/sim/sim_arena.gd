@@ -19,7 +19,7 @@ const BUFFERS := {
 	"BUPS": ["slot", GpuLayout.RECORD_BYTES, true, 0], "BUPS2": ["slot", GpuLayout.RECORD_BYTES, true, 0], "CHILD": ["slot", GpuLayout.RECORD_BYTES, false, 0],
 	"SURV": ["slot", 4, false, 0], "KID": ["slot", 4, false, 0], "EXCS": ["slot", 4, false, 0], "EXCK": ["slot", 4, false, 0],
 	"WANT": ["slot", 4, false, 0], "CELLOF": ["slot", 4, false, 0], "WANTC": ["slot", 4, false, 0], "WANT2": ["slot", 4, false, 0],
-	"CELL2": ["slot", 4, false, 0], "CBKT": ["slot", 4, false, 0], "DLIST": ["slot", 4, false, 0], "PIPDST": ["slot", 4, false, 0],
+	"CELL2": ["slot", 4, false, 0], "CLOUDC": ["slot", 4, false, 0], "CBKT": ["slot", 4, false, 0], "DLIST": ["slot", 4, false, 0], "PIPDST": ["slot", 4, false, 0],
 	"BLKDISH": ["block", 4, true, 0xFF], "BLKDISH2": ["block", 4, true, 0xFF], "SPART": ["block", GpuLayout.STATS_SUMS * 4, false, 0],
 	"DCNT": ["bucket", 4, false, 0], "DOFF": ["bucket", 4, false, 0], "DBIT": ["bucketbits", 4, false, 0],
 	"CONC": ["cell", 4, true, 0], "EFF": ["cell", 4, false, 0], "CONC2": ["cell", 4, true, 0], "CONC2B": ["cell", 4, false, 0],
