@@ -18,7 +18,8 @@ extends SceneTree
 ##    founders' family records are alive again with the dish as their home. An Unfreeze asked before the freeze has answered is done when
 ##    it answers. A thaw the memory budget refuses leaves the entry in the freezer as it was and shows banner.memory_budget; the next one
 ##    works. DishWorld.load_blob moves what was due on by the time away (100 s saved, loaded at 700 s: bloom due 150 -> 750, a plankton born
-##    at 100 and bursting at t -> 700 and t + 600); DishHistory.pad adds 600 / 120 = 5 fine samples and 600 / 240 = 2 whole-run ones.
+##    at 100 and bursting at t -> 700 and t + 600); DishHistory.pad from 100 s to 700 s adds a fine sample for each multiple of 120 s
+##    crossed (120 to 600: 5) and a whole-run one for each multiple of 240 s (240, 480: 2).
 ##  - a trash removes the dish and sends one REMOVE_DISH for its row; trashing a frozen dish asks first, and confirmed, releases its
 ##    claims on the family tree (LineageStore.claim_count back to 0) once its freeze has answered.
 ##  - the last running dish dying out with dishes frozen pauses on it and stays, empty, after resuming; an unfreeze takes its place
@@ -139,7 +140,7 @@ func _run() -> void:
 	var now := moved.save()
 	TestUtil.check(now["time"] == 700.0 and now["bloom_due"] == 750.0 and now["plankton"][0]["born_at"] == 700.0 and now["plankton"][0]["burst_at"] == burst + 600.0, "what was due at a time moves on with the dish: nothing is overdue when it runs again")
 	var history := {"history": {"pop": [1.0, 2.0, 3.0]}, "history_all": {"pop": [5.0]}, "history_all_factor": 2}
-	DishHistory.pad(history, 600.0)
+	DishHistory.pad(history, 100.0, 700.0)
 	TestUtil.check(history["history"]["pop"].size() == 3 + 5 and history["history"]["pop"][-1] == 3.0 and history["history_all"]["pop"].size() == 1 + 2, "its history goes level over the time it was away (5 samples of 120 s, and 2 of 240 s)")
 	var t0 := back.time
 	m.toolbar.set_paused(false)

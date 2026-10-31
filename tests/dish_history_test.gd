@@ -9,8 +9,11 @@ extends SceneTree
 ##    one exactly); each iteration's samples handed over twice (a snapshot not yet acknowledged carries them again) add nothing.
 ##  - A load at 130 s (a history read back, the clock at 130): a sample for 120 s (taken at 126) is refused; from 130 in steps of
 ##    7 s the next sample is at 242 s (the first step end past 240), and the one after at 361 s.
-##  - A thaw 600 s after the freeze (the history padded by the time away, read back at 726 s): 5 level samples are added (600 /
-##    120), each the last figures; a sample for 720 s (taken at 721) is refused; from 726 in steps of 7 s the next is at 845 s (past 840).
+##  - A thaw 600 s after the freeze (frozen at 126 s, the history padded to 726 s and read back there): 5 level samples are added
+##    (the multiples of 120 s crossed: 240 to 720), each the last figures; a sample for 720 s (taken at 721) is refused; from 726 in steps of
+##    7 s the next is at 845 s (past 840). The padding is the multiples crossed, not the gap over 120 s: 119 -> 241 s adds 2 (120, 240),
+##    121 -> 239 s none, 239 -> 241 s one (240); with a whole-run factor of 2 (multiples of 240 s), 119 -> 241 s adds one whole-run sample
+##    and 241 -> 479 s none.
 ##  - one sample of counts and means comes out as the series: pop the count, each gene's mean, harm, donor and key as percents
 ##    (x100), the mutator and the generation as they are.
 ##  - 6,000 samples keep the fine history at LEN (5,040) and the whole run at 750 samples of 8 each (1,024 at 1, thinned to 512 at
@@ -92,7 +95,7 @@ func _after_thaw() -> void:
 	frozen.begin(0.0)
 	run(frozen, 0.0, 18, 7.0)  # (to 126 s: one sample)
 	var data := frozen.write()
-	DishHistory.pad(data, 600.0)
+	DishHistory.pad(data, 126.0, 726.0)
 	var h := DishHistory.new()
 	h.load(DishHistory.read(data), 726.0)
 	var pops: Array = h.fine["pop"]
@@ -100,6 +103,12 @@ func _after_thaw() -> void:
 	TestUtil.check(not h.record(721.0, stats(100)), "after the thaw a sample for 720 s is not taken")
 	var times := run(h, 726.0, 17, 7.0)
 	TestUtil.check(times.size() == 1 and absf(times[0] - 845.0) < 1e-6, "after the thaw the next sample is at 845 s, past 840 (%s)" % [times])
+	for case: Array in [[119.0, 241.0, 2, 1], [121.0, 239.0, 0, 0], [239.0, 241.0, 1, 1], [241.0, 479.0, 1, 0]]:
+		var saved := {"history": {"pop": [1.0]}, "history_all": {"pop": [1.0]}, "history_all_factor": 2}
+		DishHistory.pad(saved, case[0], case[1])
+		var added: int = saved["history"]["pop"].size() - 1
+		var added_whole: int = saved["history_all"]["pop"].size() - 1
+		TestUtil.check(added == case[2] and added_whole == case[3], "frozen at %s s, thawed at %s s: %d level samples and %d whole-run ones (want %d and %d: the multiples crossed)" % [case[0], case[1], added, added_whole, case[2], case[3]])
 
 
 func _series() -> void:

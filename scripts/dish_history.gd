@@ -153,15 +153,19 @@ static func read(d: Dictionary) -> Dictionary:
 	return {"fine": read_fine, "whole": read_whole, "factor": int(d["history_all_factor"]), "origin": float(d["history_origin"]) if Validate.is_number(d.get("history_origin")) else 0.0}
 
 
-## A save that was made `gap` seconds ago: its history goes on level for the time that has passed (the last figures it had, which is what a
-## frozen dish was), so the graph's time axis stays the world's.
-static func pad(data: Dictionary, gap: float) -> void:
+## A save made at world time `saved_at`, coming back at `now`: its history goes on level (the last figures it had, which is what a frozen
+## dish was) with a sample for each multiple of INTERVAL the clock crossed meanwhile (and a whole-run sample for each multiple of the
+## whole run's factor of them), the samples it would have taken, so the graph's time axis stays the world's.
+static func pad(data: Dictionary, saved_at: float, now: float) -> void:
+	var from := boundary_of(saved_at)
+	var to := boundary_of(now)
 	var saved_fine: Variant = data.get("history")
 	if saved_fine is Dictionary:
-		_pad_series(saved_fine, mini(int(gap / INTERVAL), LEN))
+		_pad_series(saved_fine, clampi(to - from, 0, LEN))
 	var saved_whole: Variant = data.get("history_all")
 	if saved_whole is Dictionary and Validate.is_number(data.get("history_all_factor")):
-		_pad_series(saved_whole, mini(int(gap / (float(data["history_all_factor"]) * INTERVAL)), ALL_LEN))
+		var factor := maxi(int(data["history_all_factor"]), 1)
+		_pad_series(saved_whole, clampi(floori(float(to) / factor) - floori(float(from) / factor), 0, ALL_LEN))
 
 
 static func _pad_series(series_by_name: Dictionary, count: int) -> void:

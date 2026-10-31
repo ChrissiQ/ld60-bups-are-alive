@@ -913,7 +913,7 @@ func thaw(entry: Dictionary) -> void:
 	blob.host.merge(entry["host"], true)
 	var now := world_time()
 	var history: Dictionary = (entry["host"]["history"] as Dictionary).duplicate(true)
-	DishHistory.pad(history, now - float(blob.world.get("time", now)))  # (the graph's time axis stays the world's)
+	DishHistory.pad(history, float(blob.world.get("time", now)), now)  # (the graph's time axis stays the world's)
 	blob.host["history"] = history
 	var d := Dish.new()  # (not struck: a new dish under its number would put founders' records under the frozen dish's own ids)
 	d.visible = false  # (parked: what it draws is made when it is first shown)
