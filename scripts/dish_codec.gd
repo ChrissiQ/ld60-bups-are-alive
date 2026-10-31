@@ -77,9 +77,8 @@ static func read_blob(d: Dictionary) -> DishBlob:
 	spec["cloud_quota"] = maxi(int(spec["cloud_quota"]), parts["clouds"].size() / SLOT_BYTES)
 	spec["husk_quota"] = maxi(int(spec["husk_quota"]), parts["husks"].size() / SLOT_BYTES)
 	var lineage: PackedByteArray = parts["lineage"]
-	if not lineage.is_empty():
-		if lineage.size() < 4 or 4 + lineage.decode_u32(0) * LINEAGE_RECORD_BYTES > lineage.size():
-			return null
+	if not lineage.is_empty() and not lineage_readable(lineage):
+		return null
 	var saved_host: Dictionary = meta["host"]
 	var saved_history: Variant = saved_host.get("history")
 	if not (saved_history is Dictionary) or DishHistory.read(saved_history).is_empty():
@@ -110,6 +109,27 @@ static func read_blob(d: Dictionary) -> DishBlob:
 	host["nutrients_placed"] = maxi(int(saved_host.get("nutrients_placed", 0)), 0) if Validate.is_number(saved_host.get("nutrients_placed")) else 0
 	blob.host = host
 	return blob
+
+
+## Whether `bytes` is a whole export of LineageStore.export_dish, as LineageStore.import_bytes reads one (it stops part-way through a
+## block it cannot read, with some records taken and others not): a 32-bit count, that many records, a 32-bit count of names, and each
+## name's id, byte length and bytes, ending where the bytes end.
+static func lineage_readable(bytes: PackedByteArray) -> bool:
+	var size := bytes.size()
+	if size < 8:
+		return false
+	var at := 4 + int(bytes.decode_u32(0)) * LINEAGE_RECORD_BYTES
+	if at + 4 > size:
+		return false
+	var names := int(bytes.decode_u32(at))
+	at += 4
+	for i in names:
+		if at + 12 > size:
+			return false
+		at += 12 + int(bytes.decode_u32(at + 8))
+		if at > size:
+			return false
+	return at == size
 
 
 static func _read_spec(saved: Dictionary) -> Variant:

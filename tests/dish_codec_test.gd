@@ -12,7 +12,9 @@ extends SceneTree
 ##   its part (a record, the dish's state, a grid, a slot, the lineage), a spec out of range in its radius, a world with a missing or
 ##   non-finite number: read_blob returns null each time, and the dictionary it was given is as it was (nothing is built on it). A limit,
 ##   upkeep, feed or medium out of range is made safe, not refused: limit 0 with 5 bups reads as 5, upkeep 1000 as 100, a feed of -3 as 0,
-##   a medium of 1000 as 100.
+##   a medium of 1000 as 100. Lineage bytes LineageStore.import_bytes cannot read whole are refused: a count with no count of names
+##   after it (4 bytes, and a record with none), a name cut short by a byte, a byte past the names; read are none at all, a lineage of
+##   no records (8 bytes) and one of two records and two names, which the store then holds (the second named "Ada").
 ## - a save in the format before this one (a dictionary with "cells", "lineage" as a block, "moved_out") is refused, as is a file
 ##   at SaveGame's old version 2: SaveGame.read gives {} for it.
 ## - a tracker at index 2 holding 1234.5678 seconds, and a dish, written with SaveGame.write to a scratch file and read back: the
@@ -148,6 +150,25 @@ func _round_trip(original: DishBlob, parsed: Variant, store: LineageStore) -> vo
 		TestUtil.check(fresh.holds(id) > 0, "the watched bup %d is held after the merge" % id)
 
 
+## Lineage bytes as LineageStore.export_dish writes them: `records` records (ids 1 on, the rest 0), a name for each of the first of them
+## from `names`, then `drop` bytes taken off the end.
+static func _lineage(records: int, names: Array, drop: int) -> PackedByteArray:
+	var out := PackedByteArray()
+	out.resize(4 + records * DishCodec.LINEAGE_RECORD_BYTES + 4)
+	out.encode_u32(0, records)
+	for i in records:
+		out.encode_s64(4 + i * DishCodec.LINEAGE_RECORD_BYTES, i + 1)
+	out.encode_u32(4 + records * DishCodec.LINEAGE_RECORD_BYTES, names.size())
+	for i in names.size():
+		var text: PackedByteArray = String(names[i]).to_utf8_buffer()
+		var head := PackedByteArray()
+		head.resize(12)
+		head.encode_s64(0, i + 1)
+		head.encode_u32(8, text.size())
+		out.append_array(head + text)
+	return out.slice(0, out.size() - drop)
+
+
 static func written_has_moved_out(d: Dictionary) -> bool:
 	return d.has("moved_out")
 
@@ -166,6 +187,10 @@ func _refusals(written: Dictionary) -> void:
 		"a grid of the wrong size": func(d: Dictionary) -> void: d["conc"] = DishCodec.pack_bytes(PackedByteArray([0, 0, 0, 0])),
 		"a slot block of the wrong size": func(d: Dictionary) -> void: d["clouds"] = DishCodec.pack_bytes(PackedByteArray([0, 0, 0, 0])),
 		"lineage bytes that claim more records than they hold": func(d: Dictionary) -> void: d["lineage"] = DishCodec.pack_bytes(PackedByteArray([200, 0, 0, 0, 1, 2])),
+		"lineage bytes of a count alone (no count of names)": func(d: Dictionary) -> void: d["lineage"] = DishCodec.pack_bytes(PackedByteArray([0, 0, 0, 0])),
+		"lineage bytes of a record and no count of names": func(d: Dictionary) -> void: d["lineage"] = DishCodec.pack_bytes(_lineage(1, [], 4)),
+		"lineage bytes with a name cut short": func(d: Dictionary) -> void: d["lineage"] = DishCodec.pack_bytes(_lineage(1, ["bup"], 1)),
+		"lineage bytes with more after the names": func(d: Dictionary) -> void: d["lineage"] = DishCodec.pack_bytes(_lineage(1, ["bup"], 0) + PackedByteArray([0])),
 	}
 	for what: String in cases:
 		var d: Dictionary = written.duplicate(true)
@@ -193,6 +218,13 @@ func _refusals(written: Dictionary) -> void:
 		meta_edits[what].call(meta)
 		d["meta"] = DishCodec.pack_bytes(var_to_bytes(meta))
 		TestUtil.check(DishCodec.read_blob(d) == null, "refused: %s" % what)
+	for kept: Array in [[PackedByteArray(), "no lineage"], [_lineage(0, [], 0), "a lineage of no records (8 bytes)"], [_lineage(2, ["bup", "Ada"], 0), "two records and two names"]]:
+		var d: Dictionary = written.duplicate(true)
+		d["lineage"] = DishCodec.pack_bytes(kept[0])
+		TestUtil.check(DishCodec.read_blob(d) != null, "read: lineage bytes of %s" % kept[1])
+	var named := LineageStore.new()
+	named.import_bytes(_lineage(2, ["bup", "Ada"], 0), PackedInt64Array(), PackedInt64Array([1, 2]), NUMBER)
+	TestUtil.check(named.has_record(1) and named.has_record(2) and String(named.info(2).get("name", "")) == "Ada", "the store reads every lineage the codec lets through (2 records, the second named Ada: %s)" % [named.info(2)])
 	var before := written.hash()
 	DishCodec.read_blob(written)
 	TestUtil.check(written.hash() == before, "reading leaves the dictionary as it was")
