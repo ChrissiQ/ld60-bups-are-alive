@@ -23,6 +23,9 @@ extends SceneTree
 ##   share of iterations that publish at other iteration lengths, or (a long pace) a simulation that is nearly idle. `bare`: the main
 ##   side draws nothing of the dish and checks nothing (the frame the simulation's load alone leaves); `noverify`, `nocanvas`, `nohover`
 ##   leave out one check each, `nohaze` the dish's haze, `nodraw` the dish's bups from the view (to tell what a frame's time is spent on).
+##   `holdprev`: after each publish the texture published before it is held as if the main side used it then (what SimCore's reuse rule
+##   lacks: the main side may take up a payload just before the next is published, and its use is told only after the simulation
+##   has chosen where the one after goes).
 ##
 ## Expected values, written before the first run:
 ## - picture against the single-dish path's [derived: the same capsule shader and footprint; the angle a half float (0.11 degrees at pi), the colour a
@@ -114,11 +117,11 @@ var main_freed := false
 var sim_done := false
 var announce := {}  ## kind -> {index, generation, handles, size, seq, count, row}
 var sim_stats := {}
-var sim_log: Array = []
 var sim_thread: Thread
 var soak_bups := 2000000
 var pace_ms := 0.0
 var bare := false
+var hold_previous := false
 var skip: Array = []
 var main_row_switch_at := 20.0
 var want_big := false
@@ -143,9 +146,11 @@ func _run() -> void:
 					pace_ms = float(x.substr(5))
 				elif x == "bare":
 					bare = true
+				elif x == "holdprev":
+					hold_previous = true
 				elif x in ["noverify", "nocanvas", "nohover", "nohaze", "nodraw"]:
 					skip.append(x)
-			print("VIEWCHECK soak options: pace %.1f ms, bare %s, skipped %s" % [pace_ms, bare, skip])
+			print("VIEWCHECK soak options: pace %.1f ms, bare %s, skipped %s, hold previous %s" % [pace_ms, bare, skip, hold_previous])
 			await _soak(float(a[1]) if a.size() > 1 else 60.0, int(a[2]) if a.size() > 2 else 2000000, float(a[3]) if a.size() > 3 else 20.0, a.has("fitcost"))
 		_:
 			print("usage: picture | soak <seconds> <bups> <zoom> [fitcost]")
@@ -604,7 +609,7 @@ func _soak(seconds: float, bups: int, zoom: float, fitcost: bool) -> void:
 		if shown.texture_index >= 0 and not skip.has("noverify"):
 			var texels := shown.size.x * shown.size.y
 			var rid := renderer.imported_texture("payload", shown.texture_index)
-			RenderingServer.call_on_render_thread(_verify.bind(main_rd, rid, shown.seq & 255, texels, frames % 2))
+			RenderingServer.call_on_render_thread(_verify.bind(main_rd, rid, shown.seq & 255, texels, frames % 2, "ms %d gen %d index %d seq %d frame %d" % [Time.get_ticks_msec(), shown.generation, shown.texture_index, shown.seq, Engine.get_frames_drawn()]))
 		if ann.has("haze") and not skip.has("nocanvas"):
 			_shown_stamps.append(int(ann["haze"]["seq"]) & 255)
 			if _shown_stamps.size() > 8:
@@ -721,7 +726,7 @@ func _soak(seconds: float, bups: int, zoom: float, fitcost: bool) -> void:
 	print("VIEWCHECK SOAK " + JSON.stringify(result))
 
 
-func _verify(main_rd: RenderingDevice, tex: RID, stamp: int, texels: int, slot: int) -> void:
+func _verify(main_rd: RenderingDevice, tex: RID, stamp: int, texels: int, slot: int, note: String) -> void:
 	if not tex.is_valid():
 		return
 	if not _verify_sets.has(tex):
@@ -744,17 +749,17 @@ func _verify(main_rd: RenderingDevice, tex: RID, stamp: int, texels: int, slot: 
 	main_rd.compute_list_set_push_constant(cl, PackedInt32Array([stamp, GpuLayout.PAYLOAD_TEX_WIDTH, texels, 0]).to_byte_array(), 16)
 	main_rd.compute_list_dispatch(cl, (texels + 63) / 64, 1, 1)
 	main_rd.compute_list_end()
-	main_rd.buffer_get_data_async(_verify_bufs[slot], _on_verified.bind(stamp, texels), 0, 8)
+	main_rd.buffer_get_data_async(_verify_bufs[slot], _on_verified.bind(stamp, texels, note), 0, 8)
 
 
-func _on_verified(data: PackedByteArray, stamp: int, texels: int) -> void:
+func _on_verified(data: PackedByteArray, stamp: int, texels: int, note: String) -> void:
 	_verified += 1
 	var bad := data.decode_u32(0)
 	if bad > 0:
 		_torn_frames += 1
 		_torn_texels += bad
 		if _torn_notes.size() < 20:
-			_torn_notes.append("stamp %d: %d of %d texels differ, first at %d" % [stamp, bad, texels, data.decode_u32(4)])
+			_torn_notes.append("stamp %d (%s): %d of %d texels differ, first at %d" % [stamp, note, bad, texels, data.decode_u32(4)])
 
 
 func _on_canvas(data: PackedByteArray, stamps: Array) -> void:
@@ -802,6 +807,8 @@ func _sim_main() -> void:
 	var publishes := 0
 	var field_publishes := 0
 	var remakes := 0
+	var remake_log: Array = []
+	var previous_pub := {}
 	var step_ms := 20.0
 	var it_ms: Array = []
 	var run_ms: Array = []
@@ -844,6 +851,13 @@ func _sim_main() -> void:
 		req.want_thumbnails = now_ms - last_thumbs >= 1000
 		req.haze = Vector3(Cell.DETECTION_FLOOR, 0.5 * 255.0 / sqrt(10.0 * Cell.HALF_SATURATION), 0.45 * 255.0)
 		var pub := core.publish(req)
+		if hold_previous:
+			# (a stand-in for the fix SimCore needs: the texture published before this one may have been taken up by the main side
+			# just before this publish, its use not yet told; it is held as if used now)
+			for kind: String in pub:
+				if previous_pub.has(kind) and previous_pub[kind] != pub[kind]:
+					core.texture_bound(kind, previous_pub[kind], core._frame)
+				previous_pub[kind] = pub[kind]
 		var t_pub := Time.get_ticks_usec()
 		if pub.has("haze"):
 			last_field = now_ms
@@ -858,6 +872,7 @@ func _sim_main() -> void:
 				gens[kind] = [rids.duplicate(), int(gens.get(kind, [[], 0])[1]) + 1]
 				if kind == "payload" and int(gens[kind][1]) > 1:
 					remakes += 1
+					remake_log.append("ms %d gen %d" % [Time.get_ticks_msec(), gens[kind][1]])
 				if kind == "payload":
 					gens["ids"] = [core.textures("ids").duplicate(), gens[kind][1]]
 			ann[kind] = {"index": pub[kind], "generation": gens[kind][1], "handles": ViewRenderer.driver_handles(core.rd, gens[kind][0]), "size": _size_of(core.rd, rids[0])}
@@ -930,7 +945,7 @@ func _sim_main() -> void:
 	sim_stats = {
 		"iterations": iterations, "payload_publishes": publishes, "share": snappedf(float(publishes) / maxi(iterations, 1), 0.0001),
 		"share_small_phase": share_by_phase["small"], "share_big_phase": share_by_phase["big"],
-		"pace_ms": pace_ms, "field_publishes": field_publishes, "payload_remakes": remakes, "iteration_ms": _summary(it_tail), "run_ms": _summary(run_ms.slice(run_ms.size() / 2)),
+		"pace_ms": pace_ms, "field_publishes": field_publishes, "payload_remakes": remakes, "remake_log": remake_log, "iteration_ms": _summary(it_tail), "run_ms": _summary(run_ms.slice(run_ms.size() / 2)),
 		"publish_ms": _summary(pub_ms.slice(pub_ms.size() / 2)), "stamp_ms": _summary(stamp_ms.slice(stamp_ms.size() / 2)), "publish_gap_ms": _summary(pub_gaps.slice(pub_gaps.size() / 2)),
 		"count_big": core.count(row_big), "count_small": core.count(row_small), "overflow": core.overflow(), "errors": sim_errors + core.errors,
 		"sim_memory_mb": core.rd.get_memory_usage(RenderingDevice.MEMORY_TOTAL) / 1048576.0,
