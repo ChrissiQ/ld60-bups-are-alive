@@ -30,8 +30,16 @@ extends SceneTree
 ##     visible (paused, a source placed, 8 times): frames until a snapshot shows it, <= 2 frames + one iteration [derived], the single-dish path's 1 frame
 ##     [measured baseline, a pixel hash].
 ##   The interface column (frame p95 and worst on the game screen) is measured in the interface gate on the final tree; the main frames printed here are
-##   this script's (no game screen), for reference only. The 1M pipette and gates C, D and the 1,000-dish interface stay stubs.
-##   Args (windowed): `-- gate=E|F|G|x1|all` (default all; E alone takes about 11 minutes); `seconds=N` shortens E's window (a diagnosis,
+##   this script's (no game screen), for reference only. Gates C, D and the 1,000-dish interface stay stubs.
+## - The pipette on a 1M dish, through WorldClient as Dish.pipette sends it, the world running at x10,000 (the
+##   filled dish: 1,000,000 bups, 90 mm, limit 1,000,000), a circle of 20 mm at the middle. Written before the first run:
+##   the main thread's part of the call (WorldClient.pipette: a command queued) < 1 ms [derived: no read, no wait]; no frame of the wait
+##   longer than 3 display frames [derived: the main thread only polls]; no whole-dish readback and no lineage export or import [derived,
+##   read in the code: SimCore.pipette reads back DSTATE and WORLD and the moved ids only (`_ids_from`), the store gets `retarget_ids`];
+##   the reply within one iteration of the command, <= T_ITER_MS (25 ms [placeholder: Governor.T_ITER_MS, fixed by a soak]) + the
+##   iteration's sync. [measured: about 140 ms, waiting for the new dish's grid (DishGrid.make on the worker pool): expected to
+##   fail; the grid's own time is measured beside it, on the main thread, and printed.]
+##   Args (windowed): `-- gate=E|F|G|x1|55|all` (default all; E alone takes about 11 minutes); `seconds=N` shortens E's window (a diagnosis,
 ##   not the gate).
 
 const BASELINE := "res://tools/gpu/baseline/perf_pre_pool.json"
@@ -71,8 +79,7 @@ func _initialize() -> void:
 	for path: Array in REQUIRED:
 		TestUtil.show(lookup(baseline, path) != null, "baseline has %s" % "/".join(path))
 	_gate_checks()
-	for stub in [["the 1M pipette measurement", "a later change"], ["gates C, D and the 1,000-dish interface", "a later change"]]:
-		print("SKIP perf_gates_test: %s, enabled by %s" % stub)
+	print("SKIP perf_gates_test: gates C, D and the 1,000-dish interface, enabled by a later change")
 	if not SimHarness.device_available():
 		print("SKIP perf_gates_test: gates E, F, G, x1 measurements need a local GPU (not available headless), enabled by a later change")
 		TestUtil.finish(self, "OK perf_gates_test (static part; measurements skipped: headless)")
@@ -81,7 +88,7 @@ func _initialize() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("gate="):
 			which = a.substr(5)
-	var gates: Array = ["G", "x1", "F", "E"] if which == "all" else [which]
+	var gates: Array = ["G", "x1", "55", "F", "E"] if which == "all" else [which]
 	for g: String in gates:
 		match g:
 			"E":
@@ -92,9 +99,11 @@ func _initialize() -> void:
 				await _gate_g_speed(baseline)
 			"x1":
 				await _gate_x1_speed()
+			"55":
+				await _row_55()
 			_:
 				TestUtil.show(false, "no gate named %s" % g)
-	TestUtil.finish(self, "OK perf_gates_test (gates %s: the speed column)" % ", ".join(gates))
+	TestUtil.finish(self, "OK perf_gates_test (gates %s: the speed column and the 1M pipette)" % ", ".join(gates))
 
 
 static func load_baseline() -> Dictionary:
@@ -487,3 +496,70 @@ func _gate_x1_speed() -> void:
 		TestUtil.show(m["ok"], "gate x1 (%d bups): the run was clean" % n)
 		TestUtil.show(gate_x1(share), "gate x1 (%d bups): a new payload in >= 99%% of display frames (at most STEPS_PER_SECOND / display Hz)" % n)
 		TestUtil.show(not edit_frames.is_empty() and edit_frames.max() <= 3, "gate x1 (%d bups): edit to visible <= 2 frames + one iteration (%s)" % [n, edit_frames])
+
+
+# ---- The pipette on a 1M dish -------------------------------------------------------------------------------------
+
+func _row_55() -> void:
+	var backend := GpuSimBackend.new()
+	backend.start(PoolLimits.from_settings())
+	var w := WorldClient.new(backend)
+	var spec := filled_spec(1000000, DISH_90MM)
+	var row := w.add_dish(spec)
+	var view := ViewRequest.new()
+	view.camera = Rect2(-spec.radius, -spec.radius, 2.0 * spec.radius, 2.0 * spec.radius)
+	view.pixel_um = 2.0 * spec.radius / 1000.0
+	w.set_view(row, view)
+	var t0 := Time.get_ticks_msec()
+	while not w.latest().dishes.has(row) and Time.get_ticks_msec() - t0 < WAIT_MSEC:
+		w.set_time(10000.0, true, 0.0)
+		w.poll()
+		await process_frame
+	var clock := [Time.get_ticks_usec(), 0]  ## the last frame's time and the frames so far (a lambda keeps a copy of a plain local)
+	var tell := func() -> float:
+		var now := Time.get_ticks_usec()
+		var dt: float = (now - int(clock[0])) / 1e6
+		clock[0] = now
+		clock[1] = int(clock[1]) + 1
+		w.set_time(10000.0, false, dt)
+		w.poll()
+		var shown := w.shown_payload()
+		if shown != null:
+			w.texture_bound("payload", shown.texture_index, int(clock[1]), shown.seq)
+		return dt
+	for i in 600:
+		await process_frame
+		tell.call()
+	var it0 := int(w.latest().timing.get("iterations", 0))
+	var c0 := Time.get_ticks_usec()
+	var reply := w.pipette(row, Vector2.ZERO, 20000.0)
+	var call_us := Time.get_ticks_usec() - c0
+	var worst_ms := 0.0
+	while not reply.is_done() and (Time.get_ticks_usec() - c0) / 1000.0 < WAIT_MSEC:
+		await process_frame
+		worst_ms = maxf(worst_ms, tell.call() * 1000.0)
+	var reply_ms := (Time.get_ticks_usec() - c0) / 1000.0
+	var t := w.latest().timing
+	var iterations := int(t.get("iterations", 0)) - it0
+	var got: Variant = reply.value()
+	var moved: int = int(got.get("moved", -1)) if got is Dictionary else -1
+	var made := DishGrid.make(spec.radius, spec.resolution, spec.patchiness, 4321)
+	var timed := w.inspect(func(core: SimCore, rows: Dictionary) -> Array:
+		var p0 := Time.get_ticks_usec()
+		var res := core.pipette(rows[row], Vector2(30000.0, 0.0), 10000.0, null, made)
+		return [(Time.get_ticks_usec() - p0) / 1000.0, int(res.get("moved", -1))])
+	while not timed.is_done():
+		await process_frame
+		tell.call()
+	var pass_ms: float = timed.value()[0]
+	backend.shutdown()
+	var grid_ms: Array = []
+	for k in 3:
+		var g0 := Time.get_ticks_usec()
+		DishGrid.make(spec.radius, spec.resolution, spec.patchiness, 1234 + k)
+		grid_ms.append((Time.get_ticks_usec() - g0) / 1000.0)
+	grid_ms.sort()
+	var bound := Governor.T_ITER_MS + float(t.get("sync_ms", 0.0))
+	print("PIPETTE1M [measured] 1M dish at x10,000: %d bups moved; the call %d us on the main thread; reply after %.1f ms (%d iterations ended meanwhile; last iteration %.2f ms, sync %.2f ms); the worst frame of the wait %.1f ms; the new dish's grid (DishGrid.make, 100 cells, on this thread) %.1f ms median of 3; a second pipette's pass alone (SimCore.pipette with its grid made, %d bups) %.1f ms" % [moved, call_us, reply_ms, iterations, float(t.get("iteration_ms", 0.0)), float(t.get("sync_ms", 0.0)), worst_ms, grid_ms[1], timed.value()[1], pass_ms])
+	TestUtil.show(moved > 0 and call_us < 1000 and worst_ms <= 3.0 * DISPLAY_FRAME_MS, "the pipette of a 1M dish moved %d bups; the main thread's call %d us (< 1 ms), no frame of the wait over 3 display frames (worst %.1f ms)" % [moved, call_us, worst_ms])
+	TestUtil.show(reply_ms <= bound, "the reply within one iteration of the command (<= T_ITER %.0f ms + sync = %.1f ms): %.1f ms" % [Governor.T_ITER_MS, bound, reply_ms])
