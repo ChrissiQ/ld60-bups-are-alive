@@ -37,7 +37,7 @@ func _init() -> void:
 		TestUtil.check(raised[0], "the Back button of %s raises back_requested" % path)
 		page.queue_free()
 	for scale in [1.0, 2.5]:
-		UserSettings.native_override = 0.7407  # (a 3456 x 2104 screen at twice the system scale)
+		UserSettings.native_override = 0.7407  # (a display at twice the system scale)
 		UserSettings.ui_scale = scale
 		UserSettings._applied = false
 		UserSettings.apply()
