@@ -14,7 +14,8 @@ extends SceneTree
 ##   reply; its next id keeps its own number and its counter is past every moved bup's [derived: pool_pip_final, pool_pip_scatter].
 ## - freeze then thaw gives a dish whose records, field, clouds, husks, DS words (but the start) and stats equal the dump just before
 ##   the freeze, word for word [derived: `gather` reads what `load_dish` writes back].
-## - the family tree travelling with the bups (lineage export and import) is a stub: enabled by a later change.
+## - the family tree across the pipette, the freeze, the thaw and the trash (no export or import: one shared LineageStore) is checked in
+##   the game build, where the store is: tools/gpu/game_check.gd `edits`.
 ## Needs a GPU. Windowed only.
 
 const COMPARED := ["records", "field", "clouds", "husks", "dstate", "stats"]
@@ -62,8 +63,7 @@ func _init() -> void:
 	for section: String in COMPARED:
 		var line := SimHarness.diff({section: d_before[section]}, {section: d_after[section]})
 		TestUtil.show(line == "", "after the freeze and the thaw the dish's %s are as before%s" % [section, ": " + line if line != "" else ""])
-	print("SKIP round_trip_test: the family tree with the bups, enabled by a later change")
-	TestUtil.finish(self, "OK round_trip_test (lineage parts skipped)")
+	TestUtil.finish(self, "OK round_trip_test (the family tree's part: tools/gpu/game_check.gd edits)")
 
 
 static func _ids(records: PackedByteArray) -> Array:
