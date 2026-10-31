@@ -1,0 +1,990 @@
+{
+ "environment": {
+  "machine": "Apple M1 Pro, Metal, Godot 4.7.2, display 120 Hz (a frame is at best 8.33 ms), game screen layout viewport 1280x720 in a 2560x1440 window",
+  "window": "12 s settle, then 30 s measured (x1: 60 s), 3 runs each, all through tools/run_windowed.sh",
+  "what_is_measured": "interface frame time = Main._process to Main._process; achieved speed = slowest dish's clock over wall time. Every dish is filled to its limit and nutrient/feed set to the setup maxima so populations hold. Speed x10,000, backend Auto, unless the scenario says forced.",
+  "commit_base": "the single-dish path's code, no pool"
+ },
+ "expected_before_running": {
+  "written_before_running": true,
+  "G_50_cpu": "achieved speed x10,000 (the set speed; the processor can reach x68,000) [derived, AGENTS.md 'Cost of a nearly empty CPU dish']; frame near the display's period",
+  "G_gpu_vs_cpu": "GPU floor loses at 50 bups: ~x41,000 at best [derived]; both reach the set x10,000, so frame time decides the 'best of two' [placeholder]",
+  "E": "100k at x10,000 holds x10,000 on the GPU with frames near 16.7 ms [placeholder; AGENTS: 170k bups at x1 step 0.5 ms on the GPU]",
+  "A": "1M: speed below x10,000, frame near the display period because the budget cuts steps [placeholder]",
+  "F": "2M: frame about 66 ms [placeholder]",
+  "B_C_D": "no derivation possible: first measurement [placeholder: frame at most ~3 display periods]",
+  "x1": "picture changes on ~100% of display frames at x1 (a step every frame) [derived: every frame advances 1/60 s]; edit-to-visible 1-3 frames [placeholder]"
+ },
+ "scenarios": {
+  "A": {
+   "label": "[measured]",
+   "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- world A 30",
+   "dishes": 1,
+   "setup": {
+    "cells_across": [
+     100
+    ],
+    "cells_max": 100,
+    "cells_min": 100,
+    "dishes": 1,
+    "setup_ms": 3425
+   },
+   "runs": [
+    {
+     "frame_ms_mean": 31.57,
+     "frame_ms_p95": 32.153,
+     "frame_ms_max": 189.675,
+     "achieved_speed": 623,
+     "backends_after_settle": {
+      "gpu": 1
+     },
+     "population_start": 999612,
+     "population_end": 999602
+    },
+    {
+     "frame_ms_mean": 31.25,
+     "frame_ms_p95": 31.87,
+     "frame_ms_max": 36.443,
+     "achieved_speed": 625,
+     "backends_after_settle": {
+      "gpu": 1
+     },
+     "population_start": 999678,
+     "population_end": 999516
+    },
+    {
+     "frame_ms_mean": 31.53,
+     "frame_ms_p95": 31.977,
+     "frame_ms_max": 190.124,
+     "achieved_speed": 623,
+     "backends_after_settle": {
+      "gpu": 1
+     },
+     "population_start": 999540,
+     "population_end": 999643
+    }
+   ],
+   "frame_ms_mean_of_runs": 31.45,
+   "frame_ms_p95_mean_of_runs": 32.0,
+   "frame_ms_max_of_runs": 190.124,
+   "achieved_speed_mean_of_runs": 624,
+   "achieved_speed_spread": 0.9,
+   "notes": "1M bups, one 90 mm dish. Max frame ~190 ms in 2 of 3 runs is a single hitch."
+  },
+  "B": {
+   "label": "[measured]",
+   "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- world B 30",
+   "dishes": 7,
+   "setup": {
+    "cells_across": [
+     100,
+     100,
+     100
+    ],
+    "cells_max": 100,
+    "cells_min": 100,
+    "dishes": 7,
+    "setup_ms": 3592
+   },
+   "runs": [
+    {
+     "frame_ms_mean": 31.03,
+     "frame_ms_p95": 31.844,
+     "frame_ms_max": 199.09,
+     "achieved_speed": 622,
+     "backends_after_settle": {
+      "cpu": 2,
+      "gpu": 5
+     },
+     "population_start": 1011583,
+     "population_end": 1011351
+    },
+    {
+     "frame_ms_mean": 30.66,
+     "frame_ms_p95": 31.329,
+     "frame_ms_max": 200.494,
+     "achieved_speed": 624,
+     "backends_after_settle": {
+      "cpu": 3,
+      "gpu": 4
+     },
+     "population_start": 1011368,
+     "population_end": 1011463
+    },
+    {
+     "frame_ms_mean": 30.23,
+     "frame_ms_p95": 30.802,
+     "frame_ms_max": 201.589,
+     "achieved_speed": 644,
+     "backends_after_settle": {
+      "cpu": 4,
+      "gpu": 3
+     },
+     "population_start": 1011527,
+     "population_end": 1011338
+    }
+   ],
+   "frame_ms_mean_of_runs": 30.64,
+   "frame_ms_p95_mean_of_runs": 31.32,
+   "frame_ms_max_of_runs": 201.589,
+   "achieved_speed_mean_of_runs": 630,
+   "achieved_speed_spread": 9.9,
+   "notes": "940k dish plus six 12k dishes (90 mm / 45 mm). Backend split of the six small dishes varies run to run (Auto switches one at a time). Max ~200 ms in every run is a hitch."
+  },
+  "C100": {
+   "label": "[measured]",
+   "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- world C100 30",
+   "dishes": 20,
+   "setup": {
+    "cells_across": [
+     100,
+     100,
+     100
+    ],
+    "cells_max": 100,
+    "cells_min": 100,
+    "dishes": 20,
+    "setup_ms": 862
+   },
+   "runs": [
+    {
+     "frame_ms_mean": 8.33,
+     "frame_ms_p95": 8.934,
+     "frame_ms_max": 11.511,
+     "achieved_speed": 909,
+     "backends_after_settle": {
+      "cpu": 20
+     },
+     "population_start": 2000,
+     "population_end": 2000
+    },
+    {
+     "frame_ms_mean": 8.88,
+     "frame_ms_p95": 9.596,
+     "frame_ms_max": 12.565,
+     "achieved_speed": 998,
+     "backends_after_settle": {
+      "cpu": 20
+     },
+     "population_start": 2000,
+     "population_end": 2000
+    },
+    {
+     "frame_ms_mean": 8.88,
+     "frame_ms_p95": 9.594,
+     "frame_ms_max": 10.315,
+     "achieved_speed": 1000,
+     "backends_after_settle": {
+      "cpu": 20
+     },
+     "population_start": 2000,
+     "population_end": 2000
+    }
+   ],
+   "frame_ms_mean_of_runs": 8.7,
+   "frame_ms_p95_mean_of_runs": 9.37,
+   "frame_ms_max_of_runs": 12.565,
+   "achieved_speed_mean_of_runs": 969,
+   "achieved_speed_spread": 42.4,
+   "notes": "MEASURED AT TODAY'S LIMIT OF 20 DISHES (Main.MAX_DISHES), not 1,000: 20 dishes of 100 bups, 5 mm radius, 100 cells across. Scaled to 1,000 dishes [derived, linear in dish count, NOT measured]: achieved speed about x909-1000 * 20/1000 = x18-20."
+  },
+  "C48": {
+   "label": "[measured]",
+   "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- world C48 30",
+   "dishes": 20,
+   "setup": {
+    "cells_across": [
+     48,
+     48,
+     48
+    ],
+    "cells_max": 48,
+    "cells_min": 48,
+    "dishes": 20,
+    "setup_ms": 876
+   },
+   "runs": [
+    {
+     "frame_ms_mean": 9.62,
+     "frame_ms_p95": 11.068,
+     "frame_ms_max": 14.476,
+     "achieved_speed": 5005,
+     "backends_after_settle": {
+      "cpu": 20
+     },
+     "population_start": 510,
+     "population_end": 399
+    },
+    {
+     "frame_ms_mean": 9.15,
+     "frame_ms_p95": 9.972,
+     "frame_ms_max": 12.233,
+     "achieved_speed": 5013,
+     "backends_after_settle": {
+      "cpu": 20
+     },
+     "population_start": 502,
+     "population_end": 404
+    },
+    {
+     "frame_ms_mean": 9.16,
+     "frame_ms_p95": 9.954,
+     "frame_ms_max": 13.488,
+     "achieved_speed": 5005,
+     "backends_after_settle": {
+      "cpu": 20
+     },
+     "population_start": 508,
+     "population_end": 406
+    }
+   ],
+   "frame_ms_mean_of_runs": 9.31,
+   "frame_ms_p95_mean_of_runs": 10.33,
+   "frame_ms_max_of_runs": 14.476,
+   "achieved_speed_mean_of_runs": 5008,
+   "achieved_speed_spread": 3.8,
+   "notes": "MEASURED AT TODAY'S LIMIT OF 20 DISHES, not 1,000: 20 dishes of 100 bups on a 0.3 mm dish, the only radius that gives 48 cells across (the grid is derived from the radius; there is no setting). The population decays (about 505 to 400 over the 20 dishes: the tiny dish has little nutrient), so it is not held at its limit. Scaled to 1,000 dishes [derived, linear, NOT measured]: x5,000 * 20/1000 = x100."
+  },
+  "D": {
+   "label": "[measured]",
+   "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- world D 30",
+   "dishes": 20,
+   "setup": {
+    "cells_across": [
+     100,
+     100,
+     100
+    ],
+    "cells_max": 100,
+    "cells_min": 100,
+    "dishes": 20,
+    "setup_ms": 1342
+   },
+   "runs": [
+    {
+     "frame_ms_mean": 10.18,
+     "frame_ms_p95": 11.711,
+     "frame_ms_max": 14.793,
+     "achieved_speed": 1705,
+     "backends_after_settle": {
+      "cpu": 1,
+      "gpu": 19
+     },
+     "population_start": 199159,
+     "population_end": 199156
+    },
+    {
+     "frame_ms_mean": 10.24,
+     "frame_ms_p95": 11.855,
+     "frame_ms_max": 16.436,
+     "achieved_speed": 1735,
+     "backends_after_settle": {
+      "cpu": 1,
+      "gpu": 19
+     },
+     "population_start": 199115,
+     "population_end": 199283
+    },
+    {
+     "frame_ms_mean": 10.22,
+     "frame_ms_p95": 11.504,
+     "frame_ms_max": 17.218,
+     "achieved_speed": 1753,
+     "backends_after_settle": {
+      "cpu": 1,
+      "gpu": 19
+     },
+     "population_start": 199012,
+     "population_end": 199184
+    }
+   ],
+   "frame_ms_mean_of_runs": 10.21,
+   "frame_ms_p95_mean_of_runs": 11.69,
+   "frame_ms_max_of_runs": 17.218,
+   "achieved_speed_mean_of_runs": 1731,
+   "achieved_speed_spread": 19.8,
+   "notes": "MEASURED AT TODAY'S LIMIT OF 20 DISHES, not 100: 20 dishes of 10k (45 mm). Scaled to 100 dishes [derived, linear, NOT measured]: x1,700 * 20/100 = x340."
+  },
+  "E": {
+   "label": "[measured]",
+   "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- world E 30",
+   "dishes": 1,
+   "setup": {
+    "cells_across": [
+     100
+    ],
+    "cells_max": 100,
+    "cells_min": 100,
+    "dishes": 1,
+    "setup_ms": 1098
+   },
+   "runs": [
+    {
+     "frame_ms_mean": 9.01,
+     "frame_ms_p95": 10.15,
+     "frame_ms_max": 55.055,
+     "achieved_speed": 9990,
+     "backends_after_settle": {
+      "gpu": 1
+     },
+     "population_start": 99841,
+     "population_end": 99878
+    },
+    {
+     "frame_ms_mean": 9.08,
+     "frame_ms_p95": 10.191,
+     "frame_ms_max": 55.765,
+     "achieved_speed": 10006,
+     "backends_after_settle": {
+      "gpu": 1
+     },
+     "population_start": 99854,
+     "population_end": 99824
+    },
+    {
+     "frame_ms_mean": 9.1,
+     "frame_ms_p95": 10.198,
+     "frame_ms_max": 57.002,
+     "achieved_speed": 9987,
+     "backends_after_settle": {
+      "gpu": 1
+     },
+     "population_start": 99844,
+     "population_end": 99857
+    }
+   ],
+   "frame_ms_mean_of_runs": 9.06,
+   "frame_ms_p95_mean_of_runs": 10.18,
+   "frame_ms_max_of_runs": 57.002,
+   "achieved_speed_mean_of_runs": 9994,
+   "achieved_speed_spread": 8.3,
+   "notes": "goal-mode dish size (100k limit, 45 mm), Auto: runs on the GPU. Max ~55 ms in every run is a hitch."
+  },
+  "F": {
+   "label": "[measured]",
+   "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- world F 30",
+   "dishes": 1,
+   "setup": {
+    "cells_across": [
+     100
+    ],
+    "cells_max": 100,
+    "cells_min": 100,
+    "dishes": 1,
+    "setup_ms": 6009
+   },
+   "runs": [
+    {
+     "frame_ms_mean": 64.13,
+     "frame_ms_p95": 64.931,
+     "frame_ms_max": 385.06,
+     "achieved_speed": 309,
+     "backends_after_settle": {
+      "gpu": 1
+     },
+     "population_start": 1999622,
+     "population_end": 1999314
+    },
+    {
+     "frame_ms_mean": 63.9,
+     "frame_ms_p95": 64.499,
+     "frame_ms_max": 380.513,
+     "achieved_speed": 309,
+     "backends_after_settle": {
+      "gpu": 1
+     },
+     "population_start": 1998988,
+     "population_end": 1999413
+    },
+    {
+     "frame_ms_mean": 63.87,
+     "frame_ms_p95": 64.549,
+     "frame_ms_max": 380.89,
+     "achieved_speed": 310,
+     "backends_after_settle": {
+      "gpu": 1
+     },
+     "population_start": 1999442,
+     "population_end": 1999618
+    }
+   ],
+   "frame_ms_mean_of_runs": 63.97,
+   "frame_ms_p95_mean_of_runs": 64.66,
+   "frame_ms_max_of_runs": 385.06,
+   "achieved_speed_mean_of_runs": 309,
+   "achieved_speed_spread": 0.5,
+   "notes": "one 2M dish (90 mm), Auto: runs on the GPU; it ran (no memory failure)."
+  },
+  "G": {
+   "50": {
+    "cpu": {
+     "label": "[measured]",
+     "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- small 50 cpu 30",
+     "dishes": 1,
+     "setup": {
+      "cells_across": [
+       100
+      ],
+      "cells_max": 100,
+      "cells_min": 100,
+      "dishes": 1,
+      "setup_ms": 854
+     },
+     "runs": [
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.595,
+       "frame_ms_max": 9.42,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "cpu": 1
+       },
+       "population_start": 50,
+       "population_end": 50
+      },
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.605,
+       "frame_ms_max": 11.265,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "cpu": 1
+       },
+       "population_start": 50,
+       "population_end": 50
+      },
+      {
+       "frame_ms_mean": 8.34,
+       "frame_ms_p95": 8.596,
+       "frame_ms_max": 16.37,
+       "achieved_speed": 9997,
+       "backends_after_settle": {
+        "cpu": 1
+       },
+       "population_start": 50,
+       "population_end": 50
+      }
+     ],
+     "frame_ms_mean_of_runs": 8.33,
+     "frame_ms_p95_mean_of_runs": 8.6,
+     "frame_ms_max_of_runs": 16.37,
+     "achieved_speed_mean_of_runs": 9999,
+     "achieved_speed_spread": 1.4,
+     "notes": ""
+    },
+    "gpu": {
+     "label": "[measured]",
+     "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- small 50 gpu 30",
+     "dishes": 1,
+     "setup": {
+      "cells_across": [
+       100
+      ],
+      "cells_max": 100,
+      "cells_min": 100,
+      "dishes": 1,
+      "setup_ms": 842
+     },
+     "runs": [
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.764,
+       "frame_ms_max": 12.545,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "gpu": 1
+       },
+       "population_start": 43,
+       "population_end": 42
+      },
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.761,
+       "frame_ms_max": 11.207,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "gpu": 1
+       },
+       "population_start": 42,
+       "population_end": 43
+      },
+      {
+       "frame_ms_mean": 8.34,
+       "frame_ms_p95": 8.747,
+       "frame_ms_max": 16.739,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "gpu": 1
+       },
+       "population_start": 43,
+       "population_end": 40
+      }
+     ],
+     "frame_ms_mean_of_runs": 8.33,
+     "frame_ms_p95_mean_of_runs": 8.76,
+     "frame_ms_max_of_runs": 16.739,
+     "achieved_speed_mean_of_runs": 10000,
+     "achieved_speed_spread": 0.0,
+     "notes": "GPU dishes of this size lose a few bups over the run (e.g. 50 to 42); the CPU dish holds."
+    },
+    "best_of_the_two": {
+     "backend": "cpu",
+     "rule": "lowest mean frame time; the two are within noise on frame mean and speed (both x10,000, frame 8.33 ms = one display period), so a tie is stored as cpu: lower p95 and the population holds",
+     "cpu_frame_ms_mean": 8.33,
+     "gpu_frame_ms_mean": 8.33,
+     "cpu_p95": 8.6,
+     "gpu_p95": 8.76
+    }
+   },
+   "200": {
+    "cpu": {
+     "label": "[measured]",
+     "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- small 200 cpu 30",
+     "dishes": 1,
+     "setup": {
+      "cells_across": [
+       100
+      ],
+      "cells_max": 100,
+      "cells_min": 100,
+      "dishes": 1,
+      "setup_ms": 839
+     },
+     "runs": [
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.59,
+       "frame_ms_max": 9.351,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "cpu": 1
+       },
+       "population_start": 200,
+       "population_end": 200
+      },
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.595,
+       "frame_ms_max": 9.914,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "cpu": 1
+       },
+       "population_start": 200,
+       "population_end": 200
+      },
+      {
+       "frame_ms_mean": 8.34,
+       "frame_ms_p95": 8.595,
+       "frame_ms_max": 14.567,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "cpu": 1
+       },
+       "population_start": 200,
+       "population_end": 200
+      }
+     ],
+     "frame_ms_mean_of_runs": 8.33,
+     "frame_ms_p95_mean_of_runs": 8.59,
+     "frame_ms_max_of_runs": 14.567,
+     "achieved_speed_mean_of_runs": 10000,
+     "achieved_speed_spread": 0.0,
+     "notes": ""
+    },
+    "gpu": {
+     "label": "[measured]",
+     "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- small 200 gpu 30",
+     "dishes": 1,
+     "setup": {
+      "cells_across": [
+       100
+      ],
+      "cells_max": 100,
+      "cells_min": 100,
+      "dishes": 1,
+      "setup_ms": 835
+     },
+     "runs": [
+      {
+       "frame_ms_mean": 8.34,
+       "frame_ms_p95": 8.78,
+       "frame_ms_max": 16.683,
+       "achieved_speed": 9998,
+       "backends_after_settle": {
+        "gpu": 1
+       },
+       "population_start": 194,
+       "population_end": 184
+      },
+      {
+       "frame_ms_mean": 8.34,
+       "frame_ms_p95": 8.765,
+       "frame_ms_max": 15.871,
+       "achieved_speed": 9997,
+       "backends_after_settle": {
+        "gpu": 1
+       },
+       "population_start": 192,
+       "population_end": 192
+      },
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.803,
+       "frame_ms_max": 11.536,
+       "achieved_speed": 9997,
+       "backends_after_settle": {
+        "gpu": 1
+       },
+       "population_start": 190,
+       "population_end": 187
+      }
+     ],
+     "frame_ms_mean_of_runs": 8.34,
+     "frame_ms_p95_mean_of_runs": 8.78,
+     "frame_ms_max_of_runs": 16.683,
+     "achieved_speed_mean_of_runs": 9997,
+     "achieved_speed_spread": 0.5,
+     "notes": "GPU dishes of this size lose a few bups over the run (e.g. 50 to 42); the CPU dish holds."
+    },
+    "best_of_the_two": {
+     "backend": "cpu",
+     "rule": "lowest mean frame time; the two are within noise on frame mean and speed (both x10,000, frame 8.33 ms = one display period), so a tie is stored as cpu: lower p95 and the population holds",
+     "cpu_frame_ms_mean": 8.33,
+     "gpu_frame_ms_mean": 8.34,
+     "cpu_p95": 8.59,
+     "gpu_p95": 8.78
+    }
+   },
+   "1000": {
+    "cpu": {
+     "label": "[measured]",
+     "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- small 1000 cpu 30",
+     "dishes": 1,
+     "setup": {
+      "cells_across": [
+       100
+      ],
+      "cells_max": 100,
+      "cells_min": 100,
+      "dishes": 1,
+      "setup_ms": 809
+     },
+     "runs": [
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.546,
+       "frame_ms_max": 9.078,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "cpu": 1
+       },
+       "population_start": 1000,
+       "population_end": 1000
+      },
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.546,
+       "frame_ms_max": 9.724,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "cpu": 1
+       },
+       "population_start": 1000,
+       "population_end": 1000
+      },
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.573,
+       "frame_ms_max": 10.14,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "cpu": 1
+       },
+       "population_start": 1000,
+       "population_end": 1000
+      }
+     ],
+     "frame_ms_mean_of_runs": 8.33,
+     "frame_ms_p95_mean_of_runs": 8.55,
+     "frame_ms_max_of_runs": 10.14,
+     "achieved_speed_mean_of_runs": 10000,
+     "achieved_speed_spread": 0.0,
+     "notes": ""
+    },
+    "gpu": {
+     "label": "[measured]",
+     "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- small 1000 gpu 30",
+     "dishes": 1,
+     "setup": {
+      "cells_across": [
+       100
+      ],
+      "cells_max": 100,
+      "cells_min": 100,
+      "dishes": 1,
+      "setup_ms": 844
+     },
+     "runs": [
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.781,
+       "frame_ms_max": 10.89,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "gpu": 1
+       },
+       "population_start": 987,
+       "population_end": 988
+      },
+      {
+       "frame_ms_mean": 8.34,
+       "frame_ms_p95": 8.772,
+       "frame_ms_max": 17.392,
+       "achieved_speed": 9997,
+       "backends_after_settle": {
+        "gpu": 1
+       },
+       "population_start": 992,
+       "population_end": 978
+      },
+      {
+       "frame_ms_mean": 8.34,
+       "frame_ms_p95": 8.767,
+       "frame_ms_max": 17.558,
+       "achieved_speed": 9997,
+       "backends_after_settle": {
+        "gpu": 1
+       },
+       "population_start": 988,
+       "population_end": 983
+      }
+     ],
+     "frame_ms_mean_of_runs": 8.34,
+     "frame_ms_p95_mean_of_runs": 8.77,
+     "frame_ms_max_of_runs": 17.558,
+     "achieved_speed_mean_of_runs": 9998,
+     "achieved_speed_spread": 1.4,
+     "notes": "GPU dishes of this size lose a few bups over the run (e.g. 50 to 42); the CPU dish holds."
+    },
+    "best_of_the_two": {
+     "backend": "cpu",
+     "rule": "lowest mean frame time; the two are within noise on frame mean and speed (both x10,000, frame 8.33 ms = one display period), so a tie is stored as cpu: lower p95 and the population holds",
+     "cpu_frame_ms_mean": 8.33,
+     "gpu_frame_ms_mean": 8.34,
+     "cpu_p95": 8.55,
+     "gpu_p95": 8.77
+    }
+   }
+  },
+  "G_backdrop": {
+   "label": "[measured]",
+   "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- backdrop 30",
+   "note": "menu scene's 4-bup dish stepped at x1 on the CPU as scripts/menu.gd does",
+   "runs": [
+    {
+     "frame_ms_mean": 8.34,
+     "frame_ms_p95": 9.976,
+     "frame_ms_max": 27.383
+    },
+    {
+     "frame_ms_mean": 8.34,
+     "frame_ms_p95": 10.128,
+     "frame_ms_max": 23.848
+    },
+    {
+     "frame_ms_mean": 8.34,
+     "frame_ms_p95": 10.253,
+     "frame_ms_max": 30.133
+    }
+   ]
+  },
+  "x1": {
+   "note": "Edit = a source placed with the pointer off the stage, camera zoom 3, paused; ms include the stage hash's readback (~10 ms), so they are an upper bound. A single added bup was sub-pixel and never changed the hash, so it is not reported.",
+   "by_bups": {
+    "1000": {
+     "label": "[measured]",
+     "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- x1 1000 60",
+     "backend": "cpu",
+     "runs": [
+      {
+       "frame_ms_mean": 8.84,
+       "frame_ms_p95": 9.602,
+       "frame_ms_max": 15.005,
+       "share_frames_picture_changed": 1.0,
+       "share_frames_clock_advanced": 1.0,
+       "edit_to_visible_frames": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ],
+       "edit_to_visible_ms": [
+        14.728,
+        16.844,
+        12.601,
+        17.636,
+        17.29,
+        13.993,
+        16.773,
+        17.835
+       ]
+      },
+      {
+       "frame_ms_mean": 8.83,
+       "frame_ms_p95": 9.619,
+       "frame_ms_max": 11.139,
+       "share_frames_picture_changed": 1.0,
+       "share_frames_clock_advanced": 1.0,
+       "edit_to_visible_frames": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ],
+       "edit_to_visible_ms": [
+        16.036,
+        16.62,
+        11.721,
+        16.811,
+        17.763,
+        17.633,
+        12.512,
+        17.721
+       ]
+      },
+      {
+       "frame_ms_mean": 8.85,
+       "frame_ms_p95": 9.632,
+       "frame_ms_max": 14.018,
+       "share_frames_picture_changed": 1.0,
+       "share_frames_clock_advanced": 1.0,
+       "edit_to_visible_frames": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ],
+       "edit_to_visible_ms": [
+        15.475,
+        16.921,
+        16.731,
+        13.91,
+        16.615,
+        18.397,
+        14.543,
+        15.879
+       ]
+      }
+     ]
+    },
+    "100000": {
+     "label": "[measured]",
+     "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- x1 100000 60",
+     "backend": "gpu",
+     "runs": [
+      {
+       "frame_ms_mean": 11.09,
+       "frame_ms_p95": 11.867,
+       "frame_ms_max": 21.399,
+       "share_frames_picture_changed": 1.0,
+       "share_frames_clock_advanced": 1.0,
+       "edit_to_visible_frames": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ],
+       "edit_to_visible_ms": [
+        20.287,
+        18.27,
+        16.814,
+        17.557,
+        18.797,
+        18.358,
+        14.931,
+        17.622
+       ]
+      },
+      {
+       "frame_ms_mean": 11.0,
+       "frame_ms_p95": 11.811,
+       "frame_ms_max": 21.175,
+       "share_frames_picture_changed": 1.0,
+       "share_frames_clock_advanced": 1.0,
+       "edit_to_visible_frames": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ],
+       "edit_to_visible_ms": [
+        18.68,
+        18.168,
+        18.995,
+        16.833,
+        18.716,
+        14.431,
+        18.275,
+        19.447
+       ]
+      },
+      {
+       "frame_ms_mean": 11.07,
+       "frame_ms_p95": 11.91,
+       "frame_ms_max": 21.257,
+       "share_frames_picture_changed": 1.0,
+       "share_frames_clock_advanced": 1.0,
+       "edit_to_visible_frames": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ],
+       "edit_to_visible_ms": [
+        19.072,
+        19.163,
+        18.435,
+        19.63,
+        17.488,
+        18.733,
+        18.955,
+        19.324
+       ]
+      }
+     ]
+    }
+   }
+  }
+ },
+ "zoomed_out_pictures": {
+  "label": "[measured]",
+  "command": "tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- shots",
+  "what": "paused, never advanced dish of 200,000 bups (seed 3, 90 mm, processor), 1280x720 SubViewport, at fit zoom and 20x, 100x, 500x fit zoom",
+  "determinism": "fit, zoom20, zoom100 are byte-identical across two processes; zoom500 differs between processes in the background shade only (the field is almost empty at that zoom)"
+ }
+}
