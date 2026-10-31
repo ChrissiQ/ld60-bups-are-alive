@@ -121,16 +121,34 @@ GRID_LOOP(f, ((DS(uint(pcs.pa), DS_COUNT) + PAYLOAD_TEX_WIDTH - 1u) / PAYLOAD_TE
 """
 
 ## What a cell of dish row `pcs.pa` shows (NutrientField::view_values): its concentration, and in a cell inside the dish the clouds' at the
-## cell's centre. VIEW is indexed by pool cell.
+## cell's centre, a cloud counting where the cell is in the block of cells its reach covers (the CPU's picture rule: a square, one cell wider
+## than the reach, where the bups' reads use the circle). The block's cells can lie three squares from a cloud's listed ones, so each cell
+## looks at 7 x 7 squares and takes a cloud from the first of them that it and the cloud's squares share. VIEW is indexed by pool cell.
 const K_POOL_VIEW := """
 void f(uint l) {
 	uint d = uint(pcs.pa), n = DPU(d, DP_CELLS), c = DPU(d, DP_FIELD_BASE) + l;
 	float v = CONC[c];
 	if (INSIDE[c] != 0) {
-		float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS);
-		float pc, pgx, pgy, sg;
-		puffs_at_d(d, (float(l % n) + 0.5) * sp - org, (float(l / n) + 0.5) * sp - org, pc, pgx, pgy, sg);
-		v += pc;
+		int ni = int(n), cx = int(l % n), cy = int(l / n), nb = int(DPU(d, DP_BINS_ACROSS));
+		float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS), bs = DPF(d, DP_BIN_SIZE);
+		float x = (float(cx) + 0.5) * sp - org, y = (float(cy) + 0.5) * sp - org;
+		int cbx = clamp(int((x + org) / bs), 0, nb - 1), cby = clamp(int((y + org) / bs), 0, nb - 1);
+		int nx0 = max(cbx - 3, 0), nx1 = min(cbx + 3, nb - 1), ny0 = max(cby - 3, 0), ny1 = min(cby + 3, nb - 1);
+		uint base = DPU(d, DP_BIN_BASE);
+		for (int by = ny0; by <= ny1; by++) for (int bx = nx0; bx <= nx1; bx++) {
+			uint b = base + uint(by * nb + bx);
+			for (uint e = BINS[b]; e < BINS[b] + BINC[b]; e++) {
+				vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];  // x, y, mass, variance | reach^2
+				float reach = sqrt(r1.x);
+				int lx = clamp(int((r0.x - reach + org) / bs), 0, nb - 1), ly = clamp(int((r0.y - reach + org) / bs), 0, nb - 1);
+				if (bx != max(lx, nx0) || by != max(ly, ny0)) continue;
+				int x0 = max(0, int(floor((r0.x - reach + org) / sp - 0.5))), x1 = min(ni - 1, int(ceil((r0.x + reach + org) / sp - 0.5)));
+				int y0 = max(0, int(floor((r0.y - reach + org) / sp - 0.5))), y1 = min(ni - 1, int(ceil((r0.y + reach + org) / sp - 0.5)));
+				if (cx < x0 || cx > x1 || cy < y0 || cy > y1) continue;
+				float dx = x - r0.x, dy = y - r0.y;
+				v += r0.z / (6.2831853 * r0.w) * exp(-(dx * dx + dy * dy) * 0.5 / r0.w);
+			}
+		}
 	}
 	VIEW[c] = v;
 }
