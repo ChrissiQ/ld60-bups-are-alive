@@ -226,8 +226,8 @@ func record_pool_index(b: GpuSim, cl: int, hint: int) -> void:
 	scan(b, cl, "pool_bn", b._bins)
 	pd(b, cl, "pool_bin_cut", GpuLayout.D_MAX / 64)
 	pd(b, cl, "pool_bin_cursor", Rig.groups_for(b._bins))
-	pd(b, cl, "pool_bin_scatter", hg)
-	pd(b, cl, "pool_bin_sort", Rig.groups_for(b._bins))
+	pd(b, cl, "pool_bin_scatter", ceili(hint / 64.0))
+	pd(b, cl, "pool_bin_sort", ceili(b._bins / 64.0))
 
 
 ## The dish's world sends, at its step `s`: two clouds (one with cut 0.001) and three deposits; every fifth step none.

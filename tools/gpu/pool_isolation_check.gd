@@ -17,7 +17,8 @@ extends SceneTree
 ##    streams are keyed by its own step and places, appends keep each dish's order, and its virtual counters move only with its own
 ##    appends; P's slots of a dish hold POISON in a pool, so a kernel that still read one would differ]
 ##    The paths are exercised: C's DS_CLOUDS_TO_GRID > 0, B's DS_HUSKS reaches its quota of 400, D has more diffusion passes than the rest.
-## I2 Whole-bin cut: with C's quota set to cut its lists halfway, the first bin whose end (from the dish's first entry) passes 12 x quota
+## I2 Whole-bin cut: with a dish's quota set to cut its lists halfway (each dish with entries left at the end: C hands every cloud over
+##    by then, so its own cut, which binds all through the run, is checked by I1's lists and counters), the first bin whose end (from the dish's first entry) passes 12 x quota
 ##    and every bin after it have no entries, every bin before it keeps all its entries in ascending cloud order, DS_ENTRIES_CUT grows by
 ##    the entries dropped, alone and in a pool alike [derived: the kernel's rule]. With the pool's entries made to end inside the last
 ##    dish's last listed bin (and its quota not binding), that bin and those after it are cut and the overflow flag is raised (the host

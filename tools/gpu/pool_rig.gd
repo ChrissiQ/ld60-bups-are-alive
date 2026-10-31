@@ -441,11 +441,13 @@ func record_index(cl: int, cut := true) -> void:
 	record_index_rest(cl)
 
 
+## The scatter and the sort a thread an item (a cloud, a square: their loops are long and uneven, so two items a thread cost 1.25x to
+## 1.9x at 2M bups, pool_cost_check.gd).
 func record_index_rest(cl: int) -> void:
 	dispatch(cl, "pool_bin_cut", D_MAX / 64)
 	dispatch(cl, "pool_bin_cursor", groups_for(bins))
-	dispatch(cl, "pool_bin_scatter", groups_for(cloud_hint))
-	dispatch(cl, "pool_bin_sort", groups_for(bins))
+	dispatch(cl, "pool_bin_scatter", ceili(cloud_hint / 64.0))
+	dispatch(cl, "pool_bin_sort", ceili(bins / 64.0))
 
 
 func record_bups(cl: int) -> void:
