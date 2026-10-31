@@ -72,6 +72,17 @@ func run_frames(n: int, speed := 1.0, paused := true) -> void:
 		await frame(speed, paused)
 
 
+## Frames at `speed` until the dish's clock (its newest snapshot's: what the screen has seen) passes `seconds` more, then paused and settled.
+## The world runs no faster than its iterations allow, whatever the frames claim, so a test waits for the world's time, not for frames.
+func run_for(d: Dish, seconds: float, speed: float) -> void:
+	var until := d.time + seconds
+	for i in WAIT_FRAMES * 4:
+		if d.time >= until:
+			break
+		await frame(speed, false)
+	await settle()
+
+
 ## Frames (paused unless `speed` > 0 and `paused` false) until `done` returns true; false when `most` frames pass first.
 func wait_until(done: Callable, most := WAIT_FRAMES, speed := 1.0, paused := true) -> bool:
 	for i in most:
