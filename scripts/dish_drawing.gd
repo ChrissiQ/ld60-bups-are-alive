@@ -16,6 +16,9 @@ const AGAR := Color(0.03, 0.06, 0.04)  ## the dish's dark agar
 const RIM := Color(0.45, 0.8, 0.6, 0.6)  ## its green-tinted glass rim
 const RIM_OUTER := Color(0.45, 0.8, 0.6, 0.2)  ## and the rim's faint outer line
 const THUMB_RIM_SIDES := 48  ## sides of a thumbnail's rim
+const UNKNOWN := -2  ## `pick`: the view has not yet answered a question asked there
+const ASKED_KEPT := 16  ## the questions `pick` remembers of each kind, to know what an answer answers (an answer comes a few frames late)
+const MIN_INSTANCES := 1024  ## the fewest instances the bups' multimesh is made with
 
 var dish: Dish
 var view: ViewRenderer = null  ## the main view's picture of this dish (made when the dish is first in the main view and the world publishes)
@@ -25,6 +28,7 @@ var overlay: Node2D = null  ## the selection and hover rings, drawn above the bu
 var _no_view := false  ## a view was tried and cannot draw here (no main device, or its kernels did not build)
 var _view_sent: Array = []  ## what the world was last told of the view
 var _offered_payload := -1  ## the publish last given to the view
+var _asked := {true: [], false: []}  ## hover -> the questions `pick` asked lately, oldest first: [number, local, slack, pixel] each
 var _offered_field := -1
 var _offered_steer := -1
 var _husk_version := -1  ## the husk list last put into the husks' multimesh (Snapshot.husk_view's version)
@@ -114,12 +118,7 @@ func process() -> void:
 	if not _ensure_view(w):
 		return
 	var handles: Dictionary = w.backend.texture_handles()
-	var shown := w.shown_payload()
-	if shown != null and shown.row == dish.row and shown.seq != _offered_payload:
-		var p := _with_handles(shown, handles)
-		if p != null:
-			view.set_payload(p)
-			_offered_payload = shown.seq
+	_take(w, handles)
 	var field := w.latest().field_view
 	var haze: Dictionary = handles.get("haze", {})
 	if field != null and field.texture_index >= 0 and field.seq != _offered_field and not haze.is_empty():
@@ -133,6 +132,22 @@ func process() -> void:
 	for b: Array in view.take_bound():
 		w.texture_bound(b[0], b[1], b[2], b[3])
 	overlay.queue_redraw()
+
+
+## The publish the world's playout shows this frame (WorldClient.shown_payload) is given to the view, which draws it; `process` does it if
+## the screen did not first (Main takes it before it moves the camera, so a followed bup's place is the one the frame draws).
+func take_payload() -> void:
+	if view != null and dish.row >= 0 and dish.world != null:
+		_take(dish.world, dish.world.backend.texture_handles())
+
+
+func _take(w: WorldClient, handles: Dictionary) -> void:
+	var shown := w.shown_payload()
+	if shown != null and shown.row == dish.row and shown.seq != _offered_payload:
+		var p := _with_handles(shown, handles)
+		if p != null:
+			view.set_payload(p)
+			_offered_payload = shown.seq
 
 
 ## The world is told what the main view shows when that changes: the dish's row, the camera (dish-local), the scale, whether the haze and
@@ -175,6 +190,7 @@ func _ensure_view(w: WorldClient) -> bool:
 	if _no_view or not w.backend.has_method("texture_handles"):
 		return false
 	view = ViewRenderer.new(PoolLimits.from_settings().frame_queue_size)
+	_asked = {true: [], false: []}  # (a new view numbers its questions afresh)
 	if not view.can_draw():
 		view.release()
 		view = null
@@ -197,6 +213,7 @@ static func _with_handles(p: PayloadInfo, handles: Dictionary) -> PayloadInfo:
 	out.row = p.row
 	out.generation = p.generation
 	out.seq = p.seq
+	out.places = p.places
 	out.handles = PackedInt64Array(pay["handles"])
 	out.id_handles = PackedInt64Array(ids["handles"])
 	out.size = Vector2i(int(pay["width"]), int(pay["height"]))
@@ -236,14 +253,15 @@ func husks_drawn() -> int:
 	return husks_mesh.multimesh.visible_instance_count if husks_mesh != null and husks_mesh.visible else 0
 
 
-## Draws the bups from the view this frame: the MultiMesh holds the dish's limit and a twentieth more (more if the payload has more), and
-## the view's kernels write the instances of the bups the camera sees into its buffer.
+## Draws the bups from the view this frame: the view's kernels write the instances of the bups the camera sees into the MultiMesh's
+## buffer. It holds the payload's bups: made for twice their count (at least MIN_INSTANCES, at most the dish's limit and a twentieth
+## more, never fewer than the payload has), it grows the same way when they outgrow it, and never shrinks.
 func draw_bups_view() -> void:
 	view.tick()
 	var multimesh := bups_mesh.multimesh
-	var capacity := maxi(ceili(dish.bup_limit * 1.05), view.payload().count)
-	if multimesh.instance_count < capacity:
-		multimesh.instance_count = capacity  # (a new RD buffer: the view binds it afresh)
+	var count := view.payload().count
+	if multimesh.instance_count < count or multimesh.instance_count == 0:
+		multimesh.instance_count = maxi(count, mini(maxi(MIN_INSTANCES, nearest_po2(2 * count)), ceili(dish.bup_limit * 1.05)))  # (a new RD buffer: the view binds it afresh)
 	multimesh.custom_aabb = AABB(Vector3(-dish.radius, -dish.radius, -1.0), Vector3(2.0 * dish.radius, 2.0 * dish.radius, 2.0))  # (the renderer culls by these bounds: the whole dish)
 	view.follow([dish.selected.bup, dish.hovered.bup].filter(func(id: int) -> bool: return id >= 0))
 	if not bups_mesh.visible:
@@ -252,14 +270,26 @@ func draw_bups_view() -> void:
 	view.draw_frame(camera, dish.pixel(), multimesh.get_rid())
 
 
-## Asks which bup is at `local` (dish-local µm) within `slack`, and how many lie within Dish.SOURCE_NEARBY of it (ViewRenderer.pick);
-## returns the id of the last answer to a question of the same kind (`hover` or a click's), -1 for none.
+## Asks which bup is at `local` (dish-local µm) within `slack`, and how many lie within Dish.SOURCE_NEARBY of it (ViewRenderer.pick).
+## Returns the newest answer of the same kind (`hover` or a click's) when it answers a question asked here: its question (found by its
+## number among the last ASKED_KEPT asked) was at the same slack and scale and at most Dish.HOVER_CLICK_PIXELS away. Its id, -1 for none,
+## or UNKNOWN when no answer to such a question has come yet (an answer comes a few frames after its question).
 func pick(local: Vector2, slack: float, hover: bool) -> int:
 	if view == null:
 		return -1
-	view.pick(local, slack, dish.pixel(), hover, Dish.SOURCE_NEARBY)
+	var pixel := dish.pixel()
+	var asked: Array = _asked[hover]
+	asked.append([view.pick(local, slack, pixel, hover, Dish.SOURCE_NEARBY), local, slack, pixel])
+	if asked.size() > ASKED_KEPT:
+		asked.pop_front()
 	var a: Dictionary = view.answer(hover)
-	return int(a["id"]) if not a.is_empty() else -1
+	if a.is_empty():
+		return UNKNOWN
+	for q: Array in asked:
+		if q[0] == int(a["seq"]):
+			var here: bool = is_equal_approx(q[2], slack) and is_equal_approx(q[3], pixel) and (q[1] as Vector2).distance_to(local) <= Dish.HOVER_CLICK_PIXELS * pixel
+			return int(a["id"]) if here else UNKNOWN
+	return UNKNOWN
 
 
 ## The nearest bup's distance from the last hover pick's point and how many lie within Dish.SOURCE_NEARBY of it ((-1, 0): none known).
@@ -272,10 +302,14 @@ func ring_of(id: int) -> Variant:
 	return view_ring(id) if view != null and id >= 0 else null
 
 
-## Where a bup is drawn round (its place and half its drawn length) on the view's picture: from the last place looked up, or, until that
-## comes, from the pick that found it (so the hover ring shows as soon as the pick is answered); null when the view does not know it.
+## Where a bup is drawn round (its place and half its drawn length) on the view's picture: from the payload the view draws, which carries
+## the places of the bups the dish asks after (PayloadInfo.places); else from the last place the view looked up, or, until that comes, from
+## the pick that found it (so the hover ring shows as soon as the pick is answered); null when the view does not know it.
 func view_ring(id: int) -> Variant:
-	var at: Variant = view.place_of(id)
+	var p := view.payload()
+	var at: Variant = p.places.get(id) if p != null else null
+	if at == null:
+		at = view.place_of(id)
 	if at == null:
 		for hover in [true, false]:
 			var a: Dictionary = view.answer(hover)

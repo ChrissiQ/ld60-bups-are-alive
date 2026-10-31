@@ -1264,10 +1264,17 @@ func fraction_with_gene_at_least(row: int, gene: String, threshold: float) -> fl
 ## its first GpuLayout.ANSWER_BYTES bytes (everything but the chemotaxis memory). An id not in the dish (dead, never there, or in another
 ## dish) is left out.
 func track(row: int, ids: PackedInt64Array) -> Dictionary:
-	var out := {}
 	var n := mini(ids.size(), GpuLayout.TRACKED)
 	if n == 0 or not _dishes.has(row) or count(row) == 0:
-		return out
+		return {}
+	_put_track(ids)
+	_run_list(func(cl: int) -> void: _disp_track(cl, row))
+	return _took_track(ids)
+
+
+## The tracked bups' question (TQ) and an answer of none for each (TR), before the list that runs `pool_track`.
+func _put_track(ids: PackedInt64Array) -> void:
+	var n := mini(ids.size(), GpuLayout.TRACKED)
 	var q := arena.zeros((1 + 2 * GpuLayout.TRACKED) * 4)
 	q.encode_u32(0, n)
 	for t in n:
@@ -1279,10 +1286,18 @@ func track(row: int, ids: PackedInt64Array) -> Dictionary:
 		none.encode_u32(t * GpuLayout.ANSWER_BYTES + GpuLayout.R_ID_LO * 4, 0xFFFFFFFF)
 		none.encode_u32(t * GpuLayout.ANSWER_BYTES + GpuLayout.R_ID_HI * 4, 0xFFFFFFFF)
 	rd.buffer_update(arena.buf("TR"), 0, none.size(), none)
-	var first := _ds(row, GpuLayout.DS_START)
+
+
+func _disp_track(cl: int, row: int) -> void:
 	var m := count(row)
-	_run_list(func(cl: int) -> void: _disp(cl, "pool_track", _groups(m), float(first), float(m)))
-	var got: PackedByteArray = read_parts([["TR", 0, n * GpuLayout.ANSWER_BYTES]])[0]
+	_disp(cl, "pool_track", _groups(m), float(_ds(row, GpuLayout.DS_START)), float(m))
+
+
+## The answers `pool_track` wrote, after the list's sync (TR is small: read straight back): id -> record bytes, the ids found only.
+func _took_track(ids: PackedInt64Array) -> Dictionary:
+	var out := {}
+	var n := mini(ids.size(), GpuLayout.TRACKED)
+	var got := rd.buffer_get_data(arena.buf("TR"), 0, n * GpuLayout.ANSWER_BYTES)
 	for t in n:
 		var answer := got.slice(t * GpuLayout.ANSWER_BYTES, (t + 1) * GpuLayout.ANSWER_BYTES)
 		if _answer_id(answer) == ids[t]:
@@ -1440,7 +1455,8 @@ func _events_of(row: int) -> Array:
 ## The main dish's pictures into the next free shared texture of each kind, after the iteration's sync: its payload and
 ## ids (bups after the last step), and when asked its field's haze and steering pictures and every dish's thumbnail. Only a free texture is
 ## written (see the header); a kind with none is not published this time. Every texture written holds this publish's number, `publish_seq`
-## after the call. Returns kind -> the texture index written.
+## after the call. Returns kind -> the texture index written, and with a payload written and `view.track` ids asked, "tracked": those bups'
+## records as the payload has them (as `track` gives them, looked up in the same list).
 func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 	var out := {}
 	if view == null or not _dishes.has(view.row):
@@ -1462,10 +1478,15 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 	if fw >= 0 or sw >= 0:
 		arena.put_small("VQ", PackedFloat32Array([view.steer.x, view.steer.y, view.steer_alpha, float(_consts["steering_window"])]).to_byte_array())
 		_free_sets_using(["VQ"])
+	var tracking := w >= 0 and not view.track.is_empty() and n > 0
+	if tracking:
+		_put_track(view.track)
 	_run_list(func(cl: int) -> void:
 		if w >= 0:
 			_disp(cl, "pool_payload", _groups(texels), float(row))
 			_copy(cl, "pool_copy_payload", {"PAYTEX": _textures["payload"][w], "IDS": _textures["ids"][w]}, GpuLayout.PAYLOAD_TEX_WIDTH, texels)
+		if tracking:
+			_disp_track(cl, row)
 		if fw >= 0 or sw >= 0:
 			_disp(cl, "pool_view", _groups(nn * nn), float(row))
 		if fw >= 0:
@@ -1496,6 +1517,8 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 		_texture_used[kind][i] = -1
 		_superseded[kind][i] = -1
 		_next_texture[kind] = (i + 1) % TEXTURES
+	if tracking:
+		out["tracked"] = _took_track(view.track)
 	return out
 
 
@@ -1838,11 +1861,12 @@ func begin_game() -> void:
 
 ## A new dish for a pipette's bups: the source's size, grid, limit and settings, a fresh medium, the next number (`next_number`: past
 ## every dish this game has had, running, frozen or gone; taken now, so a dish added before this one is made does not take it), its seed
-## and its landscape's seed drawn as `add_dish` would.
-func receiver_spec(row: int) -> DishSpec:
+## and its landscape's seed drawn as `add_dish` would. `take` false: the spec the next one would have, the number not taken.
+func receiver_spec(row: int, take := true) -> DishSpec:
 	var s := (_dishes[row] as CoreDish).spec.copy()
 	s.number = next_number
-	next_number += 1
+	if take:
+		next_number += 1
 	s.seed = _derived_seed(s.number)
 	s.patch_seed = hash([s.seed, 7]) & 0x7FFFFFFF
 	s.step = 0

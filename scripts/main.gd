@@ -342,6 +342,7 @@ func _process(delta: float) -> void:
 	_record_parked_history()
 	# The playback speed is how many seconds of simulation pass per real second: the simulation is told the frame's real length.
 	var done := _advance_world(delta)
+	dish.take_picture()  # (before the camera follows a bup: it follows the place this frame draws)
 	if not paused and not menu_open:
 		var snap := WorldClient.shared().latest()
 		if snap.seq > 0 and not holds.stills_world():

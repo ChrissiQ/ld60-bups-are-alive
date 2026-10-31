@@ -23,6 +23,7 @@ var _version := ""  ## what this was built from: each dish's watch_version
 var _entries_list: Array = []  ## [dish, id] for each entry, youngest first
 var _looked_msec := 0
 var _buttons := {}  ## [dish, bup id] -> its button, for the second look
+var _waiting := false  ## a watched bup was left out for want of its family record: the next look builds the list again
 
 
 ## Called every frame by the screen that shows the list.
@@ -41,7 +42,7 @@ func refresh() -> void:
 	if version == _version and now - _looked_msec < LOOK_AGAIN_MSEC:
 		return
 	_looked_msec = now
-	if version != _version:
+	if version != _version or _waiting:
 		_version = version
 		_rebuild()
 	else:
@@ -49,10 +50,13 @@ func refresh() -> void:
 			_style_entry(_buttons[key], key[0], key[1])
 
 
+## A watched bup whose family record has not come yet (a thawed or loaded dish's, until the family tree has merged its lineage) is left
+## out until it has, the list being built again at the next look.
 func _rebuild() -> void:
 	Nodes.clear_children(entries)
 	_buttons.clear()
 	_entries_list = []
+	_waiting = false
 	for d in dishes:
 		for id in d.watched:
 			_entries_list.append([d, id])
@@ -60,11 +64,15 @@ func _rebuild() -> void:
 	for pair: Array in _entries_list:
 		var d: Dish = pair[0]
 		var id: int = pair[1]
+		var info := d.lineage_info(id)
+		if info.is_empty():
+			_waiting = true
+			continue
 		var entry := Button.new()
 		_style_entry(entry, d, id)
 		entry.clip_text = true
 		entry.pressed.connect(bup_chosen.emit.bind(d, id))
-		var row := BupListRow.make(d.lineage_info(id), 12.0, entry, &"TightRow")
+		var row := BupListRow.make(info, 12.0, entry, &"TightRow")
 		var stop := Button.new()
 		stop.icon = CLOSE_ICON
 		stop.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER

@@ -9,11 +9,13 @@ extends RefCounted
 ## core picks itself, so a refused dish never puts the two out of step. Snapshots, PayloadInfo.row and ViewRequest.row are client rows.
 ##
 ## The loop:
-##   drain commands (each handled at once: an edit lands at the sim clock when drained)
+##   drain commands (each handled at once: an edit lands at the sim clock when drained); the pipettes whose new dish's grid is ready; the
+##     grid of the main view's dish's next pipette started ahead on the worker pool
 ##   nothing owed (paused, or less than a step): if something changed, a pass of no steps (edits made, stats fresh, pictures, a
-##     snapshot); then sleep until the next command
+##     snapshot); then sleep until the next command (or, when that pass left the husks unread, until they may be read again)
 ##   else: k = the governor's steps within the pool's room and the history samples; the dishes' world events for the window; run;
-##     copy out DSTATE, STATS and the family events; publish; answer the questions asked; push to the worker; rest
+##     answer the questions asked; copy out DSTATE, STATS and the family events; publish (with the asked-after bups' places); push to the
+##     worker; rest
 ##
 ## Shared textures: the core makes them on this device; `texture_handles` gives their native handles (for the main device to import,
 ## after a sync, which every publish has done), and `texture_bound` is how the main side tells each texture it used, on which frame and
@@ -68,6 +70,7 @@ var _field_version := 0
 var _thumbs: ThumbsInfo = null  ## the newest thumbnails' atlas
 var _husk_view: Dictionary = {}  ## Snapshot.husk_view as last read
 var _husk_msec := -1000000
+var _husks_owed := false  ## a publish left the husks unread (read at most every HUSK_VIEW_MSEC): with nothing owed, a pass reads them then
 var _game_began := 0.0  ## s: the world time the game began at; the family tree's times count from it (WorldClient.begin_game)
 var _texture_rids := {}  ## kind -> the RIDs the handles were taken from
 var _texture_generation := 0
@@ -76,6 +79,8 @@ var _last_timing := {}
 var _last_events: Array = [0, 0]  ## the last iteration's births and deaths
 var _refusal := ""  ## why the iterations are being refused (the memory budget), while they are; "" once one runs
 var _pipettes: Array = []  ## pipettes waiting for their new dish's grid, made on the worker pool: {client, centre, radius, dest, reply, spec, made, task}
+var _grids := {}  ## the grid a pipette from the main view's dish would give its new dish, made ahead on the worker pool (`_make_grid_ahead`): key (`_grid_key`) -> {task, made}
+var _mass_um := 0.0  ## a bup's drawn length per unit of mass (SimConstants' mass_um)
 
 
 func _init(p_limits: PoolLimits = null, p_store: Object = null) -> void:
@@ -169,10 +174,12 @@ func _run() -> void:
 		return
 	_set_status("ready", true)
 	_set_status("alive", true)
+	_mass_um = float(SimConstants.build()["mass_um"])
 	while not _stopping():
 		for cmd in queue.drain():
 			_handle(cmd)
 		_finish_pipettes()
+		_make_grid_ahead()
 		if _stopping():
 			break
 		_give_bound()
@@ -180,7 +187,11 @@ func _run() -> void:
 		if k <= 0:
 			if _changed or _view_dirty:
 				_quiet_pass()
-			queue.wait()
+			if _husks_owed:
+				_wait_for_command(_husk_msec + HUSK_VIEW_MSEC)
+				_changed = true  # (a pass of no steps reads them)
+			else:
+				queue.wait()
 			continue
 		var busy := _iterate(k)
 		_rest(governor.rest_ms(busy))
@@ -189,6 +200,9 @@ func _run() -> void:
 		if p["reply"] != null:
 			p["reply"].complete(null, "shutdown")
 	_pipettes.clear()
+	for key: Array in _grids:
+		WorkerThreadPool.wait_for_task_completion(_grids[key]["task"])
+	_grids.clear()
 	_core.release()
 	_core = null
 	_set_status("alive", false)
@@ -295,7 +309,8 @@ func _iterate(k: int) -> float:
 	_last_timing = {
 		"iteration_ms": busy, "steps": ran, "step_ms_ema": governor.step_ms_ema, "duty": governor.duty,
 		"sync_ms": float(res.get("gpu_usec", 0)) / 1000.0, "record_ms": float(res.get("record_usec", 0)) / 1000.0,
-		"publish_ms": item["publish_ms"], "readback_ms": item["readback_ms"], "rest_ms": governor.rest_ms(busy), "run_ms": run_ms,
+		"publish_ms": item["publish_ms"], "readback_ms": item["readback_ms"], "answer_ms": item["answer_ms"],
+		"rest_ms": governor.rest_ms(busy), "run_ms": run_ms,
 		"births": _last_events[0], "deaths": _last_events[1],
 	}
 	item["timing"] = _timing()
@@ -315,6 +330,9 @@ func _quiet_pass() -> void:
 
 ## What the worker needs of the state now (bytes and plain values only: it never touches the device).
 func _results(steps: int, d: float, t0: float, samples: Array) -> Dictionary:
+	var t_answer := Time.get_ticks_usec()
+	_answer()  # (before the rows, which carry the answers: a pass answers what was asked before it)
+	var answer_ms := (Time.get_ticks_usec() - t_answer) / 1000.0
 	var t_read := Time.get_ticks_usec()
 	var rows: Array = []
 	var births := 0
@@ -359,12 +377,11 @@ func _results(steps: int, d: float, t0: float, samples: Array) -> Dictionary:
 	_refused = {}
 	var t_pub := Time.get_ticks_usec()
 	_publish()
-	_answer()
 	return {
 		"steps": steps, "delta": d, "t0": t0, "sim_time": governor.clock, "achieved": _achieved(), "paused": governor.paused,
 		"births": eb, "deaths": ed, "rows": rows, "stats": stats, "samples": samples, "worlds": worlds, "refused": refused,
 		"payload": _payload, "field_view": _field_view, "thumbs": _thumbs, "husk_view": _husk_view, "readback_ms": readback_ms,
-		"publish_ms": (Time.get_ticks_usec() - t_pub) / 1000.0, "game_began": _game_began,
+		"publish_ms": (Time.get_ticks_usec() - t_pub) / 1000.0, "answer_ms": answer_ms, "game_began": _game_began,
 	}
 
 
@@ -399,6 +416,12 @@ func _achieved() -> float:
 	return (governor.clock - float(first[1])) / span if span > 0.0 else 0.0
 
 
+## Sleeps until the real time `until_msec`, a command or the stop, whichever comes first.
+func _wait_for_command(until_msec: int) -> void:
+	while Time.get_ticks_msec() < until_msec and queue.size() == 0 and not _stopping():
+		OS.delay_usec(REST_SLICE_USEC)
+
+
 func _rest(ms: float) -> void:
 	var until := Time.get_ticks_usec() + int(ms * 1000.0)
 	while Time.get_ticks_usec() < until and not _stopping():
@@ -419,6 +442,7 @@ func _give_bound() -> void:
 func _publish() -> void:
 	if _view == null or not _rows.has(_view.row):
 		_view_dirty = false
+		_husks_owed = false
 		return
 	var now := Time.get_ticks_msec()
 	var v := ViewRequest.new()
@@ -430,10 +454,12 @@ func _publish() -> void:
 	v.steer_alpha = _view.steer_alpha
 	v.want_field_view = _view.want_field_view and (now - _field_msec >= FIELD_VIEW_MSEC or _view_dirty)
 	v.want_thumbnails = _view.want_thumbnails and now - _thumbs_msec >= THUMBS_MSEC
+	v.track = PackedInt64Array((_questions.get(_view.row, {}) as Dictionary).get("tracked", []))
 	_give_bound()
 	var out := _core.publish(v)
 	_take_handles()
-	if _view.want_husks and (now - _husk_msec >= HUSK_VIEW_MSEC or _view_dirty):
+	_husks_owed = _view.want_husks and not (now - _husk_msec >= HUSK_VIEW_MSEC or _view_dirty)
+	if _view.want_husks and not _husks_owed:
 		_husk_msec = now
 		_husk_view = {"row": _view.row, "version": int(_husk_view.get("version", 0)) + 1, "transforms": _core.husk_view(v.row)}
 	if out.has("payload"):
@@ -444,6 +470,7 @@ func _publish() -> void:
 		p.row = _view.row
 		p.generation = int((_handles.get("payload", {}) as Dictionary).get("generation", 0))
 		p.seq = _core.publish_seq
+		p.places = _places(out.get("tracked", {}))
 		_payload = p
 	if out.has("haze") or out.has("steer"):
 		_field_msec = now
@@ -467,6 +494,17 @@ func _publish() -> void:
 		t.tiles = _rows.duplicate()
 		_thumbs = t
 	_view_dirty = false
+
+
+## Where the bups the main view's dish asks after (its selected and hovered: WorldClient.ask's "tracked") are in the payload just published
+## (`found`: SimCore.publish's "tracked", looked up in the publish's own list): id -> Vector3(x, y, drawn length in µm), dish-local. The
+## camera's follow and the rings take a bup's place from the payload they draw, so neither lags the picture.
+func _places(found: Dictionary) -> Dictionary:
+	var out := {}
+	for id: int in found:
+		var r: PackedByteArray = found[id]
+		out[id] = Vector3(r.decode_float(GpuLayout.R_X * 4), r.decode_float(GpuLayout.R_Y * 4), r.decode_float(GpuLayout.R_MASS * 4) * _mass_um)
+	return out
 
 
 ## The native handles of every shared texture the core has made, taken again when a kind was made anew.
@@ -713,9 +751,10 @@ func _thaw(client: int, blob: DishBlob) -> void:
 
 
 ## The pipette's retarget into a new dish like the source, at client row `dest`. The new dish's grid (its landscape takes a while
-## in script: 135 ms for 100 cells across) is made on the worker pool while the dishes run on; the retarget is the first thing done once it
-## is ready, between iterations. The reply ({new_row, number, moved, ids}) comes from the worker after the store has the moved bups' new
-## home, in event order; a command about the source drained before then (a freeze, a trash) is done first.
+## in script: 135 ms for 100 cells across) is the one made ahead for the main view's dish when it is that one (`_make_grid_ahead`), or else
+## made on the worker pool now while the dishes run on; the retarget is the first thing done once it is ready, between iterations. The reply
+## ({new_row, number, moved, ids, pass_ms}) comes from the worker after the store has the moved bups' new home, in event order; a command about the
+## source drained before then (a freeze, a trash) is done first.
 func _pipette(client: int, centre: Vector2, radius: float, dest: int, reply: SimReply) -> void:
 	if not _rows.has(client):
 		_refused[dest] = "no such dish"
@@ -723,11 +762,46 @@ func _pipette(client: int, centre: Vector2, radius: float, dest: int, reply: Sim
 			reply.complete(null, "no such dish")
 		return
 	var spec := _core.receiver_spec(_rows[client])
+	var key := _grid_key(spec)
+	var ahead: Dictionary = _grids.get(key, {})
+	_grids.erase(key)
+	if ahead.is_empty():
+		ahead = _grid_task(spec)
+	_pipettes.append({"client": client, "centre": centre, "radius": radius, "dest": dest, "reply": reply, "spec": spec, "made": ahead["made"], "task": ahead["task"]})
+
+
+static func _grid_key(s: DishSpec) -> Array:
+	return [s.radius, s.resolution, s.patchiness, s.patch_seed]
+
+
+## {task, made}: `spec`'s grid being made on the worker pool (made["grid"] once the task is done).
+func _grid_task(spec: DishSpec) -> Dictionary:
 	var made := {}
 	var task := WorkerThreadPool.add_task(func() -> void:
 		made["grid"] = DishGrid.make(spec.radius, spec.resolution, spec.patchiness, spec.patch_seed)
 		queue.wake())
-	_pipettes.append({"client": client, "centre": centre, "radius": radius, "dest": dest, "reply": reply, "spec": spec, "made": made, "task": task})
+	return {"task": task, "made": made}
+
+
+## Makes ahead, on the worker pool, the grid a pipette from the main view's dish would give its new dish now (SimCore.receiver_spec's
+## size, settings and next number), so the pipette's retarget need not wait for it. One is made at a time; a grid no longer the one a
+## pipette would take (another dish took the number, the dish was resized, another dish came into view) is dropped once made.
+func _make_grid_ahead() -> void:
+	var busy := false
+	for key: Array in _grids.keys():
+		if WorkerThreadPool.is_task_completed(_grids[key]["task"]):
+			continue
+		busy = true
+	if busy or _view == null or not _rows.has(_view.row):
+		return
+	var spec := _core.receiver_spec(_rows[_view.row], false)
+	var key := _grid_key(spec)
+	for old: Array in _grids.keys():
+		if old != key:
+			WorkerThreadPool.wait_for_task_completion(_grids[old]["task"])
+			_grids.erase(old)
+	if not _grids.has(key):
+		_grids[key] = _grid_task(spec)
 
 
 ## The pipettes whose new dish's grid is ready, done now in the order they were asked.
@@ -745,7 +819,9 @@ func _retarget(client: int, centre: Vector2, radius: float, dest: int, reply: Si
 		if reply != null:
 			reply.complete(null, "no such dish")
 		return
+	var t0 := Time.get_ticks_usec()
 	var res := _core.pipette(_rows[client], centre, radius, spec, grid)
+	var pass_ms := (Time.get_ticks_usec() - t0) / 1000.0
 	if res.is_empty():
 		_refused[dest] = _core.errors[-1] if not _core.errors.is_empty() else "the pipette was refused"
 		if reply != null:
@@ -763,7 +839,7 @@ func _retarget(client: int, centre: Vector2, radius: float, dest: int, reply: Si
 		if st != null and ids.size() > 0:
 			st.retarget_ids(ids, number)
 		if reply != null:
-			reply.complete({"new_row": dest, "number": number, "moved": moved, "ids": ids}))
+			reply.complete({"new_row": dest, "number": number, "moved": moved, "ids": ids, "pass_ms": pass_ms}))
 
 
 ## A running dish's settings: the bloom is its world's; the feed, upkeep, limit and flags the core's (SimCore.set_params), and the flags'

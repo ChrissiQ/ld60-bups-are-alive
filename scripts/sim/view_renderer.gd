@@ -76,6 +76,7 @@ var _answers := {}  ## "hover" / "click" -> the last pick answer
 var _follow: Array = []  ## ids whose place is looked up (at every build, and when the list changes)
 var _follow_asked := false  ## the list changed since the last look-up
 var _places := {}  ## id -> Vector3(x, y, length) from the last answer
+static var _defs := {}  ## KERNELS' definitions (GpuKernels.all's), taken by the first view made
 
 
 ## `device`: a local device to run on instead of the main one (tools: `build` there is submitted and waited for).
@@ -86,11 +87,11 @@ func _init(limits_frame_queue := 2, device: RenderingDevice = null) -> void:
 	if rd == null:
 		errors.append("no main rendering device")
 		return
-	var defs := {}
-	var all := GpuKernels.all()
-	for kname: String in KERNELS:
-		defs[kname] = all[kname]
-	var shaders := ShaderSet.imported(defs)
+	if _defs.is_empty():  # (GpuKernels.all writes every kernel's text, about 17 ms [measured, M1 Pro]: once a run, not once a dish)
+		var all := GpuKernels.all()
+		for kname: String in KERNELS:
+			_defs[kname] = all[kname]
+	var shaders := ShaderSet.imported(_defs)
 	_on_device(func() -> void: _made = shaders.create(rd))
 	errors.append_array(shaders.errors)
 	for kname: String in KERNELS:

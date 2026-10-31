@@ -166,6 +166,10 @@ var pick_mode := PickMode.ALL:  ## the select tool ignores whatever this leaves 
 		if not looks_at_husks():
 			selected.husk = NO_HUSK
 var _hover_pos := Vector2.ZERO  ## where the pointer was when `hovered` was picked
+var _hover_slack := 0.0  ## and the slack it was picked with
+var _hover_waiting := false  ## the picture has not yet answered whether a bup is at `_hover_pos`: `hovered` is empty until it does
+var _hover_known := false  ## `hovered` is what is at `_hover_pos` (it may be nothing): a click there takes it
+var _click_at := Vector2.INF  ## a click made before the hover there was answered: it selects what the hover finds once it does
 var selected := DishPick.new()  ## what was clicked (`selection_changed` fires when its bup changes)
 var hovered := DishPick.new()  ## what is under the pointer
 const NO_HUSK := DishPick.NO_HUSK
@@ -319,12 +323,25 @@ func refresh_drawing() -> void:
 	drawing.refresh()
 
 
-## The lightning flash fades in real time, so it still clears while the sim is paused. The questions about the bups and the medium
-## the screen shows are sent when they change, and the picture is brought up to date (DishDrawing.process), once a frame.
+## The lightning flash fades in real time, so it still clears while the sim is paused. A hover the picture has not answered yet is asked
+## again until it is (then a click made meanwhile takes what it found), the questions about the bups and the medium the screen shows are
+## sent when they change, and the picture is brought up to date (DishDrawing.process), once a frame.
 func _process(delta: float) -> void:
 	flash = maxf(0.0, flash - delta * 1.5)
+	if _hover_waiting:
+		hover_at(_hover_pos, _hover_slack)
+	if _click_at.is_finite() and not _hover_waiting:
+		if _hover_is_at(_click_at):
+			selected.set_to(hovered)
+		_click_at = Vector2.INF
 	_ask()
 	drawing.process()
+
+
+## The picture this frame (DishDrawing.take_payload): the screen takes it before it moves the camera, so a followed bup's place is the
+## one drawn.
+func take_picture() -> void:
+	drawing.take_payload()
 
 
 ## Everything that belongs to one run of a dish and must start fresh with a new or loaded dish.
@@ -335,6 +352,7 @@ func _reset_runtime_state() -> void:
 	watch_version += 1
 	clear_selection()
 	clear_hover()
+	_click_at = Vector2.INF
 	_extinct_signalled = false
 	_state = null
 	_answers = {}
@@ -506,7 +524,8 @@ func freeze() -> SimReply:
 
 
 ## The pipette: the bups within `disc_radius` of the world point move, alive and with their ids, into a new dish like this one.
-## The reply's value: {new_row, number, moved, ids} (null when refused). The screen makes the new dish's node with `adopt`.
+## The reply's value: {new_row, number, moved, ids, pass_ms: the retarget pass on the sim thread} (null when refused). The screen makes
+## the new dish's node with `adopt`.
 func pipette(world_pos: Vector2, disc_radius: float) -> SimReply:
 	if row < 0:
 		return null
@@ -943,10 +962,10 @@ func fraction_with_gene_at_least(gene: String, threshold: float) -> float:
 	return float(ds.fractions.get(name, 0.0)) if ds != null else 0.0
 
 
-## The id of the bup under a world position, or -1 (the picture's pick, ViewRenderer.pick: the answer to the question asked a frame or two
-## before). `slack` widens the target (e.g. for small bups).
+## The id of the bup under a world position, or -1 (the picture's pick, DishDrawing.pick: the answer to the same question asked a few
+## frames before; -1 too until that answer comes). `slack` widens the target (e.g. for small bups).
 func cell_at(world_pos: Vector2, slack: float = 0.0, hover := false) -> int:
-	return drawing.pick(world_pos - global_position, slack, hover)
+	return maxi(drawing.pick(world_pos - global_position, slack, hover), -1)
 
 
 ## The distance to the nearest bup (-1 if there is none) and how many lie within SOURCE_NEARBY of the hovered point (the picture's).
@@ -978,29 +997,42 @@ func source_at(world_pos: Vector2, slack: float = 0.0) -> NutrientSource:
 
 ## Select-tool picking. Where they overlap a source wins over a bup (a source is small and
 ## usually crowded by bups, so if there is one under the pointer it is what is being aimed at);
-## picking empty ground selects nothing, which is how a selection is let go.
+## picking empty ground selects nothing, which is how a selection is let go. A click takes what the hover found where it rests (in a crowd
+## that moves, a fresh pick would often be another bup); where the hover has no answer yet, the point is hovered, and the click takes what
+## that finds once the picture answers (`_process`), unless the pointer has moved on.
 func select_at(world_pos: Vector2, slack: float = 0.0) -> void:
-	if _hover_is_at(world_pos):  # (a click where the pointer rests takes what is outlined: in a crowd that moves, a fresh pick would often be another bup)
-		selected.set_to(hovered)
+	_click_at = Vector2.INF
+	if not _hover_is_at(world_pos):
+		hover_at(world_pos, slack)
+	if _hover_waiting:
+		_click_at = world_pos
 		return
-	selected.set_to(_pick(world_pos, slack))
+	selected.set_to(hovered)
 
 
-## Whether something is outlined by a hover made at (nearly) this point.
+## Whether the hover was answered at (nearly) this point (what it found may be nothing).
 func _hover_is_at(world_pos: Vector2) -> bool:
-	return not hovered.is_empty() and _hover_pos.distance_to(world_pos) <= HOVER_CLICK_PIXELS * pixel()
+	return _hover_known and _hover_pos.distance_to(world_pos) <= HOVER_CLICK_PIXELS * pixel()
 
 
+## What is under the pointer at `world_pos`. Until the picture answers whether a bup is there, nothing is outlined, and the dish asks again
+## each frame (`_process`).
 func hover_at(world_pos: Vector2, slack: float = 0.0) -> void:
 	_hover_pos = world_pos
-	hovered.set_to(_pick(world_pos, slack, true))
+	_hover_slack = slack
+	var picked := _pick(world_pos, slack, true)
+	_hover_waiting = picked == null
+	_hover_known = picked != null
+	hovered.set_to(picked if picked != null else DishPick.new())
 
 
 ## What is under a world position, of the kinds the pick mode looks at: only the first of a source, a bup, a plankton and a husk
-## (in that order) that is there, the others being none.
+## (in that order) that is there, the others being none. Null while the picture has not answered whether a bup is there.
 func _pick(world_pos: Vector2, slack: float, hover := false) -> DishPick:
 	var source: NutrientSource = source_at(world_pos, slack) if looks_at_sources() else null
-	var bup := cell_at(world_pos, slack, hover) if source == null and looks_at_bups() else -1
+	var bup := drawing.pick(world_pos - global_position, slack, hover) if source == null and looks_at_bups() else -1
+	if bup == DishDrawing.UNKNOWN:
+		return null
 	var floating: Plankton = plankton_at(world_pos, slack) if source == null and bup < 0 and looks_at_plankton() else null
 	var husk := husk_at(world_pos, slack) if source == null and bup < 0 and floating == null and looks_at_husks() else NO_HUSK
 	var picked := DishPick.new()
@@ -1101,6 +1133,8 @@ func contains(world: Vector2) -> bool:
 
 func clear_hover() -> void:
 	hovered.clear()
+	_hover_waiting = false
+	_hover_known = false
 	_husk_point = Vector2.INF
 	place_preview_kind = Preview.BRUSH
 
