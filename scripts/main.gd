@@ -7,10 +7,8 @@ const PIPETTE_PULSE_LOW := 0.35  ## the opacity it fades to
 const PIPETTE_STILL_ALPHA := 0.5  ## its opacity under reduced motion (lit, not pulsing)
 const TUTORIAL_ZOOM := 6.0  ## how close the tutorial brings the camera to a bup it asks the player to click
 const TUTORIAL_BUP_PIXELS := 18.0  ## the lit square round that bup is this far out on each side
-const MAX_DISHES := 20  ## the most dishes at once (the strip holds that many)
-const DISH_SPACING := 4.0e5  ## µm between the centres of the dishes in the shared world (clear of the largest dish, 90000 µm in radius, either side). They sit in a grid DISH_COLUMNS wide so no coordinate grows large: the renderer's single-precision positions would shake what is drawn far from the origin when zoomed in
-const DISH_COLUMNS := 5
-const VIEW_BITS := 19  ## render layers there are for dishes (the 2D world has twenty and the screen keeps the first): dishes this many places apart share one
+const MAX_DISHES := 1000  ## the most dishes running at once (the world has GpuLayout.D_MAX rows; a pipette's new dish takes one before its answer)
+const RECORD_BUDGET_USEC := 1000  ## the most of a frame spent recording the parked dishes' history samples (about 10 us a dish)
 
 @onready var dish: Dish = $Dish
 @onready var camera: Camera2D = $Camera
@@ -62,7 +60,7 @@ const VIEW_BITS := 19  ## render layers there are for dishes (the 2D world has t
 var free_mode := Session.mode == Session.Mode.FREE
 var save_path := SaveGame.PATH  ## where the game is saved and loaded from (a test sets a scratch file before the screen is in the tree)
 var tracker := GoalTracker.new()
-var dishes: Array[Dish] = []  ## every dish that runs; `dish` is the one in the main view (the others run beside it, see the strip)
+var dishes: Array[Dish] = []  ## every dish that runs; `dish` is the one in the main view and the only one shown (the others are parked, Dish.park: see the strip). Every dish sits at the screen's origin, so what is drawn is in the main dish's own coordinates
 var _view_before_extinct: Dish = null  ## the dish that was in the main view when the first dish in `_extinct_queue` was brought into view: the view goes back to it afterwards
 var _extinct_queue: Array[Dish] = []  ## dishes that have died out and are not yet deleted (the first is the one the screen has said so about)
 var _dish_numbers := {}  ## Dish -> its number (a number is never reused: a bup's "line from dish 2" stays true)
@@ -86,6 +84,9 @@ var _old_dish: Dish  ## the dish a pipette took bups from, while the question ab
 var _pipette_pending := {}  ## a pipette waiting for the simulation's answer: {reply, source}
 var _thawing := {}  ## row -> {entry, dish}: an unfrozen dish the simulation has not shown yet (its entry stays in the freezer until it has; a refusal puts it back as it was)
 var _asked_rows := {}  ## row -> the Dish added there, until a snapshot shows it (a refusal takes it out again)
+var _by_row := {}  ## world row -> the running dish in it (`_dish_in_row`)
+var _by_row_count := -1  ## how many dishes ran when `_by_row` was made
+var _to_record: Array = []  ## parked dishes holding history samples not yet recorded, oldest first (`_record_parked_history`; untyped: one may be freed meanwhile)
 var _save_pending: SimReply = null  ## a save waiting for the simulation's dishes (the goal's: the quit save waits for them instead)
 var _left_empty: Dish = null  ## the last running dish, died out while dishes are frozen: the next unfrozen dish takes its place
 var _vitals_width := 0.0  ## the widest the top bar's readout has been (see _update_hud)
@@ -338,6 +339,7 @@ func _process(delta: float) -> void:
 		stage_input.pan_with_keys(delta)
 	_finish_pipette()
 	_finish_replies()
+	_record_parked_history()
 	# The playback speed is how many seconds of simulation pass per real second: the simulation is told the frame's real length.
 	var done := _advance_world(delta)
 	if not paused and not menu_open:
@@ -363,8 +365,7 @@ func _process(delta: float) -> void:
 	graph.refresh()
 	_show_graph_choices()
 	watch_list.refresh()
-	dish_strip.main_dish = dish
-	dish_strip.main_zoomed_in = 2.0 * dish.radius * camera.zoom.x > minf(stage.size.x, stage.size.y) * 1.02
+	dish.want_thumbnails = dish_strip.visible
 	dish_strip.refresh(delta)
 	_update_hud()
 	_sync_bloom_panel()
@@ -417,7 +418,6 @@ func debug_state() -> Dictionary:
 		"following": stage_input.following_id,
 		"views_open": lineage.depth(),
 		"camera_position": [camera.position.x, camera.position.y],
-		"camera_follow_precision_um": absf(camera.position.x) * 6.0e-8,  # (the single-precision step of the renderer's coordinates at the camera: a zoomed-in view shakes by it times the zoom)
 		"stage_size": [stage.size.x, stage.size.y],
 		"ui_scale": UserSettings.ui_scale,
 		"graph": {
@@ -429,12 +429,12 @@ func debug_state() -> Dictionary:
 			"shown_time_s": graph._now(),
 		},
 		"tray_open": {"dish": inspector.dish_card.open, "graph": graph_section.open, "dish_details": dish_details.open, "all_details": all_details.open},
-		"dish_strip": {"visible": dish_strip.visible, "main_zoomed_in": dish_strip.main_zoomed_in},
+		"dish_strip": {"visible": dish_strip.visible, "tabs_made": dish_strip.tabs_made()},
 		"watched_total": dishes.reduce(func(n: int, d: Dish) -> int: return n + d.watched.size(), 0),
 		"world_time": world_time(),
 		"game_time": world_time() - game_began,
 		"waiting_for_sim": holds.stills_world(),
-		"dishes": dishes.map(func(d: Dish) -> Dictionary: return {"number": _dish_numbers[d], "bups": d.population(), "time": d.time, "history_origin": d.history.origin, "position": [d.global_position.x, d.global_position.y], "row": d.row, "husks": d.husk_count()}),
+		"dishes": dishes.map(func(d: Dish) -> Dictionary: return {"number": _dish_numbers[d], "bups": d.population(), "time": d.time, "history_origin": d.history.origin, "row": d.row, "husks": d.husk_count()}),
 		"freezer": freezer_shelf.entries.map(func(entry: Dictionary) -> Dictionary: return {"number": entry["number"], "bups": entry["bups"], "frozen_at": entry["data"].get("time", 0.0)}),
 	}
 
@@ -576,6 +576,20 @@ func _finish_replies() -> void:
 ## The newest snapshot: an added or unfrozen dish it shows is in the world for good (an unfrozen one leaves the freezer then, and takes the
 ## place of the last running dish if that one had died out).
 func _on_snapshot(snap: Snapshot) -> void:
+	var due := {}  # (the parked dishes hear only what they must not miss: new history samples, a new copy of their world, dying out)
+	for row: int in snap.history:
+		if not (snap.history[row] as Array).is_empty():
+			due[row] = true
+	for row: int in snap.worlds:
+		due[row] = true
+	for row: int in snap.totals.get("extinct", []):
+		due[row] = true
+	for row: int in due:
+		var d := _dish_in_row(row)
+		if d != null and d.is_parked():
+			var had := d.has_unrecorded()
+			if d.take_parked(snap) and not had:
+				_to_record.append(d)
 	for row: int in _asked_rows.keys():
 		var ds: DishState = snap.dishes.get(row)
 		if ds != null and ds.number == (_asked_rows[row] as Dish).number:
@@ -584,6 +598,34 @@ func _on_snapshot(snap: Snapshot) -> void:
 		var ds: DishState = snap.dishes.get(row)
 		if ds != null and ds.number == (_thawing[row]["dish"] as Dish).number:
 			_thawed(row)
+
+
+## Records the history samples the parked dishes were handed, oldest first, for at most RECORD_BUDGET_USEC a frame: a snapshot can bring a
+## sample for every dish at once, and recording a thousand at once would hold up a frame. (A history that is read records its own first.)
+func _record_parked_history() -> void:
+	var until := Time.get_ticks_usec() + RECORD_BUDGET_USEC
+	var k := 0
+	while k < _to_record.size() and Time.get_ticks_usec() < until:
+		var d: Variant = _to_record[k]
+		if is_instance_valid(d):
+			(d as Dish).record_history()
+		k += 1
+	if k > 0:
+		_to_record = _to_record.slice(k)
+
+
+## The running dish in world row `row` (null: none). The table is made again after a dish came, went or lost its row (`_by_row_count` -1),
+## and when a dish it has is in another row now.
+func _dish_in_row(row: int) -> Dish:
+	var found: Variant = _by_row.get(row)  # (untyped: a dish freed since the table was made is no Dish)
+	if _by_row_count != dishes.size() or (found != null and (not is_instance_valid(found) or (found as Dish).row != row)):
+		_by_row.clear()
+		_by_row_count = dishes.size()
+		for each in dishes:
+			if each.row >= 0:
+				_by_row[each.row] = each
+		found = _by_row.get(row)
+	return found
 
 
 func _thawed(row: int) -> void:
@@ -614,6 +656,7 @@ func _on_refused(row: int, _why: String) -> void:
 	else:
 		return
 	d.row = -1  # (its row is free again: the node must not hand it back)
+	_by_row_count = -1  # (the rows' table is made again)
 	if dishes.has(d) and dishes.size() > 1:
 		_remove_dish(d)
 	_show_banner(Strings.t("banner.memory_budget"), BANNER_SECONDS)
@@ -655,8 +698,7 @@ func _end_pipette_wait(resume: bool) -> void:
 ## then the new dish takes its place in the strip and the main view moves to it; a circle with nothing in it, or no room, makes none. The world stands
 ## still meanwhile, so the circle takes the bups that were in it.
 func pipette(world: Vector2, circle_radius: float) -> void:
-	if dishes.size() >= MAX_DISHES:
-		_show_banner(Strings.t("hud.banner_pipette_limit"), BANNER_BRIEF_SECONDS)
+	if _at_dish_limit():
 		return
 	if not _pipette_pending.is_empty():
 		return
@@ -689,8 +731,8 @@ func _finish_pipette() -> void:
 	var number := int(got["number"])
 	_next_dish_number = maxi(_next_dish_number, number + 1)
 	var receiver := Dish.new()
+	receiver.visible = false  # (it comes into view below; what it draws is made then)
 	add_child(receiver)
-	receiver.global_position = _free_slot_position()
 	receiver.adopt(int(got["new_row"]), number, source)
 	for layer: int in Dish.Layer.values():
 		receiver.show_layer(layer, dish.layer_shown(layer))
@@ -704,50 +746,47 @@ func _finish_pipette() -> void:
 	_ask_about_old_dish(source, int(got["moved"]), receiver)  # (play, which the pipette's timer was holding, goes on once that is answered)
 
 
-## Takes a dish into the set: the screen hears when it dies out or its selection changes (when it is the one in the main view), and the strip gets its thumbnail.
+## Takes a dish into the set: the screen hears when it dies out or its selection changes (when it is the one in the main view), and the strip gets its tab.
+## A dish that is not the one in the main view is parked (hidden, and doing nothing a frame).
 func _register_dish(d: Dish, number := -1) -> void:
 	var is_new := number < 0  # (a dish out of the freezer comes back under the number it had)
 	if is_new:
 		number = _next_dish_number
 	dishes.append(d)
+	_by_row_count = -1  # (the rows' table is made again)
 	_dish_numbers[d] = number
 	d.number = number
-	d.set_view_layer(_view_bit(d))
-	_apply_view_mask()
+	if d != dish:
+		d.park()
 	d.extinct.connect(_on_dish_extinct.bind(d))
 	d.selection_changed.connect(func() -> void:
 		if d == dish:
 			lineage.on_selection_changed())
-	dish_strip.add(d, number, get_world_2d(), _view_bit(d))
+	dish_strip.add(d, number)
 	if is_new:
 		_next_dish_number += 1
-	_set_picture_scales()
 	dish_strip.light(dish)
 
 
-## The render layer a dish is on (bits 1 to VIEW_BITS: a place far enough from another to share its layer is never in view with it).
-func _view_bit(d: Dish) -> int:
-	var slot := roundi(d.global_position.x / DISH_SPACING) + roundi(d.global_position.y / DISH_SPACING) * DISH_COLUMNS
-	return 1 + slot % VIEW_BITS
+## Whether the most dishes are running: then nothing that would add one (a pipette, an unfrozen dish) is done, and the banner says why (the
+## tray's dish actions show a warning meanwhile, `_show_graph_choices`).
+func _at_dish_limit() -> bool:
+	if dishes.size() < MAX_DISHES:
+		return false
+	_show_banner(Strings.t("banner.dish_limit"), BANNER_BRIEF_SECONDS)
+	return true
 
 
-## The main view shows the screen's own layer and the layer of the dish in the main view, and no other dish, however far it is zoomed out.
-func _apply_view_mask() -> void:
-	get_viewport().canvas_cull_mask = 1 | (1 << _view_bit(dish))
-
-
-## Where the dish in a place of the shared world has its centre.
-static func _slot_position(slot: int) -> Vector2:
-	return Vector2(DISH_SPACING * float(slot % DISH_COLUMNS), DISH_SPACING * float(slot / DISH_COLUMNS))
-
-
-## Another dish, run beside the main one in the same world, far enough away that the view of one is clear of the next (when zoomed in). It is started as `start` says (null: the usual
-## dish) at the world's time, and takes its place in the strip; the main view stays where it is. Returns it (a dish the graphics memory has no room for goes again, `_on_refused`).
+## Another dish, run beside the main one in the same world (parked: it shows in the strip). It is started as `start` says (null: the usual dish) at the
+## world's time; the main view stays where it is. Returns it, or null when the most dishes are running (nothing changes then); a dish the graphics memory
+## has no room for goes again (`_on_refused`).
 func add_dish(start: StartConditions, number := -1) -> Dish:
+	if _at_dish_limit():
+		return null
 	var d := Dish.new()
 	d.number = number if number >= 0 else _next_dish_number
+	d.visible = false  # (parked from the start: what it draws is made when it is first shown)
 	add_child(d)
-	d.global_position = _free_slot_position()
 	d.strike(start)
 	for layer: int in Dish.Layer.values():
 		d.show_layer(layer, dish.layer_shown(layer))  # (what is shown is one choice for every dish)
@@ -755,21 +794,6 @@ func add_dish(start: StartConditions, number := -1) -> Dish:
 	if d.row >= 0:
 		_asked_rows[d.row] = d
 	return d
-
-
-## The first place in the shared world no dish holds (a dish that went extinct leaves its place free).
-func _free_slot_position() -> Vector2:
-	var slot := 0
-	while dishes.any(func(other: Dish) -> bool: return other.global_position.is_equal_approx(_slot_position(slot))):
-		slot += 1
-	return _slot_position(slot)
-
-
-## A dish out of the main view is looked at only through its small picture in the strip, so its bups are sized for that (they would be too small to see at the
-## main view's zoom); the dish in the main view is drawn for the camera.
-func _set_picture_scales() -> void:
-	for d in dishes:
-		d.picture_scale = 0.0 if d == dish else DishStrip.THUMB / (2.0 * d.radius * DishStrip.MARGIN)
 
 
 ## The dish the view goes to when `d` leaves it: the one before it in the tabs, or the next when it is the first.
@@ -784,6 +808,7 @@ func _remove_dish(d: Dish) -> void:
 	if d == dish:
 		set_main_dish(_neighbour(d))
 	dishes.erase(d)
+	_by_row_count = -1  # (the rows' table is made again)
 	_dish_numbers.erase(d)
 	_extinct_queue.erase(d)
 	for row: int in _asked_rows.keys():
@@ -873,8 +898,7 @@ func trash_dish(d: Dish) -> void:
 func thaw(entry: Dictionary) -> void:
 	if not freezer_shelf.entries.has(entry) or entry.get("thawing", false):
 		return
-	if dishes.size() >= MAX_DISHES and not (dishes.size() == 1 and _left_empty != null):
-		_show_banner(Strings.t("hud.banner_unfreeze_limit"), BANNER_BRIEF_SECONDS)
+	if _at_dish_limit():
 		return
 	if _waits(entry):
 		entry["then"] = "thaw"
@@ -889,8 +913,8 @@ func thaw(entry: Dictionary) -> void:
 	DishHistory.pad(history, now - float(blob.world.get("time", now)))  # (the graph's time axis stays the world's)
 	blob.host["history"] = history
 	var d := Dish.new()  # (not struck: a new dish under its number would put founders' records under the frozen dish's own ids)
+	d.visible = false  # (parked: what it draws is made when it is first shown)
 	add_child(d)
-	d.global_position = _free_slot_position()
 	d.load_blob(blob)
 	if d.row < 0:  # (no row at all: as the graphics memory refusing it)
 		d.queue_free()
@@ -962,6 +986,9 @@ func _show_graph_choices() -> void:
 	all_details.visible = dishes.size() > 1  # (with one dish there is no "all")
 	freezer_shelf.actions.set_available(dishes.size() > 1)  # (the last running dish stays)
 	card_actions.set_available(dishes.size() > 1)
+	var full := dishes.size() >= MAX_DISHES
+	freezer_shelf.actions.set_at_limit(full)
+	card_actions.set_at_limit(full)
 
 
 ## Brings the dish `by` places along the tabs (wrapping round) into the main view.
@@ -976,13 +1003,15 @@ func set_main_dish(d: Dish) -> void:
 		return
 	_clear_selection()
 	stage_input.remember_view()
+	var old := dish
 	dish = d
+	old.clear_hover()
+	old.park()
+	d.unpark()
 	stage_input.dish = d
 	lineage.dish = d
 	inspector.dish = d
-	_apply_view_mask()
 	d.clear_hover()  # (what it was hovering when last in view is stale)
-	_set_picture_scales()
 	d.pick_mode = tool_options.pick_mode()
 	graph.dish = d
 	layers_panel.sync_from(d)
@@ -1016,11 +1045,9 @@ func _click(world: Vector2) -> void:
 		Toolbar.Tool.NUTRIENT:
 			dish.drop_nutrients(world, tool_options.nutrient_count())
 		Toolbar.Tool.SOURCE:
-			if dish.place_source(world, tool_options.source_rate()):
-				# The new source is what you will want to look at or adjust next: its panel opens, the tool stays.
+			if dish.place_source(world, tool_options.source_rate(), true):
+				# The new source is what you will want to look at or adjust next: it is selected when the world's copy has it (its panel opens); the tool stays.
 				tool_options.show_all()  # (a mode that skips sources would hide the one just placed)
-				dish.selected.bup = -1
-				dish.selected.source = dish.sources[-1]
 			elif dish.contains(world):
 				if dish.sources.size() >= Dish.MAX_SOURCES:
 					_show_banner(Strings.t("hud.banner_source_limit"), BANNER_BRIEF_SECONDS)
@@ -1115,7 +1142,7 @@ func _start_again() -> void:
 	_dish_numbers[dish] = 1
 	dish.number = 1
 	dish_strip.remove(dish)
-	dish_strip.add(dish, 1, get_world_2d(), _view_bit(dish))
+	dish_strip.add(dish, 1)
 	dish_strip.light(dish)
 	_begin_dish()
 	toolbar.set_paused(free_mode)
@@ -1158,24 +1185,17 @@ func _update_hud() -> void:
 	_update_all_details()
 
 
-## The all-dishes section: how many dishes run and how many bups they hold, and the traits averaged over every bup of every dish (each dish counts by its bups).
+## The all-dishes section: how many dishes run and how many bups they hold, and the traits averaged over every bup of every dish (each dish counts by its
+## bups), as the newest snapshot has them together (Snapshot.totals, worked out where the snapshot is made: nothing here looks at each dish).
 func _update_all_details() -> void:
 	if not all_details.open:
 		return
-	var total := 0.0
-	var sums := {}
-	for d in dishes:
-		var stats := d.population_stats()
-		var count := float(stats["count"])
-		total += count
-		for key: String in TraitRows.keys():
-			sums[key] = float(sums.get(key, 0.0)) + float(stats[key]) * count
-	var mean := {}
-	for key: String in TraitRows.keys():
-		mean[key] = float(sums.get(key, 0.0)) / total if total > 0.0 else 0.0
-	all_rows.show_stats(mean)
-	all_rows.set_lead_text("dishes", str(dishes.size()))
-	all_rows.set_lead_text("bups", UiText.thousands(total))
+	var totals := WorldClient.shared().latest().totals
+	if totals.is_empty():
+		return
+	all_rows.show_stats(totals["stats"])
+	all_rows.set_lead_text("dishes", UiText.thousands(dishes.size()))
+	all_rows.set_lead_text("bups", UiText.thousands(totals["count"]))
 
 
 ## The details key: the dish's details section opens or closes.
@@ -1206,6 +1226,8 @@ func _start_tutorial() -> void:
 	steps.append(_tour("tray", func() -> Rect2: return tool_options.get_global_rect()))
 	steps.append(_tour("sections", func() -> Rect2: return _in_tray(graph_section)))
 	steps.append(_tour("time", func() -> Rect2: return toolbar.pause_button.get_global_rect().merge(toolbar.speed_ultra_button.get_global_rect()).grow(4.0)))
+	if dish_strip.visible:  # (the tabs are there only while several dishes run)
+		steps.append(_tour("dishes", func() -> Rect2: return dish_strip.get_global_rect().grow(4.0)))
 	steps.append(_tour("layers", func() -> Rect2: return layers_panel.get_global_rect().grow(4.0)))
 	steps.append(_tour("pick_bup", _tutorial_bup_rect, func() -> bool: return dish.selected.bup >= 0, _tutorial_show_bup))
 	steps.append(_tour("info", func() -> Rect2: return _in_tray(inspector.info_panel)))

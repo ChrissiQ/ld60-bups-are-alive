@@ -106,6 +106,7 @@ const PROBE_SPEED := 20.0  ## the speed and sense range a point's probe is asked
 const PROBE_SENSE := 50.0
 const PROBE_MOVE := 1.0  ## µm a probed point must move before it is asked again
 const HUSK_HERE := 0.01  ## µm: how near a picked husk's place the husk asked after must lie (it is the husk there: a husk does not move)
+const SOURCE_HERE := 0.01  ## µm: how near the place a source was put a new source in the world's copy must lie to be that one
 
 var drawing := DishDrawing.new(self)  ## how the dish is drawn: the simulation's picture of its bups, the dish, the rings above the bups
 var world: WorldClient = null  ## the simulation's world (SimService's, taken when the dish first needs it)
@@ -145,9 +146,11 @@ var upkeep_factor := 1.0:  ## multiplies what staying alive costs every bup (its
 		upkeep_factor = maxf(value, 0.0)
 		_send_params({"upkeep": upkeep_factor})
 var plankton: Array[Plankton] = []  ## the plankton, as the newest copy of the dish's world has them (positions in the dish)
-var time := 0.0  ## the world's clock as the newest snapshot has it (one clock for every dish)
-var picture_scale := 0.0  ## above 0 (a dish that is not in the main view): the pixels one µm covers in its small picture in the strip
+var time := 0.0:  ## the world's clock as the newest snapshot has it (one clock for every dish, read alike whether the dish is in view or parked)
+	get:
+		return world.latest().sim_time if world != null and row >= 0 and world.latest().seq > 0 else time
 var flash := 0.0  ## lightning flash intensity, decays to 0
+var want_thumbnails := false  ## the screen shows every dish's small picture (the strip): the world is asked for the thumbnails' atlas with the main view
 var _layers_hidden := {}  ## Layer -> true for each one hidden
 
 ## Presentation state set by the screen that shows this dish (nothing here affects the sim).
@@ -171,7 +174,14 @@ var place_preview_pos := Vector2.ZERO
 var place_preview_radius := -1.0  ## < 0 hides the placement preview
 var place_preview_kind := Preview.BRUSH
 
-var history := DishHistory.new()  ## what the graph shows of this dish
+var history := DishHistory.new():  ## what the graph shows of this dish (a parked dish's samples are recorded when it is read: `take_parked`)
+	get:
+		if not _unrecorded.is_empty():
+			var samples := _unrecorded
+			_unrecorded = []
+			history.take(samples)
+		return history
+var _unrecorded: Array = []  ## history samples a parked dish was handed and has not recorded yet, oldest first
 var edit_count := 0  ## bumped by every change made to the dish by hand and by every new copy of its world, so screens can tell when to look again
 var patch_seed := 0  ## which landscape of richer and poorer patches the nutrient follows (see NUTRIENT_PATCHINESS)
 var watched: Array[int] = []  ## the bups the player is watching, newest first (see watch_bup); each holds a pin of this dish's number
@@ -193,6 +203,8 @@ var _husks_seen := {}  ## a picked husk's place -> what an answer last said of i
 var _world_time := 0.0  ## the world time of the newest copy of the dish's world (a source's `emitted` is as of then)
 var _pending_names := {}  ## id -> a name given before the bup's family record came (a founder's, right after `strike`)
 var _extinct_signalled := false
+var _parked := false  ## out of the main view (`park`): what the snapshots say of it is read when asked, not taken from each one
+var _source_to_select := Vector2.INF  ## where a source was just placed with `select`: it is selected when the copy of the world that has it comes
 var _seed := 0  ## the dish's seed for the world (0: the world draws one from its own and the number)
 var _rng := RandomNumberGenerator.new()  ## where the founders lie and the patches' landscape
 static var _constants := {}  ## SimConstants.build(), for RecordCodec
@@ -205,8 +217,73 @@ func _init() -> void:
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR  # the haze is a small texture stretched over the dish
-	drawing.build_children()
+	if visible:
+		drawing.build_children()
 	_world()
+
+
+## A dish out of the main view is hidden and does nothing a frame (`park`); what it draws is made the first time it is shown.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_VISIBILITY_CHANGED and visible and is_inside_tree() and drawing.bups_mesh == null:
+		drawing.build_children()
+
+
+## The dish leaves the main view: it is hidden, does nothing a frame, and takes back the questions it asked about what was picked (the
+## screen let go of them first). It no longer hears each snapshot: its count and figures are read from the newest when asked, and the screen
+## hands it what it must not miss (`take_parked`), so a thousand parked dishes cost a snapshot nothing.
+func park() -> void:
+	visible = false
+	process_mode = Node.PROCESS_MODE_DISABLED
+	_ask()
+	drawing.forget_view()  # (back in view, it tells the world afresh what it shows: the world has shown another dish meanwhile)
+	_parked = true
+	if world != null and world.snapshot_changed.is_connected(_on_snapshot):
+		world.snapshot_changed.disconnect(_on_snapshot)
+
+
+## The dish comes into the main view: shown and run every frame again, and it hears every snapshot (the newest at once).
+func unpark() -> void:
+	process_mode = Node.PROCESS_MODE_INHERIT
+	visible = true
+	if not _parked:
+		return
+	_parked = false
+	_on_snapshot(_world().latest())
+
+
+func is_parked() -> bool:
+	return _parked
+
+
+## What a snapshot brings a parked dish that it must not miss: its history's samples, a new copy of its world, and that it has died out. The
+## screen calls it only for a dish the snapshot has one of these for; the rest (the count, the figures, the time) is read when asked. The
+## samples are only kept here (recording a thousand dishes' samples at once would hold up a frame): they are recorded when the history is
+## next read, which the screen does for a few parked dishes a frame (`record_history`). Returns whether samples were kept.
+func take_parked(snap: Snapshot) -> bool:
+	if row < 0:
+		return false
+	var ds: DishState = snap.dishes.get(row)
+	if ds == null or ds.number != _number():
+		return false
+	_state = ds
+	var samples: Array = snap.history.get(row, [])
+	_unrecorded.append_array(samples)
+	var copy: DishWorldCopy = snap.worlds.get(row)
+	if copy != null and copy.version != _world_version:
+		_take_world(copy)
+	if ds.extinct and not _extinct_signalled:
+		_extinct_signalled = true
+		extinct.emit()
+	return not samples.is_empty()
+
+
+## Records the samples a parked dish was handed (reading the history does it).
+func record_history() -> void:
+	var _read := history  # (reading it records them)
+
+
+func has_unrecorded() -> bool:
+	return not _unrecorded.is_empty()
 
 
 ## A dish that leaves the screen leaves the world too (a trash); a frozen dish has left it already.
@@ -219,8 +296,9 @@ func _exit_tree() -> void:
 func _world() -> WorldClient:
 	if world == null:
 		world = WorldClient.shared()
-	if not world.snapshot_changed.is_connected(_on_snapshot):
+	if not _parked and not world.snapshot_changed.is_connected(_on_snapshot):
 		world.snapshot_changed.connect(_on_snapshot)
+	if not world.refused.is_connected(_on_refused):
 		world.refused.connect(_on_refused)
 	return world
 
@@ -249,11 +327,6 @@ func _process(delta: float) -> void:
 	drawing.process()
 
 
-## Makes the bups' picture for the strip's small one of this dish just before the strip has it drawn.
-func prepare_picture(scale: float) -> void:
-	drawing.prepare_picture(scale)
-
-
 ## Everything that belongs to one run of a dish and must start fresh with a new or loaded dish.
 func _reset_runtime_state() -> void:
 	for id in watched:
@@ -269,6 +342,8 @@ func _reset_runtime_state() -> void:
 	_fractions = {}
 	_pending_names = {}
 	_world_version = -1
+	_unrecorded = []
+	_source_to_select = Vector2.INF
 	_husk_point = Vector2.INF
 	_husks_seen = {}
 	_sources_by_id = {}
@@ -511,6 +586,10 @@ func _take_world(copy: DishWorldCopy) -> void:
 		var source: NutrientSource = _sources_by_id.get(s["id"])
 		if source == null:
 			source = NutrientSource.new(at, s["rate"])
+			if _source_to_select.is_finite() and (s["pos"] as Vector2).distance_to(_source_to_select) <= SOURCE_HERE:
+				_source_to_select = Vector2.INF
+				selected.bup = -1
+				selected.source = source
 		source.pos = at
 		source.rate = s["rate"]
 		source.emitted = s.get("emitted", 0.0)
@@ -566,20 +645,15 @@ func _ask() -> void:
 
 
 func _flush_names() -> void:
+	if _pending_names.is_empty():
+		return
 	var store := lineage_store()
-	if _pending_names.is_empty() or store == null:
+	if store == null:
 		return
 	for id: int in _pending_names.keys():
 		if store.has_record(id):
 			store.set_custom_name(id, _pending_names[id])
 			_pending_names.erase(id)
-
-
-## Puts the dish, and everything it draws, on one render layer of the 2D world (bit 0 is the default layer, which the rest of the screen is on). A camera that does not
-## look at that layer does not see the dish, so a dish never shows beside another however far the view is zoomed out.
-func set_view_layer(bit: int) -> void:
-	for node: Node in [self] + find_children("*", "CanvasItem", true, false):
-		(node as CanvasItem).visibility_layer = 1 << bit
 
 
 ## A dish that joins a world already under way begins at the world's time, and its history begins then too.
@@ -626,9 +700,19 @@ static func feed_per_second(density: float) -> float:
 
 # --- The bups --------------------------------------------------------------------------------
 
+## What the newest snapshot says of the dish (null until one has it): taken from each snapshot while in view, looked up while parked.
+func _now() -> DishState:
+	if _parked and world != null and row >= 0:
+		var ds: DishState = world.latest().dishes.get(row)
+		if ds != null and ds.number == _number():
+			_state = ds
+	return _state
+
+
 ## How many bups the newest snapshot counts in the dish.
 func population() -> int:
-	return _state.count if _state != null else 0
+	var ds := _now()
+	return ds.count if ds != null else 0
 
 
 ## Whether `id` is alive in this dish (its family record is alive and its home is this dish).
@@ -839,8 +923,9 @@ func unwatch_bup(id: int) -> void:
 ## The count and averages the readouts show (DishState.STATS_KEYS: each gene, "harm", "mutations", and "generation", the population's: the
 ## mean of its bups' divisions), as the newest snapshot has them.
 func population_stats() -> Dictionary:
-	if _state != null and not _state.stats.is_empty():
-		return _state.stats
+	var ds := _now()
+	if ds != null and not ds.stats.is_empty():
+		return ds.stats
 	var none := {}
 	for k: String in DishState.STATS_KEYS:
 		none[k] = 0 if k == "count" else 0.0
@@ -854,7 +939,8 @@ func fraction_with_gene_at_least(gene: String, threshold: float) -> float:
 		if _fractions.size() >= GpuKernels.FRACTIONS:
 			_fractions.clear()  # (asked for something else now: the old pairs go)
 		_fractions[name] = [gene, threshold]
-	return float(_state.fractions.get(name, 0.0)) if _state != null else 0.0
+	var ds := _now()
+	return float(ds.fractions.get(name, 0.0)) if ds != null else 0.0
 
 
 ## The id of the bup under a world position, or -1 (the picture's pick, ViewRenderer.pick: the answer to the question asked a frame or two
@@ -950,7 +1036,8 @@ func has_husks() -> bool:
 
 ## How many husks lie in the dish, as the newest snapshot counts them.
 func husk_count() -> int:
-	return _state.husk_count if _state != null else 0
+	var ds := _now()
+	return ds.husk_count if ds != null else 0
 
 
 func looks_at_husks() -> bool:
@@ -1067,7 +1154,7 @@ func can_place_at(world_pos: Vector2) -> bool:
 
 ## Adds a feeder inside the dish (it shows from the next copy of the dish's world on). Returns false when the dish can't take another, or
 ## the spot can't hold one (too close to the rim).
-func place_source(world_pos: Vector2, rate: float) -> bool:
+func place_source(world_pos: Vector2, rate: float, select := false) -> bool:
 	if sources.size() >= MAX_SOURCES or not can_place_at(world_pos) or row < 0:
 		return false
 	var e := WorldEdit.new()
@@ -1076,6 +1163,8 @@ func place_source(world_pos: Vector2, rate: float) -> bool:
 	e.amount = clampf(rate, MIN_SOURCE_RATE, MAX_SOURCE_RATE)
 	_world().edit_world(row, e)
 	edit_count += 1
+	if select:
+		_source_to_select = e.position
 	return true
 
 
@@ -1248,8 +1337,6 @@ func plankton_draw_radius() -> float:
 ## How many screen pixels one µm of this dish covers: the camera's zoom and the dish's own scale (a setup
 ## preview is a shrunken dish) together.
 func screen_scale() -> float:
-	if picture_scale > 0.0:
-		return picture_scale
 	return maxf(get_global_transform_with_canvas().get_scale().x, 0.0001)
 
 

@@ -192,6 +192,8 @@ func _iteration(item: Dictionary) -> void:
 	snap.payload = published
 	snap.field_view = item["field_view"]
 	snap.husk_view = item.get("husk_view", {})
+	snap.thumbs = item.get("thumbs")
+	snap.totals = DishState.aggregate(snap.dishes)
 	var timing: Dictionary = (item["timing"] as Dictionary).duplicate()
 	timing["lineage_ms"] = lineage_us / 1000.0
 	timing["worker_queue"] = queued()

@@ -239,7 +239,7 @@ def motion_section():
              ("Banner on screen", secs(gd("scripts/main.gd", "BANNER_BRIEF_SECONDS")) + "; a completed goal's, " + secs(gd("scripts/main.gd", "BANNER_SECONDS"))),
              ("Readout rewrite at high speed, at most every", secs(gd("ui/readout.gd", "LIVE_TEXT_MSEC") / 1000)),
              ("Dish picture redraw", secs(gd("ui/dish_strip.gd", "REFRESH_SECONDS"))),
-             ("Held tab arrow repeats after", secs(gd("ui/dish_strip.gd", "REPEAT_DELAY")) + ", then every " + secs(gd("ui/dish_strip.gd", "REPEAT_EVERY")))]
+             ("Held tab arrow repeats after", secs(gd("ui/dish_strip.gd", "REPEAT_DELAY")) + ", then every " + secs(gd("ui/dish_strip.gd", "REPEAT_EVERY")) + "; a whole view at a time once held " + secs(gd("ui/dish_strip.gd", "PAGE_AFTER")))]
     return ('<div class="group" id="motion"><h3>Pulses</h3><p class="note">Reduce motion (Options; follows the system) also stops the title flicker, and the story\'s opening flash and prompt pulse.</p>%s</div>'
             '<div class="group" id="timing"><h3>Timing</h3>%s</div>'
             % (table(["Pulse", "Opacity", "Each way", "Reduce motion"], "".join("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % tuple(e(x) for x in r) for r in pulses), ["22rem", "8rem", "8rem", None]),
@@ -298,6 +298,8 @@ def component_section():
         ("Yes or no setting", "ToggleRow", "On/Off, with a description below"),
         ("Number setting", "SettingRow", "Number, with slider or field"),
         ("Warning", "WarningIcon with Warning text", "Coral icon and text"),
+        ("Dish tab", "ChoiceButton in DishStrip", "A running dish in the top bar: its small picture (the dish, with its bups as brighter where denser) and its number; the dish in view is lit, the count of dishes beside the tabs. Only the tabs in view are made, so a thousand dishes scroll as a screenful does"),
+        ("Long list", "Freezer rows, dish tabs", "Rows or tabs of one size, made only where they are in view; a spacer stands for the rest"),
     ]
     use = table(["Component", "Theme variation or scene", "Use"], "".join("<tr><td>%s</td><td><code>%s</code></td><td>%s</td></tr>" % (e(a), e(b), e(c)) for a, b, c in parts), ["11rem", "22rem", None])
     return '<div class="group" id="states"><h3>Button states</h3>%s</div><div class="group" id="parts"><h3>Component list</h3>%s</div><div class="group" id="floating"><h3>Floating surfaces</h3>%s</div>' % (states, use, floating_section())

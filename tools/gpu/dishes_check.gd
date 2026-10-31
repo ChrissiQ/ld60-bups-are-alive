@@ -33,10 +33,10 @@ func _run() -> void:
 	var image := m.get_viewport().get_texture().get_image()
 	var path := OS.get_cmdline_user_args()[0] if OS.get_cmdline_user_args().size() > 0 else "dishes.png"
 	image.save_png(path)
-	var k := 0
-	for entry in m.dish_strip._entries:
-		entry["viewport"].get_texture().get_image().save_png(path.replace(".png", "_thumb%d.png" % k))
-		k += 1
+	for k in m.dishes.size():
+		var tile: Image = m.dish_strip.picture_of(m.dishes[k])
+		if tile != null:
+			tile.save_png(path.replace(".png", "_thumb%d.png" % k))
 	m.set_main_dish(third)
 	for i in 30:
 		await process_frame

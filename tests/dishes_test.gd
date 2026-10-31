@@ -6,7 +6,13 @@ extends SceneTree
 ##
 ## Expected values, written before the first run [derived from the rules in main.gd and FakeWorld; the fake's clock starts at 3,661 s and
 ## each frame stands for 1/60 s of real time, times the speed]:
-##  - a second dish joins the set and the strip (2 tabs), far from the first, on its own render layer; the next-dish step wraps.
+##  - a second dish joins the set and the strip (2 tabs); every dish sits at the origin and only the main view's dish is shown (the
+##    other is parked: hidden, not processing, nothing made to draw); the next-dish step wraps.
+##  - dishes of 100 bups (every mean 10) and 300 bups (every mean 20) show a speed of (100 x 10 + 300 x 20) / 400 = 17.5 in the
+##    all-dishes section, with 2 dishes and 400 bups [derived].
+##  - The source tool: a click selects nothing at once (the world's copy has not come), and the source placed once it has (1-2 frames).
+##  - At Main.MAX_DISHES (1,000) running: add, pipette and unfreeze are refused with banner.dish_limit, the dish actions show the warning,
+##    and nothing changes (dish count, next number, no ADD_DISH, THAW or PIPETTE sent); a trash frees a row and both work again.
 ##  - the dishes have one clock: their times are equal after any frame, and both move while the game runs.
 ##  - a dish that dies out (FakeWorld.kill) out of view: the game pauses on it with banner "DISH 2 WENT EXTINCT", one `extinct`
 ##    signal however many snapshots say so; resuming sends one REMOVE_DISH for its row and deletes it; the view goes to the dish before it
@@ -52,9 +58,8 @@ func _run() -> void:
 	m.toolbar.set_paused(false)
 	var other: Dish = m.add_dish(chosen)
 	TestUtil.check(m.dishes.size() == 2 and m.dish == first and m.dish_strip.visible and m.dish_strip.count() == 2, "a second dish joins the set and shows in the strip; the main view stays")
-	TestUtil.check(other.global_position.distance_to(first.global_position) >= m.DISH_SPACING, "it is far from the first in the shared world")
-	TestUtil.check(first.visibility_layer != other.visibility_layer and (m.get_viewport().canvas_cull_mask & other.visibility_layer) == 0 and (m.get_viewport().canvas_cull_mask & first.visibility_layer) != 0 and (m.get_viewport().canvas_cull_mask & 1) != 0, "the main view shows its own dish and the screen, and no other dish, however far it is zoomed out")
-	TestUtil.check(first.drawing.overlay.visibility_layer == first.visibility_layer and first.drawing.bups_mesh.visibility_layer == first.visibility_layer, "everything a dish draws is on its layer")
+	TestUtil.check(other.position == Vector2.ZERO and first.position == Vector2.ZERO, "every dish sits at the screen's origin (what is drawn is in the main dish's own coordinates)")
+	TestUtil.check(first.visible and not other.visible and other.is_parked() and not other.can_process() and other.drawing.bups_mesh == null, "only the dish in the main view is shown; the other is parked, does nothing a frame and has made nothing to draw")
 	m._step_dish(1)
 	TestUtil.check(m.dish == other, "the next-dish step goes to the second dish")
 	m._step_dish(1)
@@ -75,6 +80,12 @@ func _run() -> void:
 	TestUtil.check(m.camera.position.distance_to(other.global_position) <= other.radius, "the camera is on it")
 	m.dish_strip.dish_chosen.emit(first)
 	TestUtil.check(m.dish == first and m.camera.position.distance_to(first.global_position) <= first.radius, "the strip's click brings the first back")
+	m.set_main_dish(other)
+	await process_frame
+	m.set_main_dish(first)
+	await process_frame
+	var views := fake.calls_of(SimCommand.KIND_SET_VIEW)
+	TestUtil.check(not views.is_empty() and int(views[-1]["args"]["row"]) == first.row, "a dish back in view tells the world afresh what it shows (the last view asked is its row)")
 
 	# A dish that dies out: the game pauses on it and says so; resuming deletes it and goes to the dish before it.
 	var third: Dish = m.add_dish(chosen)
@@ -157,8 +168,100 @@ func _run() -> void:
 	await _pipette(m, fake, chosen)
 	m.queue_free()
 	await process_frame
+	await _all_dishes_and_source(fake)
+	await _limit(fake, chosen)
 	_graph_times()
 	TestUtil.finish(self, "DISHES TESTS OK")
+
+
+## The all-dishes figures are every bup of every dish averaged (a dish counts by its bups), read from the snapshot. And the source tool
+## selects the source it placed once the world's copy has it (it used to read the list before the copy came).
+func _all_dishes_and_source(fake: FakeWorld) -> void:
+	var start := TestUtil.small_start()
+	start.bups = 100
+	var m: Node = TestUtil.game_screen(self, start)
+	await process_frame
+	var more := TestUtil.small_start()
+	more.bups = 300
+	var second: Dish = m.add_dish(more)
+	fake.means[m.dish.row] = 10.0
+	fake.means[second.row] = 20.0
+	m.all_details.open = true
+	m.toolbar.set_paused(false)
+	for i in 3:
+		await process_frame
+	m.readout.forget(m.vitals)
+	m._update_hud()
+	var totals: Dictionary = WorldClient.shared().latest().totals
+	TestUtil.check(m.dish.population() == 100 and second.population() == 300 and is_equal_approx(float(totals["stats"]["speed"]), 17.5), "dishes of 100 and 300 bups with speeds 10 and 20 make a mean of 17.5 over every bup (%s)" % str(totals.get("stats", {}).get("speed")))
+	TestUtil.check(m.all_rows._rows["speed"].value_text == TraitRows.format("speed", 17.5) and m.all_rows._rows["bups"].value_text == "400" and m.all_rows._rows["dishes"].value_text == "2", "the all-dishes section shows it, with 2 dishes and 400 bups")
+	m.toolbar.select_tool(Toolbar.Tool.SOURCE)
+	var at := Vector2(40.0, 30.0)
+	m._click(at)
+	TestUtil.check(m.dish.selected.source == null, "a placed source is not selected before the world's copy has it (and nothing breaks)")
+	for i in 3:
+		await process_frame
+	var placed: NutrientSource = m.dish.selected.source
+	TestUtil.check(placed != null and m.dish.sources.has(placed) and placed.pos.distance_to(at) < 0.01, "once the copy has it, the source placed is selected")
+	fake.means.clear()
+	m.queue_free()
+	await process_frame
+
+
+## At the limit (Main.MAX_DISHES running): adding a dish, a pipette and an unfreeze are refused with the banner and a warning under the dish
+## actions, and change nothing (no dish, no number used, no command to the world); after a dish is trashed they work again.
+func _limit(fake: FakeWorld, chosen: StartConditions) -> void:
+	var m: Node = TestUtil.game_screen(self, chosen)
+	await process_frame
+	var spare: Dish = m.add_dish(chosen)
+	while m.dishes.size() < m.MAX_DISHES:
+		m.add_dish(chosen)
+	await process_frame
+	m.freeze_dish(spare)
+	for i in 3:
+		await process_frame
+	m.add_dish(chosen)
+	await process_frame
+	m.toolbar.set_paused(false)
+	await process_frame
+	TestUtil.check(m.dishes.size() == m.MAX_DISHES and m.freezer_shelf.entries.size() == 1, "%d dishes run and one is frozen" % m.dishes.size())
+	TestUtil.check(m.card_actions.limit_row.visible and m.freezer_shelf.actions.limit_row.visible, "the dish actions warn that the most dishes are running")
+	var number_before: int = m._next_dish_number
+	var adds := fake.calls_of(SimCommand.KIND_ADD_DISH).size()
+	var thaws := fake.calls_of(SimCommand.KIND_THAW).size()
+	var pipettes := fake.calls_of(SimCommand.KIND_PIPETTE).size()
+	m.banner.text = ""
+	TestUtil.check(m.add_dish(chosen) == null and m.banner.text == Strings.t("banner.dish_limit"), "adding a dish is refused with the banner (%s)" % m.banner.text)
+	m.banner.text = ""
+	m.pipette(Vector2.ZERO, 50.0)
+	TestUtil.check(m._pipette_pending.is_empty() and m.banner.text == Strings.t("banner.dish_limit"), "a pipette is refused with the banner")
+	m.banner.text = ""
+	m.thaw(m.freezer_shelf.entries[0])
+	TestUtil.check(m.freezer_shelf.entries.size() == 1 and not m.freezer_shelf.entries[0].has("thawing") and m.banner.text == Strings.t("banner.dish_limit"), "an unfreeze is refused with the banner, and the dish stays frozen")
+	for i in 2:
+		await process_frame
+	TestUtil.check(m.dishes.size() == m.MAX_DISHES and m._next_dish_number == number_before and fake.calls_of(SimCommand.KIND_ADD_DISH).size() == adds and fake.calls_of(SimCommand.KIND_THAW).size() == thaws and fake.calls_of(SimCommand.KIND_PIPETTE).size() == pipettes, "...and none of them changed anything")
+	m.trash_dish(m.dishes[5])
+	await process_frame
+	TestUtil.check(not m.card_actions.limit_row.visible, "with a dish fewer the warning goes")
+	var again: Dish = m.add_dish(chosen)
+	TestUtil.check(again != null and m.dishes.size() == m.MAX_DISHES, "and a dish can be added again")
+	m.trash_dish(again)
+	await process_frame
+	var bups_at: Vector2 = fake.place_of(m.dish.row, fake.ids_in(m.dish.row)[0])
+	m.pipette(bups_at, 30.0)
+	TestUtil.check(fake.calls_of(SimCommand.KIND_PIPETTE).size() == pipettes + 1, "and a pipette is sent again")
+	for i in 3:
+		await process_frame
+	TestUtil.check(m.dishes.size() == m.MAX_DISHES and m._old_dish != null, "...and makes its dish (%d running)" % m.dishes.size())
+	m._answer_old_dish("keep")
+	m.trash_dish(m.dishes[7])
+	m.thaw(m.freezer_shelf.entries[0])
+	for i in 3:
+		await process_frame
+	TestUtil.check(m.freezer_shelf.entries.is_empty() and m.dishes.size() == m.MAX_DISHES, "and a frozen dish unfrozen")
+	m.queue_free()
+	await process_frame
 
 
 ## The graph's times of a dish's samples, which the world takes at the multiples of DishHistory.INTERVAL of its own clock.

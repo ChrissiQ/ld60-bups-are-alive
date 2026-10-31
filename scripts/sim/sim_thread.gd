@@ -65,6 +65,7 @@ var _iterations := 0
 var _payload: PayloadInfo = null
 var _field_view: FieldViewInfo = null
 var _field_version := 0
+var _thumbs: ThumbsInfo = null  ## the newest thumbnails' atlas
 var _husk_view: Dictionary = {}  ## Snapshot.husk_view as last read
 var _husk_msec := -1000000
 var _game_began := 0.0  ## s: the world time the game began at; the family tree's times count from it (WorldClient.begin_game)
@@ -362,7 +363,7 @@ func _results(steps: int, d: float, t0: float, samples: Array) -> Dictionary:
 	return {
 		"steps": steps, "delta": d, "t0": t0, "sim_time": governor.clock, "achieved": _achieved(), "paused": governor.paused,
 		"births": eb, "deaths": ed, "rows": rows, "stats": stats, "samples": samples, "worlds": worlds, "refused": refused,
-		"payload": _payload, "field_view": _field_view, "husk_view": _husk_view, "readback_ms": readback_ms,
+		"payload": _payload, "field_view": _field_view, "thumbs": _thumbs, "husk_view": _husk_view, "readback_ms": readback_ms,
 		"publish_ms": (Time.get_ticks_usec() - t_pub) / 1000.0, "game_began": _game_began,
 	}
 
@@ -459,6 +460,12 @@ func _publish() -> void:
 		_field_view = f
 	if out.has("thumbs"):
 		_thumbs_msec = now
+		var t := ThumbsInfo.new()  # (a new one: the snapshots hand the last one out to the main thread)
+		t.texture_index = out["thumbs"]
+		t.seq = _core.publish_seq
+		t.version = (_thumbs.version if _thumbs != null else 0) + 1
+		t.tiles = _rows.duplicate()
+		_thumbs = t
 	_view_dirty = false
 
 

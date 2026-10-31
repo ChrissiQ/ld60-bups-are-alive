@@ -26,6 +26,7 @@ var speed := 1.0
 var paused := false
 var refusing_iteration := ""
 var device := "fake world"  ## what device_name() answers ("": a world with no device, which the record shows as CPU)
+var means := {}  ## row -> the mean every statistic of that dish shows (1 when not set)
 
 var _dishes := {}  ## row -> {number, spec: DishSpec, bups: {id: Vector2 (dish-local)}, next: the next id counter, had_bups, asked: ids, over: {id: {word: value}}, world: DishWorld, world_version, world_sent}
 var _next_number := 1
@@ -415,7 +416,7 @@ func _publish(t0: float) -> void:
 	for row: int in _dishes:
 		var d: Dictionary = _dishes[row]
 		var count: int = d["bups"].size()
-		var ds := FakeScenes.dish_state(d["number"], count)
+		var ds := FakeScenes.dish_state(d["number"], count, float(means.get(row, 1.0)))
 		ds.extinct = d["had_bups"] and count == 0
 		snap.dishes[row] = ds
 		var samples: Array = []
@@ -430,6 +431,7 @@ func _publish(t0: float) -> void:
 		if d["world_version"] != d["world_sent"]:
 			d["world_sent"] = d["world_version"]
 			snap.worlds[row] = _copy_of(d["world"], d["world_version"])
+	snap.totals = DishState.aggregate(snap.dishes)
 	snap.timing = {"refused": _refused, "refused_iteration": refusing_iteration}
 	_refused = {}
 	_snapshot = snap

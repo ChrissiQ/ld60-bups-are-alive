@@ -176,6 +176,18 @@ func _initialize() -> void:
 	TestUtil.check(not g.paused, "a game that was running runs again when the tour ends")
 	g.queue_free()
 
+	# With several dishes the tour shows the dish tabs (the step is not there with one dish: the tabs are hidden then).
+	var several: Node = await _screen(Session.Mode.FREE, false)
+	several.add_dish(TestUtil.small_start())
+	await process_frame
+	several._start_tutorial()
+	await process_frame
+	var titles: Array = several.tutorial._steps.map(func(s: Dictionary) -> String: return s["title"])
+	var at := titles.find(Strings.t("tutorial.title_dishes"))
+	TestUtil.check(at >= 0 and several.tutorial._steps.size() == 19 and (several.tutorial._steps[at]["target"] as Callable).call().encloses(several.dish_strip.get_global_rect()), "with two dishes the tour has a step on the dish tabs, which lights them (%d steps)" % several.tutorial._steps.size())
+	several.tutorial.skip()
+	several.queue_free()
+
 	# The saved start conditions and the setup toggle.
 	var c := StartConditions.new()
 	c.tutorial = false

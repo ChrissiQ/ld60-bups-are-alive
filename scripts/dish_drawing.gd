@@ -6,11 +6,16 @@ extends RefCounted
 ## plankton (`draw`, for Dish._draw), and the rings, the placement preview and the flash above the bups (`draw_overlay`, for the dish's
 ## DishOverlay). Nothing here changes the simulation. It is a part of its Dish and holds the nodes it draws with.
 ##
-## The dish in the main view (picture_scale 0) tells the world what it shows (WorldClient.set_view: its camera, the scale, whether the
+## The dish in the main view (the one shown: the others are parked, Dish.park) tells the world what it shows (WorldClient.set_view: its camera, the scale, whether the
 ## haze and the steering map are wanted, the selected bup's speed and sense range for the map, whether its husks are), offers the view each
 ## publish the world's playout shows (WorldClient.shown_payload) and the newest haze and steering map, with the shared textures' handles,
 ## and tells the world every texture the view used this frame and the publish it held (WorldClient.texture_bound), so the simulation never
 ## writes over one still in use. The rings follow the bups' places in the picture.
+
+const AGAR := Color(0.03, 0.06, 0.04)  ## the dish's dark agar
+const RIM := Color(0.45, 0.8, 0.6, 0.6)  ## its green-tinted glass rim
+const RIM_OUTER := Color(0.45, 0.8, 0.6, 0.2)  ## and the rim's faint outer line
+const THUMB_RIM_SIDES := 48  ## sides of a thumbnail's rim
 
 var dish: Dish
 var view: ViewRenderer = null  ## the main view's picture of this dish (made when the dish is first in the main view and the world publishes)
@@ -36,6 +41,8 @@ func _init(for_dish: Dish) -> void:
 
 ## A layer was shown or hidden: the bups' and the husks' pictures follow it, and the rings and the dish are drawn again.
 func layer_changed(layer: Dish.Layer, shown: bool) -> void:
+	if bups_mesh == null:
+		return  # (not drawn yet: its children are made, as the layers say, when it is first shown)
 	match layer:
 		Dish.Layer.BUPS:
 			bups_mesh.visible = shown
@@ -68,10 +75,12 @@ func build_children() -> void:
 	husks_mesh = MultiMeshInstance2D.new()  # (under the bups: one instance for every husk there is, drawn by the graphics card, so there is no limit on how many are shown)
 	husks_mesh.multimesh = husks
 	husks_mesh.self_modulate = Dish.HUSK_COLOR
+	husks_mesh.visible = dish.layer_shown(Dish.Layer.HUSKS) and dish.has_husks()
 	dish.add_child(husks_mesh)
 	bups_mesh = MultiMeshInstance2D.new()
 	bups_mesh.multimesh = multimesh
 	bups_mesh.material = material
+	bups_mesh.visible = dish.layer_shown(Dish.Layer.BUPS)
 	dish.add_child(bups_mesh)
 	overlay = DishOverlay.new()
 	overlay.dish = dish
@@ -97,7 +106,7 @@ func refresh() -> void:
 ## Once a frame (Dish._process): the dish in the main view tells the world what it shows, takes the publish to show, draws its bups and
 ## tells the world which textures it used.
 func process() -> void:
-	if bups_mesh == null or dish.picture_scale > 0.0 or dish.row < 0 or dish.world == null:
+	if bups_mesh == null or dish.row < 0 or dish.world == null:
 		return
 	var w := dish.world
 	_send_view(w)
@@ -137,7 +146,7 @@ func _send_view(w: WorldClient) -> void:
 		steer = Vector2(chosen["speed"], chosen["sense_range"])
 	var field := dish.layer_shown(Dish.Layer.MEDIUM) or (dish.layer_shown(Dish.Layer.STEERING) and dish.selected.bup >= 0)
 	var husks := dish.layer_shown(Dish.Layer.HUSKS) and dish.has_husks()
-	var key := [dish.row, camera, dish.pixel(), field, husks, steer]
+	var key := [dish.row, camera, dish.pixel(), field, husks, steer, dish.want_thumbnails]
 	if key == _view_sent:
 		return
 	_view_sent = key
@@ -146,10 +155,16 @@ func _send_view(w: WorldClient) -> void:
 	v.pixel_um = dish.pixel()
 	v.want_field_view = field
 	v.want_husks = husks
+	v.want_thumbnails = dish.want_thumbnails
 	v.steer = steer
 	v.haze = Vector3(Cell.DETECTION_FLOOR, 0.5 * 255.0 / sqrt(10.0 * Cell.HALF_SATURATION), 0.45 * 255.0)
 	v.steer_alpha = Dish.STEER_ALPHA
 	w.set_view(dish.row, v)
+
+
+## What the world was told of the view is forgotten, so it is told again next time (the dish left the main view).
+func forget_view() -> void:
+	_view_sent = []
 
 
 ## Makes the view once the world publishes (its backend hands out the shared textures' handles) and the main device can draw; false
@@ -221,11 +236,6 @@ func husks_drawn() -> int:
 	return husks_mesh.multimesh.visible_instance_count if husks_mesh != null and husks_mesh.visible else 0
 
 
-## A dish out of the main view is shown only in the strip, whose pictures are the world's thumbnails: nothing to make here.
-func prepare_picture(_scale: float) -> void:
-	pass
-
-
 ## Draws the bups from the view this frame: the MultiMesh holds the dish's limit and a twentieth more (more if the payload has more), and
 ## the view's kernels write the instances of the bups the camera sees into its buffer.
 func draw_bups_view() -> void:
@@ -281,9 +291,9 @@ func view_ring(id: int) -> Variant:
 ## lightning flash are on top of them (`draw_overlay`).
 func draw() -> void:
 	# Dish: dark agar, green-tinted glass rim.
-	dish.draw_colored_polygon(disc_outline(dish.radius), Color(0.03, 0.06, 0.04))  # (not draw_circle: it draws a big disc with few sides, and the flats show when the dish is bigger than the window)
-	dish.draw_arc(Vector2.ZERO, dish.radius, 0.0, TAU, 96, Color(0.45, 0.8, 0.6, 0.6), 3.0)
-	dish.draw_arc(Vector2.ZERO, dish.radius + 6.0, 0.0, TAU, 96, Color(0.45, 0.8, 0.6, 0.2), 2.0)
+	dish.draw_colored_polygon(disc_outline(dish.radius), AGAR)  # (not draw_circle: it draws a big disc with few sides, and the flats show when the dish is bigger than the window)
+	dish.draw_arc(Vector2.ZERO, dish.radius, 0.0, TAU, 96, RIM, 3.0)
+	dish.draw_arc(Vector2.ZERO, dish.radius + 6.0, 0.0, TAU, 96, RIM_OUTER, 2.0)
 
 	if dish.layer_shown(Dish.Layer.MEDIUM):
 		_draw_medium()
@@ -429,6 +439,20 @@ func _draw_pick_rings(canvas: CanvasItem, selected: Variant, hovered: Variant, o
 func draw_ring(canvas: CanvasItem, center: Vector2, object_radius: float, color: Color) -> void:
 	var px := dish.pixel()
 	canvas.draw_arc(center, Dish.ring_radius_pixels(object_radius / px) * px, 0.0, TAU, 64, color, px, true)
+
+
+## A dish's small picture in `rect` of the canvas item `ci`: the agar and the rim, and over them its tile of the thumbnails' atlas (where the
+## bups are, white, the denser the brighter: SimCore's thumbnails), when there is one (`atlas` null: the dish alone).
+static func draw_thumbnail(ci: RID, rect: Rect2, atlas: Texture2D, region: Rect2, modulate: Color) -> void:
+	var centre := rect.get_center()
+	var r := 0.5 * minf(rect.size.x, rect.size.y)
+	RenderingServer.canvas_item_add_circle(ci, centre, r, AGAR * modulate)
+	if atlas != null:
+		RenderingServer.canvas_item_add_texture_rect_region(ci, rect, atlas.get_rid(), region, modulate)
+	var rim := PackedVector2Array()
+	for i in THUMB_RIM_SIDES + 1:
+		rim.append(centre + Vector2.from_angle(TAU * i / THUMB_RIM_SIDES) * (r - 0.5))
+	RenderingServer.canvas_item_add_polyline(ci, rim, PackedColorArray([RIM * modulate]), 1.0, true)
 
 
 ## A circle as a polygon with enough sides that its flats are under a pixel at the biggest the dish is drawn.

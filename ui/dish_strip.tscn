@@ -30,7 +30,18 @@ vertical_scroll_mode = 0
 
 [node name="Row" type="HBoxContainer" parent="Bar/Scroll"]
 layout_mode = 2
+mouse_filter = 2
 theme_type_variation = &"SegmentRow"
+
+[node name="Lead" type="Control" parent="Bar/Scroll/Row"]
+visible = false
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Tail" type="Control" parent="Bar/Scroll/Row"]
+visible = false
+layout_mode = 2
+mouse_filter = 2
 
 [node name="Next" type="Button" parent="Bar"]
 visible = false
@@ -40,3 +51,8 @@ focus_mode = 0
 tooltip_text = "@dishes.scroll_right"
 icon = ExtResource("3")
 icon_alignment = 1
+
+[node name="Count" type="Label" parent="Bar"]
+layout_mode = 2
+theme_type_variation = &"Hint"
+vertical_alignment = 1

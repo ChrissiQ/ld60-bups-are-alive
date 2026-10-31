@@ -65,5 +65,10 @@ static func snapshot(dish_count: int, bups_per_dish: int, tracked := 2) -> Snaps
 	snap.field_view = FieldViewInfo.new()
 	snap.field_view.texture_index = 0
 	snap.field_view.n = 100
+	snap.thumbs = ThumbsInfo.new()
+	snap.thumbs.texture_index = 0
+	for row in dish_count:
+		snap.thumbs.tiles[row] = row
+	snap.totals = DishState.aggregate(snap.dishes)
 	snap.timing = {"iteration_ms": 25.0, "steps": 1, "step_ms_ema": 0.6, "duty": 0.5, "sync_ms": 0.1, "publish_ms": 0.1, "lineage_ms": 0.0}
 	return snap
