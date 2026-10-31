@@ -8,7 +8,7 @@ extends RefCounted
 ## - A dish sits at `place`: PLACE by default, away from the world's origin (as Main's second slot), so every world-to-dish conversion is
 ##   exercised. A test comparing reads with a fixture to 1e-4 puts it at the origin (Main's first slot): a world coordinate is a float32,
 ##   whose step at 4e5 µm is 0.03 µm, which moves a read on a cloud's flank by up to 0.2% (measured: point (1524, 247) of the fixture).
-## - `frame` tells the world the speed and pause each frame (Main._advance_world's call) with a frame of 1/60 s.
+## - `frame` tells the world the speed and pause each frame with the frame's real length (Main._advance_world's call).
 ## - `settle` waits until the sim thread has drained what was sent and the result worker has done what that queued (the LineageStore lags
 ##   the pool by the worker's queue): a check of the store against the pool is made paused and settled.
 ## - `fixture_dish` loads the queries_check state (tools/gpu/golden/parity: 20,000 bups, its nutrient grid and 60 clouds, radius 3000,
@@ -29,6 +29,7 @@ var world: WorldClient
 var camera: Camera2D
 var holder: Node2D  ## the nodes a test adds (added to the root while the test starts: the root takes no child later)
 var frames := 0
+var _last_usec := 0  ## when the last frame was told to the world (its real length is what the world is told, as Main tells it)
 var place := PLACE  ## where the next dish is put
 
 
@@ -47,10 +48,12 @@ static func start(p_tree: SceneTree, test_name: String) -> ParityGame:
 	return g
 
 
-## Waits for the sim thread to be ready (the world's device made and its kernels built). False when it failed.
-func world_ready() -> bool:
+## Waits for the sim thread to be ready (the world's device made and its kernels built), the test's camera current unless the test runs a
+## screen with its own (`own_camera` false). False when it failed.
+func world_ready(own_camera := true) -> bool:
 	await tree.process_frame
-	camera.make_current()
+	if own_camera:
+		camera.make_current()
 	var backend: Variant = world.backend
 	for i in WAIT_FRAMES:
 		var st: Dictionary = backend.status()
@@ -62,7 +65,10 @@ func world_ready() -> bool:
 
 ## One frame: the world is told the speed and whether it stands still, as Main does once a frame.
 func frame(speed := 1.0, paused := true) -> void:
-	world.set_time(speed, paused, FRAME)
+	var now := Time.get_ticks_usec()
+	var dt := clampf((now - _last_usec) / 1e6, 0.0, Governor.MAX_FRAME_SECONDS) if _last_usec > 0 else FRAME
+	_last_usec = now
+	world.set_time(speed, paused, dt)
 	await tree.process_frame
 	frames += 1
 
