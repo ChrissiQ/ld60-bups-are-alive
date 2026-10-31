@@ -1,12 +1,12 @@
 class_name Dish
 extends Node2D
-## The petri dish. The simulation itself (bups, genomes, the dissolved nutrient, stepping) runs in
-## the native BupSim (native/src), or on the GPU (GpuWorld); this node owns what surrounds it: selection and hover,
-## layers, nutrient sources, plankton, the history graph's samples, the choice of backend, and loading a save. Its drawing
-## is DishDrawing's (`drawing`) and its save format DishCodec's.
-## Lengths are µm and times are seconds of simulation time, which runs at real biological rates
-## (see Biology); the player's playback speed only multiplies how much of it passes per second.
-## Bups are named by a stable id (an int), since the native arrays compact as bups die.
+## The petri dish on the screen. Its bups, nutrient, clouds, husks, plankton and sources run in the simulation's pooled world (SimService's
+## WorldClient: a dish of it under `row`); this node is the dish's face: it asks for the dish (`strike`, `load_blob`), sends the player's
+## edits as commands, and shows what the snapshots say of it (its count and figures, its plankton and sources, the answers about the bups it
+## asks after, its history's samples) and the picture the simulation publishes for the main view (DishDrawing). It also keeps what is the
+## screen's own: selection and hover, layers, the watch list (pins in the shared LineageStore, held by the dish's number), names.
+## Lengths are µm and times are seconds of simulation time, which runs at real biological rates (see Biology); the player's playback
+## speed only multiplies how much of it passes per second. Bups are named by a stable id (an int).
 
 signal extinct
 enum PickMode { ALL, BACKGROUND, BUPS, SOURCES, PLANKTON, HUSKS }  ## what the select tool looks at: everything (a source over a bup), only the medium, only bups, only sources, only plankton or only husks
@@ -101,52 +101,51 @@ void fragment() {
 	COLOR.a *= body.w > 0.0 ? exp(-behind / (fade_pixels * pixel)) : 1.0;
 }
 """
-var sim := BupSim.new()  ## the native simulation core
-var field: NutrientField = sim.get_field()  ## the dissolved nutrient (owned by the simulation)
-var acetate: NutrientField = sim.get_acetate()  ## the second food, what fast growers let go of (same grid as `field`, no clouds)
-var drawing := DishDrawing.new(self)  ## how the dish is drawn: the bups' and husks' pictures, the dish, the rings above the bups
-var radius := DEFAULT_RADIUS:  ## physical size of the dish; it changes only with a new dish (`strike`, a load) or `resize_to`
-	set(value):
-		radius = value
-		_sync_render_capacity()
+
+const PROBE_SPEED := 20.0  ## the speed and sense range a point's probe is asked with (the founder's): only its concentration is shown
+const PROBE_SENSE := 50.0
+const PROBE_MOVE := 1.0  ## µm a probed point must move before it is asked again
+
+var drawing := DishDrawing.new(self)  ## how the dish is drawn: the simulation's picture of its bups, the dish, the rings above the bups
+var world: WorldClient = null  ## the simulation's world (SimService's, taken when the dish first needs it)
+var row := -1  ## the dish's row in the world (-1: not in it: not struck yet, frozen, refused or gone)
+var number := 0  ## the dish's number, as its bups' ids and its pins carry it; the screen sets it before `strike` (0 is taken as 1)
+var radius := DEFAULT_RADIUS  ## physical size of the dish; it changes only with a new dish (`strike`, a load) or `resize_to`
+var resolution := StartConditions.MIN_NUTRIENT_RESOLUTION  ## the most cells across its nutrient grid (StartConditions.nutrient_resolution)
 var bup_limit := StartConditions.DEFAULT_BUP_LIMIT:  ## the most bups the dish holds (chosen in free mode)
 	set(value):
 		bup_limit = clampi(value, 1, StartConditions.MAX_BUP_LIMIT)
-		sim.set_limit(bup_limit)
-		_sync_render_capacity()
+		_send_params({"limit": bup_limit})
 var nutrients_placed := 0  ## how many units of nutrient the player has dropped in by hand
-var sources: Array[NutrientSource] = []
+var sources: Array[NutrientSource] = []  ## the sources, as the newest copy of the dish's world has them (their positions global)
 var feed_density := 3.0:  ## units of nutrient fed in to each mm² of the dish every hour, spread evenly (a density, so the dish's size does not change it)
 	set(value):
 		feed_density = clampf(value, 0.0, StartConditions.MAX_FEED_DENSITY)
+		_send_params({"feed_density": feed_density})
 var medium_thickness := Biology.MEDIUM_THICKNESS  ## how many times thicker than water the medium is (see StartConditions.medium_thickness)
-var bloom_density := 0.0:  ## plankton appearing in each mm² of the dish every sim-day (24 hours), at steady intervals, at random places (a density: the dish's size sets how many a day that is, see `bloom_per_day`)
+var bloom_density := 0.0:  ## plankton appearing in each mm² of the dish every sim-day (24 hours), at steady intervals, at random places (see `bloom_per_day`)
 	set(value):
-		if value > 0.0 and bloom_density <= 0.0:
-			_bloom_due = time  # (turned on: the first appears at once)
 		bloom_density = clampf(value, 0.0, StartConditions.MAX_BLOOM_DENSITY)
-var _bloom_due := 0.0  ## when the bloom's next plankton appears
-var _burst_clock := 0.0  ## sim seconds since the plankton were last looked over for bursts
-var _first_burst := -INF  ## no plankton bursts before this sim time, so the look-over can be skipped until then (-INF: not known, look). Never later than the first one due: a plankton added lowers it, a look-over sets it exactly, and plankton taken out leave it as it was (early is safe)
+		_send_params({"bloom_density": bloom_density})
 var death_husks := false:  ## a dead bup leaves a husk that leaks its nutrient back over Biology.HUSK_SECONDS instead of giving it back at once (see StartConditions.death_husks)
 	set(value):
 		death_husks = value
-		sim.set_death_husks(value)
-var plankton_husks := false  ## a plankton that dies leaves a husk that leaks its nutrient back over Biology.HUSK_SECONDS instead of bursting into a cloud (see StartConditions.plankton_husks)
-var stationary_phase := false:  ## starving bups stop growing, shrink and die at a constant rate (Biology.STARVE_*) instead of dying when the reserve is gone: free mode's option, never on in goal mode (see StartConditions.stationary_phase)
+		_send_params({"flags": _flags()})
+var plankton_husks := false:  ## a plankton that dies leaves a husk instead of bursting into a cloud (see StartConditions.plankton_husks)
+	set(value):
+		plankton_husks = value
+		_send_params({"flags": _flags()})
+var stationary_phase := false:  ## starving bups stop growing, shrink and die at a constant rate (Biology.STARVE_*) instead of dying when the reserve is gone (see StartConditions.stationary_phase)
 	set(value):
 		stationary_phase = value
-		sim.set_stationary_phase(value)
+		_send_params({"flags": _flags()})
 var upkeep_factor := 1.0:  ## multiplies what staying alive costs every bup (its base and per-mass maintenance)
 	set(value):
 		upkeep_factor = maxf(value, 0.0)
-		sim.set_upkeep_scale(upkeep_factor)
-var plankton: Array[Plankton] = []
-var time := 0.0:
-	set(value):
-		time = value
-		sim.set_time(value)  # births and deaths are stamped from the simulation's own copy
-var picture_scale := 0.0  ## above 0 (a dish that is not in the main view): the pixels one µm covers in its small picture in the strip, so its bups are drawn as big as that picture needs
+		_send_params({"upkeep": upkeep_factor})
+var plankton: Array[Plankton] = []  ## the plankton, as the newest copy of the dish's world has them (positions in the dish)
+var time := 0.0  ## the world's clock as the newest snapshot has it (one clock for every dish)
+var picture_scale := 0.0  ## above 0 (a dish that is not in the main view): the pixels one µm covers in its small picture in the strip
 var flash := 0.0  ## lightning flash intensity, decays to 0
 var _layers_hidden := {}  ## Layer -> true for each one hidden
 
@@ -172,42 +171,64 @@ var place_preview_radius := -1.0  ## < 0 hides the placement preview
 var place_preview_kind := Preview.BRUSH
 
 var history := DishHistory.new()  ## what the graph shows of this dish
+var edit_count := 0  ## bumped by every change made to the dish by hand and by every new copy of its world, so screens can tell when to look again
+var patch_seed := 0  ## which landscape of richer and poorer patches the nutrient follows (see NUTRIENT_PATCHINESS)
+var watched: Array[int] = []  ## the bups the player is watching, newest first (see watch_bup); each holds a pin of this dish's number
+var view_zoom := 0.0  ## where the screen was looking at this dish when it last looked away: the camera's zoom (0: never looked yet) ...
+var view_position := Vector2.ZERO  ## ... and its position
+var watch_version := 0  ## bumped whenever the list changes, so its panel can rebuild only then
 
-var edit_count := 0  ## bumped by every change made to the dish by hand (a bup or source added or removed, nutrient dropped or erased), so screens can tell when to look again
+var _state: DishState = null  ## what the newest snapshot says of the dish (null until one has it)
+var _answers := {}  ## the newest answers to its questions: {tracked: {id: record bytes}, steer: {id: Vector3}, probes: PackedFloat32Array}
+var _world_version := -1  ## the copy of the dish's world last taken
+var _sources_by_id := {}  ## a source's id in the dish's world -> its NutrientSource (kept, so a selection survives a new copy)
+var _plankton_by_key := {}  ## a plankton's [born_at, pos] -> its Plankton, likewise
+var _asked := {}  ## the questions last sent (WorldClient.ask)
+var _fractions := {}  ## name -> [gene, threshold] for each share asked lately (fraction_with_gene_at_least)
+var _probe := Vector2.INF  ## the point of the dish whose medium is asked after (nutrient_reading)
+var _pending_names := {}  ## id -> a name given before the bup's family record came (a founder's, right after `strike`)
 var _extinct_signalled := false
-## The GPU path (gpu/gpu_world.gd): while `gpu_active`, the GPU runs the bups and answers for them; everything the dish asks the
-## simulation about the bups goes to `gpu_world` (through `_bups`, or a branch on `runs_on_gpu` where the two answer differently),
-## and the CPU's BupSim keeps the records, names and pins.
-## `_choose_backend` makes `gpu_world` and switches (see the GPU path's functions at the end of this file).
-var gpu_world: GpuWorld = null
-var backend := DishBackend.new()  ## where the bups run, and what Auto's rule keeps to decide it
-var gpu_active := false
+var _seed := 0  ## the dish's seed for the world (0: the world draws one from its own and the number)
+var _rng := RandomNumberGenerator.new()  ## where the founders lie and the patches' landscape
+static var _constants := {}  ## SimConstants.build(), for RecordCodec
 
 
 func _init() -> void:
 	selected.bup_changed.connect(selection_changed.emit)
-	SimConstants.apply()
-	sim.set_husk_seconds(Biology.HUSK_SECONDS)
-	sim.set_limit(bup_limit)
-	sim.reset(DEFAULT_RADIUS, 1)
-
-
-## A dish that is freed gives back the buffers, shaders and pipelines its GPU simulation made on the main device.
-func _notification(what: int) -> void:
-	if what == NOTIFICATION_PREDELETE and gpu_world != null:
-		gpu_world.release_device()
+	_rng.randomize()
 
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR  # the haze is a small texture stretched over the dish
-	set_seed(Time.get_ticks_usec())
-	_reset_history()
 	drawing.build_children()
+	_world()
 
 
-## The random numbers are the native simulation's; tests set a seed to make a run repeatable.
+## A dish that leaves the screen leaves the world too (a trash); a frozen dish has left it already.
+func _exit_tree() -> void:
+	_leave_world()
+	drawing.release()
+
+
+## The simulation's world, joined on first use: its snapshots and refusals come to the dish from then on.
+func _world() -> WorldClient:
+	if world == null:
+		world = WorldClient.shared()
+	if not world.snapshot_changed.is_connected(_on_snapshot):
+		world.snapshot_changed.connect(_on_snapshot)
+		world.refused.connect(_on_refused)
+	return world
+
+
+## The dish's family tree: the world's LineageStore (null when the backend keeps none).
+func lineage_store() -> Object:
+	return _world().lineage()
+
+
+## Seeds the dish's founders' places and its patches' landscape, and the dish's own random numbers in the world, so a run repeats.
 func set_seed(value: int) -> void:
-	sim.set_seed(value)
+	_rng.seed = value
+	_seed = value & 0x7fffffff
 
 
 ## Redraws the dish only when something it shows may have changed (DishDrawing.refresh).
@@ -215,126 +236,352 @@ func refresh_drawing() -> void:
 	drawing.refresh()
 
 
-## Fits the bups' picture to the bups there are and to the dish's size (the radius and the limit change it).
-func _sync_render_capacity() -> void:
-	drawing.sync_render_capacity()
-
-
-## The lightning flash fades in real time, so it still clears while the sim is paused. The bups' and the husks'
-## pictures are refreshed here, once a frame (DishDrawing.process).
+## The lightning flash fades in real time, so it still clears while the sim is paused. The questions about the bups and the medium
+## the screen shows are sent when they change, and the picture is brought up to date (DishDrawing.process), once a frame.
 func _process(delta: float) -> void:
 	flash = maxf(0.0, flash - delta * 1.5)
+	_ask()
 	drawing.process()
 
 
-## Makes the bups' picture for the strip's small one of this dish, `scale` pixels to the µm, just before the strip has it drawn (the GPU's dishes are drawn every frame).
+## Makes the bups' picture for the strip's small one of this dish just before the strip has it drawn.
 func prepare_picture(scale: float) -> void:
 	drawing.prepare_picture(scale)
 
 
 ## Everything that belongs to one run of a dish and must start fresh with a new or loaded dish.
 func _reset_runtime_state() -> void:
-	moved_out.clear()
-	watched.clear()  # (the simulation was reset, so its records, and the pins on them, are gone)
+	for id in watched:
+		unpin_bup(id)
+	watched.clear()
 	watch_version += 1
 	clear_selection()
 	clear_hover()
 	_extinct_signalled = false
-	_reset_history()
-
-
-func _reset_history() -> void:
+	_state = null
+	_answers = {}
+	_asked = {}
+	_fractions = {}
+	_pending_names = {}
+	_world_version = -1
+	_sources_by_id = {}
+	_plankton_by_key = {}
+	sources.clear()
+	plankton.clear()
 	history.reset()
 
 
+## The DP_FLAGS bits of the dish's switches.
+func _flags() -> int:
+	return (int(stationary_phase) << GpuLayout.DPF_STATIONARY) | (int(death_husks) << GpuLayout.DPF_DEATH_HUSKS) | (int(plankton_husks) << GpuLayout.DPF_PLANKTON_HUSKS)
+
+
+## A running dish's settings change from its next step (nothing is sent before it is in the world).
+func _send_params(params: Dictionary) -> void:
+	if row >= 0:
+		_world().set_params(row, params)
+
+
+func _number() -> int:
+	if number <= 0:
+		number = 1
+	return number
+
+
 ## Abiogenesis: founders appear near the centre, part-way through their first growth (no divisions in their line: nothing precedes them).
-## Every mode starts a dish through here, so setup can't drift between modes.
-## The medium: the nutrient spreads at the speed of water over this many. The usual thickness leaves the field to the
-## simulation's own constant (SimConstants), so that anything that sets that one (the tests holding the nutrient still) still does.
-func _set_medium_thickness(thickness: float) -> void:
-	medium_thickness = thickness
-	field.set_diffusion(0.0 if is_equal_approx(thickness, Biology.MEDIUM_THICKNESS) else Biology.WATER_DIFFUSION / thickness)
-
-
+## Every mode starts a dish through here, so setup can't drift between modes. The dish is asked of the world and appears in a later
+## snapshot; it begins at the world's time.
 func strike(start: StartConditions = null) -> void:
-	if start == null:  # goal mode's dish: the usual conditions, and founders in evenly spaced colours (more interesting than all green)
+	if start == null:  # goal mode's dish: the usual conditions
 		start = StartConditions.new()
-	if runs_on_gpu():
-		_discard_gpu_state()  # (a new dish: what the GPU holds, and every result still on its way, is for the old one)
-	set_backend_setting(start.sim_backend)
-	backend.fresh = true
+	_leave_world()
 	flash = 1.0
 	_edited()
-	time = 0.0
 	nutrients_placed = 0
-	sources.clear()
-	plankton.clear()
-	_first_burst = -INF
+	radius = clampf(start.dish_radius, StartConditions.MIN_SIM_RADIUS, StartConditions.MAX_DISH_RADIUS)
+	resolution = clampi(start.nutrient_resolution, StartConditions.MIN_NUTRIENT_RESOLUTION, StartConditions.MAX_NUTRIENT_RESOLUTION)
+	medium_thickness = start.medium_thickness
+	bup_limit = start.bup_limit
+	feed_density = start.feed_density
 	bloom_density = start.bloom_density
-	_bloom_due = time  # (a new dish's bloom starts now: the setter does this only when the bloom is switched on, and the last dish may have had the same)
-	_burst_clock = 0.0
 	upkeep_factor = 1.0
 	death_husks = start.death_husks
 	plankton_husks = start.plankton_husks
 	stationary_phase = start.stationary_phase
 	_reset_runtime_state()
-	radius = clampf(start.dish_radius, StartConditions.MIN_SIM_RADIUS, StartConditions.MAX_DISH_RADIUS)
-	field.set_max_across(clampi(start.nutrient_resolution, StartConditions.MIN_NUTRIENT_RESOLUTION, StartConditions.MAX_NUTRIENT_RESOLUTION))
-	_set_medium_thickness(start.medium_thickness)
-	sim.reset(radius, -1)  # a new dish: no bups, no nutrient, the random stream carries on
-	bup_limit = start.bup_limit
-	feed_density = start.feed_density
-	var bups := clampi(start.bups, 1, bup_limit)
-	var spread := minf(radius * 0.8, 40.0 + 40.0 * sqrt(maxf(bups - 4.0, 0.0)))  # (the founders start in a disc that grows with their number, 4 in a spot 40 µm across, 100 across about 430 µm)
-	for i in bups:
+	patch_seed = maxi(1, _rng.randi() & 0x7fffffff)
+	var spec := DishSpec.new()
+	spec.number = _number()
+	spec.radius = radius
+	spec.resolution = resolution
+	spec.limit = bup_limit
+	spec.seed = _seed
+	spec.flags = _flags()
+	spec.nutrient_density = clampf(start.nutrient_density, 0.0, StartConditions.MAX_NUTRIENT_DENSITY)
+	spec.feed_density = feed_density
+	spec.bloom_density = bloom_density
+	spec.upkeep = upkeep_factor
+	spec.medium_thickness = medium_thickness
+	spec.patch_seed = patch_seed
+	var founders := clampi(start.bups, 1, bup_limit)
+	spec.founders = _founder_records(start, founders)
+	row = _world().add_dish(spec)
+	begin_at(_world().latest().sim_time)
+	for i in founders:
+		var chosen: Dictionary = start.founders[i] if i < start.founders.size() else {}
+		if chosen.get("name", "") != "":
+			rename_bup(GpuLayout.make_id(number, i + 1), chosen["name"])
+
+
+## The founders' records (GpuLayout's bup record, as SimCore.add_dish takes them): the founder's genome in the colour the player chose for
+## each, a newborn's mass grown by up to as much again (not all at the same point in the cycle), FOUNDER_ENERGY, in a disc that grows with
+## their number (4 in a spot 40 µm across, 100 across about 430 µm), ids 1 to n of the dish's number.
+func _founder_records(start: StartConditions, count: int) -> PackedByteArray:
+	var w := GpuLayout.RECORD_WORDS
+	var spread := minf(radius * 0.8, 40.0 + 40.0 * sqrt(maxf(count - 4.0, 0.0)))
+	var all := PackedFloat32Array()
+	all.resize(count * w)
+	for i in count:
 		var founder := Genome.founder()
-		var chosen: Dictionary = start.founders[i] if i < start.founders.size() else {}  # the player's name and colour for this one
+		var chosen: Dictionary = start.founders[i] if i < start.founders.size() else {}
 		if chosen.has("color"):
 			founder = Genome.with_color(founder, Genome.color_from_hex(chosen["color"]))
-		var born_with := Cell.mass_to_add(founder)
-		var grown := born_with * (1.0 + sim.random_float())  # not all at the same point in the cycle
-		var id := sim.add_bup(sim.random_point(spread), founder, FOUNDER_ENERGY, sqrt(grown), born_with, 0, Vector2.RIGHT)
-		if chosen.get("name", "") != "":
-			rename_bup(id, chosen["name"])
-	patch_seed = int(sim.random_float() * 2147483647.0)
-	field.set_patchiness(NUTRIENT_PATCHINESS, radius, patch_seed)  # (the largest patches about the size of the dish; the feed follows the same landscape)
-	field.fill(clampf(start.nutrient_density, 0.0, StartConditions.MAX_NUTRIENT_DENSITY) * CONCENTRATION_PER_DENSITY)  # the medium the colony starts in
-	_mark_gpu_dirty()  # (a new dish: what the GPU held is gone)
+		var born: float = Cell.mass_to_add(founder)
+		var o := i * w
+		for g in GpuLayout.GENE_NAMES.size():
+			all[o + GpuLayout.R_SPEED + g] = founder[GpuLayout.GENE_NAMES[g]]
+		all[o + GpuLayout.R_MUTATOR] = founder["mutator"]
+		all[o + GpuLayout.R_HUE] = founder["hue"]
+		all[o + GpuLayout.R_SAT] = founder["sat"]
+		all[o + GpuLayout.R_VAL] = founder["val"]
+		all[o + GpuLayout.R_BIRTH_MASS] = born
+		all[o + GpuLayout.R_MASS] = born * (1.0 + _rng.randf())
+		all[o + GpuLayout.R_ENERGY] = FOUNDER_ENERGY
+		var at := Vector2.from_angle(_rng.randf() * TAU) * (spread * sqrt(_rng.randf()))
+		all[o + GpuLayout.R_X] = at.x
+		all[o + GpuLayout.R_Y] = at.y
+		all[o + GpuLayout.R_DX] = 1.0
+		all[o + GpuLayout.R_DY] = 0.0
+		all[o + GpuLayout.R_PX] = GpuLayout.NO_PICTURE
+		all[o + GpuLayout.R_PY] = GpuLayout.NO_PICTURE
+		all[o + GpuLayout.R_FAST] = -1.0
+	var out := all.to_byte_array()
+	for i in count:
+		GpuLayout.set_id(out, i, GpuLayout.make_id(_number(), i + 1))
+	return out
 
 
-## Changes the dish's size about its centre, with everything in it.
-## Larger: the bups, the nutrient (spread over the new grid, none of it lost) and the sources stay where they are.
-## Smaller: everything past the new edge goes. Bups there die like any other death (a family record with no living
-## descendants, and not open in a panel, is freed with them), and so do the sources and plankton and the nutrient there.
-## The feed and the bloom are densities, so they stay as they were and the dish gets as many more or fewer as its area changes.
+## A saved or frozen dish (DishBlob, from DishCodec.read_blob or a freeze's reply) comes back into the world at its time, in place of this
+## dish's own. False, leaving the dish as it was, for no blob.
+func load_blob(blob: DishBlob) -> bool:
+	if blob == null:
+		return false
+	_leave_world()
+	var spec := DishSpec.from_dict(blob.spec)
+	number = spec.number if spec.number > 0 else _number()
+	radius = spec.radius
+	resolution = spec.resolution
+	medium_thickness = spec.medium_thickness
+	patch_seed = spec.patch_seed
+	_reset_runtime_state()
+	var flags := spec.flags
+	bup_limit = spec.limit
+	feed_density = spec.feed_density
+	bloom_density = float(blob.world.get("bloom_density", spec.bloom_density))
+	upkeep_factor = spec.upkeep
+	stationary_phase = ((flags >> GpuLayout.DPF_STATIONARY) & 1) == 1
+	death_husks = ((flags >> GpuLayout.DPF_DEATH_HUSKS) & 1) == 1
+	plankton_husks = ((flags >> GpuLayout.DPF_PLANKTON_HUSKS) & 1) == 1
+	nutrients_placed = int(blob.host.get("nutrients_placed", 0))
+	row = _world().thaw(blob)
+	time = _world().latest().sim_time
+	var saved_history := DishHistory.read(blob.host.get("history", {}))
+	if saved_history.is_empty():
+		history.begin(time)
+	else:
+		history.load(saved_history, time)
+	for id: int in blob.host.get("watched", PackedInt64Array()):  # (the store pins them for this dish as it merges the blob's lineage)
+		if not watched.has(id):
+			watched.append(id)
+	watch_version += 1
+	_edited()
+	return true
+
+
+## What the host keeps with the dish in a DishBlob (DishCodec.write_blob): its history, its watch list (newest first) and the nutrient dropped in.
+func host_part() -> Dictionary:
+	return {"history": history.write(), "watched": PackedInt64Array(watched), "nutrients_placed": nutrients_placed}
+
+
+## The dish leaves the world whole: the reply's value is its DishBlob, with its lineage, once the simulation has gathered it; the
+## dish here is then out of the world (put `host_part` into the blob's `host`). Null when it is not in the world.
+func freeze() -> SimReply:
+	if row < 0:
+		return null
+	var reply := _world().freeze(row)
+	row = -1
+	return reply
+
+
+## The pipette: the bups within `disc_radius` of the world point move, alive and with their ids, into a new dish like this one.
+## The reply's value: {new_row, number, moved, ids} (null when refused). The screen makes the new dish's node with `adopt`.
+func pipette(world_pos: Vector2, disc_radius: float) -> SimReply:
+	if row < 0:
+		return null
+	_edited()
+	return _world().pipette(row, world_pos - global_position, disc_radius)
+
+
+## Takes a dish the simulation already made (a pipette's new dish at `new_row`, numbered `new_number`) as this node's, with the settings of
+## `like` (the dish it was made like).
+func adopt(new_row: int, new_number: int, like: Dish) -> void:
+	_leave_world()
+	_reset_runtime_state()
+	number = new_number
+	radius = like.radius
+	resolution = like.resolution
+	medium_thickness = like.medium_thickness
+	patch_seed = like.patch_seed
+	row = new_row
+	bup_limit = like.bup_limit
+	feed_density = like.feed_density
+	bloom_density = like.bloom_density
+	upkeep_factor = like.upkeep_factor
+	stationary_phase = like.stationary_phase
+	death_husks = like.death_husks
+	plankton_husks = like.plankton_husks
+	begin_at(_world().latest().sim_time)
+	_edited()
+
+
+## The dish leaves the world for good (a trash): its pins go with it.
+func _leave_world() -> void:
+	if row >= 0 and world != null:
+		world.remove_dish(row)
+	row = -1
+
+
+## A dish the simulation refused (no room in the memory budget, or no free row) is in no world.
+func _on_refused(refused_row: int, _why: String) -> void:
+	if refused_row == row:
+		row = -1
+
+
+## What a new snapshot says of the dish: its state, the world's time, the history's new samples, a new copy of its world, the answers to
+## its questions; `extinct` once when it has died out.
+func _on_snapshot(snap: Snapshot) -> void:
+	if row < 0:
+		return
+	time = snap.sim_time
+	var ds: DishState = snap.dishes.get(row)
+	if ds == null or ds.number != _number():
+		return
+	_state = ds
+	history.take(snap.history.get(row, []))
+	var copy: DishWorldCopy = snap.worlds.get(row)
+	if copy != null and copy.version != _world_version:
+		_take_world(copy)
+	_answers = snap.answers.get(row, {})
+	_flush_names()
+	if ds.extinct and not _extinct_signalled:
+		_extinct_signalled = true
+		extinct.emit()
+
+
+## The newest copy of the dish's world: its sources and plankton, each kept as the same object while it lasts (so what is picked stays picked).
+func _take_world(copy: DishWorldCopy) -> void:
+	_world_version = copy.version
+	var by_id := {}
+	var list: Array[NutrientSource] = []
+	for s: Dictionary in copy.sources:
+		var at: Vector2 = global_position + (s["pos"] as Vector2)
+		var source: NutrientSource = _sources_by_id.get(s["id"])
+		if source == null:
+			source = NutrientSource.new(at, s["rate"])
+		source.pos = at
+		source.rate = s["rate"]
+		by_id[s["id"]] = source
+		list.append(source)
+	for id: int in _sources_by_id:
+		if not by_id.has(id):
+			selected.forget(_sources_by_id[id])
+			hovered.forget(_sources_by_id[id])
+	_sources_by_id = by_id
+	sources = list
+	var by_key := {}
+	var floating: Array[Plankton] = []
+	for p: Dictionary in copy.plankton:
+		var key := [p["born_at"], p["pos"]]
+		var cell: Plankton = _plankton_by_key.get(key)
+		if cell == null:
+			cell = Plankton.new(p["pos"], p["born_at"], p["burst_at"], p["units"], p["shape"])
+		by_key[key] = cell
+		floating.append(cell)
+	for key: Array in _plankton_by_key:
+		if not by_key.has(key):
+			selected.forget(_plankton_by_key[key])
+			hovered.forget(_plankton_by_key[key])
+	_plankton_by_key = by_key
+	plankton = floating
+	edit_count += 1
+
+
+## The questions the screen needs answered, sent when they change: the shares a goal watches, the selected and hovered bups' records
+## (and the steering at each), and the medium at the probed point.
+func _ask() -> void:
+	if row < 0:
+		return
+	var tracked: Array = []
+	for id in [selected.bup, hovered.bup]:
+		if id >= 0 and not tracked.has(id):
+			tracked.append(id)
+	var q := {"fractions": _fractions.duplicate(), "tracked": tracked, "probes": [[_probe.x, _probe.y, PROBE_SPEED, PROBE_SENSE]] if _probe.is_finite() else []}
+	if q != _asked:
+		_asked = q
+		_world().ask(row, q)
+
+
+func _flush_names() -> void:
+	var store := lineage_store()
+	if _pending_names.is_empty() or store == null:
+		return
+	for id: int in _pending_names.keys():
+		if store.has_record(id):
+			store.set_custom_name(id, _pending_names[id])
+			_pending_names.erase(id)
+
+
+## Puts the dish, and everything it draws, on one render layer of the 2D world (bit 0 is the default layer, which the rest of the screen is on). A camera that does not
+## look at that layer does not see the dish, so a dish never shows beside another however far the view is zoomed out.
+func set_view_layer(bit: int) -> void:
+	for node: Node in [self] + find_children("*", "CanvasItem", true, false):
+		(node as CanvasItem).visibility_layer = 1 << bit
+
+
+## A dish that joins a world already under way begins at the world's time, and its history begins then too.
+func begin_at(world_time: float) -> void:
+	time = world_time
+	history.begin(world_time)
+
+
+## Changes the dish's size about its centre, with everything in it (SimCore.resize: larger, the bups, the nutrient and the sources stay;
+## smaller, what is past the new edge goes, the bups there dying like any other death). The feed and the bloom are densities.
 func resize_to(new_radius: float) -> void:
 	new_radius = clampf(new_radius, StartConditions.MIN_DISH_RADIUS, StartConditions.MAX_DISH_RADIUS)
-	if is_equal_approx(new_radius, radius):
+	if is_equal_approx(new_radius, radius) or row < 0:
 		return
-	_edit_on_cpu(func() -> void:
-		if new_radius > radius:
-			sim.grow(new_radius)  # the bups and the nutrient stay
-		else:
-			sim.shrink(new_radius)
-			for source in sources.duplicate():
-				if source.pos.distance_to(global_position) > new_radius:
-					remove_source(source)
-			for i in range(plankton.size() - 1, -1, -1):
-				if plankton[i].pos.length() > new_radius:
-					selected.forget(plankton[i])
-					hovered.forget(plankton[i])
-					plankton.remove_at(i)
-		radius = new_radius
-		_edited()
-		queue_redraw())
+	_world().resize(row, new_radius)
+	radius = new_radius
+	_edited()
+	queue_redraw()
 
 
 ## Changes how many bups the dish holds, without ever going below how many there are now.
 func change_limit(value: int) -> void:
-	_edit_on_cpu(func() -> void: bup_limit = maxi(value, population()))
+	bup_limit = maxi(value, population())
 
 
-## Moves the dish. Bups are held relative to the dish centre, so only the sources (global) shift.
+## Moves the dish. Bups and plankton are held relative to the dish centre, so only the sources (global) shift.
 func recenter(new_position: Vector2) -> void:
 	var shift := new_position - position
 	for source in sources:
@@ -348,109 +595,55 @@ static func cap_for(dish_radius: float) -> int:
 	return maxi(MAX_CELLS, int(dish_radius))
 
 
-## Runs `seconds` of simulation time in steps no longer than MAX_STEP. With a time budget (in µs)
-## it stops once the budget is spent and drops the rest, so a costly playback speed runs slower
-## than its label instead of making the game stutter. Returns the seconds actually simulated.
-func advance(seconds: float, budget_usec := 0) -> float:
-	if seconds <= 0.0:
-		return 0.0
-	var steps := maxi(1, ceili(seconds / MAX_STEP))
-	var delta := seconds / steps
-	_choose_backend(delta, steps)
-	if runs_on_gpu():
-		return _advance_gpu(seconds)
-	var started := Time.get_ticks_usec()
-	var done := 0.0
-	for i in steps:
-		step(delta)
-		done += delta
-		if budget_usec > 0 and Time.get_ticks_usec() - started > budget_usec:
-			break
-	return done
-
-
-## One step of exactly `delta` simulated seconds: no splitting into MAX_STEP pieces, no time budget and no choice of backend (a dish already on the GPU
-## steps there). `advance` is the playback entry point; this is for the title screen's backdrop and for tests and tools that pin the step length.
-func step(delta: float) -> void:
-	if runs_on_gpu():
-		_advance_gpu(delta)
-		return
-	var world := _step_world(delta)
-	sim.step(delta, world["positions"], world["rates"], feed_per_second(feed_density), time)  # (time, so births and deaths are stamped with it)
-	if world["sample"]:
-		_record_history()  # (also once the colony has died out, so the graph's time stays true)
-	_signal_if_extinct(sim.bup_count())
-
-
 ## The nutrient the feed adds every second, as a concentration, for a feed of `density` units to each mm² every hour.
 static func feed_per_second(density: float) -> float:
 	return density * CONCENTRATION_PER_DENSITY / 3600.0
 
 
-## The part of a step that is the same on both backends, before the bups' own: the clock moves on `delta`, the plankton arrive and burst,
-## the sources count what they release, and the history's clock moves. Returns the sources' places in the dish ("positions") and rates
-## ("rates"), for the simulation's step, and whether a history sample is due after it ("sample").
-func _step_world(delta: float) -> Dictionary:
-	time += delta
-	_step_plankton(delta)
-	var positions := PackedVector2Array()
-	var rates := PackedFloat32Array()
-	for source in sources:
-		positions.append(source.pos - global_position)
-		rates.append(source.rate)
-		source.emitted += source.rate / 60.0 * delta
-	return {"positions": positions, "rates": rates, "sample": history.tick(delta)}
-
-
-## Emits `extinct` once, on the way down (not on every step after), when `count` bups are left and that is none.
-func _signal_if_extinct(count: int) -> void:
-	if count == 0 and time > 0.0 and not _extinct_signalled:
-		_extinct_signalled = true
-		extinct.emit()
-
-
-func _record_history() -> void:
-	_record_history_from(sim.population_stats())
-
-
-## One sample of the history graph from these figures (BupSim.population_stats' keys). The GPU path records its samples, taken on
-## the GPU at the steps they belong to, through this too.
-func _record_history_from(stats: Dictionary) -> void:
-	history.record(stats)
-
-
 # --- The bups --------------------------------------------------------------------------------
 
-## Whether the GPU runs the bups now (it then answers every question about them: see `_bups`).
-func runs_on_gpu() -> bool:
-	return gpu_world != null and gpu_active
-
-
-## What answers the questions about the bups that both backends answer alike (BupSim and GpuWorld have the same calls for them):
-## `gpu_world` while it runs the bups, else `sim`. Asked again at every call, since a switch (or a tool) changes `gpu_active`.
-func _bups() -> Object:
-	if runs_on_gpu():
-		return gpu_world
-	return sim
-
-
+## How many bups the newest snapshot counts in the dish.
 func population() -> int:
-	return _bups().bup_count()
+	return _state.count if _state != null else 0
 
 
+## Whether `id` is alive in this dish (its family record is alive and its home is this dish).
 func has_bup(id: int) -> bool:
-	return id >= 0 and sim.has_bup(id)
+	if id < 0:
+		return false
+	var store := lineage_store()
+	if store == null:
+		return false
+	var info: Dictionary = store.info(id)
+	return not info.is_empty() and info["alive"] and int(info.get("home", _number())) == _number()
 
 
+## The ids of the bups alive in this dish, from the family tree.
 func bup_ids() -> PackedInt64Array:
-	if runs_on_gpu():
-		return sim.alive_ids()  # (the bups are on the GPU; their records are here)
-	return sim.bup_ids()
+	var out := PackedInt64Array()
+	var store := lineage_store()
+	if store == null:
+		return out
+	for id: int in store.alive_ids():
+		if int((store.info(id) as Dictionary).get("home", _number())) == _number():
+			out.append(id)
+	return out
 
 
-## Everything about one bup (see BupSim.bup_info): its position is relative to the dish centre.
+## Everything about a living bup the dish asks after (the selected and the hovered: see `_ask`), from its record in the newest answer
+## (RecordCodec.info_from_record): its position is relative to the dish centre. Empty for a bup not asked after, or until it is answered.
 func bup_info(id: int) -> Dictionary:
-	return _bups().bup_info(id)
+	var tracked: Dictionary = _answers.get("tracked", {})
+	if id < 0 or not tracked.has(id):
+		return {}
+	var record: PackedByteArray = (tracked[id] as PackedByteArray).duplicate()
+	record.resize(GpuLayout.RECORD_BYTES)  # (the answer leaves out the chemotaxis memory, which the panel does not read)
+	if _constants.is_empty():
+		_constants = SimConstants.build()
+	var store := lineage_store()
+	var family: Dictionary = store.info(id) if store != null else {}
+	var steer: Vector3 = (_answers.get("steer", {}) as Dictionary).get(id, Vector3(0.0, 0.0, 0.5))
+	return RecordCodec.info_from_record(record, 0, _constants, int(family.get("born", 0)), steer.z, upkeep_factor)
 
 
 ## The bup's position in the world, like the sources'.
@@ -458,56 +651,41 @@ func bup_world_pos(id: int) -> Vector2:
 	return global_position + _bup_pos(id)
 
 
-## Whether the bup is alive and its place is known, so it can be drawn round. On the GPU path a bup chosen by its id (the watch list, the
-## lineage) has no place for the few frames until its record comes back.
+## Whether the bup's place is known, so it can be drawn round.
 func _bup_shown(id: int) -> bool:
-	return sim.has_bup(id) and (not runs_on_gpu() or gpu_world.knows(id))
+	return drawing.ring_of(id) != null
 
 
-## The bup's position in the dish (relative to its centre).
+## The bup's position in the dish (relative to its centre): where the picture has it, else its newest answer's place.
 func _bup_pos(id: int) -> Vector2:
-	return _bups().bup_pos(id)
+	var at: Variant = drawing.ring_of(id)
+	if at != null:
+		return Vector2(at.x, at.y)
+	return bup_info(id).get("pos", Vector2.ZERO)
 
 
-## Half the length the bup is drawn at (BupSim.bup_radius).
-func _bup_radius(id: int, pixel_um: float) -> float:
-	return _bups().bup_radius(id, pixel_um)
+## Half the length the bup is drawn at.
+func _bup_radius(id: int, _pixel_um: float) -> float:
+	var at: Variant = drawing.ring_of(id)
+	return at.z if at != null else 0.0
 
 
-## Which way the bup's drift tends where it is and how surely (BupSim.bup_steering).
+## Which way the bup's drift tends where it is and how surely (the newest answer's steering: x, y the way, z the chance).
 func bup_steering(id: int) -> Vector3:
-	return _bups().bup_steering(id)
+	return (_answers.get("steer", {}) as Dictionary).get(id, Vector3(0.0, 0.0, 0.5))
 
 
-## The nutrient at a point of the dish: concentration, and the gradient's x and y (NutrientField.read). On the GPU path `field` is
-## the copy of the GPU's field, so this is the same call there.
+## The nutrient at a point of the dish: the concentration, and the gradient's x and y. The point is asked after from now on; the
+## answer is the newest for the point asked before (a frame or two behind). The probe gives the gradient's way, not its size, so the
+## gradient here is none.
 func nutrient_reading(local: Vector2) -> Vector3:
-	return field.read(local)
+	if not _probe.is_finite() or _probe.distance_to(local) > PROBE_MOVE:
+		_probe = local
+	var p: Variant = _answers.get("probes")
+	return Vector3(p[3], 0.0, 0.0) if p is PackedFloat32Array and p.size() >= 4 else Vector3.ZERO
 
 
-## Puts the dish, and everything it draws, on one render layer of the 2D world (bit 0 is the default layer, which the rest of the screen is on). A camera that does not
-## look at that layer does not see the dish, so a dish never shows beside another however far the view is zoomed out.
-func set_view_layer(bit: int) -> void:
-	for node: Node in [self] + find_children("*", "CanvasItem", true, false):
-		(node as CanvasItem).visibility_layer = 1 << bit
-
-
-## A dish that joins a world already under way begins at the world's time, and its bloom begins then too (not catching up on the time before).
-func begin_at(world_time: float) -> void:
-	time = world_time
-	history.origin = world_time
-	_bloom_due = time
-
-
-## Adds a bup at a world position and returns its id. `size` is its body now (the square root of
-## its mass); negative means a newborn of this genome.
-func add_bup(world_pos: Vector2, genome: Dictionary, energy: float, size := -1.0, birth_mass := -1.0, divisions := 0, dir := Vector2.RIGHT, id := -1) -> int:
-	return _edit_on_cpu(func() -> int:
-		_edited()
-		return sim.add_bup(world_pos - global_position, genome, energy, size, birth_mass, divisions, dir, id))
-
-
-## What the bup is called: the name the player gave it, or else its size word and its number ("lil bup #578",
+## What a bup is called: the name the player gave it, or else its size word and its number ("lil bup #578",
 ## the 578th born in this dish). Empty if there is no such bup. This is the only way to get a bup's name.
 func bup_name(id: int) -> String:
 	var custom := bup_custom_name(id)
@@ -526,10 +704,10 @@ static func cleaned_name(text: String) -> String:
 
 ## What a panel shows for a bup, from one look-up: {"name", "info"} (its info or family record; empty if there is no record).
 func bup_display(id: int) -> Dictionary:
-	var info := lineage_info(id)  # (a living GPU bup's present size, for the swatch's length)
+	var info := lineage_info(id)
 	if info.is_empty():
 		return {}
-	var custom := sim.custom_name(id)
+	var custom := bup_custom_name(id)
 	return {
 		"name": custom if custom != "" else BupNames.default_name(info["size_gene"], id),
 		"info": info,
@@ -538,72 +716,77 @@ func bup_display(id: int) -> Dictionary:
 
 ## The name a bup has without one from the player (for showing as a hint while renaming).
 func bup_default_name(id: int) -> String:
-	var info := sim.lineage_info(id)
+	var store := lineage_store()
+	var info: Dictionary = store.info(id) if store != null and id >= 0 else {}
 	return "" if info.is_empty() else BupNames.default_name(info["size_gene"], id)
 
 
 ## The name the player gave the bup, or "" if it has none (it still has its number).
 func bup_custom_name(id: int) -> String:
-	return sim.custom_name(id)
+	if _pending_names.has(id):
+		return _pending_names[id]
+	var store := lineage_store()
+	return store.custom_name(id) if store != null and id >= 0 else ""
 
 
-## Names a bup. An empty name takes the name away. The name goes when the bup dies.
+## Names a bup. An empty name takes the name away. The name goes when its record does.
 func rename_bup(id: int, text: String) -> void:
-	sim.set_custom_name(id, BupNames.clean(text))  # (an empty name takes the name away)
+	var store := lineage_store()
+	if store != null and store.has_record(id):
+		store.set_custom_name(id, BupNames.clean(text))
+	else:
+		_pending_names[id] = BupNames.clean(text)  # (a founder's record comes with the dish's first snapshot)
 
 
-## Everything known about a bup, alive or dead, as BupSim.lineage_info (empty once its record is dropped), with a living bup's present figures from the GPU when it runs there.
-## Dead bups keep a record while a living bup descends from them or something is pinning them.
+## Everything known about a bup, alive or dead (LineageStore.info; empty once its record is dropped), with a living bup's present figures
+## when the dish asks after it. A bup whose home is another dish now (a pipette took it there) says so in "moved_to".
 func lineage_info(id: int) -> Dictionary:
-	var info := sim.lineage_info(id)
-	if not info.is_empty() and info["alive"] and runs_on_gpu():
-		info.merge(gpu_world.bup_info(id), true)  # (a bup on the GPU: the simulation here has only its record, which does not hold its size and reserve now)
-	if moved_out.has(id):
-		info["moved_to"] = moved_out[id]
+	var store := lineage_store()
+	if store == null or id < 0:
+		return {}
+	var info: Dictionary = store.info(id)
+	if info.is_empty():
+		return {}
+	if info["alive"]:
+		info.merge(bup_info(id), true)
+	var home := int(info.get("home", _number()))
+	if home != _number():
+		info["moved_to"] = home
 	return info
-
-
-## The pipette's taking half: every bup whose centre is within `disc_radius` of the world point leaves this dish and comes back as records (relative to the
-## point, to be dropped into another dish with `add_transferred`). A hand edit (`_edit_on_cpu`).
-func take_in_disc(world_pos: Vector2, disc_radius: float) -> PackedByteArray:
-	return _edit_on_cpu(func() -> PackedByteArray:
-		_edited()
-		taken_lineage = sim.lineage_export_bytes()  # (the family records as they are before the bups leave, for the dish they go to)
-		return sim.take_disc(world_pos - global_position, disc_radius))
-
-
-## The pipette's giving half: the records `take_in_disc` made come in as the same bups (same ids, so the same names, genes and colours) at the middle of the dish (a
-## droplet), with their whole family tree (`lineage`, from the dish they left: dead ancestors included, and the ones that stayed behind as dead here). Returns their ids.
-func add_transferred(records: PackedByteArray, lineage: PackedByteArray) -> PackedInt64Array:
-	return _edit_on_cpu(func() -> PackedInt64Array:
-		var ids := sim.add_state_bytes(records, Vector2.ZERO, true)
-		sim.lineage_import_bytes(lineage, PackedInt64Array())
-		_edited()
-		return ids)
 
 
 ## The family line that led to a bup: its oldest known ancestor first, the bup itself last.
 func lineage_chain(id: int) -> PackedInt64Array:
-	return sim.lineage_chain(id)
+	var store := lineage_store()
+	return store.chain(id) if store != null and id >= 0 else PackedInt64Array()
 
 
 func has_record(id: int) -> bool:
-	return id >= 0 and sim.has_record(id)
+	var store := lineage_store()
+	return id >= 0 and store != null and store.has_record(id)
 
 
-## Asks for a bup's record (and its ancestors') to be kept after it dies, until it is unpinned.
+## For each id of `chain`, how many living bups of this dish have it in their line.
+func living_descendants_of(chain: PackedInt64Array) -> PackedInt32Array:
+	var store := lineage_store()
+	if store == null:
+		var none := PackedInt32Array()
+		none.resize(chain.size())
+		return none
+	return store.living_descendants_of(chain, _number())
+
+
+## Asks for a bup's record (its ancestors') to be kept after it dies, until it is unpinned: a pin held by this dish's number.
 func pin_bup(id: int) -> void:
-	sim.pin(id)
+	var store := lineage_store()
+	if store != null and id >= 0:
+		store.pin(id, _number())
 
 
-## The bups the player is watching, newest first (see watch_bup). Their records, and their ancestors', are kept.
-var patch_seed := 0  ## which landscape of richer and poorer patches the nutrient follows (see NUTRIENT_PATCHINESS)
-var watched: Array[int] = []
-var taken_lineage := PackedByteArray()  ## the family records as they were when the last pipette took bups out (see take_in_disc)
-var view_zoom := 0.0  ## where the screen was looking at this dish when it last looked away: the camera's zoom (0: never looked yet) ...
-var view_position := Vector2.ZERO  ## ... and its position
-var moved_out := {}  ## the ids of bups the pipette took out of this dish -> the number of the dish they went to (kept for the records that outlast them)
-var watch_version := 0  ## bumped whenever the list changes, so its panel can rebuild only then
+func unpin_bup(id: int) -> void:
+	var store := lineage_store()
+	if store != null and id >= 0:
+		store.unpin(id, _number())
 
 
 func is_watched(id: int) -> bool:
@@ -628,46 +811,36 @@ func unwatch_bup(id: int) -> void:
 		watch_version += 1
 
 
-func unpin_bup(id: int) -> void:
-	sim.unpin(id)
-
-
-func remove_bup(id: int) -> void:
-	_edit_on_cpu(func() -> void:
-		_edited()
-		sim.remove_bup(id))
-
-
-func clear_bups() -> void:
-	_edit_on_cpu(func() -> void:
-		_edited()
-		sim.clear_bups())
-
-
-## The count and averages the readouts show (each gene, "harm" as a share of yield lost, "mutations"), and "generation", the population's: the mean of its bups' divisions (a pipette keeps the bups' counts, so the dish it founds carries on the count of the dish it came from).
+## The count and averages the readouts show (DishState.STATS_KEYS: each gene, "harm", "mutations", and "generation", the population's: the
+## mean of its bups' divisions), as the newest snapshot has them.
 func population_stats() -> Dictionary:
-	return _bups().population_stats()
+	if _state != null and not _state.stats.is_empty():
+		return _state.stats
+	var none := {}
+	for k: String in DishState.STATS_KEYS:
+		none[k] = 0 if k == "count" else 0.0
+	return none
 
 
+## The share of the dish's bups whose `gene` is at least `threshold`, as the newest answer has it (asked from now on).
 func fraction_with_gene_at_least(gene: String, threshold: float) -> float:
-	if not _fractions_asked.has([gene, threshold]):
-		if _fractions_asked.size() >= GpuKernels.FRACTIONS:
-			_fractions_asked.clear()  # (asked for something else now: the old pairs go)
-		_fractions_asked[[gene, threshold]] = true
-	return _bups().fraction_with_gene_at_least(gene, threshold)
+	var name := "%s>=%s" % [gene, threshold]
+	if not _fractions.has(name):
+		if _fractions.size() >= GpuKernels.FRACTIONS:
+			_fractions.clear()  # (asked for something else now: the old pairs go)
+		_fractions[name] = [gene, threshold]
+	return float(_state.fractions.get(name, 0.0)) if _state != null else 0.0
 
 
-## The id of the bup under a world position, or -1. `slack` widens the target (e.g. for small bups). (Not through `_bups`: the GPU's
-## pick takes whether it is a hover, BupSim's does not.)
+## The id of the bup under a world position, or -1 (the picture's pick, ViewRenderer.pick: the answer to the question asked a frame or two
+## before). `slack` widens the target (e.g. for small bups).
 func cell_at(world_pos: Vector2, slack: float = 0.0, hover := false) -> int:
-	if runs_on_gpu():
-		return gpu_world.pick_bup(world_pos - global_position, slack, pixel(), hover)
-	return sim.pick_bup(world_pos - global_position, slack, pixel())
+	return drawing.pick(world_pos - global_position, slack, hover)
 
 
-## The distance to the nearest bup (-1 if there is none) and how many lie within `near` of a point of the dish.
-func _nearest_and_count(local: Vector2, near: float) -> Vector2:
-	return _bups().nearest_and_count(local, near)
+## The distance to the nearest bup (-1 if there is none) and how many lie within SOURCE_NEARBY of the hovered point (the picture's).
+func _nearest_and_count(_local: Vector2, _near: float) -> Vector2:
+	return drawing.near_count()
 
 
 ## How big a source is drawn, in µm: its own size, or at least a few pixels, so it shows from far out.
@@ -750,8 +923,13 @@ func has_husks() -> bool:
 	return death_husks or plankton_husks
 
 
+## How many husks lie in the dish, as the newest snapshot counts them.
+func husk_count() -> int:
+	return _state.husk_count if _state != null else 0
+
+
 func looks_at_husks() -> bool:
-	return layer_shown(Layer.HUSKS) and (pick_mode == PickMode.ALL or pick_mode == PickMode.HUSKS) and sim.husk_count() > 0
+	return layer_shown(Layer.HUSKS) and (pick_mode == PickMode.ALL or pick_mode == PickMode.HUSKS) and husk_count() > 0
 
 
 func looks_at_bups() -> bool:
@@ -814,25 +992,63 @@ func clear_hover() -> void:
 	place_preview_kind = Preview.BRUSH
 
 
+## The id a source has in the dish's world (-1: none known).
+func _source_id(source: NutrientSource) -> int:
+	for id: int in _sources_by_id:
+		if _sources_by_id[id] == source:
+			return id
+	return -1
+
+
+## Takes a source away (from the next copy of the dish's world on; it goes from the picture at once).
 func remove_source(source: NutrientSource) -> void:
+	var id := _source_id(source)
+	if id >= 0 and row >= 0:
+		var e := WorldEdit.new()
+		e.kind = WorldEdit.Kind.REMOVE_SOURCE
+		e.id = id
+		_world().edit_world(row, e)
+		_sources_by_id.erase(id)
 	sources.erase(source)
 	edit_count += 1
 	selected.forget(source)
 	hovered.forget(source)
 
 
-## Whether nutrient (a dose or a source) can be put at a world point: inside the dish, and not in
-## the thin band at the rim where the nutrient grid has no cell to hold it.
+## Sets a source's rate (nutrients a minute, within MIN_SOURCE_RATE and MAX_SOURCE_RATE).
+func set_source_rate(source: NutrientSource, rate: float) -> void:
+	source.rate = clampf(rate, MIN_SOURCE_RATE, MAX_SOURCE_RATE)
+	var id := _source_id(source)
+	if id >= 0 and row >= 0:
+		var e := WorldEdit.new()
+		e.kind = WorldEdit.Kind.SET_SOURCE_RATE
+		e.id = id
+		e.amount = source.rate
+		_world().edit_world(row, e)
+
+
+## Whether nutrient (a dose or a source) can be put at a world point: inside the dish, and in a cell of its grid whose centre is inside
+## the rim (DishGrid.accepts: the thin band at the rim has no cell to hold it).
 func can_place_at(world_pos: Vector2) -> bool:
-	return field.accepts(world_pos - global_position)
-
-
-## Adds a feeder inside the dish. Returns false when the dish can't take another, or the spot
-## can't hold one (too close to the rim).
-func place_source(world_pos: Vector2, rate: float) -> bool:
-	if sources.size() >= MAX_SOURCES or not can_place_at(world_pos):
+	var local := world_pos - global_position
+	if local.length() > radius:
 		return false
-	sources.append(NutrientSource.new(world_pos, clampf(rate, MIN_SOURCE_RATE, MAX_SOURCE_RATE)))
+	var n := DishGrid.cells_across(radius, resolution)
+	var spacing := 2.0 * radius / n
+	var cell := Vector2(clampi(int((local.x + radius) / spacing), 0, n - 1), clampi(int((local.y + radius) / spacing), 0, n - 1))
+	return ((cell + Vector2(0.5, 0.5)) * spacing - Vector2(radius, radius)).length() <= radius
+
+
+## Adds a feeder inside the dish (it shows from the next copy of the dish's world on). Returns false when the dish can't take another, or
+## the spot can't hold one (too close to the rim).
+func place_source(world_pos: Vector2, rate: float) -> bool:
+	if sources.size() >= MAX_SOURCES or not can_place_at(world_pos) or row < 0:
+		return false
+	var e := WorldEdit.new()
+	e.kind = WorldEdit.Kind.PLACE_SOURCE
+	e.position = world_pos - global_position
+	e.amount = clampf(rate, MIN_SOURCE_RATE, MAX_SOURCE_RATE)
+	_world().edit_world(row, e)
 	edit_count += 1
 	return true
 
@@ -851,24 +1067,14 @@ func plankton_details(cell: Plankton) -> Dictionary:
 	return details
 
 
-## The husk under a world position (within its drawn size, plus `slack`): its place in the dish, or NO_HUSK.
-func husk_at(world_pos: Vector2, slack: float = 0.0) -> Vector2:
-	var found := sim.husk_near(world_pos - global_position, husk_draw_size() * 0.5 + slack)
-	return Vector2(found[0], found[1]) if found.size() == 5 else NO_HUSK
+## The husk under a world position, or NO_HUSK: the pooled world answers no question about a husk's place yet, so none is found.
+func husk_at(_world_pos: Vector2, _slack: float = 0.0) -> Vector2:
+	return NO_HUSK
 
 
-## What there is to know about the husk at a place in the dish (empty once it has leaked away): how long it has lain, the nutrient it still holds, where it is,
-## and what is near.
-func husk_details(local: Vector2) -> Dictionary:
-	var found := sim.husk_near(local, 0.01)
-	if found.size() != 5:
-		return {}
-	var details := _spot_details(local)
-	var left := exp(-0.25 * found[4])  # (what is left after the pieces already let go: see husk_share in bup_husks.cpp)
-	details["age"] = found[3]
-	details["units"] = found[2] * left / NUTRIENT_ENERGY
-	details["left"] = left
-	return details
+## What there is to know about the husk at a place in the dish: nothing, until the pooled world answers questions about husks.
+func husk_details(_local: Vector2) -> Dictionary:
+	return {}
 
 
 ## What there is to know about a spot in the dish, given its place within it: where it is, the concentration there, and how
@@ -878,30 +1084,23 @@ func _spot_details(local: Vector2) -> Dictionary:
 	return {
 		"offset": local,
 		"distance": local.length(),
-		"concentration": field.sample(local),
+		"concentration": nutrient_reading(local).x,
 		"nearest_bup": near.x,
 		"nearby": int(near.y),
 	}
 
 
-## Puts a plankton in the dish. False when the dish holds as many as it can, or the spot can't take one.
+## Puts a plankton in the dish (it shows from the next copy of the dish's world on). False when the dish holds as many as it can, or the
+## spot can't take one.
 func place_plankton(world_pos: Vector2) -> bool:
-	if plankton.size() >= MAX_PLANKTON or not can_place_at(world_pos):
+	if plankton.size() >= MAX_PLANKTON or not can_place_at(world_pos) or row < 0:
 		return false
-	_add_plankton(world_pos - global_position)
-	return true
-
-
-## Anywhere in the dish a plankton's body fits (so the bloom feeds the rim as well as the middle).
-func _random_plankton_spot() -> Vector2:
-	return sim.random_point(radius - PLANKTON_DRAW_RADIUS)
-
-
-func _add_plankton(local: Vector2) -> void:
-	var life := PLANKTON_MEAN_LIFE * (1.0 + PLANKTON_LIFE_SPREAD * (2.0 * sim.random_float() - 1.0))
-	plankton.append(Plankton.new(local, time, time + life, PLANKTON_UNITS, sim.random_float() * TAU))
-	_first_burst = minf(_first_burst, time + life)
+	var e := WorldEdit.new()
+	e.kind = WorldEdit.Kind.PLACE_PLANKTON
+	e.position = world_pos - global_position
+	_world().edit_world(row, e)
 	edit_count += 1
+	return true
 
 
 ## Puts in the plankton a bloom of this density keeps floating (what arrives in the time one floats, on average), at
@@ -909,7 +1108,8 @@ func _add_plankton(local: Vector2) -> void:
 func add_steady_state_plankton() -> void:
 	var wanted := mini(int(round(bloom_per_day() * PLANKTON_MEAN_LIFE / 86400.0)), MAX_PLANKTON - plankton.size())
 	for i in wanted:
-		_add_plankton(_random_plankton_spot())
+		var at := Vector2.from_angle(_rng.randf() * TAU) * ((radius - PLANKTON_DRAW_RADIUS) * sqrt(_rng.randf()))
+		place_plankton(global_position + at)
 
 
 ## How many plankton the bloom adds in a sim-day: its density over the dish's area.
@@ -917,47 +1117,8 @@ func bloom_per_day() -> float:
 	return bloom_density * PI * pow(radius / StartConditions.UM_PER_MM, 2)
 
 
-## The plankton: the bloom adds one at a random place at each steady interval (so there are no long gaps with none
-## coming), and any whose time has come burst, at random times, leaving their nutrient in the medium (looked for once
-## every BURST_CHECK_SECONDS, so one may burst a little after its time).
-func _step_plankton(delta: float) -> void:
-	if bloom_density > 0.0:
-		var interval := 86400.0 / bloom_per_day()
-		var arrivals := 0
-		while time >= _bloom_due and arrivals < MAX_BLOOM_ARRIVALS_PER_STEP:
-			if plankton.size() < MAX_PLANKTON:
-				_add_plankton(_random_plankton_spot())
-			_bloom_due += interval  # (exactly on schedule: only where it lands, and how long it floats, are random)
-			arrivals += 1
-		if time >= _bloom_due:  # (far behind, say the rate was just raised a great deal: start over from now)
-			_bloom_due = time + interval
-	_burst_clock += delta
-	if _burst_clock < BURST_CHECK_SECONDS:
-		return
-	_burst_clock = 0.0
-	if time < _first_burst:
-		return
-	var kept := 0  # (one pass that closes the gaps, in order, instead of a removal that shifts the rest for every plankton that bursts)
-	var next_burst := INF
-	for cell in plankton:
-		if cell.burst_at <= time:
-			if plankton_husks:
-				sim.add_plankton_husk(cell.pos, cell.units * NUTRIENT_ENERGY)
-			else:
-				field.add_cloud(cell.pos, PLANKTON_PATCH_RADIUS, cell.units * NUTRIENT_ENERGY)
-			selected.forget(cell)
-			hovered.forget(cell)
-			edit_count += 1
-		else:
-			plankton[kept] = cell
-			kept += 1
-			next_burst = minf(next_burst, cell.burst_at)
-	plankton.resize(kept)
-	_first_burst = next_burst
-
-
-## What there is to know about a source: its rate and output so far, where it lies, the
-## concentration at it, and how many bups are close by.
+## What there is to know about a source: its rate, where it lies, the concentration at it, and how many bups are close by. (What it has
+## released so far is not in the copy of the dish's world: 0.)
 func source_details(source: NutrientSource) -> Dictionary:
 	var details := _spot_details(source.pos - global_position)
 	details["rate"] = source.rate
@@ -969,7 +1130,7 @@ func source_details(source: NutrientSource) -> Dictionary:
 ## way it rises, and how far the nearest source and bup are.
 func nutrient_at(world_pos: Vector2) -> Dictionary:
 	var local := world_pos - global_position
-	var reading := field.read(local)  # the concentration and its slope together
+	var reading := nutrient_reading(local)  # the concentration and its slope together
 	var nearest_source := -1.0
 	for source in sources:
 		var d := source.pos.distance_to(world_pos)
@@ -990,92 +1151,24 @@ static func scatter_radius(count: int) -> float:
 	return 0.0 if count <= 1 else NUTRIENT_SCATTER * sqrt(count)
 
 
-## Drops `count` units of nutrient into the medium at a world point (spread over a small disc
-## when there are several). Returns false when the point is outside the dish.
+## Drops `count` units of nutrient into the medium at a world point (WorldEdit.DROP: shared out over the four cells about it). Returns
+## false when the point is outside the dish.
 func drop_nutrients(world_pos: Vector2, count: int) -> bool:
-	if not can_place_at(world_pos) or count <= 0:
+	if not can_place_at(world_pos) or count <= 0 or row < 0:
 		return false
-	field.add_cloud(world_pos - global_position, scatter_radius(count), count * NUTRIENT_ENERGY)
+	_world().edit_world(row, WorldEdit.drop(world_pos - global_position, count * NUTRIENT_ENERGY))
 	edit_count += 1
 	nutrients_placed += count
 	return true
 
 
-## The eraser: takes most of the nutrient out of a disc of the medium, a little less towards
-## its edge. Returns how many units were removed.
+## The eraser: takes most of the nutrient out of a disc of the medium, a little less towards its edge. Returns how many units were
+## removed: not known here (the simulation erases on its own thread), so 0.
 func erase_nutrient(world_pos: Vector2, brush_radius: float) -> float:
 	edit_count += 1
-	if runs_on_gpu() and not _gpu_on_cpu:  # (the GPU holds the true field: its erase also changes the CPU's copy, which is what is shown until the next refresh. Not while a save has brought the state over: the CPU's field is the true one then, and a refresh from the GPU's would undo what was dropped in since)
-		return gpu_world.erase_disc(world_pos - global_position, brush_radius, ERASE_STRENGTH) / NUTRIENT_ENERGY
-	return field.erase_disc(world_pos - global_position, brush_radius, ERASE_STRENGTH) / NUTRIENT_ENERGY
-
-
-# --- Saving and loading ------------------------------------------------------------------------
-# The format, its checks and its parsing are DishCodec's; what a load does to the dish is here.
-
-## The dish as a save (DishCodec.write).
-func to_dict() -> Dictionary:
-	_to_cpu_for_edit()  # (the save is made from the CPU's state)
-	field.flush_emitters()  # (what the sources have kept to release as a cloud is let go, so that the save has it)
-	return DishCodec.write(self, _bloom_due)
-
-
-## Returns false, leaving the dish exactly as it was, if the data is unusable. Everything is
-## validated and built on the side first (DishCodec.read), so a bad save can never leave a half-loaded dish.
-func from_dict(d: Dictionary) -> bool:
-	var blocks := DishCodec.read_blocks(d)
-	if blocks.is_empty():
-		return false
-	var loaded_bups: PackedByteArray = blocks[0]
-	var loaded_family: PackedByteArray = blocks[1]
-	backend.fresh = true
-	_to_cpu_for_edit()  # (a load that is refused leaves the dish as it was: so the bups must be the CPU's, and the GPU reloads them at its next batch)
-	var loaded := DishCodec.read(d, field, global_position)
-	if loaded.is_empty():
-		return false
-
-	# Everything checked out; now it is safe to replace the dish's state.
-	radius = loaded["radius"]
-	field.set_max_across(loaded["resolution"])
-	_set_medium_thickness(loaded["thickness"])
-	sim.reset(radius, -1)
-	bup_limit = loaded["limit"]
-	loaded_bups = loaded_bups.slice(0, mini(loaded_bups.size(), StartConditions.MAX_BUP_LIMIT * GpuSim.RECORD_BYTES))  # (not the dish's limit: a save made on the GPU at the limit can hold a step's births more, which the next step takes back, as in play)
-	_edited()
-	sim.import_state_bytes(loaded_bups)
-	if loaded.has("next_id"):
-		sim.set_next_id(loaded["next_id"])  # so the next bup born doesn't take a number already used
-	var loaded_watched: PackedInt64Array = loaded["watched"]
-	sim.lineage_import_bytes(loaded_family, loaded_watched)
-	field.load_values(loaded["field"])
-	acetate.load_values(loaded["acetate"])
-	field.puffs_import(loaded["clouds"])
-	death_husks = loaded["death_husks"]
-	plankton_husks = loaded["plankton_husks"]
-	stationary_phase = loaded["stationary_phase"]
-	sim.husks_import(loaded["husks"])
-	sources = loaded["sources"]
-	plankton = loaded["plankton"]
-	_first_burst = -INF
-	bloom_density = loaded["bloom_density"]
-	upkeep_factor = loaded["upkeep_factor"]
-	nutrients_placed = loaded["nutrients_placed"]
-	time = loaded["time"]
-	_bloom_due = loaded["bloom_due"]
-	if loaded.has("feed_density"):
-		feed_density = loaded["feed_density"]
-	patch_seed = loaded["patch_seed"]
-	field.set_patchiness(NUTRIENT_PATCHINESS, radius, patch_seed)  # (so the feed goes on following the same landscape)
-	_reset_runtime_state()
-	moved_out = loaded["moved_out"]
-	set_backend_setting(loaded["backend"])
-	history.load(loaded["history"], time)
-	for id in loaded_watched:  # (the import pinned them, oldest first, so the newest ends up on top again)
-		if has_record(id) and not watched.has(id):
-			watched.push_front(id)
-	watch_version += 1
-	_mark_gpu_dirty()  # (a loaded dish: what the GPU held is gone)
-	return true
+	if row >= 0:
+		_world().edit_world(row, WorldEdit.erase(world_pos - global_position, brush_radius, ERASE_STRENGTH))
+	return 0.0
 
 
 # --- Drawing ---------------------------------------------------------------------------------
@@ -1128,148 +1221,6 @@ func draw_overlay(canvas: CanvasItem) -> void:
 	drawing.draw_overlay(canvas)
 
 
-# --- The GPU path ------------------------------------------------------------------------------
-# The hooks of the GPU path: none is reached while `gpu_active` is false, except _choose_backend, which every `advance` asks.
-
-## Runs `seconds` of simulation on the GPU, as `advance` does on the CPU (steps of seconds / ceil(seconds / MAX_STEP)), and returns
-## the seconds simulated: as many steps as gpu_world.steps_for allows (the GPU's own budget, which `advance`'s time budget does not
-## enter). First gpu_world.poll() (finished results: records, counts, stats, answers), and each of gpu_world.take_history_samples()
-## through _record_history_from. Then for each step: `_step_world` (the clock, the plankton, the sources, the history's clock),
-## sim.step_world(delta, the sources' places and rates, time) for their emissions, the field's recorded clouds and deposits
-## (take_recorded_*) gathered into the batch's events, and the steps a history sample is due after; then one
-## gpu_world.queue_batch(plan) (see its keys). Emits `extinct` once when a polled count is 0, as `step` does.
-func _advance_gpu(seconds: float) -> float:
-	gpu_world.poll()
-	for sample: Dictionary in gpu_world.take_history_samples():
-		_record_history_from(sample["stats"])
-	if gpu_world.count_known():
-		_signal_if_extinct(gpu_world.bup_count())
-	if seconds <= 0.0:
-		return 0.0
-	var wanted := maxi(1, ceili(seconds / MAX_STEP))
-	var delta := seconds / wanted
-	var steps := gpu_world.steps_for(wanted)  # (the GPU's budget: fewer when the frames run long; 0 when its results are behind)
-	if steps == 0:
-		return 0.0
-	var start := time
-	var events := GpuSim.WorldEvents.new()
-	var history_steps := PackedInt32Array()
-	for k in steps:
-		var world := _step_world(delta)
-		sim.step_world(delta, world["positions"], world["rates"], time)  # (the sources' emissions only: the field records them, as it does the plankton's)
-		events.add_step(field)
-		if world["sample"]:
-			history_steps.append(k)  # (taken on the GPU after this step, recorded here when it comes back)
-	gpu_world.queue_batch({
-		"steps": steps, "delta": delta, "start_time": start, "history_steps": history_steps,
-		"events": events.as_dict(),
-		"feed_per_second": feed_per_second(feed_density), "upkeep_scale": upkeep_factor, "limit": bup_limit,
-		"death_puff": 0.0 if death_husks else Biology.DEATH_RELEASE * Cell.COST_PER_MASS, "stationary": stationary_phase,
-	})
-	return steps * delta
-
-
-var _gpu_on_cpu := false  ## gpu_active, but the CPU's bups are the true ones just now (an edit or a save brought them over): the GPU reloads them before its next batch
-var _fractions_asked := {}  ## [gene, threshold] -> true for each share asked lately (fraction_with_gene_at_least): a load answers them from the CPU's bups
-
-
-
-## Where the bups run now, "gpu" or "cpu" (the debug log and the pause menu's record of the settings say it).
-func backend_running() -> String:
-	return "gpu" if runs_on_gpu() else "cpu"
-
-
-## Sets the setting (StartConditions.BACKEND_*; anything else is Auto) and has the next `advance` ask again.
-func set_backend_setting(value: String) -> void:
-	backend.set_setting(value)
-
-
-## Chooses where the bups run for this frame (the rule is `DishBackend.choose`; this carries the answer out): makes `gpu_world` when first
-## needed (if GpuWorld.available()), moves the state (gpu_world.load_from_cpu / export_to_cpu) and sets `gpu_active`. Called at the top of
-## every `advance`, before any step (never while paused). `step_delta` and `steps` are as `choose` takes them. A dish that stays on the GPU
-## with `_gpu_on_cpu` set reloads it before it runs: the GPU's copy is from before the save or edit.
-func _choose_backend(step_delta: float, steps := 0) -> void:
-	var real := minf(get_process_delta_time(), 0.1)  # (the frame the caller advances for: main.gd's, capped as it caps it, MAX_FRAME_SECONDS)
-	var on_gpu := runs_on_gpu()
-	if backend.idle_release(on_gpu, gpu_world != null and gpu_world.holds_main_device(), real if real > 0.0 else BackendRule.RULE_FRAME_SECONDS):
-		gpu_world.release_device()  # (`_load_gpu` makes the buffers and pipelines afresh when the GPU is wanted later)
-	var facts := DishBackend.Facts.new()
-	facts.on_gpu = on_gpu
-	facts.available = BackendRule.usable(GpuWorld.available(), bup_limit, GpuWorld.most_bups())
-	facts.state_on_cpu = _gpu_on_cpu
-	facts.cells = field.get_size()
-	facts.moves = sim.moves_for(step_delta)
-	facts.population = population()
-	facts.clouds = field.puff_count()
-	match backend.choose(step_delta, steps, real, facts):
-		DishBackend.Action.TO_GPU:
-			if gpu_world == null:
-				gpu_world = GpuWorld.new(sim)
-			_load_gpu()
-			gpu_active = true
-			drawing.stale = true
-		DishBackend.Action.TO_CPU:
-			_to_cpu_for_edit()  # (its state, brought over unless an edit has just done so)
-			gpu_active = false
-			_gpu_on_cpu = false
-			drawing.stale = true
-		DishBackend.Action.RELOAD:
-			_load_gpu()
-
-
-## What load_from_cpu needs of the dish, and what it shows of the bups (the selected and hovered ones, the shares of a gene a goal
-## watches), so that the GPU's answers to these start from the CPU's instead of from nothing.
-func _gpu_params() -> Dictionary:
-	return {"radius": radius, "limit": bup_limit, "seed": patch_seed, "upkeep_scale": upkeep_factor, "feed_per_second": feed_per_second(feed_density), "step_seconds": MAX_STEP,
-		"tracked": [selected.bup, hovered.bup], "fractions": _fractions_asked.keys()}
-
-
-## Hands the CPU's bups and field to the GPU (the CPU's are the true ones until it has).
-func _load_gpu() -> void:
-	gpu_world.load_from_cpu(field, _gpu_params())
-	_gpu_on_cpu = false
-
-
-## Forgets what the GPU holds, for a dish that is being replaced (a new one): no export, the CPU's field stops recording, and what
-## the GPU still has on its way is dropped. The CPU's own state is the new dish's, which the caller makes; `_mark_gpu_dirty` loads it.
-func _discard_gpu_state() -> void:
-	field.set_recording(false)
-	gpu_world.reset_pipeline(0)
-	gpu_world.take_history_samples()  # (the old dish's samples that came back and were not yet recorded: not the new dish's)
-	_gpu_on_cpu = true
-
-
-## Before an edit made by hand (adding or removing bups, a resize, the limit, a save): brings the GPU's state to the CPU
-## (gpu_world.export_to_cpu, which stalls), so the edit is made on the CPU's bups. Nothing to do when it already has them.
-func _to_cpu_for_edit() -> void:
-	if not runs_on_gpu() or _gpu_on_cpu:
-		return
-	gpu_world.export_to_cpu(field)
-	for sample: Dictionary in gpu_world.take_history_samples():  # (the history samples of the batches the stall finished: recorded, in order, before any CPU step)
-		_record_history_from(sample["stats"])
-	_gpu_on_cpu = true
-
-
-## A hand edit was made (what `edit_count` counts), and the bups' picture is out of date.
+## A hand edit was made (what `edit_count` counts), and the picture is out of date.
 func _edited() -> void:
-	drawing.stale = true
 	edit_count += 1
-
-
-## After an edit made by hand, a new dish or a load: the CPU's state is the true one, so the GPU loads it (now, so that the picture and
-## the counts are the edited dish's, whether or not time is moving), and results of batches from before it are dropped.
-func _mark_gpu_dirty() -> void:
-	if not runs_on_gpu():
-		return
-	_gpu_on_cpu = true
-	if bup_limit <= GpuWorld.most_bups():  # (a limit the device cannot hold stays on the CPU: the next `advance` says so)
-		_load_gpu()
-
-
-## A hand edit of the bups (adding or removing them, a resize, the limit, the pipette): `work` runs on the CPU's bups, which
-## `_to_cpu_for_edit` brings over from the GPU first, and the GPU then loads the result (`_mark_gpu_dirty`). Returns what `work` returns.
-func _edit_on_cpu(work: Callable) -> Variant:
-	_to_cpu_for_edit()
-	var result: Variant = work.call()
-	_mark_gpu_dirty()
-	return result

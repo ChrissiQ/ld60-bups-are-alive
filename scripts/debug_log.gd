@@ -31,7 +31,7 @@ static func report(dish: Dish, scene: Node, extra: Dictionary) -> String:
 		"screen": extra,
 	}
 	if dish != null:
-		var field := dish.field
+		var cells := DishGrid.cells_across(dish.radius, dish.resolution)
 		data["dish"] = {
 			"radius_um": dish.radius,
 			"time_s": dish.time,
@@ -58,12 +58,10 @@ static func report(dish: Dish, scene: Node, extra: Dictionary) -> String:
 		}
 		data["backend"] = backend(dish)
 		data["nutrient"] = {
-			"cells_across": field.get_size(),
-			"max_across": field.get_max_across(),
-			"cell_um": field.get_spacing(),
-			"diffusion": field.get_diffusion(),
-			"total": field.total(),
-			"clouds": field.puff_count(),
+			"cells_across": cells,
+			"max_across": dish.resolution,
+			"cell_um": 2.0 * dish.radius / cells,
+			"diffusion": Biology.WATER_DIFFUSION / dish.medium_thickness,
 			"by_distance_from_centre": nutrient_profile(dish),
 		}
 		data["selected"] = _selected(dish)
@@ -71,16 +69,15 @@ static func report(dish: Dish, scene: Node, extra: Dictionary) -> String:
 	return JSON.stringify(data, "\t", false, true)  # (in the order written here: what is looked at first comes first)
 
 
-## Where the bups are simulated: the setting, where they run now, whether this machine can use the GPU at all, the GPU's name, and
-## what the GPU path has lost for want of room (clouds sent to the grid, list entries cut, births and deaths with no event slot).
+## Where the bups are simulated: the setting (a hidden field the world ignores), where they run (the world's backend: the GPU's pooled
+## world, or the processor's stub, which runs nothing), whether this machine can use the GPU at all and the GPU's name.
 static func backend(dish: Dish) -> Dictionary:
-	var out := {
-		"setting": dish.backend.setting,
-		"running": dish.backend_running(),
+	var sim := WorldClient.shared().backend
+	return {
+		"setting": StartConditions.BACKEND_AUTO,
+		"running": "gpu" if sim.can_simulate() else "cpu",
 		"gpu_available": GpuWorld.available(),
-		"gpu_device": dish.gpu_world.device_name() if dish.gpu_world != null else "",
-		"gpu_wanted_seconds": dish.backend.gpu_wanted_seconds,
-		"state_on_cpu": dish._gpu_on_cpu,
+		"gpu_device": sim.device_name(),
 		"gpu_overflows": {},
 		"steps_cap": 0,
 		"record_usec": 0,
@@ -91,17 +88,6 @@ static func backend(dish: Dish) -> Dictionary:
 		"draw_slots": _draw_slots(dish),
 		"pick_latency_frames": {"last": 0, "max": 0},
 	}
-	var world := dish.gpu_world
-	if world != null:
-		out["steps_cap"] = world.budget.steps_cap
-		out["record_usec"] = world.record_usec
-		out["record_steps"] = world.record_steps
-		out["apply_usec"] = world.apply_usec
-		out["applied_events"] = world.applied_events
-		out["pick_latency_frames"] = world.questions.pick_latency()
-	if world != null and world.gpu != null:
-		out["gpu_overflows"] = world.overflows()
-	return out
 
 
 ## The bups' picture's instance slots: drawn (visible), capacity (allocated), and the bups alive.
@@ -110,14 +96,6 @@ static func _draw_slots(dish: Dish) -> Dictionary:
 	if mesh == null or mesh.multimesh == null:
 		return {"drawn": 0, "capacity": 0, "live": dish.population()}
 	return {"drawn": mesh.multimesh.visible_instance_count, "capacity": mesh.multimesh.instance_count, "live": dish.population()}
-
-
-## What decides where a dish runs, for every dish (the main one's `backend` has the rest): see DishBackend.debug.
-static func rule(dish: Dish) -> Dictionary:
-	var out := dish.backend.debug()
-	out["running"] = dish.backend_running()
-	out["state_on_cpu"] = dish._gpu_on_cpu
-	return out
 
 
 ## The mean nutrient at each of RIM_FRACTIONS of the radius, averaged around the dish: where a ring or a step shows up.
@@ -190,14 +168,9 @@ static func _constants() -> Dictionary:
 	return out
 
 
-## The husks: how many, the nutrient still in them (what they will leak back: the energy at death less the pieces already let go), and how many the layer draws.
+## The husks: how many the newest snapshot counts, and how many the layer draws (none: the pooled world publishes no picture of them).
 static func _husks(dish: Dish) -> Dictionary:
-	var count := dish.sim.husk_count()
-	var energy := 0.0
-	var saved := dish.sim.husks_export()
-	for i in count:
-		energy += saved[i * 5 + 2] * exp(-0.25 * saved[i * 5 + 4])  # (the energy at death times e^(-k/4) for the k pieces already let go: what BupSim::husk_share leaves)
-	return {"count": count, "energy_held": energy, "drawn": dish.sim.husk_count() if dish.layer_shown(Dish.Layer.HUSKS) else 0}
+	return {"count": dish.husk_count(), "drawn": 0}
 
 
 ## The dish's graph history: where it began, how many samples each part holds, and the newest figures.

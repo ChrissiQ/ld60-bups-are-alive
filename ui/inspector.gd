@@ -120,7 +120,7 @@ func _show_info(following: bool) -> void:
 	var editing := source != null and bup_id < 0
 	var alive_info: Dictionary = dish.bup_info(bup_id) if bup_id >= 0 else {}  # (fetched once: the panels below are built from it)
 	if bup_id >= 0 and alive_info.is_empty() and dish.has_bup(bup_id):
-		alive_info = dish.lineage_info(bup_id)  # (alive, but on the GPU its record has not come back yet: its family record stands in, rather than showing it as deceased)
+		alive_info = dish.lineage_info(bup_id)  # (alive, but its record has not been answered yet: its family record stands in, rather than showing it as deceased)
 	var dead := bup_id >= 0 and alive_info.is_empty()  # a selected bup that has died stays up, as a record
 	var lineage_open := lineage.is_open_on(bup_id)
 	var something := bup_id >= 0 or source != null or floating != null or not husk.is_empty()
@@ -267,7 +267,7 @@ func _show_source_rate(source: NutrientSource) -> void:
 
 func _on_source_rate_changed(rate: float) -> void:
 	if dish.selected.source != null:
-		dish.selected.source.rate = rate
+		dish.set_source_rate(dish.selected.source, rate)
 
 
 func delete_selected_source() -> void:

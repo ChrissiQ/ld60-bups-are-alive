@@ -26,6 +26,14 @@ var _shown: PayloadInfo = null
 var _known_publish := -1  ## the newest publish seen
 
 
+## The game's world: the SimService autoload's (null where it is not there). Reached through the tree, not the autoload's name, so the
+## scripts that use it compile before the autoloads exist (a script a static initializer loads, a tool).
+static func shared() -> WorldClient:
+	var tree := Engine.get_main_loop() as SceneTree
+	var service: Node = tree.root.get_node_or_null(^"SimService") if tree != null else null
+	return service.world() if service != null else null
+
+
 func _init(p_backend: SimBackend) -> void:
 	backend = p_backend
 	var hz := DisplayServer.screen_get_refresh_rate()

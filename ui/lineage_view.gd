@@ -2,8 +2,8 @@ class_name LineageView
 extends RefCounted
 ## The views the player has opened on bups, and the lineage panel's list. Each view on the stack is
 ## {"view": "info" or "lineage", "id": a bup}, oldest first. Escape takes the newest away; anything outside
-## the stack (another selection, a tool) closes it all. Every bup on it is pinned in the simulation, so its
-## record isn't dropped (even if it dies) while it is on the stack.
+## the stack (another selection, a tool) closes it all. Every bup on it is pinned in the family tree for the dish in view (its number
+## holds the pin), so its record isn't dropped (even if it dies) while it is on the stack.
 
 ## A name in the lineage was clicked and its bup's info opened (the bup is selected, if it is alive).
 signal info_opened
@@ -100,7 +100,7 @@ func step_back() -> void:
 
 
 ## Who of a lineage is alive in the other dishes: ancestor id -> [[how many, the dish's number], ...]. Worked out when the lineage is first shown and then at most every
-## ELSEWHERE_MSEC (a pass over a dish's records), and only for dishes that hold a record of someone in the line (the ones a pipette took bups into).
+## ELSEWHERE_MSEC (a pass over the family tree for each other dish: its living bups whose home it is).
 func alive_elsewhere(chain: PackedInt64Array) -> Dictionary:
 	if dishes.size() < 2 or chain.is_empty():
 		return {}
@@ -112,7 +112,7 @@ func alive_elsewhere(chain: PackedInt64Array) -> Dictionary:
 	for other in dishes:
 		if other == dish or not other.has_record(chain[0]):
 			continue
-		var counts := other.sim.living_descendants_of(chain)
+		var counts := other.living_descendants_of(chain)
 		for k in chain.size():
 			if counts[k] > 0:
 				if not _elsewhere.has(chain[k]):

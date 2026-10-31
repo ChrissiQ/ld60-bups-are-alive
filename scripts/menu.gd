@@ -74,7 +74,7 @@ func _process(delta: float) -> void:
 	# Follow the window if it is resized (or stretched by the editor's game view).
 	if not dish.position.is_equal_approx(_dish_center()):
 		dish.recenter(_dish_center())
-	dish.step(minf(delta, 1.0 / 30.0))
+	WorldClient.shared().set_time(1.0, false, delta)  # (the backdrop is a dish of the world, run at x1 while the title shows)
 	dish.queue_redraw()
 	# Neon-sign flicker on the title.
 	_flicker_left = maxf(0.0, _flicker_left - delta)

@@ -78,7 +78,7 @@ func _blob() -> Dictionary:
 		var stats := {"count": 10 + i, "harm": 0.01 * i, "mutator": 1.0, "donor": 0.1, "key": 0.0, "generation": 2.0 + i}
 		for gene in Genome.GENES:
 			stats[gene] = rng.randf()
-		history.record(stats)
+		history.record((i + 1) * DishHistory.INTERVAL, stats)
 	var f := FileAccess.open_compressed(LINEAGE_GOLDEN, FileAccess.READ, FileAccess.COMPRESSION_GZIP)
 	var golden := f.get_buffer(f.get_length())
 	var store := LineageStore.new()

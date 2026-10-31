@@ -1,6 +1,7 @@
 class_name DishHistory
 extends RefCounted
-## What the graph shows of one dish: the means of its population and traits, sampled on the dish's own clock. `fine` keeps the last week
+## What the graph shows of one dish: the means of its population and traits, as the simulation sampled them (one schedule for every dish:
+## a sample after the step that crosses each multiple of INTERVAL of the world's clock, with that step's exact time). `fine` keeps the last week
 ## of samples; `whole` keeps the whole run in no more than ALL_LEN samples, each the mean of `whole_factor` fine ones, and when it fills
 ## up its neighbours are merged in pairs and the factor doubles, so a run of any length is kept, thinner the longer it gets. Sample i of
 ## `whole` ends at (i + 1) * whole_factor * INTERVAL. The save keeps these under its own names (`write`, `read`, `pad`).
@@ -16,7 +17,8 @@ var whole := {}
 var whole_factor := 1
 var version := 0  ## bumped whenever the history gains or loses a sample, so views can redraw only on change
 var origin := 0.0  ## the world time this history began at (a dish that joins a running world begins at its time): the graph shows a dish's own time from here
-var accum := 0.0  ## the seconds into the sample interval the clock is
+var last_time := -1.0  ## the world time of the newest sample (-1: none yet)
+var _boundary := 0  ## the multiple of INTERVAL the newest sample was taken for: a sample for it or an earlier one is not taken again
 var _sums := {}  ## the running sums for the next whole-run sample
 var _count := 0  ## how many fine samples are in them
 
@@ -35,22 +37,40 @@ func reset() -> void:
 		_sums[series] = 0.0
 	whole_factor = 1
 	_count = 0
-	accum = 0.0
 	origin = 0.0
+	last_time = -1.0
+	_boundary = 0
 	version += 1
 
 
-## Moves the sampling clock on `delta`; true when a sample is due.
-func tick(delta: float) -> bool:
-	accum += delta
-	if accum >= INTERVAL:
-		accum -= INTERVAL
-		return true
-	return false
+## The history begins at `world_time` (a dish struck, or joining a running world): no sample for a multiple of INTERVAL at or before it is taken.
+func begin(world_time: float) -> void:
+	origin = world_time
+	_boundary = boundary_of(world_time)
 
 
-## One sample from these figures (BupSim.population_stats' keys).
-func record(stats: Dictionary) -> void:
+## The multiple of INTERVAL a sample taken at `time` is for (the step that crossed it ended at `time`, at most a step later).
+static func boundary_of(time: float) -> int:
+	return floori(time / INTERVAL + Governor.OWED_TOLERANCE)
+
+
+## A snapshot's samples of the dish ({time, stats} each, oldest first). Returns how many were new.
+func take(samples: Array) -> int:
+	var taken := 0
+	for s: Dictionary in samples:
+		if record(float(s["time"]), s["stats"]):
+			taken += 1
+	return taken
+
+
+## One sample, taken at world time `time`, from these figures (DishState.STATS_KEYS). False, and nothing changes, when the sample is for a
+## multiple of INTERVAL the history already has (a snapshot carries a sample until the main thread has taken it, so it can come twice).
+func record(time: float, stats: Dictionary) -> bool:
+	var boundary := boundary_of(time)
+	if boundary <= _boundary:
+		return false
+	_boundary = boundary
+	last_time = time
 	fine["pop"].append(stats["count"])
 	if stats["count"] == 0 and not fine["harm"].is_empty():  # (nobody left to average: the traits stay as they last were)
 		for series in SERIES:
@@ -78,6 +98,7 @@ func record(stats: Dictionary) -> void:
 		if whole["pop"].size() >= ALL_LEN:
 			_thin()
 	version += 1
+	return true
 
 
 ## Merges the whole-run history's neighbours in pairs (each the mean of two), so it holds twice the time in half the samples.
@@ -91,8 +112,7 @@ func _thin() -> void:
 	whole_factor *= 2
 
 
-## Takes a history `read` has checked, for a dish whose clock is at `time`. Samples are taken on multiples of the interval, so the clock
-## resumes part-way through one.
+## Takes a history `read` has checked, for a dish whose clock is at `time`: the next sample taken is for the next multiple of the interval.
 func load(read_back: Dictionary, time: float) -> void:
 	fine = read_back["fine"]
 	whole = read_back["whole"]
@@ -100,7 +120,9 @@ func load(read_back: Dictionary, time: float) -> void:
 	while whole["pop"].size() >= ALL_LEN:
 		_thin()
 	origin = read_back["origin"]
-	accum = fposmod(time - origin, INTERVAL)
+	_boundary = boundary_of(time)
+	last_time = time
+	version += 1
 
 
 ## The history's part of a dish's save.
