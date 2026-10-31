@@ -87,6 +87,51 @@ func add_pool_buffers(b: GpuSim, state: GpuSim.State) -> void:
 		z.call(nm, Rig.SCAN_SCRATCH * 4)
 
 
+## Binds every pooled kernel on `b`, as SimCore binds it, so that none is left unbound: the arena's buffers (SimArena's tables) and the
+## ones SimCore or a query hands a kernel for one call (PIX, the probes' queries and answers) that `b` lacks, zeroed, then the sets made
+## again; the copy kernels with their images too (GpuKernelsCore.IMAGE_BINDINGS, the formats SimCore makes). A kernel naming a buffer
+## none of these has stays unbound. Returns the images made (the caller frees them after `b.release`).
+func bind_every_pool_kernel(b: GpuSim) -> Array:
+	var names: Array = SimArena.BUFFERS.keys() + SimArena.DRAW_BUFFERS.keys() + ["PIX", "PQ", "PR", "SPQ", "SPR"]
+	for nm: String in names:
+		if not b._bufs.has(nm):
+			var bytes := PackedByteArray()
+			bytes.resize(65536)
+			b._bufs[nm] = b.rd.storage_buffer_create(bytes.size(), bytes)
+	for kname: String in GpuKernelsCore.IMAGE_BINDINGS:
+		b._kernels[kname]["external"] = true  # (bound below with its images)
+	b._bind_kernels()
+	var formats := {"PAYTEX": RenderingDevice.DATA_FORMAT_R32G32B32A32_UINT, "IDS": RenderingDevice.DATA_FORMAT_R32G32_UINT,
+		"PIC": RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM}
+	var images: Array = []
+	for kname: String in GpuKernelsCore.IMAGE_BINDINGS:
+		var kern: Dictionary = b._kernels[kname]
+		var uniforms: Array[RDUniform] = []
+		var buffers: Array = kern["buffers"]
+		for k in buffers.size():
+			var u := RDUniform.new()
+			u.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
+			u.binding = k
+			u.add_id(b._bufs[buffers[k]])
+			uniforms.append(u)
+		var bindings: Dictionary = GpuKernelsCore.IMAGE_BINDINGS[kname]
+		for binding: int in bindings:
+			var fmt := RDTextureFormat.new()
+			fmt.width = 16
+			fmt.height = 16
+			fmt.format = formats[bindings[binding]]
+			fmt.usage_bits = RenderingDevice.TEXTURE_USAGE_STORAGE_BIT
+			var t := b.rd.texture_create(fmt, RDTextureView.new())
+			images.append(t)
+			var u := RDUniform.new()
+			u.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
+			u.binding = binding
+			u.add_id(t)
+			uniforms.append(u)
+		kern["set"] = b.rd.uniform_set_create(uniforms, kern["shader"], 0)
+	return images
+
+
 ## DISHP, DSTATE and WORLD of the pool of one dish, from `b`'s P as its batch set it (the feed of a step, k, the handover, ...).
 func upload_tables(b: GpuSim, quota: int, stationary: bool) -> void:
 	var pv := func(nm: String) -> float: return b._p[GpuLayout.p_slot(nm)]
@@ -271,9 +316,10 @@ func run_variant(state: GpuSim.State, v: Dictionary) -> void:
 	ok(src.errors.is_empty(), "%s: the bridge compiles %s" % [name, src.errors])
 	bridge = made["chain_bridge"]
 	bridge["set"] = ShaderSet.uniform_set(b.rd, bridge, b._bufs)
+	var images := bind_every_pool_kernel(b)
 	var missing := []
 	for kname: String in b._kernels:
-		if kname.begins_with("pool_") and not b._kernels[kname]["set"].is_valid() and kname != "pool_probe":
+		if kname.begins_with("pool_") and not b._kernels[kname]["set"].is_valid():
 			missing.append(kname)
 	ok(missing.is_empty(), "%s: every pooled kernel is bound on the pool's buffers %s" % [name, missing])
 	upload_counts(b)
@@ -325,6 +371,8 @@ func run_variant(state: GpuSim.State, v: Dictionary) -> void:
 	ShaderSet.free_all(b.rd, made)
 	a.release()
 	b.release()
+	for t: RID in images:
+		b.rd.free_rid(t)
 	for warm in [0, 3, 16, 37]:
 		per_kernel(state, v, warm)
 
