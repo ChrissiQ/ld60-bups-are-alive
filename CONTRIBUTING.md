@@ -35,7 +35,7 @@ godot --headless --path . -s tests/strings_test.gd
 godot --headless --path . res://tests/dialog_test.tscn
 ```
 
-The quick ones cover the interface (`ui_lint_test`, `strings_test`, `fonts_test`, `screens_test`, `settings_test`, `toolbar_test`, `free_mode_test`, `tutorial_test`, `save_test`). The simulation ones are slow: `model_test`, `cloud_test`, `substep_test`, `motion_table_test`, and `smoke`, which plays a whole game. Run `godot --headless --path . --import` after adding a `class_name` script.
+The quick ones cover the interface (`ui_lint_test`, `strings_test`, `fonts_test`, `screens_test`, `settings_test`, `toolbar_test`, `free_mode_test`, `tutorial_test`, `dish_codec_test`). The simulation ones are slow: `model_test`, `cloud_test`, `substep_test`, `motion_table_test`, and `smoke`, which plays a whole game. Run `godot --headless --path . --import` after adding a `class_name` script.
 
 ## Making a release
 
