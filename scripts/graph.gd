@@ -32,6 +32,7 @@ const BIG_STEPS := [1.0, 1.2, 1.6, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0]  ## the l
 var dish: Dish  ## the dish in the main view
 var dishes: Array = []  ## every dish that runs (the screen's own list)
 var all_dishes := false  ## show every dish together instead of the one in the main view (see `combined`)
+var game_began := 0.0  ## the world time the game began at: with every dish together the graph's clock counts from it
 var trait_index := 1
 var span := Span.LAST_24  ## the mode the player has chosen with G (it counts once `chosen`)
 var chosen := false  ## whether G has been pressed: until then the graph moves up a mode by itself (see `shown_span`)
@@ -74,7 +75,7 @@ func combined() -> bool:
 
 
 ## How far the shown time has got: the main dish's own time (from the moment its history began, whatever the world's clock said then), or with every dish
-## together the world's (the longest-running dish's).
+## together the game's (the world's since the game began).
 func _now() -> float:
 	if dish == null:
 		return 0.0
@@ -82,7 +83,7 @@ func _now() -> float:
 		var latest := 0.0
 		for d: Dish in dishes:
 			latest = maxf(latest, d.time)
-		return latest
+		return latest - game_began
 	return dish.time - dish.history.origin
 
 
@@ -378,23 +379,28 @@ func _notification(what: int) -> void:
 		queue_redraw()
 
 
-## The samples of a series as (time, value), the ones from `x_min` on. In the whole-run view they are the whole run's (thinned: see
-## Dish.history.whole), each at the end of the stretch it is the mean of, with the newest sample of the fine history after them.
-## Otherwise sample i was recorded at (newest sample time) - (samples after it) * interval.
+## The samples of a series as (time, value), the ones from `x_min` on. The simulation samples every dish at the multiples of
+## DishHistory.INTERVAL of the world's clock (one sample after each), so sample i of the fine history is for the multiple (samples after it)
+## intervals before the newest one's. In the whole-run view they are the whole run's (thinned: see Dish.history.whole), each at the multiple
+## that ends the stretch it is the mean of (the first stretch begins with the first multiple after the history began), with the newest sample
+## of the fine history after them.
 func _points(name: String, x_min: float, mode: Span) -> PackedVector2Array:
 	return _points_of(dish, name, x_min, mode, 0.0)
 
 
-## `shift` moves the dish's own times (from the start of its history) on to the shown clock: its history's origin when every dish is shown together, nothing otherwise.
+## `shift` moves the dish's own times (from the start of its history) on to the shown clock: its history's origin less the game's beginning when every dish is
+## shown together, nothing otherwise.
 func _points_of(d: Dish, name: String, x_min: float, mode: Span, shift: float) -> PackedVector2Array:
 	var out := PackedVector2Array()
-	var last_sample := last_sample_time(d.time - d.history.origin)
+	var origin := d.history.origin
+	var last_sample := DishHistory.boundary_of(d.history.last_time) * DishHistory.INTERVAL - origin
 	var fine: Array = d.history.fine[name]
 	if mode == Span.ALL:
 		var whole: Array = d.history.whole[name]
 		var step := d.history.whole_factor * DishHistory.INTERVAL
+		var before := DishHistory.boundary_of(origin) * DishHistory.INTERVAL - origin  # (the multiple at or before the history began, on its own clock)
 		for i in whole.size():
-			out.append(Vector2((i + 1) * step + shift, whole[i]))
+			out.append(Vector2((i + 1) * step + before + shift, whole[i]))
 		if not fine.is_empty() and (out.is_empty() or last_sample + shift > out[-1].x):
 			out.append(Vector2(last_sample + shift, fine[-1]))
 		return out
@@ -410,13 +416,13 @@ func _pops_per_dish(x_min: float, mode: Span) -> Array:
 	var out: Array = []
 	if combined():
 		for d: Dish in dishes:
-			out.append(_points_of(d, "pop", x_min, mode, d.history.origin))
+			out.append(_points_of(d, "pop", x_min, mode, d.history.origin - game_began))
 	return out
 
 
-## The series as the graph draws it: the main dish's, or every dish's together. The dishes' samples are not at quite the same times (a dish that joined
-## later started its own sampling), so the sum goes along the times of the longest one, each dish read between its own samples (nothing before it
-## began, its last value after its history ends). A trait is the mean over the dishes, each counting by its bups.
+## The series as the graph draws it: the main dish's, or every dish's together. The dishes' samples fall on the same multiples of the world's clock, but a
+## dish that joined later has fewer, and each dish thins its whole run by its own factor, so the sum goes along the times of the longest one, each dish read
+## between its own samples (nothing before it began, its last value after its history ends). A trait is the mean over the dishes, each counting by its bups.
 ## `dish_pops` is `_pops_per_dish` when the caller already has it (the population and the trait are then built from one reading of the dishes).
 func _series(name: String, x_min: float, mode: Span, dish_pops: Array = []) -> PackedVector2Array:
 	if not combined():
@@ -426,7 +432,7 @@ func _series(name: String, x_min: float, mode: Span, dish_pops: Array = []) -> P
 	var grid := PackedVector2Array()
 	for k in dishes.size():
 		var pop: PackedVector2Array = pops[k]
-		vals.append(pop if name == "pop" else _points_of(dishes[k], name, x_min, mode, dishes[k].history.origin))
+		vals.append(pop if name == "pop" else _points_of(dishes[k], name, x_min, mode, dishes[k].history.origin - game_began))
 		if pop.size() > grid.size():
 			grid = pop
 	var pop_cursor := []

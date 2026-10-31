@@ -5,7 +5,6 @@ const BANNER_BRIEF_SECONDS := 1.5  ## how long a short banner stays up
 const PIPETTE_PULSE_SECONDS := 0.5  ## the pipette button's fade each way while the timer holds the game
 const PIPETTE_PULSE_LOW := 0.35  ## the opacity it fades to
 const PIPETTE_STILL_ALPHA := 0.5  ## its opacity under reduced motion (lit, not pulsing)
-const MAX_FRAME_SECONDS := 0.1  ## the longest frame the sim will catch up on, so a hitch can't snowball
 const TUTORIAL_ZOOM := 6.0  ## how close the tutorial brings the camera to a bup it asks the player to click
 const TUTORIAL_BUP_PIXELS := 18.0  ## the lit square round that bup is this far out on each side
 const MAX_DISHES := 20  ## the most dishes at once (the strip holds that many)
@@ -61,14 +60,16 @@ const VIEW_BITS := 19  ## render layers there are for dishes (the 2D world has t
 ## The two modes share everything (dish, evolution, HUD, controls). Free mode differs in
 ## exactly two ways: no goals, and no saving.
 var free_mode := Session.mode == Session.Mode.FREE
+var save_path := SaveGame.PATH  ## where the game is saved and loaded from (a test sets a scratch file before the screen is in the tree)
 var tracker := GoalTracker.new()
 var dishes: Array[Dish] = []  ## every dish that runs; `dish` is the one in the main view (the others run beside it, see the strip)
 var _view_before_extinct: Dish = null  ## the dish that was in the main view when the first dish in `_extinct_queue` was brought into view: the view goes back to it afterwards
 var _extinct_queue: Array[Dish] = []  ## dishes that have died out and are not yet deleted (the first is the one the screen has said so about)
 var _dish_numbers := {}  ## Dish -> its number (a number is never reused: a bup's "line from dish 2" stays true)
-var _next_dish_number := 1
-var scheduler: DishScheduler  ## the dishes' world clock and their turns for the processor
-var holds: PlayHolds  ## what holds the game besides the player: the pipette's timer (&"pipette"), the question about the old dish (&"old_dish"), the tour (&"tour") and the end of the game (&"end")
+var _next_dish_number := 1  ## the number the next dish takes (a pipette's new dish takes the one the simulation gives it, and this moves past it)
+var game_began := 0.0  ## the world time this game began at: the world's clock runs from the start of the program, so what the screen shows is the time since
+var _world_last := -1.0  ## the world's time at the last frame (-1: none yet)
+var holds: PlayHolds  ## what holds the game besides the player: the pipette's timer (&"pipette"), the question about the old dish (&"old_dish"), the tour (&"tour"), the end of the game (&"end"), and quietly the wait for the simulation's answer (&"sim_reply")
 var _pipette_hours := 0.0  ## the pipette timer: the game pauses for the pipette every this many simulated hours (0: off)
 var _pipette_clock := 0.0  ## simulated seconds since the last pause for the pipette
 var _pipette_pulse: Tween
@@ -83,7 +84,10 @@ var _entry_to_trash := {}  ## the frozen dish (a freezer entry) the trash questi
 var _to_trash: Dish  ## the dish the trash question (from its card or the freezer) is about
 var _old_dish: Dish  ## the dish a pipette took bups from, while the question about it is up (null: no question)
 var _pipette_pending := {}  ## a pipette waiting for the simulation's answer: {reply, source}
-var _stats_cache := {}  ## Dish -> [its time, its edit count, the msec it was worked out, its population_stats]: a scan of every bup, so not worked out again for the same moment (see _stats_of)
+var _thawing := {}  ## row -> {entry, dish}: an unfrozen dish the simulation has not shown yet (its entry stays in the freezer until it has; a refusal puts it back as it was)
+var _asked_rows := {}  ## row -> the Dish added there, until a snapshot shows it (a refusal takes it out again)
+var _save_pending: SimReply = null  ## a save waiting for the simulation's dishes (the goal's: the quit save waits for them instead)
+var _left_empty: Dish = null  ## the last running dish, died out while dishes are frozen: the next unfrozen dish takes its place
 var _vitals_width := 0.0  ## the widest the top bar's readout has been (see _update_hud)
 var _vitals_full_width := 0.0  ## the same with the playback speed at its end, whether or not it is there (what the top bar's row has to hold)
 var _speed_width := 0.0  ## the width the speed readout keeps in the second row: its longest possible text (see _reserve_speed_width)
@@ -104,7 +108,8 @@ var _banner_left := 0.0
 func _ready() -> void:
 	UserSettings.ensure_applied()
 	holds = PlayHolds.new(toolbar)
-	scheduler = DishScheduler.new(dishes)
+	WorldClient.shared().refused.connect(_on_refused)
+	WorldClient.shared().snapshot_changed.connect(_on_snapshot)
 	stage_input.host = self
 	stage_input.camera = camera
 	stage_input.stage = stage
@@ -187,14 +192,20 @@ func _ready() -> void:
 	_on_tool_selected(toolbar.current_tool())  # the toolbar decides the starting tool
 	_on_pick_mode_selected(tool_options.pick_mode())  # and its tray the starting mode
 	goal_card.visible = not free_mode  # (free mode has no goals; how its dish began is on the Escape menu)
-	var data := SaveGame.read() if Session.load_requested and not free_mode else {}
+	var data := SaveGame.read(save_path) if Session.load_requested and not free_mode else {}
 	Session.load_requested = false
-	if data.is_empty() or not dish.load_blob(DishCodec.read_blob(data["dish"])):
+	var blob: DishBlob = DishCodec.read_blob(data["dish"]) if not data.is_empty() else null
+	if blob != null:
+		_carry_to(blob, world_time())
+	if blob == null or not dish.load_blob(blob):
 		if not data.is_empty():
-			SaveGame.delete()  # (a save that will not load is no save: the title screen stops offering it)
+			SaveGame.delete(save_path)  # (a save that will not load is no save: the title screen stops offering it)
 		_begin_dish()
 	else:
+		if dish.row >= 0:
+			_asked_rows[dish.row] = dish
 		tracker.from_dict(data["goals"])
+		_set_game_began(dish.history.origin)  # (the goals' dish began with the game)
 		stage_input.fit_camera()
 	_sync_tool_locks()
 	layers_panel.sync_from(dish)
@@ -211,7 +222,18 @@ func _apply_tray_order() -> void:
 	TraySection.apply_order(graph_section.get_parent())
 
 
+## The freezer is not kept beyond the game (nor saved): the family tree lets go of what it kept for the frozen dishes.
 func _exit_tree() -> void:
+	var w := WorldClient.shared()
+	if w != null:
+		var store := w.lineage()
+		if store != null:
+			for entry: Dictionary in freezer_shelf.entries:
+				store.discard_frozen(int(entry["number"]))
+		if w.refused.is_connected(_on_refused):
+			w.refused.disconnect(_on_refused)
+		if w.snapshot_changed.is_connected(_on_snapshot):
+			w.snapshot_changed.disconnect(_on_snapshot)
 	UserSettings.unlisten_tray(_apply_tray_order)
 	Encyclopedia.set_fact("husks", false)
 	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
@@ -219,10 +241,44 @@ func _exit_tree() -> void:
 
 func _begin_dish() -> void:
 	dish.strike(Session.free_start if free_mode else null)
+	if dish.row >= 0:
+		_asked_rows[dish.row] = dish
+	_set_game_began(dish.history.origin)  # (the game begins with its dish, at the world's time)
 	tracker.apply_costs(dish)  # (strike resets it: experiment 2 and after costs what it did)
 	stage_input.fit_camera()
 	if free_mode:
 		toolbar.set_paused(true)  # the playground starts paused so you can set the scene
+
+
+## The game's clock begins at `world` (the world's time then): the readout, the graph with every dish together and the freezer count from it.
+func _set_game_began(world: float) -> void:
+	game_began = world
+	graph.game_began = world
+
+
+## A save is read into a world whose clock is not the one it was saved on: the times its history keeps go with the world's (the
+## simulation moves its plankton's and bloom's, DishWorld.load_blob), so it carries on as though no time had passed. `now`: the world's time.
+static func _carry_to(blob: DishBlob, now: float) -> void:
+	var gap := now - float(blob.world.get("time", now))
+	var saved: Variant = blob.host.get("history")
+	if saved is Dictionary and Validate.is_number(saved.get("history_origin")):
+		saved["history_origin"] = float(saved["history_origin"]) + gap
+
+
+## The world's time, as the newest snapshot has it.
+func world_time() -> float:
+	return WorldClient.shared().latest().sim_time
+
+
+## Once a frame: the world is told the speed, whether it stands still (the player's pause, the menu, a wait for the simulation's answer)
+## and the frame's real length (it owes speed x the frame, and caps it). Returns how far its clock moved since the last frame.
+func _advance_world(real_dt: float) -> float:
+	var w := WorldClient.shared()
+	w.set_time(sim_speed, paused or menu_open or holds.stills_world(), real_dt)
+	var now := w.latest().sim_time
+	var moved := 0.0 if _world_last < 0.0 else maxf(now - _world_last, 0.0)
+	_world_last = now
+	return moved
 
 
 ## Nutrient tools are a free-mode toy and a reward in goal mode: they unlock with experiment 2,
@@ -246,16 +302,24 @@ func _set_paused(is_paused: bool) -> void:
 		_retire_extinct.call_deferred()  # (play was resumed: the dish that died out goes)
 
 
-## Extinct colonies aren't saved, so a wipe-out never overwrites a good save. The quit save: the one place the game waits for the
-## simulation's reply (it gathers every running dish).
-func save_game() -> void:
+## Extinct colonies aren't saved, so a wipe-out never overwrites a good save. The simulation gathers every running dish for it; the quit
+## save (`now`) is the one place the game waits for its answer, any other save is written when the answer comes.
+func save_game(now := true) -> void:
 	if free_mode or dish.population() == 0 or dish.row < 0:
 		return
-	var blobs: Variant = WorldClient.shared().save_all().wait()
+	var reply := WorldClient.shared().save_all()
+	if now:
+		_write_save(reply.wait())
+	else:
+		_save_pending = reply
+		_sync_reply_hold()
+
+
+func _write_save(blobs: Variant) -> void:
 	for blob: DishBlob in (blobs if blobs is Array else []):
 		if blob.number() == dish.number:
 			blob.host.merge(dish.host_part(), true)
-			SaveGame.write({"dish": DishCodec.write_blob(blob), "goals": tracker.to_dict()})
+			SaveGame.write({"dish": DishCodec.write_blob(blob), "goals": tracker.to_dict()}, save_path)
 
 
 func _notification(what: int) -> void:
@@ -268,18 +332,21 @@ func _process(delta: float) -> void:
 	if not menu_open and not tutorial.active:
 		stage_input.pan_with_keys(delta)
 	_finish_pipette()
+	_finish_replies()
 	# The playback speed is how many seconds of simulation pass per real second: the simulation is told the frame's real length.
-	var done := scheduler.advance(sim_speed, paused or menu_open, delta)
+	var done := _advance_world(delta)
 	if not paused and not menu_open:
-		var frame := minf(delta, MAX_FRAME_SECONDS)
-		if frame > 0.0:
-			achieved_speed = lerpf(achieved_speed, done / frame, 0.1)
+		var snap := WorldClient.shared().latest()
+		if snap.seq > 0 and not holds.stills_world():
+			achieved_speed = snap.achieved_speed
 		if _pipette_hours > 0.0 and not holds.has(&"pipette"):
 			_pipette_clock += done
 			if _pipette_clock >= _pipette_hours * 3600.0:
 				_begin_pipette_wait()
 		if not free_mode:
 			tracker.update(dish, done)
+	if String(WorldClient.shared().latest().timing.get("refused_iteration", "")) != "":
+		_show_banner(Strings.t("banner.memory_budget"), BANNER_BRIEF_SECONDS)  # (the dishes have outgrown the graphics memory and stand still: up while it lasts)
 	_banner_left = maxf(0.0, _banner_left - delta)
 	if _banner_left == 0.0:
 		banner.text = ""
@@ -359,7 +426,9 @@ func debug_state() -> Dictionary:
 		"tray_open": {"dish": inspector.dish_card.open, "graph": graph_section.open, "dish_details": dish_details.open, "all_details": all_details.open},
 		"dish_strip": {"visible": dish_strip.visible, "main_zoomed_in": dish_strip.main_zoomed_in},
 		"watched_total": dishes.reduce(func(n: int, d: Dish) -> int: return n + d.watched.size(), 0),
-		"world_time": scheduler.world_time(),
+		"world_time": world_time(),
+		"game_time": world_time() - game_began,
+		"waiting_for_sim": holds.stills_world(),
 		"dishes": dishes.map(func(d: Dish) -> Dictionary: return {"number": _dish_numbers[d], "bups": d.population(), "time": d.time, "history_origin": d.history.origin, "position": [d.global_position.x, d.global_position.y], "row": d.row, "husks": d.husk_count()}),
 		"freezer": freezer_shelf.entries.map(func(entry: Dictionary) -> Dictionary: return {"number": entry["number"], "bups": entry["bups"], "frozen_at": entry["data"].get("time", 0.0)}),
 	}
@@ -369,6 +438,8 @@ func debug_state() -> Dictionary:
 func _unhandled_input(event: InputEvent) -> void:
 	if _old_dish != null:
 		return  # (a question about the old dish is up: nothing else is done until it is answered)
+	if holds.stills_world():
+		return  # (the simulation has not answered yet: a frame or a few)
 	if menu_open:  # only Escape reaches the game while the menu is up, and it closes the menu
 		if UiInput.is_escape_press(event) and not pause_menu.close_panel():
 			_close_menu()
@@ -450,11 +521,100 @@ func _open_menu() -> void:
 
 
 func _close_menu() -> void:
-	hud_layer.process_mode = Node.PROCESS_MODE_INHERIT
 	pause_menu.close()
+	_sync_hud_input()
 
 
-## The player chose another size for the dish (in the pause menu): the view stays inside it.
+## The top bar, the tools and the tray take input unless the menu is up or the game waits for the simulation's answer.
+func _sync_hud_input() -> void:
+	hud_layer.process_mode = Node.PROCESS_MODE_DISABLED if menu_open or holds.stills_world() else Node.PROCESS_MODE_INHERIT
+
+
+## The quiet hold (PlayHolds.hold_quietly) is on while an answer is awaited: a pipette's, a freeze's, an unfrozen dish not shown yet, a save.
+func _sync_reply_hold() -> void:
+	var waiting := not _pipette_pending.is_empty() or not _thawing.is_empty() or _save_pending != null or freezer_shelf.entries.any(_waits)
+	if waiting:
+		holds.hold_quietly(&"sim_reply")
+	else:
+		holds.release(&"sim_reply")
+	_sync_hud_input()
+
+
+## Whether a freezer entry's dish is still on its way out of the world (its freeze has not answered).
+static func _waits(entry: Dictionary) -> bool:
+	var reply: SimReply = entry.get("reply")
+	return reply != null and not reply.is_done()
+
+
+## Once a frame: the answers that have come. A frozen dish whose blob has come is unfrozen or trashed if that was asked meanwhile; one the
+## simulation could not freeze (it answered with nothing) leaves the freezer; a save is written.
+func _finish_replies() -> void:
+	for entry: Dictionary in freezer_shelf.entries.duplicate():
+		if _waits(entry):
+			continue
+		if entry.get("reply") != null and (entry["reply"] as SimReply).value() == null:
+			freezer_shelf.remove(entry)
+			continue
+		var then: String = entry.get("then", "")
+		entry.erase("then")
+		match then:
+			"thaw":
+				thaw(entry)
+			"trash":
+				_trash_frozen(entry)
+	if _save_pending != null and _save_pending.is_done():
+		_write_save(_save_pending.value())
+		_save_pending = null
+	_sync_reply_hold()
+
+
+## The newest snapshot: an added or unfrozen dish it shows is in the world for good (an unfrozen one leaves the freezer then, and takes the
+## place of the last running dish if that one had died out).
+func _on_snapshot(snap: Snapshot) -> void:
+	for row: int in _asked_rows.keys():
+		var ds: DishState = snap.dishes.get(row)
+		if ds != null and ds.number == (_asked_rows[row] as Dish).number:
+			_asked_rows.erase(row)
+	for row: int in _thawing.keys():
+		var ds: DishState = snap.dishes.get(row)
+		if ds != null and ds.number == (_thawing[row]["dish"] as Dish).number:
+			_thawed(row)
+
+
+func _thawed(row: int) -> void:
+	var t: Dictionary = _thawing[row]
+	_thawing.erase(row)
+	freezer_shelf.remove(t["entry"])
+	var d: Dish = t["dish"]
+	if _left_empty != null and dishes.has(_left_empty) and dishes.has(d):
+		set_main_dish(d)
+		_remove_dish(_left_empty)
+		_show_banner("", 0.0)
+	_left_empty = null
+	_sync_reply_hold()
+
+
+## The simulation refused a dish this screen added or unfroze: there was no room for it in the graphics memory (with MAX_DISHES rows far
+## below the world's, that is the only refusal it can have). An unfrozen dish's entry stays in the freezer, as it was; the dish's node goes.
+## A pipette's refusal comes with its reply (`_finish_pipette`).
+func _on_refused(row: int, _why: String) -> void:
+	var d: Dish = null
+	if _thawing.has(row):
+		d = _thawing[row]["dish"]
+		(_thawing[row]["entry"] as Dictionary).erase("thawing")
+		_thawing.erase(row)
+	elif _asked_rows.has(row):
+		d = _asked_rows[row]
+		_asked_rows.erase(row)
+	else:
+		return
+	d.row = -1  # (its row is free again: the node must not hand it back)
+	if dishes.has(d) and dishes.size() > 1:
+		_remove_dish(d)
+	_show_banner(Strings.t("banner.memory_budget"), BANNER_SECONDS)
+	_sync_reply_hold()
+
+
 ## The pipette timer was switched or set (hours; 0 is off). Switching it off ends a wait for the pipette (play stays paused).
 func _set_pipette_timer(hours: float) -> void:
 	_pipette_hours = hours
@@ -486,31 +646,38 @@ func _end_pipette_wait(resume: bool) -> void:
 
 
 ## The pipette: every bup in the circle moves to a new dish (a droplet in the middle of a fresh dish like this one, as the player started it), and the old dish
-## goes on without them. The new dish takes its place in the strip and the main view moves to it. Returns the new dish, or null if there was nothing to move or no room.
-## The simulation moves them (a retarget: the same bups, alive, with their ids) and answers a frame or two later (`_finish_pipette`).
-func pipette(world: Vector2, circle_radius: float) -> Dish:
+## goes on without them. The simulation moves them (a retarget: the same bups, alive, with their ids) and answers a frame or a few later (`_finish_pipette`):
+## then the new dish takes its place in the strip and the main view moves to it; a circle with nothing in it, or no room, makes none. The world stands
+## still meanwhile, so the circle takes the bups that were in it.
+func pipette(world: Vector2, circle_radius: float) -> void:
 	if dishes.size() >= MAX_DISHES:
 		_show_banner(Strings.t("hud.banner_pipette_limit"), BANNER_BRIEF_SECONDS)
-		return null
+		return
 	if not _pipette_pending.is_empty():
-		return null
+		return
 	var reply := dish.pipette(world, circle_radius)
 	if reply != null:
 		_pipette_pending = {"reply": reply, "source": dish}
-	return null
+		_next_dish_number += 1  # (the simulation gives the new dish a number past every dish's so far: one added before it answers must not take that one)
+		_sync_reply_hold()
 
 
 ## The pipette's answer has come: the new dish takes its place in the strip and the main view moves to it, and the player is asked about
-## the old one; a circle with no bups makes no dish.
+## the old one; a circle with no bups makes no dish. No answer while the dish is still there means the graphics memory had no room for
+## the new dish (the pipette is then undone in the simulation).
 func _finish_pipette() -> void:
 	if _pipette_pending.is_empty() or not (_pipette_pending["reply"] as SimReply).is_done():
 		return
 	var source: Dish = _pipette_pending["source"]
 	var got: Variant = (_pipette_pending["reply"] as SimReply).value()
 	_pipette_pending = {}
-	if got == null or int(got["moved"]) == 0 or not dishes.has(source):
-		if got != null:
-			WorldClient.shared().remove_dish(int(got["new_row"]))
+	_sync_reply_hold()
+	if got == null:
+		if dishes.has(source):
+			_show_banner(Strings.t("banner.memory_budget"), BANNER_SECONDS)
+		return
+	if int(got["moved"]) == 0 or not dishes.has(source):
+		WorldClient.shared().remove_dish(int(got["new_row"]))
 		_show_banner(Strings.t("hud.banner_pipette_empty"), BANNER_BRIEF_SECONDS)
 		return
 	var number := int(got["number"])
@@ -569,17 +736,18 @@ static func _slot_position(slot: int) -> Vector2:
 
 
 ## Another dish, run beside the main one in the same world, far enough away that the view of one is clear of the next (when zoomed in). It is started as `start` says (null: the usual
-## dish) and takes its place in the strip; the main view stays where it is. Returns it.
+## dish) at the world's time, and takes its place in the strip; the main view stays where it is. Returns it (a dish the graphics memory has no room for goes again, `_on_refused`).
 func add_dish(start: StartConditions, number := -1) -> Dish:
 	var d := Dish.new()
 	d.number = number if number >= 0 else _next_dish_number
 	add_child(d)
 	d.global_position = _free_slot_position()
 	d.strike(start)
-	d.begin_at(scheduler.world_time())  # (a dish that joins is at the world's time: one clock for all)
 	for layer: int in Dish.Layer.values():
 		d.show_layer(layer, dish.layer_shown(layer))  # (what is shown is one choice for every dish)
 	_register_dish(d, number)
+	if d.row >= 0:
+		_asked_rows[d.row] = d
 	return d
 
 
@@ -591,7 +759,6 @@ func _free_slot_position() -> Vector2:
 	return _slot_position(slot)
 
 
-## Takes a dish out of the running set for good: the view goes to its neighbour if it was the one in the main view, the strip and the lists forget it, and it is freed.
 ## A dish out of the main view is looked at only through its small picture in the strip, so its bups are sized for that (they would be too small to see at the
 ## main view's zoom); the dish in the main view is drawn for the camera.
 func _set_picture_scales() -> void:
@@ -599,36 +766,55 @@ func _set_picture_scales() -> void:
 		d.picture_scale = 0.0 if d == dish else DishStrip.THUMB / (2.0 * d.radius * DishStrip.MARGIN)
 
 
+## The dish the view goes to when `d` leaves it: the one before it in the tabs, or the next when it is the first.
+func _neighbour(d: Dish) -> Dish:
+	var at := dishes.find(d)
+	return dishes[at - 1] if at > 0 else dishes[1]
+
+
+## Takes a dish out of the running set for good: the view goes to its neighbour if it was the one in the main view, the strip and the lists forget it, and it is freed
+## (leaving the world, unless a freeze took it out already).
 func _remove_dish(d: Dish) -> void:
 	if d == dish:
-		var at := dishes.find(d)
-		set_main_dish(dishes[at - 1] if at > 0 else dishes[1])
+		set_main_dish(_neighbour(d))
 	dishes.erase(d)
 	_dish_numbers.erase(d)
-	_stats_cache.erase(d)
 	_extinct_queue.erase(d)
+	for row: int in _asked_rows.keys():
+		if _asked_rows[row] == d:
+			_asked_rows.erase(row)
 	dish_strip.remove(d)
 	dish_strip.light(dish)
 	d.queue_free()
 	lineage.forget_elsewhere()
 
 
-## Puts a dish in the freezer: its whole state is kept as a save keeps it, and it leaves the running dishes. It does not advance (the world's clock, the machine's
-## load and the graph's all-dishes view leave it out) until `thaw` brings it back under its own number. The last running dish cannot be frozen.
+## Whether a pipette's answer is awaited from `d`: until it comes the dish stays as it is (it is neither frozen nor trashed meanwhile).
+func _pipetting_from(d: Dish) -> bool:
+	return not _pipette_pending.is_empty() and _pipette_pending["source"] == d
+
+
+## Puts a dish in the freezer: the simulation takes it out of the world whole (its DishBlob, with its part of the family tree, a frame or a few later), and it leaves
+## the running dishes. It does not advance until `thaw` brings it back under its own number. The last running dish cannot be frozen. The main view leaves it
+## first, so its lineage stack lets go of the bups it held before the dish's family is written out.
 func freeze_dish(d: Dish) -> void:
-	if not dishes.has(d) or dishes.size() < 2:
+	if not dishes.has(d) or dishes.size() < 2 or _pipetting_from(d):
 		return
+	if d == dish:
+		set_main_dish(_neighbour(d))
+	var number: int = _dish_numbers[d]
 	var picture := dish_strip.picture_of(d)
-	freezer_shelf.add({
-		"number": _dish_numbers[d],
-		"data": {},
-		"reply": d.freeze(),  # (its DishBlob, a frame or two later)
+	var entry := {
+		"number": number,
+		"data": {"time": world_time() - game_began},  # (when it was frozen, on the game's clock)
 		"host": d.host_part(),
 		"bups": d.population(),
 		"picture": ImageTexture.create_from_image(picture) if picture != null else null,
-	})
-	var number: int = _dish_numbers[d]
+	}
+	entry["reply"] = d.freeze()
+	freezer_shelf.add(entry)
 	_remove_dish(d)
+	_sync_reply_hold()
 	_show_banner(Strings.t("hud.banner_frozen", [number]), BANNER_BRIEF_SECONDS)
 
 
@@ -640,11 +826,19 @@ func _ask_to_trash_frozen(entry: Dictionary) -> void:
 	trash_dialog.popup_centered()
 
 
-## Takes a frozen dish out of the freezer for good.
+## Takes a frozen dish out of the freezer for good: the family tree lets go of the records it was keeping the death times of for it (LineageStore.discard_frozen).
+## A dish still on its way out of the world is trashed once its freeze has answered (its claims on those records are made then).
 func _trash_frozen(entry: Dictionary) -> void:
-	if freezer_shelf.entries.has(entry):
-		freezer_shelf.remove(entry)
-		_show_banner(Strings.t("hud.banner_trashed", [entry["number"]]), BANNER_BRIEF_SECONDS)
+	if not freezer_shelf.entries.has(entry):
+		return
+	if _waits(entry):
+		entry["then"] = "trash"
+		return
+	freezer_shelf.remove(entry)
+	var store := WorldClient.shared().lineage()
+	if store != null:
+		store.discard_frozen(int(entry["number"]))
+	_show_banner(Strings.t("hud.banner_trashed", [entry["number"]]), BANNER_BRIEF_SECONDS)
 
 
 ## Asks before the dish in the main view is trashed (it cannot be got back).
@@ -660,59 +854,50 @@ func _ask_to_trash() -> void:
 
 ## Takes a dish out of the game: its bups die with it and nothing of it is kept. The last running dish cannot be trashed.
 func trash_dish(d: Dish) -> void:
-	if not dishes.has(d) or dishes.size() < 2:
+	if not dishes.has(d) or dishes.size() < 2 or _pipetting_from(d):
 		return
 	var number: int = _dish_numbers[d]
 	_remove_dish(d)
 	_show_banner(Strings.t("hud.banner_trashed", [number]), BANNER_BRIEF_SECONDS)
 
 
-## A frozen dish runs again, as one of the running dishes, from the world's time on (the time it was frozen is not simulated), under the number it had.
+## A frozen dish runs again, as one of the running dishes, from the world's time on (the time it was frozen is not simulated: the simulation moves its
+## plankton's and bloom's times on, and its history goes on level for the time it was away), under the number it had. Its entry leaves the freezer when a
+## snapshot shows it (`_thawed`); one asked for while its freeze has not answered is unfrozen when it has.
 func thaw(entry: Dictionary) -> void:
-	if dishes.size() >= MAX_DISHES:
+	if not freezer_shelf.entries.has(entry) or entry.get("thawing", false):
+		return
+	if dishes.size() >= MAX_DISHES and not (dishes.size() == 1 and _left_empty != null):
 		_show_banner(Strings.t("hud.banner_unfreeze_limit"), BANNER_BRIEF_SECONDS)
 		return
-	var reply: SimReply = entry.get("reply")
-	if reply == null or not reply.is_done() or reply.value() == null:
+	if _waits(entry):
+		entry["then"] = "thaw"
 		return
-	var blob: DishBlob = reply.value()
+	var reply: SimReply = entry.get("reply")
+	var blob: DishBlob = reply.value() if reply != null else null
+	if blob == null:
+		return
 	blob.host.merge(entry["host"], true)
+	var now := world_time()
 	var history: Dictionary = (entry["host"]["history"] as Dictionary).duplicate(true)
-	DishHistory.pad(history, scheduler.world_time() - float(blob.world.get("time", scheduler.world_time())))  # (it goes on level for the time it was away, so the graph's time axis stays the world's)
+	DishHistory.pad(history, now - float(blob.world.get("time", now)))  # (the graph's time axis stays the world's)
 	blob.host["history"] = history
-	var emptied: Dish = null  # (the last running dish died out while others were frozen and stayed, empty: the thawed dish takes its place)
-	if dishes.size() == 1 and _extinct_queue.is_empty() and dishes[0].time > 0.0 and dishes[0].population() == 0:
-		emptied = dishes[0]
 	var d := Dish.new()  # (not struck: a new dish under its number would put founders' records under the frozen dish's own ids)
 	add_child(d)
 	d.global_position = _free_slot_position()
-	if not d.load_blob(blob):
+	d.load_blob(blob)
+	if d.row < 0:  # (no row at all: as the graphics memory refusing it)
 		d.queue_free()
+		_show_banner(Strings.t("banner.memory_budget"), BANNER_SECONDS)
 		return
 	for layer: int in Dish.Layer.values():
 		d.show_layer(layer, dish.layer_shown(layer))
 	_register_dish(d, entry["number"])
-	if emptied != null:
-		set_main_dish(d)
-		_remove_dish(emptied)
-		_show_banner("", 0.0)
-	freezer_shelf.remove(entry)
-
-
-## What a dish's save holds in the times of the run, moved on to `world` (the dish was frozen at an earlier time): the plankton's and the bloom's times go with
-## it, so nothing is overdue the moment it runs, and the history goes on level for the time it was away (it is the last figures it had, which is what a frozen
-## dish was) so the graph's time axis stays the world's.
-static func _move_saved_dish_to(data: Dictionary, world: float) -> void:
-	var gap := maxf(world - float(data.get("time", world)), 0.0)
-	data["time"] = world
-	if Validate.is_number(data.get("bloom_due")):
-		data["bloom_due"] = float(data["bloom_due"]) + gap
-	for saved in data.get("plankton", []):
-		if saved is Dictionary:
-			for key in ["born_at", "burst_at"]:
-				if Validate.is_number(saved.get(key)):
-					saved[key] = float(saved[key]) + gap
-	DishHistory.pad(data, gap)
+	entry["thawing"] = true
+	_thawing[d.row] = {"entry": entry, "dish": d}
+	if not WorldClient.shared().backend.can_simulate():
+		_thawed(d.row)  # (the processor's stub shows no dish: there is nothing to wait for)
+	_sync_reply_hold()
 
 
 ## After a pipette: the dish the bups came from is what the player decides about, and nothing else can be done until they have. The game holds meanwhile.
@@ -800,6 +985,7 @@ func set_main_dish(d: Dish) -> void:
 	stage_input.restore_view()
 
 
+## The player chose another size for a dish (in the pause menu): the view stays inside it.
 func _resize_dish(target: Dish, new_radius: float) -> void:
 	if not dishes.has(target):  # (frozen or gone since the menu was opened)
 		return
@@ -855,7 +1041,7 @@ func _on_goal_completed(goal: Goal) -> void:
 	toolbar.set_paused(true)  # so the colony isn't left running while the player reads and sets up what comes next
 	_sync_tool_locks()
 	_show_banner(Strings.t("hud.banner_complete", [goal.title]) + ("\n" + Strings.t("hud.banner_unlocked") if tracker.index == 1 else ""), BANNER_SECONDS)
-	save_game()
+	save_game(false)
 
 
 ## A dish has no bups left. The game pauses on that dish and says so; resuming goes on without it (the dish before it, or the next when it was the first, comes
@@ -876,6 +1062,7 @@ func _announce_extinct() -> void:
 		set_main_dish(d)
 	toolbar.set_paused(true)
 	if dishes.size() == 1 and not freezer_shelf.entries.is_empty():
+		_left_empty = d
 		_show_banner(Strings.t("hud.banner_extinct_frozen", [_dish_numbers[d]]), 1e9)
 		return
 	if dishes.size() == 1:
@@ -883,7 +1070,7 @@ func _announce_extinct() -> void:
 		_view_before_extinct = null
 		holds.hold(&"end")
 		pause_ring.visible = false  # (the game is over, not paused: the dialog says what happened)
-		end_dialog.dialog_text = Strings.t("hud.end_text") + "\n" + Strings.t("hud.end_survived", [SimClock.format(dish.time)])
+		end_dialog.dialog_text = Strings.t("hud.end_text") + "\n" + Strings.t("hud.end_survived", [SimClock.format(dish.time - game_began)])
 		end_dialog.popup_centered()
 		return
 	_show_banner(Strings.t("hud.banner_dish_extinct", [_dish_numbers[d]]), 1e9)
@@ -941,11 +1128,11 @@ func _update_hud() -> void:
 		return  # (nothing below is worth working out: the text would not be shown yet)
 	var wrapped := top_bar_more_row.visible
 	if wrapped:
-		readout.set_text(vitals, Strings.t("hud.vitals_short", [_dish_lines(), SimClock.format(dish.time)]), about)
+		readout.set_text(vitals, Strings.t("hud.vitals_short", [_dish_lines(), SimClock.format(dish.time - game_began)]), about)
 		readout.set_text(speed_readout, _playback_text(), about)
 		speed_readout.custom_minimum_size = Vector2(_speed_width, speed_readout.get_content_height())
 	else:
-		readout.set_text(vitals, Strings.t("hud.vitals", [_dish_lines(), SimClock.format(dish.time), _playback_text()]), about)
+		readout.set_text(vitals, Strings.t("hud.vitals", [_dish_lines(), SimClock.format(dish.time - game_began), _playback_text()]), about)
 	# The readout takes the width its text needs (never less than it has needed, so it does not shrink and grow as the figures change), up to
 	# a share of the bar; the hint beside it gets all the rest.
 	_vitals_width = maxf(_vitals_width, vitals.get_content_width())
@@ -953,20 +1140,8 @@ func _update_hud() -> void:
 	vitals.custom_minimum_size = Vector2(minf(_vitals_width, _vitals_room()), vitals.get_content_height())  # (as tall as its text, which grows with the interface size)
 	_fit_top_bar()
 	placed_row.value_text = UiText.thousands(dish.nutrients_placed)
-	colony.show_stats(_stats_of(dish))
+	colony.show_stats(dish.population_stats())
 	_update_all_details()
-
-
-## A dish's `population_stats`, worked out again only when its time or an edit has changed it and Readout.LIVE_TEXT_MSEC has passed since (below x100 the HUD asks every frame,
-## and on the processor each answer is a scan of every bup; the figures move too slowly there for a tenth of a second to show).
-func _stats_of(d: Dish) -> Dictionary:
-	var now := Time.get_ticks_msec()
-	var kept: Array = _stats_cache.get(d, [])
-	if not kept.is_empty() and (kept[0] == d.time and kept[1] == d.edit_count or now - kept[2] < Readout.LIVE_TEXT_MSEC):
-		return kept[3]
-	var stats := d.population_stats()
-	_stats_cache[d] = [d.time, d.edit_count, now, stats]
-	return stats
 
 
 ## The all-dishes section: how many dishes run and how many bups they hold, and the traits averaged over every bup of every dish (each dish counts by its bups).
@@ -976,7 +1151,7 @@ func _update_all_details() -> void:
 	var total := 0.0
 	var sums := {}
 	for d in dishes:
-		var stats := _stats_of(d)
+		var stats := d.population_stats()
 		var count := float(stats["count"])
 		total += count
 		for key: String in TraitRows.keys():

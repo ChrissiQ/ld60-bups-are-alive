@@ -4,6 +4,10 @@ extends RefCounted
 ## game. Each is a named hold: it pauses the game, may lock the toolbar so that only the screen resumes play (`locked`), and remembers
 ## whether the game was already paused when it began, which is what `release` can give back. The toolbar's `resume_locked` is written here
 ## and nowhere else.
+##
+## A quiet hold (`hold_quietly`) is the wait for the simulation's answer to a freeze, a pipette, an unfreeze or a save: the world stands
+## still and the screen takes no input until the answer comes (a frame or a few), and nothing on screen changes: the toolbar is not
+## paused, so the game is as it was the moment the answer is in.
 
 ## What `release` leaves the game as.
 enum Then {
@@ -14,6 +18,7 @@ enum Then {
 
 var _toolbar: Toolbar
 var _held := {}  ## name -> {"locked": bool, "was_paused": bool}
+var _quiet := {}  ## name -> true, for each quiet hold
 
 
 func _init(toolbar: Toolbar) -> void:
@@ -21,7 +26,7 @@ func _init(toolbar: Toolbar) -> void:
 
 
 func has(name: StringName) -> bool:
-	return _held.has(name)
+	return _held.has(name) or _quiet.has(name)
 
 
 ## Pauses the game for `name` (nothing changes if it already holds).
@@ -33,8 +38,20 @@ func hold(name: StringName, locked := true) -> void:
 	_toolbar.set_paused(true)
 
 
-## Lifts `name`'s hold (nothing changes if it does not hold).
+## Keeps the world still and the screen's input off for `name`, with nothing shown (see the header).
+func hold_quietly(name: StringName) -> void:
+	_quiet[name] = true
+
+
+## Whether a quiet hold keeps the world still.
+func stills_world() -> bool:
+	return not _quiet.is_empty()
+
+
+## Lifts `name`'s hold (nothing changes if it does not hold; a quiet hold changes nothing but the world's stillness).
 func release(name: StringName, then := Then.RESTORE) -> void:
+	if _quiet.erase(name):
+		return
 	if not _held.has(name):
 		return
 	var was_paused: bool = _held[name]["was_paused"]

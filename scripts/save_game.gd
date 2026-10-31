@@ -30,6 +30,8 @@ static func read(path := PATH) -> Dictionary:
 		return {}
 	if not (parsed.get("dish") is Dictionary) or not (parsed.get("goals") is Dictionary):
 		return {}
+	if not Validate.is_number(parsed["dish"].get("format")) or int(parsed["dish"]["format"]) != DishCodec.FORMAT:
+		return {}  # (a dish of another format is never read: the title screen does not offer it)
 	return parsed
 
 
