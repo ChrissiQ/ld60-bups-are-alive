@@ -5,7 +5,7 @@ layout(local_size_x = 64) in;
 layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs;
 layout(set = 0, binding = 0, std430) buffer B_DSTATE { uint DSTATE[]; };
 layout(set = 0, binding = 1, std430) buffer B_DISHP { uint DISHP[]; };
-layout(set = 0, binding = 2, std430) buffer B_CBASE { uint CBASE[]; };
+layout(set = 0, binding = 2, std430) buffer B_CLIVE { uint CLIVE[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -16,6 +16,7 @@ const uint DP_FLAGS = 12u;
 const uint DP_WORDS = 32u;
 const uint DS_CLOUD_SLOTS = 19u;
 const uint DS_COUNT = 1u;
+const uint DS_HUSKS = 22u;
 const uint DS_SEED = 7u;
 const uint DS_START = 0u;
 const uint DS_STEP = 8u;
@@ -46,10 +47,8 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define BLOCK_LOOP(F) void main() { uint nb_ = (WORLD[WD_SLOTS] + BLK_SLOTS - 1u) >> BLK_SHIFT; for (uint k_ = gl_WorkGroupID.x; k_ < nb_; k_ += gl_NumWorkGroups.x) { F(k_, BLKDISH[k_]); barrier(); } }
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
 
-void main() {
-	if (gl_GlobalInvocationID.x != 0u) return;
-	for (uint d = 0u; d < D_MAX; d++) {
-		if (((DPU(d, DP_FLAGS) >> DPF_RUNNING) & 1u) == 0u) continue;
-		if (DS(d, DS_STEP) % 16u == 15u) { DS(d, DS_CLOUD_SLOTS) = CBASE[d]; CBASE[d] = 0u; }
-	}
+void f(uint d) {
+	if (((DPU(d, DP_FLAGS) >> DPF_RUNNING) & 1u) == 0u) return;
+	if (DS(d, DS_STEP) % 16u == 15u) { DS(d, DS_CLOUD_SLOTS) = CLIVE[d]; DS(d, DS_HUSKS) = CLIVE[D_MAX + d]; CLIVE[d] = 0u; CLIVE[D_MAX + d] = 0u; }
 }
+GRID_LOOP(f, D_MAX)

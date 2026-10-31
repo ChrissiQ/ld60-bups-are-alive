@@ -8,7 +8,7 @@ extends SceneTree
 ##  - DISHP: 32 words = 128 B; DP_* name 22 distinct words 0-21 (10 spare, 22-31 unused); seven DPF_* flags in 0-6;
 ##    it names seed, step, k_total, iterations, noise_reference and radius;
 ##  - DSTATE: 32 words; DS_* name 24 distinct words 0-23 (8 spare), including moved_in and moved_out;
-##  - WORLD: 8 words, 5 named; payload: 4 words = 16 B, id texture 2 words = 8 B, colour bytes inside the fourth word above its spare low byte;
+##  - WORLD: 16 words, 9 named (the totals the kernels bound their loops by are uints there, not floats in P); payload: 4 words = 16 B, id texture 2 words = 8 B, colour bytes inside the fourth word above its spare low byte;
 ##  - STATS per dish: 16 words x (1 + 16) = 272 words; QIN and QOUT pools are D_MAX rows of the single-dish path's QIN_WORDS (44) and QOUT_WORDS (240);
 ##  - D_MAX 1,024 rows: DISHP + DSTATE = 1,024 x 256 B = 256 KB;
 ##  - no kernel reads a dish table by a number, and no layout name is also a kernel's buffer name.
@@ -23,7 +23,7 @@ func _init() -> void:
 	_death_step()
 	_table(constants, "DP_", 22, L.DP_WORDS, "DISHP")
 	_table(constants, "DS_", 24, L.DS_WORDS, "DSTATE")
-	_table(constants, "WD_", 5, L.WD_WORDS, "WORLD")
+	_table(constants, "WD_", 9, L.WD_WORDS, "WORLD")
 	_dishp(constants)
 	_dstate()
 	_payload()

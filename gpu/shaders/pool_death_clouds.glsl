@@ -43,7 +43,6 @@ const uint NO_DISH = 4294967295u;
 const uint PUFF_ROW_BASE = 1065353216u;
 const int P_CELLS = 1;
 const int P_DEATH_GIVE = 8;
-const int P_PUFF_CAPACITY = 71;
 const uint RECORD_WORDS = 28u;
 const uint R_MASS = 6u;
 const uint R_PY = 23u;
@@ -51,6 +50,7 @@ const uint R_X = 1u;
 const uint R_Y = 2u;
 const uint WD_CLOUD_SLOTS = 1u;
 const uint WD_OVERFLOW = 4u;
+const uint WD_PUFF_CAPACITY = 7u;
 const uint WD_SLOTS = 0u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
@@ -78,6 +78,12 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define ADD_FIXED20(LO, HI, cell, amount) { float rest_ = amount; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); ADD64(LO, HI, cell, q_) } }
 #define FIX30(HI, LO) (float(HI) * 4.0 + float(LO) * 9.313225746154785e-10)
 #define FIX20(HI, LO) (float(HI) * 4096.0 + float(LO) * 9.5367431640625e-7)
+
+bool accepts_d(uint d, float x, float y) {
+	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS);
+	int cx = clamp(int((x + org) / sp), 0, n - 1), cy = clamp(int((y + org) / sp), 0, n - 1);
+	return INSIDE[DPU(d, DP_FIELD_BASE) + uint(cy * n + cx)] != 0 && x * x + y * y <= org * org;
+}
 
 void add_dep(uint cell, float amount) { ADD_FIXED20(DPLO, DPHI, cell, amount) }
 void deposit_xy_d(uint d, float x, float y, float mass) {
@@ -114,14 +120,11 @@ void f(uint i, uint d, uint l) {
 	uint quota = DPU(d, DP_CLOUD_QUOTA);
 	uint vslot = DS(d, DS_CLOUD_SLOTS) + cr;
 	uint pslot = WORLD[WD_CLOUD_SLOTS] + CBASE[d] + cr;
-	bool phys = pslot < uint(P[P_PUFF_CAPACITY]);
+	bool phys = pslot < WORLD[WD_PUFF_CAPACITY];
 	if (phys) PUFF[pslot * 8u + 5u] = 0.0;  // (empty unless this one is a cloud below)
 	if (BUPS[b + R_PY] != -2.0) return;
 	float mass = P[P_DEATH_GIVE] * BUPS[b + R_MASS], x = BUPS[b + R_X], y = BUPS[b + R_Y];
-	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS);
-	int cx = clamp(int((x + org) / sp), 0, n - 1), cy = clamp(int((y + org) / sp), 0, n - 1);
-	bool accepted = INSIDE[DPU(d, DP_FIELD_BASE) + uint(cy * n + cx)] != 0 && x * x + y * y <= org * org;
-	if (vslot < quota && phys && 10.0 < DPF(d, DP_HANDOVER) && accepted) {
+	if (vslot < quota && phys && 10.0 < DPF(d, DP_HANDOVER) && accepts_d(d, x, y)) {
 		uint o = pslot * 8u;
 		PUFF[o] = x; PUFF[o + 1] = y; PUFF[o + 2] = mass; PUFF[o + 3] = 100.0; PUFF[o + 4] = 1.0;
 		PUFF[o + 6] = 0.0; PUFF[o + 7] = 0.0; PUFF[o + 5] = uintBitsToFloat(PUFF_ROW_BASE + d);

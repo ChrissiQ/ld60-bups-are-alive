@@ -3,7 +3,7 @@
 #version 450
 layout(local_size_x = 64) in;
 layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs;
-layout(set = 0, binding = 0, std430) buffer B_P { float P[]; };
+layout(set = 0, binding = 0, std430) buffer B_WORLD { uint WORLD[]; };
 layout(set = 0, binding = 1, std430) buffer B_CELLDISH { uint CELLDISH[]; };
 layout(set = 0, binding = 2, std430) buffer B_DISHP { uint DISHP[]; };
 layout(set = 0, binding = 3, std430) buffer B_CONC { float CONC[]; };
@@ -24,6 +24,7 @@ const uint DS_WORDS = 32u;
 const uint NO_DISH = 4294967295u;
 const int P_CELLS = 1;
 const uint RECORD_WORDS = 28u;
+const uint WD_CELLS = 5u;
 const uint WD_SLOTS = 0u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
@@ -58,4 +59,4 @@ void f(uint c, uint d, uint l) {
 	if (m > 0.0) CONC[c] += m / (sp * sp);
 	DPLO[c] = 0u; DPHI[c] = 0u;
 }
-CELL_LOOP(f, uint(P[P_CELLS]))
+CELL_LOOP(f, WORLD[WD_CELLS])

@@ -422,9 +422,9 @@ void main() {
 
 ## ---- The pooled world's field kernels: the same arithmetic as the single dish's above, per dish row `d`. ----
 ## A dish's cells are one run of the pool's field buffers: its cell `l` (row-major in its grid) is the cell `DP_FIELD_BASE + l`, and OWNER,
-## CELLOF, CELL2 and the cloud lists hold pool cells, never a dish's own index. In the pool P_CELLS is the pool's cells in use (the bound of
-## the cell kernels), P_BINS the pool's bins, P_PUFF_CAPACITY and P_ENTRY_CAPACITY the physical slots and entries; a dish's own geometry is
-## in DISHP. The motion table, and every constant of the model, stay in P.
+## CELLOF, CELL2 and the cloud lists hold pool cells, never a dish's own index. The pool's cells in use (the bound of the cell kernels) are
+## WORLD[WD_CELLS]; a dish's own geometry is in DISHP. The motion table, and every constant of the model, stay in P; no pooled kernel reads
+## P's slots of a dish (cells, spacing, origin, radius, feed, handover, the bins, the capacities).
 const POOL_READF := """
 // the field's concentration (and its gradient) at a point of dish d, bilinear in the snapshot
 void readf_d(uint d, float x, float y, out float c, out float gx, out float gy) {
@@ -472,21 +472,22 @@ void readc_d(uint d, float x, float y, int own, out float c, out float own_share
 
 const K_POOL_CLEAR := """
 void f(uint c, uint d, uint l) { DLO[c] = 0u; DHI[c] = 0u; RLO[c] = 0u; RHI[c] = 0u; ALO[c] = 0u; AHI[c] = 0u; }
-CELL_LOOP(f, uint(P[P_CELLS]))
+CELL_LOOP(f, WORLD[WD_CELLS])
 """
 
 const K_POOL_SNAPSHOT := """
 void f(uint c, uint d, uint l) { int o = OWNER[c]; EFF[c] = o >= 0 ? CONC[o] : 0.0; }
-CELL_LOOP(f, uint(P[P_CELLS]))
+CELL_LOOP(f, WORLD[WD_CELLS])
 """
 
 const K_POOL_FEED := """
-void f(uint c, uint d, uint l) { CONC[c] += (DPF(d, DP_FEED) * P[P_DELTA]) * WGT[c]; }
-CELL_LOOP(f, uint(P[P_CELLS]))
+void f(uint c, uint d, uint l) { CONC[c] += DPF(d, DP_FEED) * WGT[c]; }
+CELL_LOOP(f, WORLD[WD_CELLS])
 """
 
 ## Diffusion: one kernel per direction of the ping-pong, dispatched for pass p = pcs.pa over the first pcs.pb cells of the
-## pool, which the host orders by iteration count (most first) so that the cells that still need pass p are a prefix. A dish whose own
+## pool, which the host orders by iteration count (most first) so that the cells that still need pass p are a prefix (the end of a block of
+## 256-aligned cells, which a float holds exactly up to 2^32). A dish whose own
 ## (even) count is done returns at once: its field is already in CONC where its lone run would leave it. The acetate's passes are
 ## skipped for a dish without the second food (its field is all zeros, which diffuse to zeros exactly).
 const K_POOL_DIFFUSE := """
@@ -588,7 +589,7 @@ void f(uint i, uint d, uint l) {
 	SCALE[i] = lo * area / dm;
 	CONC[i] = c0 - lo;
 }
-CELL_LOOP(f, uint(P[P_CELLS]))
+CELL_LOOP(f, WORLD[WD_CELLS])
 """
 
 const K_POOL_APPLY := """
@@ -659,7 +660,7 @@ void f(uint i, uint d, uint l) {
 	CONC2[i] = c + dep / area;
 	AWLO[i] = 0u; AWHI[i] = 0u; ADLO[i] = 0u; ADHI[i] = 0u;
 }
-CELL_LOOP(f, uint(P[P_CELLS]))
+CELL_LOOP(f, WORLD[WD_CELLS])
 """
 
 const K_POOL_AC_APPLY := """
@@ -702,7 +703,7 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "diffuse_a", K_DIFFUSE.replace("SRC", "CONC").replace("DST", "EFF"), ["P", "INSIDE", "CONC", "EFF"])
 	GpuKernels.add(out, "diffuse_b", K_DIFFUSE.replace("SRC", "EFF").replace("DST", "CONC"), ["P", "INSIDE", "EFF", "CONC"])
 
-	var cell_b := ["P", "CELLDISH", "DISHP"]
+	var cell_b := ["P", "WORLD", "CELLDISH", "DISHP"]
 	var bup_b := ["P", "WORLD", "BLKDISH", "DSTATE", "DISHP"]
 	var fixed := GpuKernels.FIXED_FUNCS
 	GpuKernels.add(out, "pool_feed", K_POOL_FEED, cell_b + ["CONC", "WGT"])

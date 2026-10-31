@@ -4,10 +4,11 @@
 layout(local_size_x = 64) in;
 layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs;
 layout(set = 0, binding = 0, std430) buffer B_P { float P[]; };
-layout(set = 0, binding = 1, std430) buffer B_CELLDISH { uint CELLDISH[]; };
-layout(set = 0, binding = 2, std430) buffer B_DISHP { uint DISHP[]; };
-layout(set = 0, binding = 3, std430) buffer B_CONC { float CONC[]; };
-layout(set = 0, binding = 4, std430) buffer B_WGT { float WGT[]; };
+layout(set = 0, binding = 1, std430) buffer B_WORLD { uint WORLD[]; };
+layout(set = 0, binding = 2, std430) buffer B_CELLDISH { uint CELLDISH[]; };
+layout(set = 0, binding = 3, std430) buffer B_DISHP { uint DISHP[]; };
+layout(set = 0, binding = 4, std430) buffer B_CONC { float CONC[]; };
+layout(set = 0, binding = 5, std430) buffer B_WGT { float WGT[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -22,8 +23,8 @@ const uint DS_STEP = 8u;
 const uint DS_WORDS = 32u;
 const uint NO_DISH = 4294967295u;
 const int P_CELLS = 1;
-const int P_DELTA = 5;
 const uint RECORD_WORDS = 28u;
+const uint WD_CELLS = 5u;
 const uint WD_SLOTS = 0u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
@@ -46,5 +47,5 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define BLOCK_LOOP(F) void main() { uint nb_ = (WORLD[WD_SLOTS] + BLK_SLOTS - 1u) >> BLK_SHIFT; for (uint k_ = gl_WorkGroupID.x; k_ < nb_; k_ += gl_NumWorkGroups.x) { F(k_, BLKDISH[k_]); barrier(); } }
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
 
-void f(uint c, uint d, uint l) { CONC[c] += (DPF(d, DP_FEED) * P[P_DELTA]) * WGT[c]; }
-CELL_LOOP(f, uint(P[P_CELLS]))
+void f(uint c, uint d, uint l) { CONC[c] += DPF(d, DP_FEED) * WGT[c]; }
+CELL_LOOP(f, WORLD[WD_CELLS])

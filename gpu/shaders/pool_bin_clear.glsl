@@ -3,7 +3,7 @@
 #version 450
 layout(local_size_x = 64) in;
 layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs;
-layout(set = 0, binding = 0, std430) buffer B_P { float P[]; };
+layout(set = 0, binding = 0, std430) buffer B_WORLD { uint WORLD[]; };
 layout(set = 0, binding = 1, std430) buffer B_BINC { uint BINC[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
@@ -17,9 +17,9 @@ const uint DS_START = 0u;
 const uint DS_STEP = 8u;
 const uint DS_WORDS = 32u;
 const uint NO_DISH = 4294967295u;
-const int P_BINS = 73;
 const int P_CELLS = 1;
 const uint RECORD_WORDS = 28u;
+const uint WD_BINS = 6u;
 const uint WD_SLOTS = 0u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
@@ -43,4 +43,4 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
 
 void f(uint b) { BINC[b] = 0u; }
-GRID_LOOP(f, uint(P[P_BINS]))
+GRID_LOOP(f, WORLD[WD_BINS])

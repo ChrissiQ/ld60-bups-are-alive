@@ -3,22 +3,22 @@
 #version 450
 layout(local_size_x = 64) in;
 layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs;
-layout(set = 0, binding = 0, std430) buffer B_P { float P[]; };
-layout(set = 0, binding = 1, std430) buffer B_WORLD { uint WORLD[]; };
-layout(set = 0, binding = 2, std430) buffer B_DSTATE { uint DSTATE[]; };
-layout(set = 0, binding = 3, std430) buffer B_DISHP { uint DISHP[]; };
-layout(set = 0, binding = 4, std430) buffer B_PUFF { float PUFF[]; };
-layout(set = 0, binding = 5, std430) buffer B_EVR { int EVR[]; };
-layout(set = 0, binding = 6, std430) buffer B_EVP { float EVP[]; };
-layout(set = 0, binding = 7, std430) buffer B_CONC { float CONC[]; };
-layout(set = 0, binding = 8, std430) buffer B_INSIDE { int INSIDE[]; };
-layout(set = 0, binding = 9, std430) buffer B_HUSK { float HUSK[]; };
+layout(set = 0, binding = 0, std430) buffer B_WORLD { uint WORLD[]; };
+layout(set = 0, binding = 1, std430) buffer B_DSTATE { uint DSTATE[]; };
+layout(set = 0, binding = 2, std430) buffer B_DISHP { uint DISHP[]; };
+layout(set = 0, binding = 3, std430) buffer B_PUFF { float PUFF[]; };
+layout(set = 0, binding = 4, std430) buffer B_EVR { int EVR[]; };
+layout(set = 0, binding = 5, std430) buffer B_EVP { float EVP[]; };
+layout(set = 0, binding = 6, std430) buffer B_CONC { float CONC[]; };
+layout(set = 0, binding = 7, std430) buffer B_INSIDE { int INSIDE[]; };
+layout(set = 0, binding = 8, std430) buffer B_HUSK { float HUSK[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
 const uint DP_CELLS = 1u;
 const uint DP_CLOUD_QUOTA = 16u;
 const uint DP_FIELD_BASE = 0u;
+const uint DP_HANDOVER = 4u;
 const uint DP_HUSK_QUOTA = 17u;
 const uint DP_RADIUS = 3u;
 const uint DP_SPACING = 2u;
@@ -36,11 +36,12 @@ const uint EV_PUFF_FLOATS = 6u;
 const uint NO_DISH = 4294967295u;
 const uint PUFF_ROW_BASE = 1065353216u;
 const int P_CELLS = 1;
-const int P_PUFF_CAPACITY = 71;
 const uint RECORD_WORDS = 28u;
 const uint WD_CLOUD_SLOTS = 1u;
+const uint WD_HUSK_CAPACITY = 8u;
 const uint WD_HUSK_SLOTS = 2u;
 const uint WD_OVERFLOW = 4u;
+const uint WD_PUFF_CAPACITY = 7u;
 const uint WD_SLOTS = 0u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
@@ -63,7 +64,30 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define BLOCK_LOOP(F) void main() { uint nb_ = (WORLD[WD_SLOTS] + BLK_SLOTS - 1u) >> BLK_SHIFT; for (uint k_ = gl_WorkGroupID.x; k_ < nb_; k_ += gl_NumWorkGroups.x) { F(k_, BLKDISH[k_]); barrier(); } }
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
 
+bool accepts_d(uint d, float x, float y) {
+	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS);
+	int cx = clamp(int((x + org) / sp), 0, n - 1), cy = clamp(int((y + org) / sp), 0, n - 1);
+	return INSIDE[DPU(d, DP_FIELD_BASE) + uint(cy * n + cx)] != 0 && x * x + y * y <= org * org;
+}
+
 uint slots_g, cap_g;
+// a point's nutrient onto the four cells about it (the CPU's deposit_xy), at once: one thread adds, in the events' order
+void deposit_now_d(uint d, float x, float y, float mass) {
+	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS); uint base = DPU(d, DP_FIELD_BASE); float area = sp * sp;
+	float fx = (x + org) / sp - 0.5, fy = (y + org) / sp - 0.5;
+	int bx = int(floor(fx)), by = int(floor(fy));
+	float tx = fx - float(bx), ty = fy - float(by);
+	uint cells[4]; float weights[4]; float kept = 0.0; int count = 0;
+	for (int k = 0; k < 4; k++) {
+		int cx = bx + (k & 1), cy = by + (k >> 1);
+		if (cx < 0 || cy < 0 || cx >= n || cy >= n || INSIDE[base + uint(cy * n + cx)] == 0) continue;
+		float w = ((k & 1) != 0 ? tx : 1.0 - tx) * ((k >> 1) != 0 ? ty : 1.0 - ty);
+		cells[count] = base + uint(cy * n + cx); weights[count] = w; kept += w; count++;
+	}
+	if (count == 0) return;
+	if (kept <= 1e-9) { CONC[cells[0]] += mass / area; return; }
+	for (int k = 0; k < count; k++) CONC[cells[k]] += mass * weights[k] / kept / area;
+}
 void to_grid_d(uint d, float x, float y, float mass, float v) {
 	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS); uint base = DPU(d, DP_FIELD_BASE); float area = sp * sp; float reach = 4.0 * sqrt(v);
 	int x0 = max(0, int(floor((x - reach + org) / sp - 0.5))), x1 = min(n - 1, int(ceil((x + reach + org) / sp - 0.5)));
@@ -82,19 +106,7 @@ void to_grid_d(uint d, float x, float y, float mass, float v) {
 		}
 		return;
 	}
-	float fx = (x + org) / sp - 0.5, fy = (y + org) / sp - 0.5;
-	int bx = int(floor(fx)), by = int(floor(fy));
-	float tx = fx - float(bx), ty = fy - float(by);
-	uint cells[4]; float weights[4]; float kept = 0.0; int count = 0;
-	for (int k = 0; k < 4; k++) {
-		int cx = bx + (k & 1), cy = by + (k >> 1);
-		if (cx < 0 || cy < 0 || cx >= n || cy >= n || INSIDE[base + uint(cy * n + cx)] == 0) continue;
-		float w = ((k & 1) != 0 ? tx : 1.0 - tx) * ((k >> 1) != 0 ? ty : 1.0 - ty);
-		cells[count] = base + uint(cy * n + cx); weights[count] = w; kept += w; count++;
-	}
-	if (count == 0) return;
-	if (kept <= 1e-9) { CONC[cells[0]] += mass / area; return; }
-	for (int k = 0; k < count; k++) CONC[cells[k]] += mass * weights[k] / kept / area;
+	deposit_now_d(d, x, y, mass);
 }
 void put_cloud(uint d, float x, float y, float mass, float v, float cut) {
 	uint q = DS(d, DS_CLOUD_SLOTS);
@@ -109,14 +121,18 @@ void main() {
 	if (gl_GlobalInvocationID.x != 0u) return;  // (one thread: a dispatch of 1 runs a whole group of 64)
 	int st = int(pcs.pa);
 	int start = EVR[st * 4], cnt = EVR[st * 4 + 1];
-	slots_g = WORLD[WD_CLOUD_SLOTS]; cap_g = uint(P[P_PUFF_CAPACITY]);
-	uint husk_cap = uint(HUSK.length()) / 8u;
+	slots_g = WORLD[WD_CLOUD_SLOTS]; cap_g = WORLD[WD_PUFF_CAPACITY];
+	uint husk_cap = WORLD[WD_HUSK_CAPACITY];
 	for (int e = 0; e < cnt; e++) {
 		uint q = uint(start + e) * EV_PUFF_FLOATS;
 		uint d = floatBitsToUint(EVP[q + 5]) - PUFF_ROW_BASE;
 		if (EVP[q + 4] < 0.0) {  // a plankton husk
 			uint hv = DS(d, DS_HUSKS), hs = WORLD[WD_HUSK_SLOTS];
-			if (hv >= DPU(d, DP_HUSK_QUOTA)) { put_cloud(d, EVP[q], EVP[q + 1], EVP[q + 2], 100.0, 1.0); continue; }
+			if (hv >= DPU(d, DP_HUSK_QUOTA)) {  // (as the CPU's add_cloud of radius 0: a cloud of variance 100, or onto the grid)
+				if (accepts_d(d, EVP[q], EVP[q + 1]) && 10.0 < DPF(d, DP_HANDOVER)) put_cloud(d, EVP[q], EVP[q + 1], EVP[q + 2], 100.0, 1.0);
+				else deposit_now_d(d, EVP[q], EVP[q + 1], EVP[q + 2]);
+				continue;
+			}
 			if (hs >= husk_cap) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; continue; }
 			uint o = hs * 8u;
 			HUSK[o] = EVP[q]; HUSK[o + 1] = EVP[q + 1]; HUSK[o + 2] = EVP[q + 2]; HUSK[o + 3] = 0.0; HUSK[o + 4] = 0.0;

@@ -3,12 +3,11 @@
 #version 450
 layout(local_size_x = 64) in;
 layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs;
-layout(set = 0, binding = 0, std430) buffer B_P { float P[]; };
-layout(set = 0, binding = 1, std430) buffer B_WORLD { uint WORLD[]; };
-layout(set = 0, binding = 2, std430) buffer B_DSTATE { uint DSTATE[]; };
-layout(set = 0, binding = 3, std430) buffer B_DISHP { uint DISHP[]; };
-layout(set = 0, binding = 4, std430) buffer B_BINS { uint BINS[]; };
-layout(set = 0, binding = 5, std430) buffer B_BINC { uint BINC[]; };
+layout(set = 0, binding = 0, std430) buffer B_WORLD { uint WORLD[]; };
+layout(set = 0, binding = 1, std430) buffer B_DSTATE { uint DSTATE[]; };
+layout(set = 0, binding = 2, std430) buffer B_DISHP { uint DISHP[]; };
+layout(set = 0, binding = 3, std430) buffer B_BINS { uint BINS[]; };
+layout(set = 0, binding = 4, std430) buffer B_BINC { uint BINC[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -30,9 +29,9 @@ const uint DS_WORDS = 32u;
 const uint D_MAX = 1024u;
 const uint NO_DISH = 4294967295u;
 const int P_CELLS = 1;
-const int P_ENTRY_CAPACITY = 72;
 const uint RECORD_WORDS = 28u;
 const uint WD_OVERFLOW = 4u;
+const uint WD_PUFF_CAPACITY = 7u;
 const uint WD_SLOTS = 0u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
@@ -56,22 +55,29 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
 const uint ENTRIES_PER_SLOT = 12u;
 
+// the first of the dish's nbins bins (from base) whose end passes `limit` (counted from `from`), nbins when none does
+uint first_past(uint base, uint nbins, uint from, uint limit) {
+	uint last = base + nbins - 1u;
+	if (BINS[last] + BINC[last] - from <= limit) return nbins;
+	uint lo = 0u, hi = nbins - 1u;
+	while (lo < hi) {
+		uint mid = (lo + hi) >> 1u;
+		if (BINS[base + mid] + BINC[base + mid] - from > limit) hi = mid; else lo = mid + 1u;
+	}
+	return lo;
+}
 void f(uint k) {
 	uint d = k;
 	if (((DPU(d, DP_FLAGS) >> DPF_RUNNING) & 1u) == 0u) return;
 	uint base = DPU(d, DP_BIN_BASE), nbins = DPU(d, DP_BINS_ACROSS) * DPU(d, DP_BINS_ACROSS);
-	uint first = BINS[base], quota = ENTRIES_PER_SLOT * DPU(d, DP_CLOUD_QUOTA), phys = uint(P[P_ENTRY_CAPACITY]);
-	uint last = base + nbins - 1u;
-	if (BINS[last] + BINC[last] - first <= quota && BINS[last] + BINC[last] <= phys) return;
-	uint lo = 0u, hi = nbins - 1u;  // the first bin that does not fit
-	while (lo < hi) {
-		uint mid = (lo + hi) >> 1u;
-		uint end = BINS[base + mid] + BINC[base + mid];
-		if (end - first > quota || end > phys) hi = mid; else lo = mid + 1u;
-	}
+	if (nbins == 0u) return;
+	uint first = BINS[base];
+	uint by_quota = first_past(base, nbins, first, ENTRIES_PER_SLOT * DPU(d, DP_CLOUD_QUOTA));
+	uint by_room = first_past(base, nbins, 0u, ENTRIES_PER_SLOT * WORLD[WD_PUFF_CAPACITY]);
+	if (by_room < by_quota) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; }
+	uint cut = min(by_quota, by_room);
 	uint dropped = 0u;
-	for (uint b = base + lo; b <= last; b++) { dropped += BINC[b]; BINC[b] = 0u; }
-	DS(d, DS_ENTRIES_CUT) += dropped;
-	if (BINS[last] > phys) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; }
+	for (uint b = base + cut; b < base + nbins; b++) { dropped += BINC[b]; BINC[b] = 0u; }
+	if (by_quota < nbins) DS(d, DS_ENTRIES_CUT) += dropped;
 }
 GRID_LOOP(f, D_MAX)

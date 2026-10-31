@@ -4,17 +4,18 @@
 layout(local_size_x = 64) in;
 layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs;
 layout(set = 0, binding = 0, std430) buffer B_P { float P[]; };
-layout(set = 0, binding = 1, std430) buffer B_CELLDISH { uint CELLDISH[]; };
-layout(set = 0, binding = 2, std430) buffer B_DISHP { uint DISHP[]; };
-layout(set = 0, binding = 3, std430) buffer B_CONC { float CONC[]; };
-layout(set = 0, binding = 4, std430) buffer B_OWNER { int OWNER[]; };
-layout(set = 0, binding = 5, std430) buffer B_DLO { uint DLO[]; };
-layout(set = 0, binding = 6, std430) buffer B_DHI { uint DHI[]; };
-layout(set = 0, binding = 7, std430) buffer B_RLO { uint RLO[]; };
-layout(set = 0, binding = 8, std430) buffer B_RHI { uint RHI[]; };
-layout(set = 0, binding = 9, std430) buffer B_ALO { uint ALO[]; };
-layout(set = 0, binding = 10, std430) buffer B_AHI { uint AHI[]; };
-layout(set = 0, binding = 11, std430) buffer B_SCALE { float SCALE[]; };
+layout(set = 0, binding = 1, std430) buffer B_WORLD { uint WORLD[]; };
+layout(set = 0, binding = 2, std430) buffer B_CELLDISH { uint CELLDISH[]; };
+layout(set = 0, binding = 3, std430) buffer B_DISHP { uint DISHP[]; };
+layout(set = 0, binding = 4, std430) buffer B_CONC { float CONC[]; };
+layout(set = 0, binding = 5, std430) buffer B_OWNER { int OWNER[]; };
+layout(set = 0, binding = 6, std430) buffer B_DLO { uint DLO[]; };
+layout(set = 0, binding = 7, std430) buffer B_DHI { uint DHI[]; };
+layout(set = 0, binding = 8, std430) buffer B_RLO { uint RLO[]; };
+layout(set = 0, binding = 9, std430) buffer B_RHI { uint RHI[]; };
+layout(set = 0, binding = 10, std430) buffer B_ALO { uint ALO[]; };
+layout(set = 0, binding = 11, std430) buffer B_AHI { uint AHI[]; };
+layout(set = 0, binding = 12, std430) buffer B_SCALE { float SCALE[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -31,6 +32,7 @@ const uint NO_DISH = 4294967295u;
 const int P_CELLS = 1;
 const int P_HALF_SATURATION = 24;
 const uint RECORD_WORDS = 28u;
+const uint WD_CELLS = 5u;
 const uint WD_SLOTS = 0u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
@@ -89,4 +91,4 @@ void f(uint i, uint d, uint l) {
 	SCALE[i] = lo * area / dm;
 	CONC[i] = c0 - lo;
 }
-CELL_LOOP(f, uint(P[P_CELLS]))
+CELL_LOOP(f, WORLD[WD_CELLS])

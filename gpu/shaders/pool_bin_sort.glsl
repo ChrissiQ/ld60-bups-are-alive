@@ -3,7 +3,7 @@
 #version 450
 layout(local_size_x = 64) in;
 layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs;
-layout(set = 0, binding = 0, std430) buffer B_P { float P[]; };
+layout(set = 0, binding = 0, std430) buffer B_WORLD { uint WORLD[]; };
 layout(set = 0, binding = 1, std430) buffer B_PUFF { float PUFF[]; };
 layout(set = 0, binding = 2, std430) buffer B_BINS { uint BINS[]; };
 layout(set = 0, binding = 3, std430) buffer B_BINC { uint BINC[]; };
@@ -21,9 +21,9 @@ const uint DS_START = 0u;
 const uint DS_STEP = 8u;
 const uint DS_WORDS = 32u;
 const uint NO_DISH = 4294967295u;
-const int P_BINS = 73;
 const int P_CELLS = 1;
 const uint RECORD_WORDS = 28u;
+const uint WD_BINS = 6u;
 const uint WD_SLOTS = 0u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
@@ -59,4 +59,4 @@ void f(uint b) {
 		ENTD[e * 2u + 1u] = vec4(PUFF[o + 6u], PUFF[o + 7u], float(k), 0.0);
 	}
 }
-GRID_LOOP(f, uint(P[P_BINS]))
+GRID_LOOP(f, WORLD[WD_BINS])

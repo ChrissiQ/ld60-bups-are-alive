@@ -7,12 +7,15 @@ extends RefCounted
 ## The spawn of a plankton husk is in `pool_ev_puffs` (kernels_clouds.gd), the husks of deaths in `pool_husk_spawn` below. The leak makes
 ## the dish's clouds, in slots the step reserves after the deaths': `pool_husk_age` finds how many pieces each husk lets go, the scan `hl`
 ## orders them, `pool_husk_leak` writes them. A piece is a cloud of variance 100 and cut 1 where the husk is (a deposit on the grid when the
-## dish hands over below that width); it raises its dish's cloud counter but is not held back by the cloud quota, as the husk quota already
-## bounds what leaks. The cull (mark, scan `hc`, copy, copy back, count) runs at a cadence the host sets.
+## dish hands over below that width or does not accept a cloud there, as the CPU's add_cloud); it raises its dish's cloud counter but is
+## not held back by the cloud quota, as the husk quota already bounds what leaks. A dish's DS_HUSKS is virtual, as its cloud counter:
+## raised by every husk slot its deaths and plankton take, and set to its live husks at its own cadence (`pool_husk_live`, then
+## `pool_cloud_cadence`), so the cull (mark, scan `hc`, copy, copy back, the new top), which the host runs when it likes, frees slots
+## without changing what any dish does. A husk is live while it holds a piece not yet let go.
 ##
-## Buffers of this file's own, which the host allocates (kernels_clouds.gd names CBASE and CLIVE): HUSK and HUSK2 (floats, 8 a husk), HDUE
+## Buffers of this file's own, which the host allocates (kernels_clouds.gd names CBASE): HUSK and HUSK2 (floats, 8 a husk), HDUE
 ## (the pieces due now, a husk's), HEXC (their exclusive scan), HAL (alive marks), HKEEP (kept before a husk), HSUM and HOFF (scan scratch).
-## The husk slots' number is a physical capacity the host gives (HUSK's length / 8).
+## The husk slots' number is a physical capacity the host gives (WORLD[WD_HUSK_CAPACITY]).
 
 const HUSK_PIECES := 12
 
@@ -53,9 +56,9 @@ void f(uint k) {
 	for (uint j = 0u; j < due; j++) {
 		float mass = energy * husk_share(first + int(j));
 		uint slot = at + j;
-		if (slot >= uint(P[P_PUFF_CAPACITY])) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; deposit_xy_d(d, x, y, mass); continue; }
+		if (slot >= WORLD[WD_PUFF_CAPACITY]) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; deposit_xy_d(d, x, y, mass); continue; }
 		uint q = slot * 8u;
-		if (10.0 < DPF(d, DP_HANDOVER)) {
+		if (10.0 < DPF(d, DP_HANDOVER) && accepts_d(d, x, y)) {
 			PUFF[q] = x; PUFF[q + 1u] = y; PUFF[q + 2u] = mass; PUFF[q + 3u] = 100.0; PUFF[q + 4u] = 1.0;
 			PUFF[q + 5u] = uintBitsToFloat(PUFF_ROW_BASE + d); PUFF[q + 6u] = 0.0; PUFF[q + 7u] = 0.0;
 		} else {
@@ -76,16 +79,17 @@ void main() {
 """
 
 ## The husks of this step's deaths: a dish's first `husk_room` deaths (by rank, as in `pool_death_clouds`) take the slots its base gives. A
-## trimmed bup (its record's y is not -2) and a death with no energy left leave an empty slot.
+## husk holds what the death gives back (P_DEATH_GIVE x its mass, as the CPU's release_deaths); a trimmed bup (its record's y is not -2)
+## leaves an empty slot.
 const K_SPAWN := """
 void f(uint i, uint d, uint l) {
 	if (SURV[i] != 0u) return;
 	uint rank = l - (EXCS[i] - EXCS[DS(d, DS_START)]);
 	if (rank >= husk_room(d)) return;
 	uint slot = WORLD[WD_HUSK_SLOTS] + CBASE[D_MAX + 1u + d] + rank;
-	if (slot >= uint(HUSK.length()) / 8u) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; return; }
+	if (slot >= WORLD[WD_HUSK_CAPACITY]) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; return; }
 	uint b = i * RECORD_WORDS, o = slot * 8u;
-	float energy = BUPS[b + R_ENERGY];
+	float energy = P[P_DEATH_GIVE] * BUPS[b + R_MASS];
 	bool real = BUPS[b + R_PY] == -2.0 && energy > 0.0;
 	HUSK[o] = BUPS[b + R_X]; HUSK[o + 1u] = BUPS[b + R_Y]; HUSK[o + 2u] = energy; HUSK[o + 3u] = 0.0; HUSK[o + 4u] = 0.0;
 	HUSK[o + 5u] = uintBitsToFloat(PUFF_ROW_BASE + d); HUSK[o + 6u] = real ? 1.0 : 0.0; HUSK[o + 7u] = 0.0;
@@ -118,27 +122,29 @@ void f(uint t) { HUSK[t] = HUSK2[t]; }
 GRID_LOOP(f, kept_count() * 8u)
 """
 
-## The new top, and the dishes' counts as they stand after it: zeroed, then summed by the husks themselves.
+## The new top.
 const K_SET_COUNT := """
 void main() {
 	if (gl_GlobalInvocationID.x != 0u) return;
 	uint n = WORLD[WD_HUSK_SLOTS];
 	WORLD[WD_HUSK_SLOTS] = n > 0u ? HKEEP[n - 1u] + HAL[n - 1u] : 0u;
-	for (uint d = 0u; d < D_MAX; d++) DS(d, DS_HUSKS) = 0u;
 }
 """
 
-const K_RECOUNT := """
+## The live husks of each dish at its cadence (see `pool_cloud_live` in kernels_clouds.gd), in CLIVE from D_MAX.
+const K_LIVE := """
 void f(uint k) {
-	if (HUSK[k * 8u + 6u] < 0.5) return;
-	atomicAdd(DS(floatBitsToUint(HUSK[k * 8u + 5u]) - PUFF_ROW_BASE, DS_HUSKS), 1u);
+	uint o = k * 8u;
+	if (HUSK[o + 6u] < 0.5 || int(HUSK[o + 4u]) >= HUSK_PIECES) return;
+	uint d = floatBitsToUint(HUSK[o + 5u]) - PUFF_ROW_BASE;
+	if (DS(d, DS_STEP) % 16u == 15u) atomicAdd(CLIVE[D_MAX + d], 1u);
 }
 GRID_LOOP(f, WORLD[WD_HUSK_SLOTS])
 """
 
 
 static func register(out: Dictionary) -> void:
-	var types := {"HUSK": "float", "HUSK2": "float", "HDUE": "uint", "HEXC": "uint", "HAL": "uint", "HKEEP": "uint", "CBASE": "uint"}
+	var types := {"HUSK": "float", "HUSK2": "float", "HDUE": "uint", "HEXC": "uint", "HAL": "uint", "HKEEP": "uint", "CBASE": "uint", "CLIVE": "uint"}
 	var funcs: String = HUSK_FUNCS % [str(Biology.HUSK_SECONDS), HUSK_PIECES]
 	var fixed := GpuKernels.FIXED_FUNCS
 	var dep := GpuKernelsClouds.POOL_DEP_FUNCS
@@ -152,5 +158,5 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add_grid_scan(out, "pool_hc", "HAL", "HKEEP", "HSUM", "HOFF", "WORLD[WD_HUSK_SLOTS]", ["WORLD"])
 	GpuKernels.add(out, "pool_husk_compact", K_COMPACT, ["WORLD", "HUSK", "HUSK2", "HAL", "HKEEP"], "", 64, types)
 	GpuKernels.add(out, "pool_husk_copy", K_COPY.replace("kept_count()", "(WORLD[WD_HUSK_SLOTS] > 0u ? HKEEP[WORLD[WD_HUSK_SLOTS] - 1u] + HAL[WORLD[WD_HUSK_SLOTS] - 1u] : 0u)"), ["WORLD", "HUSK", "HUSK2", "HAL", "HKEEP"], "", 64, types)
-	GpuKernels.add(out, "pool_husk_set_count", K_SET_COUNT, ["WORLD", "DSTATE", "HAL", "HKEEP"], "", 64, types)
-	GpuKernels.add(out, "pool_husk_recount", K_RECOUNT, ["WORLD", "DSTATE", "HUSK"], "", 64, types)
+	GpuKernels.add(out, "pool_husk_set_count", K_SET_COUNT, ["WORLD", "HAL", "HKEEP"], "", 64, types)
+	GpuKernels.add(out, "pool_husk_live", K_LIVE, ["WORLD", "DSTATE", "HUSK", "CLIVE"], funcs, 64, types)

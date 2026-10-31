@@ -115,6 +115,7 @@ uint cell_at(uint d, float x, float y) {
 // the list of entries (a range of ENTD) of the square of dish d that holds a point
 void bin_list(uint d, float x, float y, out uint e0, out uint e1) {
 	int nb = int(DPU(d, DP_BINS_ACROSS)); float bs = DPF(d, DP_BIN_SIZE), org = DPF(d, DP_RADIUS);
+	if (nb == 0) { e0 = 0u; e1 = 0u; return; }  // (a dish with no squares has no clouds)
 	int bx = clamp(int((x + org) / bs), 0, nb - 1), by = clamp(int((y + org) / bs), 0, nb - 1);
 	uint b = DPU(d, DP_BIN_BASE) + uint(by * nb + bx);
 	e0 = BINS[b]; e1 = e0 + BINC[b];

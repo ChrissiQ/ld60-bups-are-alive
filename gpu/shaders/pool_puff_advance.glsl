@@ -58,6 +58,12 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define FIX30(HI, LO) (float(HI) * 4.0 + float(LO) * 9.313225746154785e-10)
 #define FIX20(HI, LO) (float(HI) * 4096.0 + float(LO) * 9.5367431640625e-7)
 
+bool accepts_d(uint d, float x, float y) {
+	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS);
+	int cx = clamp(int((x + org) / sp), 0, n - 1), cy = clamp(int((y + org) / sp), 0, n - 1);
+	return INSIDE[DPU(d, DP_FIELD_BASE) + uint(cy * n + cx)] != 0 && x * x + y * y <= org * org;
+}
+
 void add_dep(uint cell, float amount) { ADD_FIXED20(DPLO, DPHI, cell, amount) }
 void deposit_xy_d(uint d, float x, float y, float mass) {
 	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS); uint base = DPU(d, DP_FIELD_BASE);

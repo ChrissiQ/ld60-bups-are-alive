@@ -6,7 +6,7 @@ layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs
 layout(set = 0, binding = 0, std430) buffer B_WORLD { uint WORLD[]; };
 layout(set = 0, binding = 1, std430) buffer B_DSTATE { uint DSTATE[]; };
 layout(set = 0, binding = 2, std430) buffer B_PUFF { float PUFF[]; };
-layout(set = 0, binding = 3, std430) buffer B_CBASE { uint CBASE[]; };
+layout(set = 0, binding = 3, std430) buffer B_CLIVE { uint CLIVE[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -48,6 +48,6 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 void f(uint k) {
 	if (PUFF[k * 8u + 5u] < 0.5) return;
 	uint d = floatBitsToUint(PUFF[k * 8u + 5u]) - PUFF_ROW_BASE;
-	if (DS(d, DS_STEP) % 16u == 15u) atomicAdd(CBASE[d], 1u);
+	if (DS(d, DS_STEP) % 16u == 15u) atomicAdd(CLIVE[d], 1u);
 }
 GRID_LOOP(f, WORLD[WD_CLOUD_SLOTS])

@@ -33,11 +33,11 @@ const uint DS_WORDS = 32u;
 const uint NO_DISH = 4294967295u;
 const uint PUFF_ROW_BASE = 1065353216u;
 const int P_CELLS = 1;
-const int P_PUFF_CAPACITY = 71;
 const uint RECORD_WORDS = 28u;
 const uint WD_CLOUD_SLOTS = 1u;
 const uint WD_HUSK_SLOTS = 2u;
 const uint WD_OVERFLOW = 4u;
+const uint WD_PUFF_CAPACITY = 7u;
 const uint WD_SLOTS = 0u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
@@ -73,6 +73,12 @@ float husk_share(int k) {
 #define FIX30(HI, LO) (float(HI) * 4.0 + float(LO) * 9.313225746154785e-10)
 #define FIX20(HI, LO) (float(HI) * 4096.0 + float(LO) * 9.5367431640625e-7)
 
+bool accepts_d(uint d, float x, float y) {
+	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS);
+	int cx = clamp(int((x + org) / sp), 0, n - 1), cy = clamp(int((y + org) / sp), 0, n - 1);
+	return INSIDE[DPU(d, DP_FIELD_BASE) + uint(cy * n + cx)] != 0 && x * x + y * y <= org * org;
+}
+
 void add_dep(uint cell, float amount) { ADD_FIXED20(DPLO, DPHI, cell, amount) }
 void deposit_xy_d(uint d, float x, float y, float mass) {
 	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS); uint base = DPU(d, DP_FIELD_BASE);
@@ -103,9 +109,9 @@ void f(uint k) {
 	for (uint j = 0u; j < due; j++) {
 		float mass = energy * husk_share(first + int(j));
 		uint slot = at + j;
-		if (slot >= uint(P[P_PUFF_CAPACITY])) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; deposit_xy_d(d, x, y, mass); continue; }
+		if (slot >= WORLD[WD_PUFF_CAPACITY]) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; deposit_xy_d(d, x, y, mass); continue; }
 		uint q = slot * 8u;
-		if (10.0 < DPF(d, DP_HANDOVER)) {
+		if (10.0 < DPF(d, DP_HANDOVER) && accepts_d(d, x, y)) {
 			PUFF[q] = x; PUFF[q + 1u] = y; PUFF[q + 2u] = mass; PUFF[q + 3u] = 100.0; PUFF[q + 4u] = 1.0;
 			PUFF[q + 5u] = uintBitsToFloat(PUFF_ROW_BASE + d); PUFF[q + 6u] = 0.0; PUFF[q + 7u] = 0.0;
 		} else {

@@ -200,7 +200,7 @@ const DP_HANDOVER := 4  ## float: a cloud this wide goes to the grid
 const DP_BIN_BASE := 5  ## uint: the first of the dish's cloud-list squares in the pool
 const DP_BINS_ACROSS := 6  ## uint
 const DP_BIN_SIZE := 7  ## float
-const DP_FEED := 8  ## float: feed per second
+const DP_FEED := 8  ## float: the feed of one step (the feed per second times the step, worked out on the host, as the single dish's P_FEED)
 const DP_UPKEEP_SCALE := 9  ## float
 const DP_LIMIT := 10  ## uint: the most bups
 const DP_CAP := 11  ## uint: the hard cap c_d, the newborn cutoff
@@ -250,13 +250,17 @@ const DS_ENTRIES_CUT := 21
 const DS_HUSKS := 22
 const DS_OVERFLOW := 23  ## the physical-overflow flag
 
-## WORLD: one row of the world's totals.
-const WD_WORDS := 8
+## WORLD: one row of the world's totals (uints; words 9-15 are spare).
+const WD_WORDS := 16
 const WD_SLOTS := 0  ## the slots in use (the sum of the aligned segment lengths)
 const WD_CLOUD_SLOTS := 1
 const WD_HUSK_SLOTS := 2
 const WD_ITERATION_STEP := 3  ## the iteration's step index
 const WD_OVERFLOW := 4
+const WD_CELLS := 5  ## the field cells in use (the bound of the cell kernels)
+const WD_BINS := 6  ## the cloud-list squares in use
+const WD_PUFF_CAPACITY := 7  ## the physical cloud slots (PUFF holds 8 floats a slot; the list entries are ENTRIES_PER_SLOT a slot)
+const WD_HUSK_CAPACITY := 8  ## the physical husk slots (HUSK holds 8 floats a slot; a kernel does not read a buffer's length, which Metal's translation of the SPIR-V cannot bind)
 
 ## The payload textures (a bup's picture, written sim-side after `finalize`): PAYLOAD (RGBA32UI, PAYLOAD_TEX_WIDTH wide) and the ids (RG32UI).
 const PL_WORDS := 4

@@ -34,11 +34,13 @@ const uint D_MAX = 1024u;
 const uint NO_DISH = 4294967295u;
 const uint PUFF_ROW_BASE = 1065353216u;
 const int P_CELLS = 1;
+const int P_DEATH_GIVE = 8;
 const uint RECORD_WORDS = 28u;
-const uint R_ENERGY = 5u;
+const uint R_MASS = 6u;
 const uint R_PY = 23u;
 const uint R_X = 1u;
 const uint R_Y = 2u;
+const uint WD_HUSK_CAPACITY = 8u;
 const uint WD_HUSK_SLOTS = 2u;
 const uint WD_OVERFLOW = 4u;
 const uint WD_SLOTS = 0u;
@@ -75,9 +77,9 @@ void f(uint i, uint d, uint l) {
 	uint rank = l - (EXCS[i] - EXCS[DS(d, DS_START)]);
 	if (rank >= husk_room(d)) return;
 	uint slot = WORLD[WD_HUSK_SLOTS] + CBASE[D_MAX + 1u + d] + rank;
-	if (slot >= uint(HUSK.length()) / 8u) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; return; }
+	if (slot >= WORLD[WD_HUSK_CAPACITY]) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; return; }
 	uint b = i * RECORD_WORDS, o = slot * 8u;
-	float energy = BUPS[b + R_ENERGY];
+	float energy = P[P_DEATH_GIVE] * BUPS[b + R_MASS];
 	bool real = BUPS[b + R_PY] == -2.0 && energy > 0.0;
 	HUSK[o] = BUPS[b + R_X]; HUSK[o + 1u] = BUPS[b + R_Y]; HUSK[o + 2u] = energy; HUSK[o + 3u] = 0.0; HUSK[o + 4u] = 0.0;
 	HUSK[o + 5u] = uintBitsToFloat(PUFF_ROW_BASE + d); HUSK[o + 6u] = real ? 1.0 : 0.0; HUSK[o + 7u] = 0.0;

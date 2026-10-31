@@ -6,6 +6,7 @@ layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs
 layout(set = 0, binding = 0, std430) buffer B_WORLD { uint WORLD[]; };
 layout(set = 0, binding = 1, std430) buffer B_DSTATE { uint DSTATE[]; };
 layout(set = 0, binding = 2, std430) buffer B_HUSK { float HUSK[]; };
+layout(set = 0, binding = 3, std430) buffer B_CLIVE { uint CLIVE[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -13,11 +14,11 @@ const uint DP_CELLS = 1u;
 const uint DP_FIELD_BASE = 0u;
 const uint DP_WORDS = 32u;
 const uint DS_COUNT = 1u;
-const uint DS_HUSKS = 22u;
 const uint DS_SEED = 7u;
 const uint DS_START = 0u;
 const uint DS_STEP = 8u;
 const uint DS_WORDS = 32u;
+const uint D_MAX = 1024u;
 const uint NO_DISH = 4294967295u;
 const uint PUFF_ROW_BASE = 1065353216u;
 const int P_CELLS = 1;
@@ -45,8 +46,17 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define BLOCK_LOOP(F) void main() { uint nb_ = (WORLD[WD_SLOTS] + BLK_SLOTS - 1u) >> BLK_SHIFT; for (uint k_ = gl_WorkGroupID.x; k_ < nb_; k_ += gl_NumWorkGroups.x) { F(k_, BLKDISH[k_]); barrier(); } }
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
 
+const float HUSK_SECONDS = 10800.0;
+const int HUSK_PIECES = 12;
+float husk_share(int k) {
+	float share = exp(-0.25 * float(k)) - exp(-0.25 * float(k + 1));
+	return k == HUSK_PIECES - 1 ? share + exp(-0.25 * float(HUSK_PIECES)) : share;
+}
+
 void f(uint k) {
-	if (HUSK[k * 8u + 6u] < 0.5) return;
-	atomicAdd(DS(floatBitsToUint(HUSK[k * 8u + 5u]) - PUFF_ROW_BASE, DS_HUSKS), 1u);
+	uint o = k * 8u;
+	if (HUSK[o + 6u] < 0.5 || int(HUSK[o + 4u]) >= HUSK_PIECES) return;
+	uint d = floatBitsToUint(HUSK[o + 5u]) - PUFF_ROW_BASE;
+	if (DS(d, DS_STEP) % 16u == 15u) atomicAdd(CLIVE[D_MAX + d], 1u);
 }
 GRID_LOOP(f, WORLD[WD_HUSK_SLOTS])

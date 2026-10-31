@@ -63,15 +63,15 @@ uint husk_room(uint d) {
 	return hv < q ? min(q - hv, deaths_of(d)) : 0u;
 }
 
-void main() {
-	if (gl_GlobalInvocationID.x != 0u) return;
+void f(uint d) {
 	bool give = P[P_DEATH_GIVE] > 0.0;
-	for (uint d = 0u; d < D_MAX; d++) {
-		if (((DPU(d, DP_FLAGS) >> DPF_RUNNING) & 1u) == 0u) continue;
-		uint room = husk_room(d);
-		if (give) DS(d, DS_CLOUD_SLOTS) = min(DS(d, DS_CLOUD_SLOTS) + deaths_of(d) - room, DPU(d, DP_CLOUD_QUOTA));
-		DS(d, DS_HUSKS) += room;
+	if (d == 0u) {
+		if (give) WORLD[WD_CLOUD_SLOTS] += CBASE[D_MAX];
+		WORLD[WD_HUSK_SLOTS] += CBASE[2u * D_MAX + 1u];
 	}
-	if (give) WORLD[WD_CLOUD_SLOTS] += CBASE[D_MAX];
-	WORLD[WD_HUSK_SLOTS] += CBASE[2u * D_MAX + 1u];
+	if (((DPU(d, DP_FLAGS) >> DPF_RUNNING) & 1u) == 0u) return;
+	uint room = husk_room(d);
+	if (give) DS(d, DS_CLOUD_SLOTS) = min(DS(d, DS_CLOUD_SLOTS) + deaths_of(d) - room, DPU(d, DP_CLOUD_QUOTA));
+	DS(d, DS_HUSKS) += room;
 }
+GRID_LOOP(f, D_MAX)

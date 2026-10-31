@@ -71,7 +71,12 @@ func create(rd: RenderingDevice) -> Dictionary:
 		if not shader.is_valid():
 			errors.append("%s: the shader was not created" % kernel_name)
 			continue
-		made[kernel_name] = {"shader": shader, "pipeline": rd.compute_pipeline_create(shader), "buffers": k["buffers"], "local": k["local_size"]}
+		var pipeline := rd.compute_pipeline_create(shader)
+		if not pipeline.is_valid():  # (the driver's own compile, Metal's from the SPIR-V, can fail where the GLSL compiled)
+			errors.append("%s: the pipeline was not created" % kernel_name)
+			rd.free_rid(shader)
+			continue
+		made[kernel_name] = {"shader": shader, "pipeline": pipeline, "buffers": k["buffers"], "local": k["local_size"]}
 	return made
 
 
