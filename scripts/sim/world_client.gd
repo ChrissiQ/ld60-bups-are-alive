@@ -9,10 +9,10 @@ extends RefCounted
 ## it: a DishState's `number` says which dish it is. A dish the simulation refuses (no room in the memory budget, no free row) is listed in
 ## a snapshot's timing["refused"]: `poll` frees its row and emits `refused`.
 ##
-## The main view's picture is played out one publish behind (`shown_payload`): a publish is shown once the next one has arrived, or on the
-## next frame that brings none, so an iteration that ends just after a frame's poll (two publishes in the next frame, none in this one)
-## still gives every frame a new picture. A publish waits at most one frame; one that is overtaken by two more in a frame is skipped; the
-## picture never goes back to an older publish.
+## The main view's picture is played out one publish a frame (`shown_payload`): each frame shows the oldest publish not yet shown, and at
+## most one is kept waiting, so when two land in one frame (an iteration ended just after the last poll) the second is shown on the next,
+## and a frame that then brings none still gets a new picture. A publish waits at most one frame; one overtaken by two more in a frame is
+## skipped; the picture never goes back to an older publish.
 
 signal snapshot_changed(snap: Snapshot)
 signal refused(row: int, why: String)
@@ -149,15 +149,13 @@ func shown_payload() -> PayloadInfo:
 
 
 ## One frame of the playout: `waiting` (publishes seen and not shown, oldest first) with the publishes that `arrived` this frame. Returns
-## [the publish to show now (null: keep the one shown), what waits after]. With two or more waiting the newest waits and the one before it
-## is shown (any older are skipped); with one, it is shown only when nothing arrived this frame.
+## [the publish to show now (null: none waits, keep the one shown), what waits after]: the oldest is shown, and at most one is left
+## waiting (with three or more, the oldest are skipped).
 static func playout(waiting: Array, arrived: Array) -> Array:
 	var all := waiting + arrived
-	if all.size() >= 2:
-		return [all[-2], [all[-1]]]
-	if all.size() == 1 and arrived.is_empty():
-		return [all[0], []]
-	return [null, all]
+	if all.is_empty():
+		return [null, []]
+	return [all[-2] if all.size() >= 2 else all[0], [all[-1]] if all.size() >= 2 else []]
 
 
 ## Once a frame on the main thread: a newer snapshot is acknowledged and emitted, the rows of refused dishes are freed, and the playout

@@ -24,9 +24,9 @@ extends SceneTree
 ##     T_ITER of steps leaves unmeasured over 30 s and frame capping) [derived]; the single-dish path's best is x10,000 at each size [measured baseline].
 ##   x1: 1,000 and 100,000 bups, 45 mm, x1, 60 s: the share of display frames in which a new payload is shown; >= 0.99 is the gate. The
 ##     sim steps Governor.STEPS_PER_SECOND (120) times a simulated second, so on a 120 Hz display every frame can have a new one [derived];
-##     this script shows the payload WorldClient's playout gives each frame (one publish behind: a frame whose iteration ended just after
-##     its poll shows the publish held back, and the next frame the older of the two that came), as the game does: 0.992 at 1,000 and
-##     0.998 at 100,000 [measured, a replay of iteration ends against the polls; showing the newest instead gave 0.98 and 0.87]. Edit to
+##     this script shows the payload WorldClient's playout gives each frame (one publish a frame in order, at most one waiting: two that
+##     land in one frame are shown on two), as the game does: 0.9997 at 1,000 and 0.9989 at 100,000 [measured: a replay of 7,200 frames'
+##     arrivals recorded in a run of this script; showing the newest gave 0.978 and 0.867 on the same frames]. Edit to
 ##     visible (paused, a source placed, 8 times): frames until a snapshot shows it, <= 2 frames + one iteration [derived], the single-dish path's 1 frame
 ##     [measured baseline, a pixel hash].
 ##   The interface column (frame p95 and worst on the game screen) is measured in the interface gate on the final tree; the main frames printed here are
@@ -149,17 +149,20 @@ func _gate_checks() -> void:
 
 ## WorldClient.playout on synthetic arrivals (publishes per frame), expected values derived from the rule before the first run:
 ## - [1, 1, 0, 2] x 25 (an iteration ending just after a poll every fourth frame): showing the newest changes the picture in 75 of 100
-##   frames; the playout misses only the first frame (its first publish waits for the next): 99 of 100.
-## - [1, 1, 0, 1] x 25 (a publish truly missing every fourth frame): the newest 75 of 100; the playout 74 (the first frame, then each
-##   frame after a missing one: no publish was held back to show).
-## - [3]: the older two arrive together with a third: the second newest is shown, the oldest skipped, the newest waits.
+##   frames; the playout misses only the first empty frame (nothing was waiting yet; from the first double on one always is): 99 of 100.
+## - [1, 0, 1, 1, 2] x 20 (the empty frame some frames before the double): the newest 80 of 100; the playout 99 (the first empty frame).
+## - [1, 1, 0, 1] x 25 (a publish truly missing every fourth frame): 75 of 100 either way (no publish is there to show).
+## - [3]: the second newest is shown, the oldest skipped, the newest waits.
 ## - Every publish shown is shown at most one frame after the frame it arrived in, and the picture never goes back to an older one.
 func _playout_checks() -> void:
-	var smooth := _played_out([1, 1, 0, 2], 25)
-	TestUtil.show(smooth["newest"] == 75 and smooth["shown"] == 99, "playout: late iterations [1,1,0,2]: newest 75, playout 99 of 100 (got %d, %d)" % [smooth["newest"], smooth["shown"]])
+	var late := _played_out([1, 1, 0, 2], 25)
+	TestUtil.show(late["newest"] == 75 and late["shown"] == 99, "playout: late iterations [1,1,0,2]: newest 75, playout 99 of 100 (got %d, %d)" % [late["newest"], late["shown"]])
+	var apart := _played_out([1, 0, 1, 1, 2], 20)
+	TestUtil.show(apart["newest"] == 80 and apart["shown"] == 99, "playout: [1,0,1,1,2]: newest 80, playout 99 of 100 (got %d, %d)" % [apart["newest"], apart["shown"]])
 	var gaps := _played_out([1, 1, 0, 1], 25)
-	TestUtil.show(gaps["newest"] == 75 and gaps["shown"] == 74, "playout: missing publishes [1,1,0,1]: newest 75, playout 74 of 100 (got %d, %d)" % [gaps["newest"], gaps["shown"]])
-	TestUtil.show(smooth["late"] == 0 and gaps["late"] == 0 and smooth["back"] == 0 and gaps["back"] == 0, "playout: no publish shown more than a frame after it came, never an older one")
+	TestUtil.show(gaps["newest"] == 75 and gaps["shown"] == 75, "playout: missing publishes [1,1,0,1]: 75 of 100 either way (got %d, %d)" % [gaps["newest"], gaps["shown"]])
+	var all_runs: Array = [late, apart, gaps]
+	TestUtil.show(all_runs.all(func(r: Dictionary) -> bool: return r["late"] == 0 and r["back"] == 0), "playout: no publish shown more than a frame after it came, never an older one")
 	var three := WorldClient.playout([], [_publish(1), _publish(2), _publish(3)])
 	TestUtil.show(three[0] != null and (three[0] as PayloadInfo).seq == 2 and three[1].size() == 1 and (three[1][0] as PayloadInfo).seq == 3, "playout: three at once show the second newest, the newest waits")
 
