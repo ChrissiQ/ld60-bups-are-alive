@@ -11,6 +11,7 @@ layout(set = 0, binding = 4, std430) buffer B_DSTATE { uint DSTATE[]; };
 layout(set = 0, binding = 5, std430) buffer B_DCNT { uint DCNT[]; };
 layout(set = 0, binding = 6, std430) buffer B_DOFF { uint DOFF[]; };
 layout(set = 0, binding = 7, std430) buffer B_DLIST { uint DLIST[]; };
+layout(set = 0, binding = 8, std430) buffer B_DBIT { uint DBIT[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -92,7 +93,9 @@ void conj_apply(uint i, uint d, uint l) {
 	int x0 = int(floor((x - reach) / DCELL)), x1 = int(floor((x + reach) / DCELL)), y0 = int(floor((y - reach) / DCELL)), y1 = int(floor((y + reach) / DCELL));
 	uint start = DS(d, DS_START), key = DISH_KEY(d), mask = conj_mask(), best = NOT_DONOR;
 	for (int gx = x0; gx <= x1; gx++) for (int gy = y0; gy <= y1; gy++) {
-		uint h = dbucket(d, gx, gy, mask), n = DCNT[h];
+		uint h = dbucket(d, gx, gy, mask);
+		if ((DBIT[h >> 5u] & (1u << (h & 31u))) == 0u) continue;
+		uint n = DCNT[h];
 		if (n == 0u) continue;
 		uint end = DOFF[h];
 		for (uint k = end - n; k < end; k++) {

@@ -83,8 +83,8 @@ func probe_defs() -> Dictionary:
 	GpuKernels.add(defs, "grow_today", "void main() {\n\tBUP_RECORD_THREAD\n\tuint s = hash(hash(CNT[CNT_SEED] ^ (CNT[CNT_STEP] * 0x85EBCA6BU) ^ 4242U) + i * 0x9E3779B9U);\n" + grow_body, ["CNT", "BUPS"])
 	# the dish-blind index: no dish in the bucket's hash and no dish check (as the single-dish table), for C4
 	var blind := GpuKernelsLife.CONJ_FUNCS + GpuKernelsLife.dn_funcs() + "#define CONJ_BUCKETS (%s)\n" % GpuKernelsLife.CONJ_BUCKETS_EXPR + GpuKernelsLife.swapped(GpuKernelsLife.POOL_CONJ_FUNCS, " ^ d * 83492791u", "")
-	GpuKernels.add(defs, "pool_conj_count_blind", GpuKernelsLife.K_POOL_CONJ_COUNT, ["P", "BUPS", "WORLD", "BLKDISH", "DSTATE", "CBKT", "DCNT"], blind, 64, GpuKernelsLife.POOL_TYPES)
-	GpuKernels.add(defs, "pool_conj_apply_blind", GpuKernelsLife.swapped(GpuKernelsLife.K_POOL_CONJ_APPLY, "if (BLKDISH[j >> BLK_SHIFT] != d) continue;", ""), ["P", "BUPS", "WORLD", "BLKDISH", "DSTATE", "DCNT", "DOFF", "DLIST"], blind, 64, GpuKernelsLife.POOL_TYPES)
+	GpuKernels.add(defs, "pool_conj_count_blind", GpuKernelsLife.K_POOL_CONJ_COUNT, ["P", "BUPS", "WORLD", "BLKDISH", "DSTATE", "CBKT", "DCNT", "DBIT"], blind, 64, GpuKernelsLife.POOL_TYPES)
+	GpuKernels.add(defs, "pool_conj_apply_blind", GpuKernelsLife.swapped(GpuKernelsLife.K_POOL_CONJ_APPLY, "if (BLKDISH[j >> BLK_SHIFT] != d) continue;", ""), ["P", "BUPS", "WORLD", "BLKDISH", "DSTATE", "DCNT", "DOFF", "DLIST", "DBIT"], blind, 64, GpuKernelsLife.POOL_TYPES)
 	# the single-dish path's donor table with 32 slots a bucket in place of 4 (no donor dropped below 33 a bucket), for C1's dense dish
 	var wide := func(text: String) -> String: return text.replace("(DMASK + 1u) * 4u", "(DMASK + 1u) * WIDE").replace("s < 4u", "s < WIDE").replace("h * 4u + s", "h * WIDE + s")
 	var wide_funcs := GpuKernelsLife.CONJ_FUNCS + "const uint WIDE = 32u;\n"
@@ -133,7 +133,7 @@ func make_world(phys: int, today := false, cap := 0) -> World:
 		sizes.merge({"CNT": L.CNT_WORDS * 4, "S1": s1 * 4, "S1X": s1 * 4, "S2": ((s1 + 255) / 256) * 4, "S2X": ((s1 + 255) / 256) * 4, "S3": 16,
 			"DTAB": (65536 * 32 + 2048) * 4, "EVN": L.EVENT_SETS * 8, "OUT": L.OUT_WORDS * 4})
 	else:
-		sizes.merge({"CBKT": phys * 4, "DLIST": phys * 4, "PIPDST": phys * 4, "DCNT": w.buckets * 4, "DOFF": w.buckets * 4, "GSUM": SCAN_MAX_GROUPS * 4,
+		sizes.merge({"CBKT": phys * 4, "DLIST": phys * 4, "PIPDST": phys * 4, "DCNT": w.buckets * 4, "DOFF": w.buckets * 4, "DBIT": (w.buckets / 32 + 1) * 4, "GSUM": SCAN_MAX_GROUPS * 4,
 			"GOFF": SCAN_MAX_GROUPS * 4, "DISHP": L.D_MAX * L.DP_WORDS * 4, "DSTATE": L.D_MAX * L.DS_WORDS * 4, "BLKDISH": (phys / 256 + 1) * 4,
 			"BLKDISH2": (phys / 256 + 1) * 4, "DNEXT": GpuKernelsLife.DNEXT_WORDS * 4, "STATS": L.D_MAX * L.STATS_DISH_WORDS * 4})
 	for nm: String in sizes:

@@ -250,7 +250,7 @@ const DS_ENTRIES_CUT := 21
 const DS_HUSKS := 22
 const DS_OVERFLOW := 23  ## the physical-overflow flag
 
-## WORLD: one row of the world's totals (uints; words 9-15 are spare).
+## WORLD: one row of the world's totals (uints; words 10-15 are spare).
 const WD_WORDS := 16
 const WD_SLOTS := 0  ## the slots in use (the sum of the aligned segment lengths)
 const WD_CLOUD_SLOTS := 1
@@ -261,6 +261,7 @@ const WD_CELLS := 5  ## the field cells in use (the bound of the cell kernels)
 const WD_BINS := 6  ## the cloud-list squares in use
 const WD_PUFF_CAPACITY := 7  ## the physical cloud slots (PUFF holds 8 floats a slot; the list entries are ENTRIES_PER_SLOT a slot)
 const WD_HUSK_CAPACITY := 8  ## the physical husk slots (HUSK holds 8 floats a slot; a kernel does not read a buffer's length, which Metal's translation of the SPIR-V cannot bind)
+const WD_SLOT_CAPACITY := 9  ## the physical record slots (BUPS, BUPS2 and CHILD hold this many records)
 
 ## The payload textures (a bup's picture, written sim-side after `finalize`): PAYLOAD (RGBA32UI, PAYLOAD_TEX_WIDTH wide) and the ids (RG32UI).
 const PL_WORDS := 4

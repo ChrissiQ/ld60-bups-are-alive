@@ -10,6 +10,7 @@ layout(set = 0, binding = 3, std430) buffer B_BLKDISH { uint BLKDISH[]; };
 layout(set = 0, binding = 4, std430) buffer B_DSTATE { uint DSTATE[]; };
 layout(set = 0, binding = 5, std430) buffer B_CBKT { uint CBKT[]; };
 layout(set = 0, binding = 6, std430) buffer B_DCNT { uint DCNT[]; };
+layout(set = 0, binding = 7, std430) buffer B_DBIT { uint DBIT[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -84,5 +85,6 @@ void conj_count(uint i, uint d, uint l) {
 	uint h = dbucket(d, int(floor(BUPS[b + R_X] / DCELL)), int(floor(BUPS[b + R_Y] / DCELL)), conj_mask());
 	CBKT[i] = h;
 	atomicAdd(DCNT[h], 1u);
+	atomicOr(DBIT[h >> 5u], 1u << (h & 31u));
 }
 BUP_LOOP(conj_count)

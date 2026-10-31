@@ -273,7 +273,7 @@ void main() {
 # it, so a segment the host writes anywhere (a new dish, a thaw) is in row order after the next pass.
 # The scratch buffers these kernels add (uint words): DNEXT (the step's per-dish words DN_*, D_MAX + 1 rows of DN_WORDS: the last row's
 # first word is the next layout's slots), CBKT (a slot each: a donor's bucket or NOT_DONOR), DCNT and DOFF (a word a bucket:
-# conj_buckets(slots)), DLIST (a slot each: the donors by bucket), GSUM and GOFF (GpuKernels.scan_groups' most groups: a grid scan's
+# conj_buckets(slots)), DBIT (a bit a bucket: the buckets that hold a donor), DLIST (a slot each: the donors by bucket), GSUM and GOFF (GpuKernels.scan_groups' most groups: a grid scan's
 # sums and offsets).
 
 const DN_WORDS := 8  ## words of a dish's row of DNEXT
@@ -291,7 +291,7 @@ const CONJ_MIN_BUCKETS := 65536  ## the fewest buckets of the donors' index
 const POOL_ROWS_PER_THREAD := GpuLayout.D_MAX / 256  ## pool_finalize and pool_pip_final: one group of 256 threads over every row
 
 ## The scratch buffers' element types (for GpuKernels.add).
-const POOL_TYPES := {"DNEXT": "uint", "CBKT": "uint", "DCNT": "uint", "DOFF": "uint", "DLIST": "uint", "GSUM": "uint", "GOFF": "uint"}
+const POOL_TYPES := {"DNEXT": "uint", "CBKT": "uint", "DCNT": "uint", "DOFF": "uint", "DLIST": "uint", "GSUM": "uint", "GOFF": "uint", "DBIT": "uint"}
 
 
 ## The buckets of the donors' index for a pool of `slots` slots in use (the kernels work it out from WORLD[WD_SLOTS] the same way): a
@@ -466,6 +466,8 @@ GRID_LOOP(setcount_row, D_MAX)
 ## least value, the same in whatever order the donors are listed, so the donors' index need not be sorted within a bucket: it is a count
 ## of the donors in each bucket of (dish, 20 µm cell), a scan, and a scatter, with no overflow (CBKT keeps each donor's bucket between
 ## the count and the scatter; DLIST is the donors by bucket, bucket b's from DOFF[b] - DCNT[b] up to DOFF[b] after the scatter).
+## DBIT has a bit for each bucket that holds a donor (a word a 32 buckets: 64 KB for 2M slots), which a recipient reads before the
+## bucket's count, so the many recipients near no donor touch a small table that stays in the cache instead of DCNT.
 const POOL_CONJ_FUNCS := """
 const uint NOT_DONOR = 0xFFFFFFFFu;
 uint conj_mask() { return CONJ_BUCKETS - 1u; }
@@ -478,6 +480,7 @@ const CONJ_BUCKETS_EXPR := "max(CONJ_MIN_BUCKETS, (2u << uint(findMSB(max(WORLD[
 const K_POOL_CONJ_CLEAR := """
 void conj_clear(uint k) {
 	if (k < CONJ_BUCKETS) DCNT[k] = 0u;
+	if (k < CONJ_BUCKETS / 32u) DBIT[k] = 0u;
 	if (k < D_MAX) { DS(k, DS_DONORS) = 0u; DS(k, DS_DONOR_REACH) = 0u; }
 }
 GRID_LOOP(conj_clear, max(CONJ_BUCKETS, D_MAX))
@@ -492,6 +495,7 @@ void conj_count(uint i, uint d, uint l) {
 	uint h = dbucket(d, int(floor(BUPS[b + R_X] / DCELL)), int(floor(BUPS[b + R_Y] / DCELL)), conj_mask());
 	CBKT[i] = h;
 	atomicAdd(DCNT[h], 1u);
+	atomicOr(DBIT[h >> 5u], 1u << (h & 31u));
 }
 BUP_LOOP(conj_count)
 """
@@ -516,7 +520,9 @@ void conj_apply(uint i, uint d, uint l) {
 	int x0 = int(floor((x - reach) / DCELL)), x1 = int(floor((x + reach) / DCELL)), y0 = int(floor((y - reach) / DCELL)), y1 = int(floor((y + reach) / DCELL));
 	uint start = DS(d, DS_START), key = DISH_KEY(d), mask = conj_mask(), best = NOT_DONOR;
 	for (int gx = x0; gx <= x1; gx++) for (int gy = y0; gy <= y1; gy++) {
-		uint h = dbucket(d, gx, gy, mask), n = DCNT[h];
+		uint h = dbucket(d, gx, gy, mask);
+		if ((DBIT[h >> 5u] & (1u << (h & 31u))) == 0u) continue;
+		uint n = DCNT[h];
 		if (n == 0u) continue;
 		uint end = DOFF[h];
 		for (uint k = end - n; k < end; k++) {
@@ -677,11 +683,11 @@ static func _register_pool(out: Dictionary) -> void:
 	var dn := dn_funcs()
 	var conj := CONJ_FUNCS + dn + "#define CONJ_BUCKETS (%s)\n" % CONJ_BUCKETS_EXPR + POOL_CONJ_FUNCS
 	var t := POOL_TYPES
-	GpuKernels.add(out, "pool_conj_clear", K_POOL_CONJ_CLEAR, ["WORLD", "DSTATE", "DCNT"], dn + "#define CONJ_BUCKETS (%s)\n" % CONJ_BUCKETS_EXPR, 64, t)
-	GpuKernels.add(out, "pool_conj_count", K_POOL_CONJ_COUNT, ["P", "BUPS", "WORLD", "BLKDISH", "DSTATE", "CBKT", "DCNT"], conj, 64, t)
+	GpuKernels.add(out, "pool_conj_clear", K_POOL_CONJ_CLEAR, ["WORLD", "DSTATE", "DCNT", "DBIT"], dn + "#define CONJ_BUCKETS (%s)\n" % CONJ_BUCKETS_EXPR, 64, t)
+	GpuKernels.add(out, "pool_conj_count", K_POOL_CONJ_COUNT, ["P", "BUPS", "WORLD", "BLKDISH", "DSTATE", "CBKT", "DCNT", "DBIT"], conj, 64, t)
 	GpuKernels.add_grid_scan(out, "pool_conj_scan", "DCNT", "DOFF", "GSUM", "GOFF", CONJ_BUCKETS_EXPR.replace("CONJ_MIN_BUCKETS", "%du" % CONJ_MIN_BUCKETS), ["WORLD"])
 	GpuKernels.add(out, "pool_conj_scatter", K_POOL_CONJ_SCATTER, ["WORLD", "BLKDISH", "DSTATE", "CBKT", "DOFF", "DLIST"], conj, 64, t)
-	GpuKernels.add(out, "pool_conj_apply", K_POOL_CONJ_APPLY, ["P", "BUPS", "WORLD", "BLKDISH", "DSTATE", "DCNT", "DOFF", "DLIST"], conj, 64, t)
+	GpuKernels.add(out, "pool_conj_apply", K_POOL_CONJ_APPLY, ["P", "BUPS", "WORLD", "BLKDISH", "DSTATE", "DCNT", "DOFF", "DLIST", "DBIT"], conj, 64, t)
 	GpuKernels.add(out, "pool_life", pool_life(), ["P", "BUPS", "CHILD", "SURV", "KID", "WORLD", "BLKDISH", "DSTATE", "DISHP"], FLAG_FUNC)
 	GpuKernels.add_grid_scan(out, "pool_scan_s", "SURV", "EXCS", "GSUM", "GOFF", "WORLD[WD_SLOTS]", ["WORLD"])
 	GpuKernels.add_grid_scan(out, "pool_scan_k", "KID", "EXCK", "GSUM", "GOFF", "WORLD[WD_SLOTS]", ["WORLD"])

@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://c5ufgda7kth46"
+path="res://.godot/imported/pool_slot_check.glsl-5e77006d771711016f7f5e4f50c68e88.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_slot_check.glsl"
+dest_files=["res://.godot/imported/pool_slot_check.glsl-5e77006d771711016f7f5e4f50c68e88.res"]
+
+[params]
+

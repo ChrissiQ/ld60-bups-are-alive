@@ -9,14 +9,15 @@ extends RefCounted
 ##   - windowed and no `SimCore` yet: prints "FAIL <test>: no SimCore yet" and quits 1;
 ##   - otherwise returns true and the test runs on a local `RenderingDevice`.
 ## The core's method names below are what the pooled core gives (`add_dish`, `run`, `pipette`, `remove_dish`, `queue_edit`,
-## `canonical_dump`); the names of the type files are placeholders (`TYPE_PATHS`).
+## `canonical_dump`); `TYPE_PATHS` are the core's files. Every chunk of steps checks that WORLD's overflow flag stayed 0 (a failed check, so
+## the test fails). `SEED_SHIFT_ARG` on the command line (`-- seed_shift=N`) adds N to every scenario's seed, so a test runs on other seeds.
 ##
 ## Expected values (derived): `diff` of a dump with itself is ""; `make` returns null (and prints SKIP) without a device;
 ## `step(n)` advances every row by n steps of `delta` seconds in chunks of `CHUNK` (so a plan never outgrows the core's
 ## per-iteration limit), with each row's `DishWorld` events in the plan.
 
 const SIM_CORE_PATH := "res://scripts/sim/sim_core.gd"
-const TYPE_PATHS := {  ## placeholders
+const TYPE_PATHS := {
 	"PoolLimits": "res://scripts/sim/pool_limits.gd",
 	"DishSpec": "res://scripts/sim/dish_spec.gd",
 	"WorldEdit": "res://scripts/sim/world_edit.gd",
@@ -24,6 +25,7 @@ const TYPE_PATHS := {  ## placeholders
 	"DishBlob": "res://scripts/sim/dish_blob.gd",
 }
 const CHUNK := 20  ## steps per call of the core's `run`
+const SEED_SHIFT_ARG := "seed_shift="
 const DEFAULT_DELTA := 20.0
 const NUTRIENT_ENERGY := 16.0  ## the energy in one unit of nutrient (DishWorld's default)
 
@@ -86,7 +88,9 @@ func _new_type(type_name: String) -> Variant:
 
 
 ## Adds a dish; returns its row.
-func add(s: Scenario) -> int:
+func add(given: Scenario) -> int:
+	var s := given.copy()
+	s.seed_value += seed_shift()
 	var number := s.number if s.number != 0 else scenarios.size() + 1
 	var spec: Variant = _new_type("DishSpec")
 	spec.number = number
@@ -96,13 +100,24 @@ func add(s: Scenario) -> int:
 	spec.seed = s.seed_value
 	spec.flags = s.dish_flags()
 	spec.nutrient_density = s.nutrient_density
-	spec.records = s.founder_records(number)
+	spec.feed_density = s.feed_density
+	spec.bloom_density = s.bloom_density
+	spec.medium_thickness = s.medium_thickness
+	spec.founders = s.founder_records(number)
 	var row: int = core.add_dish(spec)
 	scenarios[row] = s
 	_steps_done[row] = s.step_start
 	_worlds[row] = _world_for(s, number)
 	tallies[row] = {"births": 0, "deaths": 0, "moved_in": 0, "moved_out": 0}
 	return row
+
+
+## What `-- seed_shift=N` asks (0 without it).
+static func seed_shift() -> int:
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with(SEED_SHIFT_ARG):
+			return int(a.substr(SEED_SHIFT_ARG.length()))
+	return 0
 
 
 func _world_for(s: Scenario, _number: int) -> DishWorld:
@@ -149,6 +164,7 @@ func step(n: int, delta := -1.0) -> SimHarness:
 			plan.events[row] = _worlds[row].events(_steps_done[row] * d, chunk, d)
 			_steps_done[row] += chunk
 		core.run(chunk, d, plan)
+		TestUtil.check(int(core.overflow()) == 0, "WORLD.overflow is %d after a run" % int(core.overflow()))
 		if options.get("tally", false):
 			_tally()
 		left -= chunk
@@ -175,20 +191,48 @@ func set_field(row: int, values: PackedFloat32Array) -> SimHarness:
 	return self
 
 
-## The pipette's retarget: returns the number moved.
+## The pipette's retarget into a new dish like the source (its size, grid and limit; a world with nothing in it): returns the number moved;
+## the new dish's row is `last_pipette_row`.
+var last_pipette_row := -1
+
+
 func pipette(row: int, centre: Vector2, radius: float) -> int:
-	return int(core.pipette(row, centre, radius))
+	var reply: Dictionary = core.pipette(row, centre, radius)
+	if reply.is_empty():
+		return 0
+	last_pipette_row = int(reply["new_row"])
+	var s := Scenario.small(0, scenarios[row].radius)
+	s.resolution = scenarios[row].resolution
+	s.limit = scenarios[row].limit
+	scenarios[last_pipette_row] = s
+	_steps_done[last_pipette_row] = _steps_done[row]
+	_worlds[last_pipette_row] = _world_for(s, 0)
+	_worlds[last_pipette_row].time = _worlds[row].time
+	tallies[last_pipette_row] = {"births": 0, "deaths": 0, "moved_in": 0, "moved_out": 0}
+	return int(reply["moved"])
 
 
+## Freezes the dish: the blob carries the dish's world (DishWorld.save()) and the harness's own record of it, which `thaw` restores.
 func freeze(row: int) -> Variant:
 	var blob: Variant = core.freeze(row)
+	blob.world = _worlds[row].save()
+	blob.host = {"scenario": scenarios[row], "steps_done": _steps_done[row]}
 	scenarios.erase(row)
 	_worlds.erase(row)
+	_steps_done.erase(row)
 	return blob
 
 
 func thaw(blob: Variant) -> int:
-	return int(core.thaw(blob))
+	var row := int(core.thaw(blob))
+	if row >= 0 and blob.host.has("scenario"):
+		scenarios[row] = blob.host["scenario"]
+		_steps_done[row] = blob.host["steps_done"]
+		var w := DishWorld.new()
+		w.load_blob(blob.world, float(blob.world["time"]))
+		_worlds[row] = w
+		tallies[row] = {"births": 0, "deaths": 0, "moved_in": 0, "moved_out": 0}
+	return row
 
 
 func dump(row: int) -> Dictionary:
@@ -205,6 +249,8 @@ func dump_all() -> Dictionary:
 ## The checks; empty when all hold: count balance, unique ids, bups inside the rim, DSTATE's count equal to a recount of the live records.
 func invariants() -> PackedStringArray:
 	var bad := PackedStringArray()
+	if int(core.overflow()) != 0:
+		bad.append("WORLD.overflow is %d" % int(core.overflow()))
 	for row in scenarios:
 		var s: Scenario = scenarios[row]
 		var d := dump(row)

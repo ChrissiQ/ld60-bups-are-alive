@@ -14,6 +14,8 @@ func _init() -> void:
 		return
 	var few := Scenario.small(30, 3000.0).seed(61)
 	var many := Scenario.small(30, 150.0).seed(62)
+	few.number = 1
+	many.number = 2  # (the same number alone and pooled: a dish's ids carry it)
 	var pool := SimHarness.make([few.copy(), many.copy()]).step(100)
 	for i in 2:
 		var alone := SimHarness.make([[few, many][i].copy()]).step(100).dump(0)

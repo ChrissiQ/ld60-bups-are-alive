@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://btn6kfccdojdm"
+path="res://.godot/imported/pool_row_clear.glsl-206c2a5ba4fd0fc05101b2456189c81d.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_row_clear.glsl"
+dest_files=["res://.godot/imported/pool_row_clear.glsl-206c2a5ba4fd0fc05101b2456189c81d.res"]
+
+[params]
+

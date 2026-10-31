@@ -6,6 +6,7 @@ layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs
 layout(set = 0, binding = 0, std430) buffer B_WORLD { uint WORLD[]; };
 layout(set = 0, binding = 1, std430) buffer B_DSTATE { uint DSTATE[]; };
 layout(set = 0, binding = 2, std430) buffer B_DCNT { uint DCNT[]; };
+layout(set = 0, binding = 3, std430) buffer B_DBIT { uint DBIT[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -61,6 +62,7 @@ const uint POOL_ROWS_PER_THREAD = 4u;
 
 void conj_clear(uint k) {
 	if (k < CONJ_BUCKETS) DCNT[k] = 0u;
+	if (k < CONJ_BUCKETS / 32u) DBIT[k] = 0u;
 	if (k < D_MAX) { DS(k, DS_DONORS) = 0u; DS(k, DS_DONOR_REACH) = 0u; }
 }
 GRID_LOOP(conj_clear, max(CONJ_BUCKETS, D_MAX))

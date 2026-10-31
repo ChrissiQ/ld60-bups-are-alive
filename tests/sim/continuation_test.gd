@@ -4,7 +4,7 @@ extends SceneTree
 ## Expected values, written before the first run:
 ## - run N = 80 steps, freeze, thaw, run M = 80 steps gives a dump with 0 differing words against the dish run N + M = 160 steps
 ##   straight (diff == "") [derived: a frozen dish keeps its records, field, clouds, husks, RNG state and step; thawing restores them
-##   to a new row and the step counter carries on].
+##   to a new row and the step counter carries on; the harness keeps the dish's world (DishWorld.save()) in the blob and restores it].
 ## Needs a GPU. Windowed only.
 
 const N := 80
@@ -21,10 +21,6 @@ func _init() -> void:
 		var h := SimHarness.make([s.copy()]).step(N)
 		var blob: Variant = h.freeze(0)
 		var row := h.thaw(blob)
-		h.scenarios[row] = s.copy()
-		h._steps_done[row] = N
-		h._worlds[row] = h._world_for(s, 1)
-		h._worlds[row].time = N * h.DEFAULT_DELTA
 		h.step(M)
 		var line := SimHarness.diff(straight.dump(0), h.dump(row))
 		TestUtil.show(line == "", "flags %s: freeze at %d and thaw equals the straight run: %s" % [flags.keys(), N, line if line != "" else "same"])

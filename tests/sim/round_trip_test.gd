@@ -2,9 +2,9 @@ extends SceneTree
 ## The pipette and the freezer move bups and dishes without changing them.
 ##
 ## Expected values, written before the first run:
-## - a pipette of radius 150 µm at (0, 0) in a dish of 40 founders after 60 steps moves some number m of bups (m reported, > 0);
-##   the reply equals DS_MOVED_OUT of the source and DS_MOVED_IN of the destination, summed over the pool (moved_out == moved_in == m)
-##   [derived: the retarget pass counts each move twice, once at each end].
+## - a pipette of radius 150 µm at (0, 0) in a dish of 40 founders after 60 steps moves some number m of bups (m reported, > 0) into a
+##   new dish (the pipette's); the reply equals DS_MOVED_OUT of the source and DS_MOVED_IN of the new dish
+##   (moved_out == moved_in == m) [derived: the retarget pass counts each move twice, once at each end].
 ## - the bups moved keep their ids, genes and reach words (records compared by id, words R_SPEED..R_REACH) and their positions are
 ##   shifted by exactly the pipette centre in float32 (centre (0,0): unchanged) [derived].
 ## - the source's count falls by m and the destination's rises by m; no deaths are added (deaths unchanged) [derived].
@@ -19,17 +19,21 @@ func _init() -> void:
 	var s := Scenario.small(40, 600.0).seed(8)
 	var h := SimHarness.make([s, Scenario.small(1, 600.0).seed(9)], {"tally": true}).step(60)
 	var source_before := h.dump(0)
-	var dest_count_before := h.count(1)
 	var src_count_before := h.count(0)
+	var deaths_before := h.dstate(0)[GpuLayout.DS_DEATHS_LOST]
 	var moved := h.pipette(0, Vector2.ZERO, 150.0)
-	TestUtil.show(moved > 0, "the pipette moved %d bups" % moved)
+	var dest := h.last_pipette_row
+	var dest_count_before := 0
+	TestUtil.show(moved > 0 and dest >= 0, "the pipette moved %d bups into a new dish (row %d)" % [moved, dest])
 	h.step(0)
 	var ds := h.dstate(0)
 	TestUtil.show(ds[GpuLayout.DS_MOVED_OUT] == moved, "DS_MOVED_OUT %d equals the reply %d" % [ds[GpuLayout.DS_MOVED_OUT], moved])
+	TestUtil.show(h.dstate(dest)[GpuLayout.DS_MOVED_IN] == moved, "DS_MOVED_IN %d of the new dish equals the reply %d" % [h.dstate(dest)[GpuLayout.DS_MOVED_IN], moved])
+	TestUtil.show(ds[GpuLayout.DS_DEATHS] == 0 and h.dstate(dest)[GpuLayout.DS_DEATHS] == 0 and ds[GpuLayout.DS_DEATHS_LOST] == deaths_before, "the pipette counts no death")
 	TestUtil.show(h.count(0) == src_count_before - moved, "the source lost %d bups" % moved)
-	TestUtil.show(h.count(1) == dest_count_before + moved, "the destination gained %d bups" % moved)
-	_moved_bups_unchanged(source_before["records"], h.dump(1)["records"], moved)
-	var blob: Variant = h.freeze(1)
+	TestUtil.show(h.count(dest) == dest_count_before + moved, "the destination gained %d bups" % moved)
+	_moved_bups_unchanged(source_before["records"], h.dump(dest)["records"], moved)
+	var blob: Variant = h.freeze(dest)
 	var thawed := h.thaw(blob)
 	var d_before := h.dump(thawed)
 	var again := h.dump(thawed)
