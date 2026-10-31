@@ -177,9 +177,19 @@ func _send_view(w: WorldClient) -> void:
 	w.set_view(dish.row, v)
 
 
-## What the world was told of the view is forgotten, so it is told again next time (the dish left the main view).
+## The dish left the main view: what the world was told of the view is forgotten, so it is told again next time, and the view lets go of
+## the pictures it holds (ViewRenderer.let_go: the textures it drew from will hold the other dishes' pictures), its last uses told first.
 func forget_view() -> void:
 	_view_sent = []
+	if view != null:
+		if dish.world != null:
+			for b: Array in view.take_bound():
+				dish.world.texture_bound(b[0], b[1], b[2], b[3])
+		view.let_go()
+	_offered_payload = -1
+	_offered_field = -1
+	_offered_steer = -1
+	_asked = {true: [], false: []}
 
 
 ## Makes the view once the world publishes (its backend hands out the shared textures' handles) and the main device can draw; false

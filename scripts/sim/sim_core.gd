@@ -20,7 +20,8 @@ extends RefCounted
 ## main side's uses of a kind never go back to an older publish, so once it uses a newer one it never uses this one again, and its last use
 ## of it was on that frame or before. A texture never written is free. A texture holding the newest publish the main side has told of, or
 ## a newer one, is never written over, so a kind the main side does not use (tells nothing of) stops being published once its textures
-## are all written, until it is used.
+## are all written, until it is used. Textures made afresh (a payload outgrown, another grid's size) are freed by the same rule, once the
+## main side is done with them (`_free_retired`), never while it may still hold a view of them.
 
 const D_MAX := GpuLayout.D_MAX
 const RB := GpuLayout.RECORD_BYTES
@@ -69,6 +70,7 @@ var _superseded := {}  ## kind -> Array: the frame on which the main side first 
 var _seen_seq := {}  ## kind -> the newest publish of the kind the main side has told of
 var _next_texture := {}  ## kind -> where the search for a free texture starts (the one after the last written)
 var _frame := 0  ## the main side's frame count as last told
+var _retired_textures: Array = []  ## {kind, rids, last_seq, last_use, made, moved_on} of each set of textures made afresh, freed once unused (`_free_retired`)
 var publish_seq := 0  ## the number of the last publish that wrote a texture
 var _temp_sets: Array[RID] = []  ## the copy kernels' sets of one publish
 var _profile: Variant = null  ## while `profile_steps` runs: kernel name -> Array of µs, each dispatch its own submit
@@ -148,6 +150,11 @@ func release() -> void:
 			if t.is_valid():
 				rd.free_rid(t)
 	_textures.clear()
+	for r: Dictionary in _retired_textures:
+		for t: RID in r["rids"]:
+			if t.is_valid():
+				rd.free_rid(t)
+	_retired_textures.clear()
 	if _scratch.is_valid():
 		rd.free_rid(_scratch)
 		_scratch = RID()
@@ -1468,6 +1475,7 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 	var texels := rows * GpuLayout.PAYLOAD_TEX_WIDTH
 	arena.ensure_draw(texels, cd.grid.n * cd.grid.n)
 	_after_growth()
+	_free_retired()
 	var w := _free_texture("payload", Vector2i(GpuLayout.PAYLOAD_TEX_WIDTH, rows))
 	var nn := cd.grid.n
 	var fw := _free_texture("haze", Vector2i(nn, nn)) if view.want_field_view else -1
@@ -1527,6 +1535,13 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 ## never free); the number counts only as the newest publish in use (none when seq < 0).
 func texture_bound(kind: String, index: int, frame: int, seq: int) -> void:
 	_frame = maxi(_frame, frame)
+	for r: Dictionary in _retired_textures:
+		if r["kind"] != kind:
+			continue
+		if seq < 0 or seq <= int(r["last_seq"]):  # (a use of the set made afresh since, or one whose publish is not known: counted as one)
+			r["last_use"] = maxi(int(r["last_use"]), frame)
+		elif int(r["moved_on"]) < 0:
+			r["moved_on"] = frame
 	if not _texture_seqs.has(kind) or index < 0 or index >= TEXTURES:
 		return
 	var seqs: Array = _texture_seqs[kind]
@@ -1566,9 +1581,12 @@ func _free_texture(kind: String, size: Vector2i) -> int:
 
 
 func _make_textures(kind: String, size: Vector2i) -> void:
-	for t: RID in _textures.get(kind, []):
-		if t.is_valid():
-			rd.free_rid(t)
+	if _textures.has(kind):
+		var old: Array = _textures[kind]
+		if kind == "payload" and _textures.has("ids"):  # (the ids go with the payload: the main side tells only the payload's uses)
+			old = old + _textures["ids"]
+			_textures.erase("ids")
+		_retire_textures(kind, old)
 	_free_sets()
 	var fmt := RDTextureFormat.new()
 	fmt.width = size.x
@@ -1585,6 +1603,49 @@ func _make_textures(kind: String, size: Vector2i) -> void:
 		a.fill(-1)
 		table[kind] = a
 	_next_texture[kind] = 0
+
+
+## Textures made afresh (`_make_textures`) may still be imported on the main side (a view of them, which on some drivers does not keep them
+## alive), so they are freed only once it no longer uses them (`_free_retired`). A kind the main side has never told a use of was never
+## imported: its old textures go at once.
+func _retire_textures(kind: String, rids: Array) -> void:
+	var last_seq := -1
+	var last_use := -1
+	for i in TEXTURES:
+		last_seq = maxi(last_seq, int(_texture_seqs[kind][i]))
+		last_use = maxi(last_use, int(_texture_used[kind][i]))
+	if last_use < 0 and not _seen_seq.has(kind):
+		for t: RID in rids:
+			if t.is_valid():
+				rd.free_rid(t)
+		return
+	_retired_textures.append({"kind": kind, "rids": rids, "last_seq": last_seq, "last_use": last_use, "made": _frame, "moved_on": -1})
+
+
+## Frees the textures made afresh that the main side is done with: it told of a newer publish of the kind in use (its uses never go back to
+## an older one) and of no use of these for twice frame_queue_size + 1 frames (its view frees an import frame_queue_size + 1 frames after
+## its last use, and its device lets go of it once the frames in flight are done); or it has told of frames since without ever using them.
+func _free_retired() -> void:
+	var wait := 2 * (limits.frame_queue_size + 1)
+	var keep: Array = []
+	for r: Dictionary in _retired_textures:
+		var used := int(r["last_use"])
+		var done := (int(r["moved_on"]) >= 0 and _frame - maxi(int(r["moved_on"]), used) > wait) or (used < 0 and _frame - int(r["made"]) > wait)
+		if not done:
+			keep.append(r)
+			continue
+		for t: RID in r["rids"]:
+			if t.is_valid():
+				rd.free_rid(t)
+	_retired_textures = keep
+
+
+## The textures made afresh and not yet freed (for checks): {kind: sets}.
+func retired_textures() -> Dictionary:
+	var out := {}
+	for r: Dictionary in _retired_textures:
+		out[r["kind"]] = int(out.get(r["kind"], 0)) + 1
+	return out
 
 
 ## A copy kernel with image bindings: its storage buffers by name, its images from `images`.

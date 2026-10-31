@@ -76,6 +76,7 @@ var _answers := {}  ## "hover" / "click" -> the last pick answer
 var _follow: Array = []  ## ids whose place is looked up (at every build, and when the list changes)
 var _follow_asked := false  ## the list changed since the last look-up
 var _places := {}  ## id -> Vector3(x, y, length) from the last answer
+var _epoch := 0  ## counts `let_go`s: an answer to a build from before the last one is dropped
 static var _defs := {}  ## KERNELS' definitions (GpuKernels.all's), taken by the first view made
 
 
@@ -262,8 +263,8 @@ func draw_frame(camera: Rect2, pixel_um: float, multimesh: RID) -> void:
 ## `draw_frame` into `target`, a storage buffer of `capacity` instances on this renderer's device (the MultiMesh's, or a tool's: then
 ## `multimesh` is RID() and nothing is told the visible count).
 func draw_into(camera: Rect2, pixel_um: float, target: RID, capacity: int, multimesh := RID()) -> void:
-	if capacity <= 0 or not target.is_valid():
-		return
+	if capacity <= 0 or not target.is_valid() or not _imports.has("payload") or not _shown.has("payload"):
+		return  # (no payload yet, or none since `let_go`: a question asked waits for one)
 	var count := mini(_payload.count, _imports["payload"]["size"].x * _imports["payload"]["size"].y)
 	var dens := density_ready()
 	var mode := density_taps if dens else 0
@@ -486,7 +487,7 @@ func _build(count: int, target: RID, index: int, pick: Variant, view_key: Array,
 		rd.sync()
 		_on_answer(rd.buffer_get_data(_bufs["VOUT"], 0, GpuKernelsView.VO_WORDS * 4), view_key if rebuild else [], pick, asking, dens)
 	else:
-		rd.buffer_get_data_async(_bufs["VOUT"], _on_answer.bind(view_key if rebuild else [], pick, asking, dens), 0, GpuKernelsView.VO_WORDS * 4)
+		rd.buffer_get_data_async(_bufs["VOUT"], _on_answer.bind(view_key if rebuild else [], pick, asking, dens, _epoch), 0, GpuKernelsView.VO_WORDS * 4)
 
 
 ## `cl` -1: (profiling on a local device) the kernel in a list and a submit of its own, timed.
@@ -574,7 +575,9 @@ func _free_sets() -> void:
 
 
 ## `view_key` empty: the build drew nothing (it only answered), so its visible count is not one.
-func _on_answer(data: PackedByteArray, view_key: Array, pick: Variant, asked: bool, dens := false) -> void:
+func _on_answer(data: PackedByteArray, view_key: Array, pick: Variant, asked: bool, dens := false, epoch := -1) -> void:
+	if epoch >= 0 and epoch != _epoch:
+		return  # (asked before `let_go`: of a payload this view no longer holds)
 	var w := func(word: int) -> int: return data.decode_u32(word * 4)
 	var f := func(word: int) -> float: return data.decode_float(word * 4)
 	if not view_key.is_empty():
@@ -606,6 +609,35 @@ func _on_answer(data: PackedByteArray, view_key: Array, pick: Variant, asked: bo
 		"seq": pick["seq"], "id": id, "pos": pos, "length": length, "nearest": -1.0 if nearest_bits == NONE else sqrt(f.call(GpuKernelsView.VO_NEAREST)),
 		"near": w.call(GpuKernelsView.VO_NEAR), "asked": pick["asked"], "frame": Engine.get_frames_drawn(),
 	}
+
+
+## The dish left the main view: every import is given back now, and the payload and the answers with them, so the view draws nothing
+## and answers no pick until the world publishes the dish again (the textures it last drew from have since held the other dishes'
+## pictures, and the world may have made them afresh; it frees its old ones once the main side has stopped using them, SimCore's
+## header). The kernels and buffers stay; the next `offer` imports afresh.
+func let_go() -> void:
+	if rd == null:
+		return
+	var rids: Array = []
+	for kind: String in _imports:
+		rids.append_array(_imports[kind]["rids"])
+	for r: Dictionary in _retired:
+		rids.append_array(r["rids"])
+	_imports.clear()
+	_retired.clear()
+	_shown.clear()
+	_pictures.clear()
+	_payload = PayloadInfo.new()
+	_last_build = []
+	_visible = {}
+	_large = {}
+	_answers.clear()
+	_places.clear()
+	_pick_request = null
+	_epoch += 1
+	_on_device(func() -> void:
+		_free_sets()
+		_free_textures(rids))
 
 
 ## Frees every texture, buffer and shader this made. Call it before the simulation frees its textures, and once nothing draws with
