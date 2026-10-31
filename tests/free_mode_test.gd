@@ -705,14 +705,12 @@ func _initialize() -> void:
 	fake.device = ""
 	m.pause_menu.open(m.dish, true, chosen)
 	TestUtil.check(m.pause_menu.initial_running.value_label.text == Strings.t("pause.running_cpu"), "...and says CPU when the world has no device")
-	TestUtil.check(not m.pause_menu.initial_backend.visible, "the record has no row for the GPU setting while it is Auto (like the other advanced settings at their defaults)")
+	TestUtil.check(not m.pause_menu.initial_backend.visible, "the record has no row for the GPU setting (hidden: the world always runs on the GPU)")
 	var gpu_start := chosen.copy()
-	gpu_start.sim_backend = StartConditions.BACKEND_GPU
-	m.pause_menu.open(m.dish, true, gpu_start)
-	TestUtil.check(m.pause_menu.initial_backend.visible and m.pause_menu.initial_backend.value_label.text == "On" and m.pause_menu.initial_backend.name_label.text == "GPU simulation", "...and a row saying On when it was not")
-	gpu_start.sim_backend = StartConditions.BACKEND_CPU
-	m.pause_menu.open(m.dish, true, gpu_start)
-	TestUtil.check(m.pause_menu.initial_backend.visible and m.pause_menu.initial_backend.value_label.text == "Off", "...or Off")
+	for setting: String in [StartConditions.BACKEND_GPU, StartConditions.BACKEND_CPU]:
+		gpu_start.sim_backend = setting
+		m.pause_menu.open(m.dish, true, gpu_start)
+		TestUtil.check(not m.pause_menu.initial_backend.visible, "...nor when the hidden field says %s" % setting)
 	m._close_menu()
 	# The dish-size slider covers every size, so a dish at its largest can still shrink.
 	m.dish.resize_to(StartConditions.MAX_DISH_RADIUS)

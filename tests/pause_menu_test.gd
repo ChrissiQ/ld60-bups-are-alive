@@ -1,7 +1,8 @@
 extends SceneTree
 ## Run: godot --headless --path . -s tests/pause_menu_test.gd
 ## Checks the pause menu's record of how a free-mode dish started: the rows show the start conditions, the rows at their defaults are hidden, the device row
-## names the device the world simulates on (read when the menu opens, "CPU" when the world names none), and the quit button's words.
+## names the device the world simulates on (read when the menu opens, "CPU" when the world names none), the GPU setting's row is never shown
+## (hidden: the world always runs on the GPU), and the quit button's words.
 ## The world is a FakeWorld, whose `device` is what the menu reads.
 
 
@@ -17,7 +18,7 @@ func _initialize() -> void:
 	root.add_child(menu)
 	await process_frame
 
-	# Started with limit 5,000, detail 200, thickness 10 and starvation on: those rows show, and the ones that are at their defaults (the GPU setting, both husk switches) do not.
+	# Started with limit 5,000, detail 200, thickness 10 and starvation on: those rows show, and the ones that are at their defaults (both husk switches) and the GPU setting's do not.
 	var start := StartConditions.new()
 	start.bup_limit = 5000
 	start.nutrient_resolution = 200
@@ -51,7 +52,8 @@ func _initialize() -> void:
 	more.plankton_husks = true
 	more.sim_backend = StartConditions.BACKEND_GPU
 	menu.open(dish, true, more)
-	TestUtil.check(menu.initial_husks.visible and menu.initial_plankton_husks.visible and menu.initial_backend.visible and menu.initial_husks.value_label.text == Strings.t("pause.husks_value"), "the husk and backend rows show when those were set")
+	TestUtil.check(menu.initial_husks.visible and menu.initial_plankton_husks.visible and menu.initial_husks.value_label.text == Strings.t("pause.husks_value"), "the husk rows show when those were set")
+	TestUtil.check(not menu.initial_backend.visible, "the GPU setting's row stays hidden whatever the hidden field says (the world always runs on the GPU)")
 
 	# The record belongs to free mode with a start; the quit button's words say whether the game is saved.
 	TestUtil.check(menu.quit_button.text == Strings.t("pause.quit"), "free mode's quit button reads '%s'" % menu.quit_button.text)

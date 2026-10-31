@@ -219,46 +219,31 @@ func _init() -> void:
 	adv.queue_free()
 	await process_frame
 
-	# The GPU setting, an advanced option: three buttons of one group (Auto, On, Off), kept with the other choices, counted in the
-	# advanced heading, reset with the advanced options, and a one-line notice for On where this machine has no GPU to use.
+	# The GPU setting is hidden: neither it nor its notice shows, whatever the field
+	# says; the field is kept with the other choices (saved and read back) and the reset puts it back to Auto, and it is never counted as a
+	# changed advanced option (the player could not see why).
 	Session.free_start = StartConditions.new()
 	var gs: Control = load(Scenes.FREE_SETUP).instantiate()
 	root.add_child(gs)
 	await process_frame
-	var auto := StartConditions.BACKEND_AUTO
-	var on := StartConditions.BACKEND_GPU
-	var off := StartConditions.BACKEND_CPU
-	var bt: ToggleRow = gs.backend_toggle
-	TestUtil.check(bt.auto_check.text == "Automatic" and bt.on_button.text == "On" and bt.off_button.text == "Off", "the setting is a checkbox (Automatic) and an On / Off switch")
-	TestUtil.check(bt.automatic and gs._start.sim_backend == auto, "the setting starts on Automatic")
-	TestUtil.check(bt.on_button.mouse_filter == Control.MOUSE_FILTER_IGNORE and bt.segments.modulate.a < 1.0, "while Automatic is ticked the switch is dimmed and cannot be used")
-	TestUtil.check(not gs.backend_notice.visible and not gs.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "on Auto there is no notice and the advanced heading is as usual")
-	bt.automatic = false
-	bt.button_pressed = true
-	TestUtil.check(bt.on_button.button_pressed and not bt.automatic and gs._start.sim_backend == on, "unticking Automatic and switching On makes On the setting")
-	TestUtil.check(gs.backend_notice.visible == not GpuWorld.available(), "On shows the one-line notice exactly where there is no GPU to use (here: %s)" % ("none" if not GpuWorld.available() else "one"))
-	TestUtil.check(gs.backend_notice.text == Strings.t("free_setup.backend_unavailable") and gs.backend_notice.text.length() < 100, "the notice is a line from strings.cfg")
-	TestUtil.check(gs.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "a setting that is not Auto shows 'changed' on the advanced heading")
-	TestUtil.check(Strings.t("free_setup.backend_hint").contains("any speed") and Strings.t("free_setup.backend_hint").contains("processor"), "the hint says the GPU is used at any speed and does what the processor does")
-	bt.button_pressed = false
-	TestUtil.check(not gs.backend_notice.visible and gs._start.sim_backend == off, "Off needs no notice")
+	gs.advanced_toggle.pressed.emit()
+	await process_frame
+	TestUtil.check(not gs.backend_toggle.visible and not gs.backend_notice.visible, "the GPU setting and its notice are not shown on the advanced page")
+	gs._start.sim_backend = StartConditions.BACKEND_CPU
 	gs._go()
-	TestUtil.check(StartConditions.load_saved().sim_backend == off, "GO saves the setting")
+	TestUtil.check(StartConditions.load_saved().sim_backend == StartConditions.BACKEND_CPU, "the hidden field is still saved with the other choices")
 	gs.queue_free()
 	await process_frame
 	Session.free_start = StartConditions.load_saved()
 	var gs2: Control = load(Scenes.FREE_SETUP).instantiate()
 	root.add_child(gs2)
 	await process_frame
-	TestUtil.check(gs2.backend_toggle.off_button.button_pressed and not gs2.backend_toggle.automatic and gs2._start.sim_backend == off, "the next launch shows the setting")
 	gs2.advanced_toggle.pressed.emit()
 	await process_frame
+	TestUtil.check(gs2._start.sim_backend == StartConditions.BACKEND_CPU and not gs2.backend_toggle.visible and not gs2.backend_notice.visible, "a saved setting that is not Auto is read back and still not shown")
+	TestUtil.check(not gs2.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "...nor counted as a changed advanced option")
 	gs2.reset_button.pressed.emit()
-	TestUtil.check(gs2.backend_toggle.automatic and gs2._start.sim_backend == auto and not gs2.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "the reset puts it back to Auto")
-	gs2.backend_toggle.automatic = false
-	gs2.backend_toggle.button_pressed = true
-	gs2.reset_button.pressed.emit()
-	TestUtil.check(gs2.backend_toggle.automatic and gs2._start.sim_backend == auto, "and again after choosing On")
+	TestUtil.check(gs2._start.sim_backend == StartConditions.BACKEND_AUTO and not gs2.backend_toggle.visible, "the reset puts the field back to Auto")
 	gs2.queue_free()
 	await process_frame
 

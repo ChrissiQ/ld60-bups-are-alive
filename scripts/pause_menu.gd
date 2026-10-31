@@ -30,7 +30,7 @@ signal bup_limit_chosen(limit: int)
 @onready var initial_dish: StatRow = %DishRow
 @onready var initial_detail: StatRow = %DetailRow
 @onready var initial_thickness: StatRow = %ThicknessRow
-@onready var initial_backend: StatRow = %BackendRow
+@onready var initial_backend: StatRow = %BackendRow  ## the GPU setting's row, hidden: the pooled world always runs on the GPU
 @onready var initial_stationary: StatRow = %StationaryRow  ## shown when the dish was started with starvation switched on
 @onready var initial_plankton_husks: StatRow = %PlanktonHusksRow  ## shown when the dish was started with plankton husks
 @onready var initial_husks: StatRow = %HusksRow  ## shown when the dish was started with husks
@@ -96,8 +96,6 @@ func open(dish: Dish, free_mode: bool, started_as: StartConditions = null) -> vo
 		initial_thickness.visible = not is_equal_approx(started_as.medium_thickness, defaults.medium_thickness)
 		initial_detail.value_text = UiText.thousands(started_as.nutrient_resolution) + Strings.t("pause.cells_across")
 		initial_thickness.value_text = UiText.thousands(started_as.medium_thickness) + Strings.t("pause.times_water")
-		initial_backend.visible = started_as.sim_backend != defaults.sim_backend
-		initial_backend.value_text = Strings.t("free_setup.backend_on" if started_as.sim_backend == StartConditions.BACKEND_GPU else "free_setup.backend_off")
 		initial_stationary.visible = started_as.stationary_phase
 		initial_stationary.value_text = Strings.t("pause.stationary_value")
 		initial_husks.visible = started_as.death_husks

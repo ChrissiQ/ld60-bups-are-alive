@@ -218,6 +218,7 @@ text = "@free_setup.thickness_tip"
 autowrap_mode = 3
 
 [node name="BackendToggle" parent="Panel/Box/Scroll/Rows/Advanced/Options" instance=ExtResource("toggle_row")]
+visible = false
 layout_mode = 2
 label_text = "@free_setup.backend"
 auto_text = "@free_setup.backend_auto"

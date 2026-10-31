@@ -28,11 +28,11 @@ var _still: StillBups  ## the founders as a still picture, when the world has no
 @onready var advanced: VBoxContainer = $Panel/Box/Scroll/Rows/Advanced  ## options for testing the simulation itself, hidden until asked for
 @onready var detail_row: SettingRow = $Panel/Box/Scroll/Rows/Advanced/Options/DetailGroup/DetailRow
 @onready var thickness_row: SettingRow = $Panel/Box/Scroll/Rows/Advanced/Options/ThicknessGroup/ThicknessRow
-@onready var backend_toggle: ToggleRow = $Panel/Box/Scroll/Rows/Advanced/Options/BackendToggle  ## the GPU setting: Automatic ticked is BACKEND_AUTO; otherwise On is BACKEND_GPU and Off BACKEND_CPU
+@onready var backend_toggle: ToggleRow = $Panel/Box/Scroll/Rows/Advanced/Options/BackendToggle  ## the GPU setting, hidden: the pooled world always runs on the GPU (StartConditions.sim_backend stays as a field nothing reads)
 @onready var stationary_toggle: ToggleRow = $Panel/Box/Scroll/Rows/Advanced/Options/StationaryToggle  ## whether starving bups shrink and die slowly (on) or die as soon as the reserve is gone
 @onready var plankton_husks_toggle: ToggleRow = $Panel/Box/Scroll/Rows/Advanced/Options/PlanktonHusksToggle  ## whether a plankton that dies leaves a husk that leaks its nutrient slowly
 @onready var husks_toggle: ToggleRow = $Panel/Box/Scroll/Rows/Advanced/Options/HusksToggle  ## whether a dead bup leaves a husk that leaks its nutrient slowly
-@onready var backend_notice: Label = $Panel/Box/Scroll/Rows/Advanced/Options/BackendNotice  ## says so when On is chosen and this machine has no GPU to use
+@onready var backend_notice: Label = $Panel/Box/Scroll/Rows/Advanced/Options/BackendNotice  ## the GPU setting's notice, hidden with it
 @onready var limit_row: SettingRow = $Panel/Box/Scroll/Rows/LimitGroup/LimitRow
 @onready var back_button: Button = $Panel/Box/Actions/BackButton
 @onready var go_button: Button = $Panel/Box/Actions/GoButton
@@ -81,10 +81,6 @@ func _ready() -> void:
 	dish_row.value_changed.connect(func(v: float) -> void: _start.dish_radius = snappedf(v * StartConditions.UM_PER_MM, 1.0); _refresh())
 	detail_row.value_changed.connect(func(v: float) -> void: _start.nutrient_resolution = int(v); _refresh(); _update_advanced_label())
 	thickness_row.value_changed.connect(func(v: float) -> void: _start.medium_thickness = v; _refresh(); _update_advanced_label())
-	backend_toggle.automatic_toggled.connect(func(_on: bool) -> void: _choose_backend(_backend_from_toggle()))
-	backend_toggle.toggled.connect(func(_on: bool) -> void: _choose_backend(_backend_from_toggle()))
-	_show_backend()
-	_update_backend_notice()
 	stationary_toggle.set_pressed_no_signal(_start.stationary_phase)
 	stationary_toggle.toggled.connect(func(on: bool) -> void: _start.stationary_phase = on; _update_advanced_label())
 	husks_toggle.set_pressed_no_signal(_start.death_husks)
@@ -203,31 +199,6 @@ func _fit_scroll() -> void:
 	scroll.get_v_scroll_bar().modulate.a = 1.0 if rows.get_combined_minimum_size().y > scroll.custom_minimum_size.y + 0.5 else 0.0  # (the page showing is what counts, not the taller of the two)  # (nothing to scroll: the strip stays, the bar does not show)
 
 
-## Sets where the bups are simulated (a StartConditions.BACKEND_*) and shows it on the switch.
-func _choose_backend(choice: String) -> void:
-	_start.sim_backend = choice
-	_show_backend()
-	_update_backend_notice()
-	_update_advanced_label()
-
-
-func _backend_from_toggle() -> String:
-	if backend_toggle.automatic:
-		return StartConditions.BACKEND_AUTO
-	return StartConditions.BACKEND_GPU if backend_toggle.button_pressed else StartConditions.BACKEND_CPU
-
-
-func _show_backend() -> void:
-	backend_toggle.set_automatic_no_signal(_start.sim_backend == StartConditions.BACKEND_AUTO)
-	if _start.sim_backend != StartConditions.BACKEND_AUTO:  # (on Auto the switch keeps the last manual choice)
-		backend_toggle.set_pressed_no_signal(_start.sim_backend == StartConditions.BACKEND_GPU)
-
-
-## One line says so when On is chosen and this machine has no GPU the simulation can run on.
-func _update_backend_notice() -> void:
-	backend_notice.visible = _start.sim_backend == StartConditions.BACKEND_GPU and not GpuWorld.available()
-
-
 ## The advanced options' heading says whether they are open, and, so that a changed one is not forgotten while it is shut,
 ## whether any is not at its usual value.
 func _show_tab(advanced_wanted: bool) -> void:
@@ -240,7 +211,7 @@ func _show_tab(advanced_wanted: bool) -> void:
 
 
 func _update_advanced_label() -> void:
-	var changed := not is_equal_approx(detail_row.value, detail_row.default_value) or not is_equal_approx(thickness_row.value, thickness_row.default_value) or _start.sim_backend != StartConditions.new().sim_backend or _start.death_husks or _start.plankton_husks or _start.stationary_phase != StartConditions.new().stationary_phase
+	var changed := not is_equal_approx(detail_row.value, detail_row.default_value) or not is_equal_approx(thickness_row.value, thickness_row.default_value) or _start.death_husks or _start.plankton_husks or _start.stationary_phase != StartConditions.new().stationary_phase
 	advanced_toggle.text = Strings.t("free_setup.advanced") + (Strings.t("free_setup.advanced_changed") if changed else "")
 
 
@@ -319,7 +290,7 @@ func _reset_to_defaults() -> void:
 	husks_toggle.button_pressed = StartConditions.new().death_husks
 	plankton_husks_toggle.button_pressed = StartConditions.new().plankton_husks
 	stationary_toggle.button_pressed = StartConditions.new().stationary_phase
-	_choose_backend(StartConditions.new().sim_backend)
+	_start.sim_backend = StartConditions.new().sim_backend
 
 
 func _go() -> void:
