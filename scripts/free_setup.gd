@@ -11,6 +11,7 @@ const BOTTOM_CLEARANCE := 24.0  ## and from the bottom
 const PLANKTON_SETTLE_SECONDS := 0.5  ## how long the settings are still before the preview fills with plankton (up to thousands, so not on every nudge of a slider)
 
 @onready var dish: Dish = $Dish
+var _still: StillBups  ## the founders as a still picture, when the world has no device
 @onready var panel: PanelContainer = $Panel
 @onready var scroll: ScrollContainer = $Panel/Box/Scroll  ## the rows, which scroll when there are more than fit below the title
 @onready var rows: VBoxContainer = $Panel/Box/Scroll/Rows
@@ -296,6 +297,10 @@ func _refresh() -> void:
 	dish.strike(_start)
 	dish.flash = 0.0
 	dish.queue_redraw()
+	if _still == null:
+		_still = StillBups.new()
+		dish.add_child(_still)
+	_still.show_start(_start if not WorldClient.shared().backend.can_simulate() else null, dish.radius)  # (no device: the founders as a still picture)
 	# A bloom's plankton are put in once the settings have been still for a moment (a dish that has run a while has them floating).
 	_refreshes += 1
 	var refresh := _refreshes

@@ -2,6 +2,7 @@ extends Control
 ## Title screen. A live dish of bups multiplies quietly behind the buttons.
 
 @onready var dish: Dish = $Dish
+var _still: StillBups  ## the founders as a still picture, when the world has no device
 @onready var title: Label = $Center/Column/Title
 @onready var button_scroll: ScrollContainer = $Center/Column/Scroll  ## the buttons scroll when they are taller than what is left under the title and the tagline
 @onready var buttons: VBoxContainer = $Center/Column/Scroll/Buttons
@@ -32,8 +33,8 @@ func _ready() -> void:
 	buttons.minimum_size_changed.connect(_fit_buttons)  # (a new interface size changes the buttons' height with no window resize, even while a panel hides them)
 	_fit_buttons()
 	dish.position = _dish_center()
-	dish.strike(_ambient_start())
-	dish.extinct.connect(func() -> void: dish.strike(_ambient_start()), CONNECT_DEFERRED)  # (each time in new colours)
+	_strike_backdrop()
+	dish.extinct.connect(_strike_backdrop, CONNECT_DEFERRED)  # (each time in new colours)
 
 	load_button.visible = SaveGame.has_save()  # (Continue is the first thing offered when there is something to continue)
 	new_button.theme_type_variation = &"" if load_button.visible else &"PrimaryButton"
@@ -56,6 +57,16 @@ func _ready() -> void:
 	quit_button.focus_neighbor_bottom = quit_button.get_path_to(first)
 	quit_button.focus_next = quit_button.get_path_to(first)
 	first.grab_focus()
+
+
+## The dish behind the title runs in the world; with no device to run it the title shows its founders as a still picture.
+func _strike_backdrop() -> void:
+	var start := _ambient_start()
+	dish.strike(start)
+	if _still == null:
+		_still = StillBups.new()
+		dish.add_child(_still)
+	_still.show_start(start if not WorldClient.shared().backend.can_simulate() else null, dish.radius)
 
 
 ## The dish behind the title: a fed colony of founders in evenly spaced colours.
