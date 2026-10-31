@@ -13,6 +13,9 @@ extends RefCounted
 ##   DS_SURVIVORS; DS_COUNT still the step's first count); pool_death_bases, pool_husk_spawn, pool_death_clouds, pool_death_count; the
 ##   husks' leak (pool_husk_age, scan hl, pool_husk_leak, pool_husk_leak_count); pool_cloud_live, pool_husk_live, pool_cloud_cadence;
 ##   then the rest of life, which advances DS_STEP; every 16 world steps the clouds' compaction, at the host's cadence the husks' cull.
+##   The host runs some of these as one pass over the bups: pool_swim and pool_demand (pool_swim_demand), pool_apply and conjugation's
+##   count (pool_apply_count, after pool_conj_clear), pool_ac_apply, conjugation and life (pool_ac_conj_life, then pool_donor_life), with
+##   the same results; the rig runs them alone.
 ##
 ## A rig is made on one thread and used on it (a local device belongs to its thread). Readbacks stall.
 

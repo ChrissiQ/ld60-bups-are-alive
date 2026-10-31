@@ -262,7 +262,8 @@ void main() {
 # A dish's bups are the segment of slots it occupies (BLKDISH, DS_START, DS_COUNT); its random streams, ranks, ids, limit and counters are
 # its own (keyed by the bup's place l in its segment), so a dish's run is the same alone or among others. A step's order:
 #   pool_conj_clear, pool_conj_count, pool_conj_scan_*, pool_conj_scatter, pool_conj_apply (conjugation)
-#   pool_life, pool_scan_s_* (SURV -> EXCS), pool_scan_k_* (KID -> EXCK), pool_finalize, pool_slot_check (kernels_core.gd)
+#   pool_life (the host counts the donors in `pool_apply_count` and runs conjugation and life in `pool_ac_conj_life` and `pool_donor_life`),
+#   pool_scan_s_* (SURV -> EXCS), pool_scan_k_* (KID -> EXCK), pool_finalize, pool_slot_check (kernels_core.gd)
 #   (the death clouds read: SURV 0 for a bup not kept, R_PY -2 for one dead of starvation or chance, its rank among its dish's dead
 #   l - (EXCS[i] - DN_SURV_BASE), the dish's dead DS_COUNT - DS_SURVIVORS)
 #   pool_events, pool_blk_fill, pool_compact (into the other half), pool_setcount (pa 1), then the halves swap (GpuKernels.PING_PONG)
