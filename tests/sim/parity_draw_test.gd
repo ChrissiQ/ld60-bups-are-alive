@@ -14,7 +14,7 @@ extends SceneTree
 ##    fixture's steer_<id>: alpha within 1, RGB equal where alpha > 0 (the bound).
 ## S  The 40 fixture bups of queries_info.txt, each selected in turn: Dish.bup_steering (the tracked answer's way and chance) within 1e-5
 ##    of the fixture's bup_steering in each of x, y and the chance (the bound).
-## The answers are made to come while paused with ParityGame.answer_now (see there).
+## Paused, each answer is waited for with ParityGame.answer_now.
 
 var g: ParityGame
 var dish: Dish
@@ -88,7 +88,7 @@ func _steer_maps() -> void:
 	for id: int in [4, 10001, 20000]:
 		dish.selected.bup = ParityGame.pooled_id(dish.number, id)
 		await g.answer_now()
-		await g.answer_now()
+		await g.answer_now()  # (the first brings the bup's record; the map for its speed and sense range is published after the view that asks it)
 		await _newest_field()
 		var info := dish.bup_info(dish.selected.bup)
 		print("     bup %d: speed %s, sense range %s (the map's)" % [id, info.get("speed"), info.get("sense_range")])

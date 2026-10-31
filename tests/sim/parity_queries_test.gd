@@ -10,8 +10,7 @@ extends SceneTree
 ##    the fixture's within 1e-4 relative (the bound; the probe sums the grid's bilinear read and the clouds in float32 where the
 ##    CPU summed in doubles: found 1e-5), and its gradient's size within 1e-4 relative of the fixture's, or within 1e-12 /µm where
 ##    the fixture's is below 1e-8 (flat: a central difference of float rounding; the bounds).
-## The answers are made to come while paused with ParityGame.answer_now (see there: a paused world shows a dish's answers only after a
-## second pass, which parity_pick_test reports as a failure of its own).
+## Paused, each point's answer is waited for with ParityGame.answer_now.
 
 var g: ParityGame
 

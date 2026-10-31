@@ -1,17 +1,19 @@
 extends SceneTree
-## Its windowed part (the thumbnails' atlas the world publishes for the dish strip) on the real pool: a dish of bups and a
-## bare dish at ParityGame.PLACE, the main view asking for thumbnails as the strip will (ViewRequest.want_thumbnails; the strip itself is
-## another script's), the atlas read on the sim thread (SimCore's THUMBS, what its publish copies into the shared texture). Windowed only:
+## Its windowed part (the thumbnails' atlas the world publishes for the dish strip) on the real pool: a dish of bups in the
+## main view and a bare dish parked (Dish.park, as Main parks every dish out of the view), the main view's dish asking for thumbnails as the
+## screen asks while the strip shows (Dish.want_thumbnails), and the atlas taken each frame as the strip takes it (a ThumbAtlas ticked, its
+## texture drawn from: it tells the world which atlas it used); the atlas read on the sim thread (SimCore's THUMBS, what its publish copies
+## into the shared texture). Windowed only:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_thumbs_test.gd
 ##
-## Expected values, written before the first run [derived unless marked]:
-## A  The atlas made from the pool as it is now (its publish's three kernels, run on the sim thread: the publish itself writes it only when
-##    a thumbnail texture is free, see C): the tile of the dish with 2,000 or more bups (its core row's: THUMB_TILE texels square, THUMB_ATLAS / THUMB_TILE tiles a row) has texels
-##    with alpha above 0, at least one at 255 (the tile's densest texel); the bare dish's tile is all zero.
+## Expected values, written before the run [derived unless marked]:
+## A  The atlas made from the pool as it is now (its publish's three kernels, run on the sim thread): the tile of the dish with 2,000 or
+##    more bups (its core row's: THUMB_TILE texels square, THUMB_ATLAS / THUMB_TILE tiles a row) has texels with alpha above 0, at least
+##    one at 255 (the tile's densest texel); the bare dish's tile is all zero.
 ## C  Over about 5.5 s of real time with thumbnails wanted, an atlas is made at most once a real second (SimThread.THUMBS_MSEC, whatever
-##    the simulation's speed: run at x1,000 here): 5 or 6 of them. [derived risk: a thumbnail texture is written again only once the main
-##    side has told it used (SimCore._free_texture), and nothing on the main side binds them yet: then only the first
-##    publishes come; that is reported as a failure of the row's cadence, not passed.]
+##    the simulation's speed: run at x1,000 here): 5 or 6 of them, and the ThumbAtlas takes each (5 or 6 versions). A thumbnail texture
+##    is written again only once the main side has told a newer one used (SimCore._free_texture); there are SimCore.TEXTURES of them and
+##    the ThumbAtlas tells each use, so none is ever wanting.
 
 var g: ParityGame
 
@@ -41,21 +43,23 @@ func _run() -> void:
 	bare_spec.limit = 1000
 	bare_spec.seed = 5
 	var bare: Dish = await g.add(bare_spec)
-	bare.picture_scale = 0.1  # (out of the main view: its node draws nothing of its own)
+	bare.park()
 	g.look_at(full, 0.03)
+	full.want_thumbnails = true
 	await g.wait_picture(full)
-	var v := ViewRequest.new()
-	v.camera = Rect2(-10000.0, -10000.0, 20000.0, 20000.0)
-	v.pixel_um = 1.0 / 0.03
-	v.want_thumbnails = true
-	g.world.set_view(full.row, v)
+	var strip := ThumbAtlas.new()
 	var thread: Variant = g.world.backend.get("thread")
 	var made := {}
+	var taken := {}
 	var t0 := Time.get_ticks_msec()
 	while Time.get_ticks_msec() - t0 < 5500:
 		await g.frame(1000.0, false)
+		strip.tick(g.world)
+		strip.texture()
 		made[int(thread._thumbs_msec)] = true
+		taken[strip.version()] = true
 	made.erase(-1000000)
+	taken.erase(0)
 	await g.settle()
 	var rows := [full.row, bare.row]
 	var tiles: Array = await g.inspect(func(core: SimCore, map: Dictionary) -> Array:
@@ -82,5 +86,6 @@ func _run() -> void:
 			out.append([cr, lit, full_alpha])
 		return out)
 	TestUtil.show(tiles[0][1] > 0 and tiles[0][2] >= 1 and tiles[1][1] == 0, "A the tile of the dish with %d bups (row %d) has %d texels lit, %d at full alpha; the bare dish's (row %d) %d lit" % [full.population(), tiles[0][0], tiles[0][1], tiles[0][2], tiles[1][0], tiles[1][1]])
-	TestUtil.show(made.size() >= 5 and made.size() <= 6, "C %d atlases in 5.5 s of real time at x1,000 (at most one a second)" % made.size())
+	TestUtil.show(made.size() >= 5 and made.size() <= 6 and taken.size() >= 5 and taken.size() <= 6, "C %d atlases in 5.5 s of real time at x1,000 (at most one a second), %d taken by the strip's ThumbAtlas" % [made.size(), taken.size()])
+	strip.release()
 	TestUtil.finish(self, "OK parity_thumbs_test")

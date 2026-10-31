@@ -7,10 +7,10 @@ extends SceneTree
 ##
 ## Expected values, written before the first run [derived unless marked]:
 ## F  The bound: over 100 frames at x10,000, zoomed in to 2 px a µm, the followed bup is drawn within 2 px of the stage's middle
-##    in every frame. [derived risk, written before the run: StageInput.follow_selected puts the camera on Dish.bup_world_pos, which is the
-##    view's place of the bup from the last pick answer read back (a frame or two after its build), while the frame draws the newest
-##    payload; a bup swims 20-50 µm/s, about 80 s of simulation a frame at x10,000, so a payload's lag is thousands of pixels at this zoom.
-##    If the bound fails by that lag it is reported as a failure, not widened.]
+##    in every frame. StageInput.follow_selected puts the camera on Dish.bup_world_pos, which is the bup's place in the payload the frame
+##    draws (PayloadInfo.places: the sim thread looks up the bups the dish asks after as it publishes, and Main gives the view the frame's
+##    payload before it moves the camera), so the two differ by float rounding only: well under 0.01 px [derived]. A frame drawn from a
+##    payload published before the dish asked after the bup has no place for it; the 60 frames before the window leave none of those.
 
 var g: ParityGame
 var main: Node

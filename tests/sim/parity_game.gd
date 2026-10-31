@@ -126,14 +126,12 @@ func settle(speed := 1.0, paused := true) -> void:
 	await run_frames(3, speed, paused)
 
 
-## Paused, the answers to a dish's questions (WorldClient.ask: tracked bups, probes, husks) reach a snapshot only with the pass after the
-## one that made them (SimThread._results lists the answers before `_answer` makes new ones), and a paused world makes a pass only when a
-## command comes. A frame (Dish._process sends what it asks), then two passes of no steps (an `inspect` each): the snapshot then carries
+## Paused, a dish's questions (WorldClient.ask: tracked bups, probes, husks) are answered by the pass the command that asks them brings. A
+## frame (Dish._process sends what it asks), then a pass of no steps after it (an `inspect`), then a few frames: the snapshot then carries
 ## the answers to what the dish asks now.
 func answer_now() -> void:
 	await frame()
-	for k in 2:
-		await reply_value(world.inspect(func(_core: SimCore, _rows: Dictionary) -> int: return 0))
+	await reply_value(world.inspect(func(_core: SimCore, _rows: Dictionary) -> int: return 0))
 	await run_frames(2)
 
 
