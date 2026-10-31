@@ -137,6 +137,12 @@ func _fit_value_box() -> void:
 	value_field.custom_minimum_size.x = maxf(value_min_width, widest + pad + 8.0)
 
 
+## The text size changed (the interface size setting): the box is measured again once every control has its new font.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_THEME_CHANGED and is_node_ready():
+		_fit_value_box.call_deferred()
+
+
 func _update_text() -> void:
 	_fit_value_box()
 	if value_field.has_focus():

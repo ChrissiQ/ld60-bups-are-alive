@@ -329,7 +329,7 @@ T("CheckBox",colors={"font_color":TEXT,"font_hover_color":TEXT,"font_hover_press
 # fields
 T("LineEdit",colors={"caret_color":ACCENT,"font_color":TEXT,"selection_color":(ACCENT[0],ACCENT[1],ACCENT[2],0.35)},styles={"focus":"edit_focus","normal":"edit_normal"})
 T("ReadoutField","LineEdit",consts={"minimum_character_width":1},sizes={"font_size":FS["l"]},fonts={"font":MONO},styles={"focus":"edit_tight_focus","normal":"edit_tight"})
-T("CompactField","LineEdit",consts={"minimum_character_width":1},sizes={"font_size":FS["l"]},fonts={"font":MONO})
+T("CompactField","LineEdit",consts={"minimum_character_width":4},sizes={"font_size":FS["l"]},fonts={"font":MONO})
 T("CompactSpinBox","SpinBox",consts={"buttons_width":12})
 T("HSlider",styles={"grabber_area":"slider_fill","grabber_area_highlight":"slider_fill_hi","slider":"slider_track","focus":"slider_focus"})
 T("VScrollBar",styles={"scroll":"scroll_track","scroll_focus":"scroll_track","grabber":"scroll_grabber","grabber_highlight":"scroll_grabber_hi","grabber_pressed":"scroll_grabber_hi"})

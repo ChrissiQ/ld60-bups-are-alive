@@ -231,7 +231,7 @@ func _initialize() -> void:
 	var field := box.get_line_edit()
 	await process_frame
 	var digits_w := field.get_theme_font("font").get_string_size("9999", HORIZONTAL_ALIGNMENT_LEFT, -1, field.get_theme_font_size("font_size")).x
-	TestUtil.check(box.size.x <= 72.0, "nutrient box is compact (%.0fpx)" % box.size.x)
+	TestUtil.check(box.size.x <= 80.0, "nutrient box is compact (%.0fpx)" % box.size.x)
 	TestUtil.check(digits_w + 8.0 <= field.size.x, "four digits still fit the field (%.0f + padding in %.0fpx)" % [digits_w, field.size.x])
 	m.tool_options.nutrient_count_box.value = 1
 	var p := centre + Vector2(50, 30)

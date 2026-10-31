@@ -398,7 +398,7 @@ text = "@tray.caption_nutrients"
 
 [node name="NutrientCount" type="SpinBox" parent="HUD/Frame/Layout/Middle/Main/Row/Stage/ToolOptions/NutrientOptions/Row"]
 theme_type_variation = &"CompactSpinBox"
-custom_minimum_size = Vector2(66, 30)
+custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 min_value = 1.0
 max_value = 9999.0
@@ -420,7 +420,7 @@ text = "@tray.caption_rate"
 
 [node name="SourceRate" type="SpinBox" parent="HUD/Frame/Layout/Middle/Main/Row/Stage/ToolOptions/SourceOptions/Row"]
 theme_type_variation = &"CompactSpinBox"
-custom_minimum_size = Vector2(78, 30)
+custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 min_value = 0.5
 max_value = 60.0
@@ -442,7 +442,7 @@ text = "@tray.caption_brush"
 
 [node name="BrushSize" type="SpinBox" parent="HUD/Frame/Layout/Middle/Main/Row/Stage/ToolOptions/EraseOptions/Row"]
 theme_type_variation = &"CompactSpinBox"
-custom_minimum_size = Vector2(66, 30)
+custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 min_value = 50.0
 max_value = 9999.0
@@ -465,7 +465,7 @@ text = "@tray.caption_pipette"
 
 [node name="PipetteRadius" type="SpinBox" parent="HUD/Frame/Layout/Middle/Main/Row/Stage/ToolOptions/PipetteOptions/Row"]
 theme_type_variation = &"CompactSpinBox"
-custom_minimum_size = Vector2(66, 30)
+custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 min_value = 50.0
 max_value = 9999.0
@@ -480,7 +480,7 @@ text = "@tray.caption_pipette_timer"
 
 [node name="TimerHours" type="SpinBox" parent="HUD/Frame/Layout/Middle/Main/Row/Stage/ToolOptions/PipetteOptions/Row"]
 theme_type_variation = &"CompactSpinBox"
-custom_minimum_size = Vector2(58, 30)
+custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 min_value = 1.0
 max_value = 999.0
