@@ -26,6 +26,10 @@ extends SceneTree
 ##    and the answer resumes play.
 ##  - A dish added while a pipette's answer is awaited takes another number than the one the simulation gives the new dish.
 ##  - A size chosen for one dish goes to that dish; a layer key works with its buttons hidden; Follow centres the bup in the stage.
+##  - The graph puts a dish's samples where the world took them: a history begun at world time 3,661 s with samples taken at 3,720.4,
+##    3,840.2, 3,960.9 and 4,080.3 s (after the steps that crossed 3,720, 3,840, 3,960 and 4,080) shows them at 59, 179, 299 and 419 s of
+##    the dish's own time, in the last-24-hours view and the whole-run view alike; with every dish together, in a game begun at 3,000 s,
+##    at 720, 840, 960 and 1,080 s.
 
 const EXTINCT_BANNER := "hud.banner_dish_extinct"
 
@@ -153,7 +157,33 @@ func _run() -> void:
 	await _pipette(m, fake, chosen)
 	m.queue_free()
 	await process_frame
+	_graph_times()
 	TestUtil.finish(self, "DISHES TESTS OK")
+
+
+## The graph's times of a dish's samples, which the world takes at the multiples of DishHistory.INTERVAL of its own clock.
+func _graph_times() -> void:
+	var d := Dish.new()
+	var other := Dish.new()
+	for one: Dish in [d, other]:
+		one.history.begin(3661.0)
+		for t: float in [3720.4, 3840.2, 3960.9, 4080.3]:
+			one.history.record(t, FakeScenes.stats(10))
+		one.time = 4090.0
+	var graph := HistoryGraph.new()
+	graph.dish = d
+	var xs := func(points: PackedVector2Array) -> Array: return Array(points).map(func(p: Vector2) -> float: return snappedf(p.x, 0.01))
+	var fine: Array = xs.call(graph._series("pop", 0.0, HistoryGraph.Span.LAST_24))
+	var whole: Array = xs.call(graph._series("pop", 0.0, HistoryGraph.Span.ALL))
+	TestUtil.check(fine == [59.0, 179.0, 299.0, 419.0] and whole == fine, "the graph puts a dish's samples at the world's multiples, on the dish's own clock (%s, whole run %s)" % [fine, whole])
+	graph.dishes = [d, other]
+	graph.all_dishes = true
+	graph.game_began = 3000.0
+	var together: Array = xs.call(graph._series("pop", 0.0, HistoryGraph.Span.LAST_24))
+	var counts: Array = Array(graph._series("pop", 0.0, HistoryGraph.Span.LAST_24)).map(func(p: Vector2) -> float: return p.y)
+	TestUtil.check(together == [720.0, 840.0, 960.0, 1080.0] and counts == [20.0, 20.0, 20.0, 20.0], "with every dish together they are on the game's clock, and summed (%s, %s)" % [together, counts])
+	for node: Node in [d, other, graph]:
+		node.free()
 
 
 ## The pipette, its timer, and what follows.
