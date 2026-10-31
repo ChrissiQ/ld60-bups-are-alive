@@ -8,6 +8,11 @@ extends RefCounted
 ## row is free again as soon as the dish is removed, frozen or refused, so a snapshot taken before that may still show the old dish under
 ## it: a DishState's `number` says which dish it is. A dish the simulation refuses (no room in the memory budget, no free row) is listed in
 ## a snapshot's timing["refused"]: `poll` frees its row and emits `refused`.
+##
+## The main view's picture is played out one publish behind (`shown_payload`): a publish is shown once the next one has arrived, or on the
+## next frame that brings none, so an iteration that ends just after a frame's poll (two publishes in the next frame, none in this one)
+## still gives every frame a new picture. A publish waits at most one frame; one that is overtaken by two more in a frame is skipped; the
+## picture never goes back to an older publish.
 
 signal snapshot_changed(snap: Snapshot)
 signal refused(row: int, why: String)
@@ -16,6 +21,9 @@ var backend: SimBackend
 var _used := {}  ## client row -> true
 var _last_seq := -1
 var _display_ms := 0.0
+var _waiting: Array = []  ## publishes seen and not yet shown, oldest first (at most one after a frame)
+var _shown: PayloadInfo = null
+var _known_publish := -1  ## the newest publish seen
 
 
 func _init(p_backend: SimBackend) -> void:
@@ -135,9 +143,38 @@ func latest() -> Snapshot:
 	return backend.latest()
 
 
-## Once a frame on the main thread: a newer snapshot is acknowledged and emitted, and the rows of refused dishes are freed.
+## The main view's picture this frame (null before the first publish): see the header.
+func shown_payload() -> PayloadInfo:
+	return _shown
+
+
+## One frame of the playout: `waiting` (publishes seen and not shown, oldest first) with the publishes that `arrived` this frame. Returns
+## [the publish to show now (null: keep the one shown), what waits after]. With two or more waiting the newest waits and the one before it
+## is shown (any older are skipped); with one, it is shown only when nothing arrived this frame.
+static func playout(waiting: Array, arrived: Array) -> Array:
+	var all := waiting + arrived
+	if all.size() >= 2:
+		return [all[-2], [all[-1]]]
+	if all.size() == 1 and arrived.is_empty():
+		return [all[0], []]
+	return [null, all]
+
+
+## Once a frame on the main thread: a newer snapshot is acknowledged and emitted, the rows of refused dishes are freed, and the playout
+## moves on a frame.
 func poll() -> void:
 	var snap := backend.latest()
+	var arrived: Array = []
+	if snap != null and snap.seq > 0 and snap.seq != _last_seq:
+		var published: Array = snap.payloads if not snap.payloads.is_empty() else ([snap.payload] if snap.payload != null else [])
+		for p: PayloadInfo in published:
+			if p.seq > _known_publish:
+				arrived.append(p)
+				_known_publish = p.seq
+	var step := playout(_waiting, arrived)
+	if step[0] != null:
+		_shown = step[0]
+	_waiting = step[1]
 	if snap == null or snap.seq <= 0 or snap.seq == _last_seq:
 		return
 	_last_seq = snap.seq

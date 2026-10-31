@@ -6,7 +6,7 @@ extends RefCounted
 ## queued between the iterations, so they run in event order; a reply that waits on one is completed by it.
 ##
 ## The queue holds at most MAX_ITERATIONS iterations: a slow worker makes the sim thread wait, never the interface. What a snapshot
-## carries that happens once (history samples, a dish world's new copy, a refused dish) stays in every snapshot until the main thread
+## carries that happens once (history samples, a publish, a dish world's new copy, a refused dish) stays in every snapshot until the main thread
 ## acknowledges a snapshot that carried it (`ack`), so a snapshot the main thread never looked at loses nothing.
 
 const MAX_ITERATIONS := 2
@@ -32,6 +32,8 @@ var _seq := 0
 var _history := {}  ## row -> Array of {time, stats, seq}
 var _worlds := {}  ## row -> [DishWorldCopy, seq]
 var _refused := {}  ## row -> [why, seq]
+var _payloads: Array = []  ## [PayloadInfo, seq] of each publish not yet acknowledged, oldest first
+var _payload_seq := -1  ## the publish last listed
 
 
 func _init(p_store: Object = null) -> void:
@@ -181,7 +183,12 @@ func _iteration(item: Dictionary) -> void:
 		snap.history[row] = (_history[row] as Array).map(func(h: Dictionary) -> Dictionary: return {"time": h["time"], "stats": h["stats"]})
 	for row: int in _worlds:
 		snap.worlds[row] = _worlds[row][0]
-	snap.payload = item["payload"]
+	var published: PayloadInfo = item["payload"]
+	if published != null and published.seq > _payload_seq:
+		_payload_seq = published.seq
+		_payloads.append([published, _seq])
+	snap.payloads = _payloads.map(func(p: Array) -> PayloadInfo: return p[0])
+	snap.payload = published
 	snap.field_view = item["field_view"]
 	var timing: Dictionary = (item["timing"] as Dictionary).duplicate()
 	timing["lineage_ms"] = lineage_us / 1000.0
@@ -209,6 +216,7 @@ func _drop_acked(acked: int) -> void:
 	for row: int in _refused.keys():
 		if int(_refused[row][1]) <= acked:
 			_refused.erase(row)
+	_payloads = _payloads.filter(func(p: Array) -> bool: return int(p[1]) > acked)
 
 
 ## Stats sample `sample` of core row `core_row` in a read of STATS from row 0, as BupSim.population_stats' dictionary (DishState.STATS_KEYS).

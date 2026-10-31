@@ -22,11 +22,11 @@ extends SceneTree
 ##     about x800 (a step about 20 ms [measured] plus the iteration's readback and publish, one step an iteration) [derived].
 ##   G: 50, 200 and 1,000 bups (limit = count), 45 mm, x10,000, 30 s each: >= x9,990 (x10,000 less what one iteration's lag of at most
 ##     T_ITER of steps leaves unmeasured over 30 s and frame capping) [derived]; the single-dish path's best is x10,000 at each size [measured baseline].
-##   x1: 1,000 and 100,000 bups, 45 mm, x1, 60 s: the share of display frames in which a new payload arrived; >= 0.99 is the gate. The
+##   x1: 1,000 and 100,000 bups, 45 mm, x1, 60 s: the share of display frames in which a new payload is shown; >= 0.99 is the gate. The
 ##     sim steps Governor.STEPS_PER_SECOND (120) times a simulated second, so on a 120 Hz display every frame can have a new one [derived];
-##     this script shows the newest payload each frame, and a payload reaches it only if its iteration ends before the next frame's poll:
-##     about 0.97 at 1,000 and 0.86 to 0.91 at 100,000 [measured, a 20 to 40 s replay of iteration ends against the polls], so the gate is
-##     expected to FAIL at both (the main frames' jitter against an iteration of about 4.7 ms at 1,000 and 6.8 ms at 100,000). Edit to
+##     this script shows the payload WorldClient's playout gives each frame (one publish behind: a frame whose iteration ended just after
+##     its poll shows the publish held back, and the next frame the older of the two that came), as the game does: 0.992 at 1,000 and
+##     0.998 at 100,000 [measured, a replay of iteration ends against the polls; showing the newest instead gave 0.98 and 0.87]. Edit to
 ##     visible (paused, a source placed, 8 times): frames until a snapshot shows it, <= 2 frames + one iteration [derived], the single-dish path's 1 frame
 ##     [measured baseline, a pixel hash].
 ##   The interface column (frame p95 and worst on the game screen) is measured in the interface gate on the final tree; the main frames printed here are
@@ -144,6 +144,63 @@ func _gate_checks() -> void:
 	TestUtil.show(gate_g(8.4, 10000.0, 8.33, 8.33, 0.1) and not gate_g(8.6, 10000.0, 8.33, 8.33, 0.1), "gate G: the best of the two plus 1 SD")
 	TestUtil.show(not gate_g(8.3, 9999.0, 8.33, 8.33, 0.1), "gate G fails a speed under x10,000")
 	TestUtil.show(gate_x1(0.99) and not gate_x1(0.9899), "gate x1: 99% of frames")
+	_playout_checks()
+
+
+## WorldClient.playout on synthetic arrivals (publishes per frame), expected values derived from the rule before the first run:
+## - [1, 1, 0, 2] x 25 (an iteration ending just after a poll every fourth frame): showing the newest changes the picture in 75 of 100
+##   frames; the playout misses only the first frame (its first publish waits for the next): 99 of 100.
+## - [1, 1, 0, 1] x 25 (a publish truly missing every fourth frame): the newest 75 of 100; the playout 74 (the first frame, then each
+##   frame after a missing one: no publish was held back to show).
+## - [3]: the older two arrive together with a third: the second newest is shown, the oldest skipped, the newest waits.
+## - Every publish shown is shown at most one frame after the frame it arrived in, and the picture never goes back to an older one.
+func _playout_checks() -> void:
+	var smooth := _played_out([1, 1, 0, 2], 25)
+	TestUtil.show(smooth["newest"] == 75 and smooth["shown"] == 99, "playout: late iterations [1,1,0,2]: newest 75, playout 99 of 100 (got %d, %d)" % [smooth["newest"], smooth["shown"]])
+	var gaps := _played_out([1, 1, 0, 1], 25)
+	TestUtil.show(gaps["newest"] == 75 and gaps["shown"] == 74, "playout: missing publishes [1,1,0,1]: newest 75, playout 74 of 100 (got %d, %d)" % [gaps["newest"], gaps["shown"]])
+	TestUtil.show(smooth["late"] == 0 and gaps["late"] == 0 and smooth["back"] == 0 and gaps["back"] == 0, "playout: no publish shown more than a frame after it came, never an older one")
+	var three := WorldClient.playout([], [_publish(1), _publish(2), _publish(3)])
+	TestUtil.show(three[0] != null and (three[0] as PayloadInfo).seq == 2 and three[1].size() == 1 and (three[1][0] as PayloadInfo).seq == 3, "playout: three at once show the second newest, the newest waits")
+
+
+static func _publish(seq: int) -> PayloadInfo:
+	var p := PayloadInfo.new()
+	p.seq = seq
+	return p
+
+
+## `pattern` (publishes arriving each frame) repeated `times`: {newest: frames whose newest publish changed, shown: frames whose shown
+## publish changed, late: publishes shown more than a frame after they came, back: frames that showed an older publish}.
+static func _played_out(pattern: Array, times: int) -> Dictionary:
+	var seq := 0
+	var came := {}  ## seq -> frame it arrived
+	var waiting: Array = []
+	var shown := -1
+	var out := {"newest": 0, "shown": 0, "late": 0, "back": 0}
+	var frame := 0
+	for t in times:
+		for n: int in pattern:
+			var arrived: Array = []
+			for k in n:
+				seq += 1
+				came[seq] = frame
+				arrived.append(_publish(seq))
+			if n > 0:
+				out["newest"] += 1
+			var step := WorldClient.playout(waiting, arrived)
+			waiting = step[1]
+			if step[0] != null:
+				var s: int = (step[0] as PayloadInfo).seq
+				if s < shown:
+					out["back"] += 1
+				if s != shown:
+					out["shown"] += 1
+					if frame - int(came[s]) > 1:
+						out["late"] += 1
+				shown = s
+			frame += 1
+	return out
 
 
 # ---- the speed column: measured through the sim thread ---------------------------------------------------------------------------
@@ -212,7 +269,7 @@ static func filled_records(n: int, radius: float, number: int, seed_value: int) 
 
 
 ## A world with one dish of `spec` in the main view, run at `speed`: settles, then measures `seconds`. Returns {samples: [[wall s, world s]],
-## frames: [ms], payload_frames (frames in which a new payload arrived), timing (the last snapshot's), steps, ok, note}; `edits` > 0 then
+## frames: [ms], payload_frames (frames in which a new payload was shown), timing (the last snapshot's), steps, ok, note}; `edits` > 0 then
 ## pauses and times that many source placements to the snapshot that shows them.
 func _measure(label: String, spec: DishSpec, speed: float, seconds: float, edits := 0) -> Dictionary:
 	var t_setup := Time.get_ticks_msec()
@@ -254,16 +311,17 @@ func _measure(label: String, spec: DishSpec, speed: float, seconds: float, edits
 		w.set_time(speed, false, dt)
 		w.poll()
 		var snap := w.latest()
-		if snap.payload != null:
-			w.texture_bound("payload", snap.payload.texture_index, frame, snap.payload.seq)
+		var shown := w.shown_payload()
+		if shown != null:
+			w.texture_bound("payload", shown.texture_index, frame, shown.seq)
 		if now < settle_until:
-			last_payload = snap.payload.seq if snap.payload != null else -1
+			last_payload = shown.seq if shown != null else -1
 			continue
 		if started < 0:
 			started = now
 		frames.append(dt * 1000.0)
 		samples.append([(now - started) / 1e6, snap.sim_time])
-		var pseq := snap.payload.seq if snap.payload != null else -1
+		var pseq := shown.seq if shown != null else -1
 		if pseq != last_payload:
 			payload_frames += 1
 		last_payload = pseq
