@@ -1,6 +1,7 @@
 #include "register_types.h"
 
 #include "bup_sim.h"
+#include "lineage_store.h"
 #include "nutrient_field.h"
 
 #include <gdextension_interface.h>
@@ -15,6 +16,7 @@ void initialize_bups_module(ModuleInitializationLevel p_level) {
 	}
 	GDREGISTER_CLASS(NutrientField);
 	GDREGISTER_CLASS(BupSim);
+	GDREGISTER_CLASS(LineageStore);
 }
 
 void uninitialize_bups_module(ModuleInitializationLevel p_level) {
