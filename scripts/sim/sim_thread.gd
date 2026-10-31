@@ -189,7 +189,8 @@ func _run() -> void:
 				_quiet_pass()
 			if _husks_owed:
 				_wait_for_command(_husk_msec + HUSK_VIEW_MSEC)
-				_changed = true  # (a pass of no steps reads them)
+				if Time.get_ticks_msec() >= _husk_msec + HUSK_VIEW_MSEC:
+					_changed = true  # (a pass of no steps reads them; a command that came first is drained before it)
 			else:
 				queue.wait()
 			continue
