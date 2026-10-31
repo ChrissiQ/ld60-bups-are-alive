@@ -161,6 +161,125 @@ const STATS_SUMS := 11  ## the sums `stats1` makes for each group of 256 bups (S
 const MAX_SAMPLES := 256  ## history samples one batch can take (1024 steps of 20 s make 171)
 const OUT_WORDS := OUT_STATS + STATS_WORDS * (1 + MAX_SAMPLES)
 
+# ---- the pooled world: ids, blocks, the dish tables, the payload ---------------------------------------------------------
+# The bup record above is the pool's record too: it has no dish word. A bup's dish is the segment it occupies (BLKDISH, DS_START).
+# DISHP and DSTATE are tables of D_MAX rows, one per dish; a row is addressed by the dish's row, never by its number.
+const D_MAX := 1024  ## rows of DISHP and DSTATE (the running dishes)
+const NO_DISH := 0xFFFFFFFF  ## a row that is no dish (a block of no dish in BLKDISH, a bup that stays in PIPDST)
+
+## Ids are (dish number << ID_DISH_SHIFT) | counter, positive (bit 63 is 0). The number is the dish the bup was born in; a pipette leaves it as it
+## is, so it is never "the dish the bup is in now" (that is the segment).
+const ID_COUNTER_BITS := 44
+const ID_DISH_SHIFT := 44  ## the dish number's lowest bit in the id
+const ID_DISH_BITS := 19
+const ID_MAX_DISH := 524287  ## the largest dish number: (1 << ID_DISH_BITS) - 1
+const ID_HI_DISH_SHIFT := 12  ## in R_ID_HI (the id's high word) the number starts here, above the counter's high 12 bits
+const ID_HI_COUNTER_MASK := 0xFFF  ## the counter's bits 32-43
+
+## The block table: BLKDISH[slot >> BLK_SHIFT] is the dish row of each block of BLK_SLOTS slots, or NO_DISH (A and B halves, like the records).
+const BLK_SLOTS := 256
+const BLK_SHIFT := 8
+const PIPDST_WORDS := 1  ## the pipette's scratch: one uint a slot (the destination row, NO_DISH: stays), apart from the record
+
+## A death event's ED_STEP: the step's place in its batch in the low EV_STEP_BITS, the number of the dish whose segment the bup was in above.
+const EV_STEP_BITS := 13
+const EV_STEP_MASK := 0x1FFF
+const EV_DISH_SHIFT := 13
+const EV_DISH_BITS := 19
+const EV_DISH_MASK := 0x7FFFF
+
+## DISHP[d]: host to device, uploaded when changed. Floats and uints by their bits; words 22-31 are spare.
+const DP_WORDS := 32
+const DP_FIELD_BASE := 0  ## uint: the 256-aligned base of the dish's cells in each field buffer
+const DP_CELLS := 1  ## uint: cells across
+const DP_SPACING := 2  ## float: a cell's width (µm)
+const DP_RADIUS := 3  ## float: the dish's radius (µm), also the origin: a grid coordinate is (x + radius) / spacing
+const DP_HANDOVER := 4  ## float: a cloud this wide goes to the grid
+const DP_BIN_BASE := 5  ## uint: the first of the dish's cloud-list squares in the pool
+const DP_BINS_ACROSS := 6  ## uint
+const DP_BIN_SIZE := 7  ## float
+const DP_FEED := 8  ## float: feed per second
+const DP_UPKEEP_SCALE := 9  ## float
+const DP_LIMIT := 10  ## uint: the most bups
+const DP_CAP := 11  ## uint: the hard cap c_d, the newborn cutoff
+const DP_FLAGS := 12  ## uint: DPF_* bits
+const DP_K_TOTAL := 13  ## float: the diffusion's whole k
+const DP_K := 14  ## float: its k in one sub-iteration
+const DP_ITERATIONS := 15  ## uint: the sub-iterations (always even)
+const DP_CLOUD_QUOTA := 16  ## uint
+const DP_HUSK_QUOTA := 17  ## uint
+const DP_NUMBER := 18  ## uint: the dish's number (the id's high part)
+const DP_SEED := 19  ## uint: the initial seed of a new or loaded dish (the running copy is DS_SEED)
+const DP_STEP := 20  ## uint: the initial step of a new or loaded dish (the running copy is DS_STEP)
+const DP_NOISE_REFERENCE := 21  ## float: the dish's receptor-noise scale for chemotaxis
+const DPF_STATIONARY := 0  ## the bits of DP_FLAGS (the bit's place, not its mask)
+const DPF_DEATH_HUSKS := 1
+const DPF_PLANKTON_HUSKS := 2
+const DPF_RUNNING := 3
+const DPF_REMOVED := 4
+const DPF_MAIN_VIEW := 5
+const DPF_ACETATE := 6
+const DPF_COUNT := 7
+
+## DSTATE[d]: device-owned, read back each iteration (the single-dish path's CNT and PCNT, per dish). Uints; words 24-31 are spare.
+const DS_WORDS := 32
+const DS_START := 0  ## the first slot of the dish's segment
+const DS_COUNT := 1
+const DS_SURVIVORS := 2
+const DS_NEWBORN := 3
+const DS_NEXT_COUNT := 4
+const DS_NEXT_ID_LO := 5
+const DS_NEXT_ID_HI := 6
+const DS_SEED := 7
+const DS_STEP := 8  ## the dish's own step, from 0 at its strike
+const DS_GROWTH := 9
+const DS_TRIMMED := 10
+const DS_DONORS := 11
+const DS_DONOR_REACH := 12  ## float bits
+const DS_BIRTHS := 13  ## this iteration
+const DS_DEATHS := 14
+const DS_BIRTHS_LOST := 15
+const DS_DEATHS_LOST := 16
+const DS_MOVED_IN := 17  ## the bups a pipette's retarget pass moved in and out (written only by that pass, zeroed at the start of each batch)
+const DS_MOVED_OUT := 18
+const DS_CLOUD_SLOTS := 19  ## the virtual cloud counter
+const DS_CLOUDS_TO_GRID := 20
+const DS_ENTRIES_CUT := 21
+const DS_HUSKS := 22
+const DS_OVERFLOW := 23  ## the physical-overflow flag
+
+## WORLD: one row of the world's totals.
+const WD_WORDS := 8
+const WD_SLOTS := 0  ## the slots in use (the sum of the aligned segment lengths)
+const WD_CLOUD_SLOTS := 1
+const WD_HUSK_SLOTS := 2
+const WD_ITERATION_STEP := 3  ## the iteration's step index
+const WD_OVERFLOW := 4
+
+## The payload textures (a bup's picture, written sim-side after `finalize`): PAYLOAD (RGBA32UI, PAYLOAD_TEX_WIDTH wide) and the ids (RG32UI).
+const PL_WORDS := 4
+const PL_X := 0  ## float bits
+const PL_Y := 1
+const PL_SHAPE := 2  ## packHalf2x16(length µm, angle radians)
+const PL_COLOR := 3  ## red, green, blue in bytes from PL_RED_SHIFT, PL_GREEN_SHIFT, PL_BLUE_SHIFT; the low byte is spare
+const PL_RED_SHIFT := 24
+const PL_GREEN_SHIFT := 16
+const PL_BLUE_SHIFT := 8
+const PAYLOAD_BYTES := PL_WORDS * 4
+const IDT_WORDS := 2  ## the id texture: the id's low and high words
+const IDT_LO := 0
+const IDT_HI := 1
+const IDT_BYTES := IDT_WORDS * 4
+const PAYLOAD_TEX_WIDTH := 2048  ## a texture's width: a dish's n bups take ceil(n / 2048) rows
+
+## STATS per dish: D_MAX rows of one sample for the state at the end plus STATS_ITER_SAMPLES for the iteration's steps (sample words: ST_*).
+const STATS_ITER_SAMPLES := 16
+const STATS_DISH_WORDS := STATS_WORDS * (1 + STATS_ITER_SAMPLES)
+
+## QIN and QOUT per dish: a dish's row is its own QIN_WORDS and QOUT_WORDS (the words of Q_* and QO_*), indexed by the dish's row.
+const QIN_POOL_WORDS := D_MAX * QIN_WORDS
+const QOUT_POOL_WORDS := D_MAX * QOUT_WORDS
+
 # ---- P (the parameters, floats) -------------------------------------------------------------------------------------------------------
 const P_WORDS := 128
 
@@ -302,3 +421,38 @@ static func whole_record(answer: PackedByteArray) -> PackedByteArray:
 	record.resize(RECORD_BYTES)
 	record.encode_float(R_FAST * 4, -1.0)
 	return record
+
+
+## The id of the bup numbered `counter` born in dish number `dish_number`.
+static func make_id(dish_number: int, counter: int) -> int:
+	return (dish_number << ID_DISH_SHIFT) | counter
+
+
+## The number of the dish an id was minted in (the birth dish).
+static func id_dish_number(id: int) -> int:
+	return (id >> ID_DISH_SHIFT) & ID_MAX_DISH
+
+
+## The counter part of an id.
+static func id_counter(id: int) -> int:
+	return id & ((1 << ID_COUNTER_BITS) - 1)
+
+
+## R_ID_HI of an id: the dish number above the counter's bits 32-43.
+static func id_hi_word(id: int) -> int:
+	return (id_dish_number(id) << ID_HI_DISH_SHIFT) | ((id_counter(id) >> 32) & ID_HI_COUNTER_MASK)
+
+
+## A death event's ED_STEP: `step` in its batch and the number of the dish the bup died in.
+static func death_step_word(step: int, dish_number: int) -> int:
+	return (dish_number << EV_DISH_SHIFT) | (step & EV_STEP_MASK)
+
+
+## The step's place in the batch from a death event's ED_STEP.
+static func death_step(word: int) -> int:
+	return word & EV_STEP_MASK
+
+
+## The dish number from a death event's ED_STEP.
+static func death_dish_number(word: int) -> int:
+	return (word >> EV_DISH_SHIFT) & EV_DISH_MASK

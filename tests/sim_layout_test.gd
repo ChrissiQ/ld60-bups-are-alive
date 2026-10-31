@@ -1,0 +1,130 @@
+extends SceneTree
+## Run: godot --headless --path . -s tests/sim_layout_test.gd
+## The pooled world's word layouts (gpu/gpu_layout.gd), headless. Expected values, written before the first run:
+## [derived]
+##  - the record: 28 words, each of R_* named once (0-27), no word or constant naming a dish (a bup's dish is its segment);
+##  - ids: 1 + 19 + 44 = 64 bits; make_id(524287, 2^44 - 1) is positive; R_ID_HI is the id's high word, (dish << 12) | counter >> 32;
+##  - a death event's ED_STEP: 13 low bits step, 19 high bits dish number, 13 + 19 = 32; MAX_STEPS_PER_BATCH (1024) fits in 13 bits;
+##  - DISHP: 32 words = 128 B; DP_* name 22 distinct words 0-21 (10 spare, 22-31 unused); seven DPF_* flags in 0-6;
+##    it names seed, step, k_total, iterations, noise_reference and radius;
+##  - DSTATE: 32 words; DS_* name 24 distinct words 0-23 (8 spare), including moved_in and moved_out;
+##  - WORLD: 8 words, 5 named; payload: 4 words = 16 B, id texture 2 words = 8 B, colour bytes inside the fourth word above its spare low byte;
+##  - STATS per dish: 16 words x (1 + 16) = 272 words; QIN and QOUT pools are D_MAX rows of the single-dish path's QIN_WORDS (44) and QOUT_WORDS (240);
+##  - D_MAX 1,024 rows: DISHP + DSTATE = 1,024 x 256 B = 256 KB;
+##  - no kernel reads a dish table by a number, and no layout name is also a kernel's buffer name.
+
+const L := preload("res://gpu/gpu_layout.gd")
+
+
+func _init() -> void:
+	var constants: Dictionary = (load("res://gpu/gpu_layout.gd") as Script).get_script_constant_map()
+	_record_has_no_dish(constants)
+	_ids()
+	_death_step()
+	_table(constants, "DP_", 22, L.DP_WORDS, "DISHP")
+	_table(constants, "DS_", 24, L.DS_WORDS, "DSTATE")
+	_table(constants, "WD_", 5, L.WD_WORDS, "WORLD")
+	_dishp(constants)
+	_dstate()
+	_payload()
+	_sizes()
+	_kernels(constants)
+	TestUtil.finish(self, "SIM LAYOUT TEST OK")
+
+
+## The words of the table `prefix`..., distinct, from 0, `named` of them, inside `size`.
+func _table(constants: Dictionary, prefix: String, named: int, size: int, what: String) -> void:
+	var seen := {}
+	for name: String in constants:
+		if name.begins_with(prefix) and not name.ends_with("_WORDS") and constants[name] is int:
+			var w: int = constants[name]
+			TestUtil.check(w >= 0 and w < size, "%s: %s is %d, outside its %d words" % [what, name, w, size])
+			TestUtil.check(not seen.has(w), "%s: %s and %s are both word %d" % [what, name, seen.get(w, ""), w])
+			seen[w] = name
+	TestUtil.check(seen.size() == named, "%s: %d words named, expected %d" % [what, seen.size(), named])
+	for w in named:
+		TestUtil.check(seen.has(w), "%s: word %d has no name (the named words are 0-%d, the rest spare)" % [what, w, named - 1])
+
+
+func _record_has_no_dish(constants: Dictionary) -> void:
+	TestUtil.check(L.RECORD_WORDS == 28 and L.RECORD_VEC4 == 7 and L.RECORD_BYTES == 112, "the record stays 28 words, 112 bytes")
+	var words := {}
+	for name: String in constants:
+		if name.begins_with("R_") and constants[name] is int:
+			TestUtil.check(not words.has(constants[name]), "the record: %s and %s are one word" % [name, words.get(constants[name], "")])
+			words[constants[name]] = name
+			TestUtil.check(not name.contains("DISH"), "the record has a word for a dish (%s): a bup's dish is its segment" % name)
+	TestUtil.check(words.size() == L.RECORD_WORDS, "the record: %d words named, not %d" % [words.size(), L.RECORD_WORDS])
+	TestUtil.check(L.R_ID_LO == 0 and L.R_ID_HI == 21 and L.R_TUMBLING == 27, "the record's words are where they were")
+
+
+func _ids() -> void:
+	TestUtil.check(1 + L.ID_DISH_BITS + L.ID_COUNTER_BITS == 64 and L.ID_DISH_SHIFT == L.ID_COUNTER_BITS, "an id is a zero bit, 19 bits of dish number, 44 of counter")
+	TestUtil.check(L.ID_MAX_DISH == (1 << L.ID_DISH_BITS) - 1 and L.ID_HI_DISH_SHIFT == L.ID_COUNTER_BITS - 32 and L.ID_HI_COUNTER_MASK == (1 << 12) - 1, "the id's high word: the counter's 12 bits, then the number")
+	var counter_max := (1 << L.ID_COUNTER_BITS) - 1
+	for pair: Array in [[0, 0], [1, 1], [7, 12345], [524287, counter_max], [524287, 0], [3, 1 << 32], [100000, (1 << 32) - 1]]:
+		var id := L.make_id(pair[0], pair[1])
+		TestUtil.check(id >= 0, "make_id(%d, %d) is negative" % pair)
+		TestUtil.check(L.id_dish_number(id) == pair[0] and L.id_counter(id) == pair[1], "make_id(%d, %d) does not read back" % pair)
+		TestUtil.check(L.id_hi_word(id) == (id >> 32) and L.id_hi_word(id) <= 0xFFFFFFFF, "R_ID_HI of id %d is not its high word" % id)
+		var records := PackedByteArray()
+		records.resize(L.RECORD_BYTES)
+		L.set_id(records, 0, id)
+		TestUtil.check(L.id_of(records, 0) == id and records.decode_u32(L.R_ID_HI * 4) == L.id_hi_word(id), "the record's two id words are not the id's")
+
+
+func _death_step() -> void:
+	TestUtil.check(L.EV_STEP_BITS + L.EV_DISH_BITS == 32 and L.EV_DISH_SHIFT == L.EV_STEP_BITS, "ED_STEP: 13 bits of step, 19 of dish number")
+	TestUtil.check(L.EV_STEP_MASK == (1 << L.EV_STEP_BITS) - 1 and L.EV_DISH_MASK == (1 << L.EV_DISH_BITS) - 1 and L.EV_DISH_BITS == L.ID_DISH_BITS, "ED_STEP's masks")
+	TestUtil.check(L.MAX_STEPS_PER_BATCH <= L.EV_STEP_MASK + 1, "a batch's steps fit ED_STEP's low bits")
+	for pair: Array in [[0, 0], [1023, 524287], [5, 1], [L.EV_STEP_MASK, 123456]]:
+		var word := L.death_step_word(pair[0], pair[1])
+		TestUtil.check(word >= 0 and word <= 0xFFFFFFFF and L.death_step(word) == pair[0] and L.death_dish_number(word) == pair[1], "ED_STEP (%d, %d) does not read back" % pair)
+
+
+func _dishp(constants: Dictionary) -> void:
+	TestUtil.check(L.DP_WORDS * 4 == 128, "a DISHP row is 128 bytes")
+	for name in ["DP_SEED", "DP_STEP", "DP_K_TOTAL", "DP_ITERATIONS", "DP_NOISE_REFERENCE", "DP_RADIUS", "DP_NUMBER", "DP_LIMIT", "DP_CAP", "DP_FLAGS"]:
+		TestUtil.check(constants.has(name), "DISHP has no %s" % name)
+	var bits := {}
+	for name: String in constants:
+		if name.begins_with("DPF_") and name != "DPF_COUNT":
+			TestUtil.check(constants[name] >= 0 and constants[name] < 32 and not bits.has(constants[name]), "flag %s is a bit in use or outside the word" % name)
+			bits[constants[name]] = name
+	TestUtil.check(bits.size() == L.DPF_COUNT and L.DPF_COUNT == 7, "DISHP has seven flags")
+
+
+func _dstate() -> void:
+	TestUtil.check(L.DS_WORDS * 4 == 128, "a DSTATE row is 128 bytes")
+	TestUtil.check(L.D_MAX * (L.DP_WORDS + L.DS_WORDS) * 4 == 256 * 1024, "DISHP and DSTATE together are 256 KB")
+	TestUtil.check(L.DS_MOVED_IN != L.DS_MOVED_OUT, "DSTATE has moved_in and moved_out apart")
+
+
+func _payload() -> void:
+	TestUtil.check(L.PL_WORDS == 4 and L.PAYLOAD_BYTES == 16 and L.IDT_WORDS == 2 and L.IDT_BYTES == 8, "the payload is 16 bytes a bup, the id texture 8")
+	TestUtil.check(L.PL_X == 0 and L.PL_Y == 1 and L.PL_SHAPE == 2 and L.PL_COLOR == 3 and L.IDT_LO == 0 and L.IDT_HI == 1, "payload words in order")
+	TestUtil.check(L.PL_RED_SHIFT == 24 and L.PL_GREEN_SHIFT == 16 and L.PL_BLUE_SHIFT == 8, "the colour's three bytes sit above the spare low byte")
+	TestUtil.check(L.PAYLOAD_TEX_WIDTH == 2048, "payload textures are 2048 wide")
+
+
+func _sizes() -> void:
+	TestUtil.check(L.STATS_DISH_WORDS == 272 and L.STATS_ITER_SAMPLES == 16, "a dish's STATS row is 17 samples of 16 words")
+	TestUtil.check(L.QIN_POOL_WORDS == L.D_MAX * 44 and L.QOUT_POOL_WORDS == L.D_MAX * 240, "QIN and QOUT hold a row of the single-dish path's words for each dish")
+	TestUtil.check(L.D_MAX == 1024 and L.BLK_SLOTS == 1 << L.BLK_SHIFT and L.BLK_SLOTS == 256 and L.NO_DISH == 0xFFFFFFFF, "D_MAX, the block size and the no-dish value")
+	TestUtil.check(L.PIPDST_WORDS == 1, "PIPDST is one uint a slot")
+
+
+## No kernel reads a dish table with a number in its index, and no layout name is a kernel's buffer name (it would be declared twice).
+func _kernels(constants: Dictionary) -> void:
+	var numbered := RegEx.create_from_string("\\b(DISHP|DSTATE|WORLD|BLKDISH|PIPDST)(_[AB])?\\[[^\\]]*\\b\\d+u?\\b")
+	var all := GpuKernels.all()
+	var buffers := {}
+	for kernel_name: String in all:
+		var source: String = all[kernel_name]["source"]
+		var raw := numbered.search(source)
+		TestUtil.check(raw == null, "kernel %s: %s reads a dish table by a number (use gpu/gpu_layout.gd's names)" % [kernel_name, raw.get_string() if raw != null else ""])
+		for b: String in all[kernel_name]["buffers"]:
+			buffers[b] = true
+	for name: String in constants:
+		if constants[name] is int:
+			TestUtil.check(not buffers.has(name), "layout name %s is also a kernel buffer" % name)
