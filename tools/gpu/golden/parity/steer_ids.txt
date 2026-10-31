@@ -1,0 +1,4 @@
+# bup_steer_bytes(id, Dish.STEER_ALPHA) for these ids, files steer_<id>.bin.gz; haze_bytes.bin.gz is 40000 bytes
+id 4 index 3 bytes 40000
+id 10001 index 10000 bytes 40000
+id 20000 index 19999 bytes 40000

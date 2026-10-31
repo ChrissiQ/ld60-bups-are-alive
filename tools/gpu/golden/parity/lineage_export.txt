@@ -1,0 +1,5 @@
+records=254
+alive=250
+next_id=257
+population=250
+time=21600.0
