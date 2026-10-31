@@ -207,7 +207,7 @@ func _plan_steps() -> int:
 	var d := governor.delta()
 	var cap := mini(want, governor.steps_by_time())
 	var room := _room_steps(cap)
-	var samples := Governor.steps_for_samples(governor.clock, d, DishHistory.INTERVAL, GpuLayout.STATS_ITER_SAMPLES, Governor.MAX_STEPS)
+	var samples := Governor.steps_for_samples(governor.clock, d, DishHistory.INTERVAL, GpuLayout.STATS_ITER_SAMPLES, room)
 	return governor.steps(room, samples)
 
 

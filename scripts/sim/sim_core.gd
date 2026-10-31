@@ -1369,6 +1369,8 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 	var fw := _free_texture("haze", Vector2i(nn, nn)) if view.want_field_view else -1
 	var sw := _free_texture("steer", Vector2i(nn, nn)) if view.want_field_view else -1
 	var tw := _free_texture("thumbs", Vector2i(GpuKernelsDraw.THUMB_ATLAS, GpuKernelsDraw.THUMB_ATLAS)) if view.want_thumbnails else -1
+	if w < 0 and fw < 0 and sw < 0 and tw < 0:
+		return out
 	if fw >= 0 or sw >= 0:
 		arena.put_small("VQ", PackedFloat32Array([view.steer.x, view.steer.y, view.steer_alpha, float(_consts["steering_window"])]).to_byte_array())
 		_free_sets_using(["VQ"])
@@ -1389,7 +1391,7 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 			_disp(cl, "pool_thumb_clear", _groups(tiles))
 			_disp(cl, "pool_thumb_splat", _bup_groups())
 			_disp(cl, "pool_thumb_resolve", _groups(tiles))
-			_copy_pix(cl, "THUMBS", _textures["thumbs"][tw], GpuKernelsDraw.THUMB_ATLAS, GpuKernelsDraw.THUMB_ATLAS * GpuKernelsDraw.THUMB_ATLAS))
+			_copy_pix(cl, "THUMBS", _textures["thumbs"][tw], GpuKernelsDraw.THUMB_ATLAS, GpuKernelsDraw.THUMB_ATLAS * GpuKernelsDraw.THUMB_ATLAS), false)
 	for t: RID in _temp_sets:
 		if rd.uniform_set_is_valid(t):
 			rd.free_rid(t)
@@ -1638,13 +1640,16 @@ func _scan(cl: int, prefix: String, elements: int) -> void:
 	_disp(cl, prefix + "_add", g)
 
 
-func _run_list(rec: Callable) -> void:
+## Records `rec(compute list)`, submits and syncs; then reads WORLD and DSTATE back, unless `read_back` is false (a list that writes
+## neither, as the pictures' is).
+func _run_list(rec: Callable, read_back := true) -> void:
 	var cl := rd.compute_list_begin()
 	rec.call(cl)
 	rd.compute_list_end()
 	rd.submit()
 	rd.sync()
-	_read_back()
+	if read_back:
+		_read_back()
 
 
 func _read_back() -> void:
