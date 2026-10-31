@@ -45,7 +45,7 @@ var profiling := false
 ## picture (`density_texture`) that a quad the size of the camera's rectangle shows over the dish; a bup at or over its least footprint is
 ## drawn as today, so there is no jump where a bup crosses. Set with `set_density`.
 var density := false
-var density_taps := GpuKernelsView.DENSITY_BILINEAR  ## GpuKernelsView.DENSITY_NEAREST or DENSITY_BILINEAR (a footprint on one pixel or shared by four)
+var density_taps := GpuKernelsView.DENSITY_BILINEAR  ## GpuKernelsView.DENSITY_NEAREST, DENSITY_BILINEAR or DENSITY_ROD (a footprint on one pixel, shared by four, or as a rod of two such)
 
 var _local := false  ## a local device (tools): its work is submitted and waited for, not run with the frame
 var _den_made := {}  ## the density kernels, made the first time density mode is switched on
@@ -105,7 +105,7 @@ func can_draw() -> bool:
 	return rd != null and _made.size() == KERNELS.size()
 
 
-## Density mode on or off (`taps`: GpuKernelsView.DENSITY_NEAREST or DENSITY_BILINEAR). The density kernels are made the first time it is
+## Density mode on or off (`taps`: GpuKernelsView.DENSITY_NEAREST, DENSITY_BILINEAR or DENSITY_ROD). The density kernels are made the first time it is
 ## switched on; if they do not build, `density_ready` stays false and the single-dish path's drawing goes on whatever the switch says.
 func set_density(on: bool, taps := GpuKernelsView.DENSITY_BILINEAR) -> void:
 	density = on
