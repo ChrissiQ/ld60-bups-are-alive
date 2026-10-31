@@ -11,7 +11,8 @@ extends RefCounted
 ## records its steps in one compute list in the order of tools/gpu/pool_rig.gd's header (life's `pool_*` kernels in kernels_life.gd's
 ## order), submits, syncs and reads back DSTATE and WORLD. The pipette is its own zero-step pass (`pipette`, a retarget); a dish leaves by
 ## `remove_dish` (its blocks become padding at once, its clouds and husks empty slots) and comes back by `load_dish` from what `gather`
-## read. `publish` writes the main dish's pictures into the next free shared texture after the sync.
+## read; `resize` and `set_params` change a running dish. `publish` writes the main dish's pictures into the next free shared texture after
+## the sync. Reads of parts of the buffers go through a right-sized copy (`read_parts`).
 
 const D_MAX := GpuLayout.D_MAX
 const RB := GpuLayout.RECORD_BYTES
@@ -25,6 +26,8 @@ const TEXTURES := 4  ## shared textures of each kind
 const HARD_BOUND_MOST := 1 << 18  ## the cloud (and husk) slots past which an iteration's room is estimated instead of bounded [placeholder: about 135 MB of cloud buffers at 516 B a slot]
 const OVERFLOW_DEVICE := 1  ## `overflow()` bits: a kernel found a buffer full (WORLD's flag)
 const OVERFLOW_BUDGET := 2  ## the room an iteration needed would pass the memory budget: it was refused, nothing ran
+const SCRATCH_KEEP := 1 << 23  ## bytes: a read up to this goes through the kept scratch buffer; a larger one (a dish's records) through one made for it and freed after it, so no buffer outside the memory budget stays
+const PROBES_MOST := 64  ## points a `probe` call answers
 
 var rd: RenderingDevice
 var limits: PoolLimits
@@ -57,6 +60,10 @@ var _published := {}  ## kind -> index of the texture published last
 var _frame := 0  ## the main side's frame count as last told
 var _temp_sets: Array[RID] = []  ## the copy kernels' sets of one publish
 var _profile: Variant = null  ## while `profile_steps` runs: kernel name -> Array of µs, each dispatch its own submit
+var _scratch := RID()  ## where `read_parts` gathers what it reads (up to SCRATCH_KEEP bytes)
+var _scratch_bytes := 0
+var lone_passes := false  ## checks only: a step runs the lone kernels in place of the fused passes, in the same order (tools/gpu/fused_check.gd)
+var lone_order: Array = ["pool_ac_apply", "pool_conj_apply", "pool_life"]  ## what the lone passes run in place of pool_ac_conj_life and pool_donor_life (a check can change it to show that it would see a wrong order)
 
 
 ## A dish as the host knows it.
@@ -109,6 +116,8 @@ func _notification(what: int) -> void:
 		for kind: String in _textures:
 			for t: RID in _textures[kind]:
 				rd.free_rid(t)
+		if _scratch.is_valid():
+			rd.free_rid(_scratch)
 		if arena != null:
 			arena.free_all()
 		ShaderSet.free_all(rd, _made)
@@ -127,6 +136,9 @@ func release() -> void:
 			if t.is_valid():
 				rd.free_rid(t)
 	_textures.clear()
+	if _scratch.is_valid():
+		rd.free_rid(_scratch)
+		_scratch = RID()
 	if arena != null:
 		arena.free_all()
 	ShaderSet.free_all(rd, _made)
@@ -172,10 +184,10 @@ func add_dish(spec: DishSpec) -> int:
 	return row
 
 
-## Loads a dish that `gather` read (a thaw, a load): a new row, its segment at the end, its clouds and husks after the pool's, its run
-## carrying on from its saved step. Returns the row, or -1.
-func load_dish(blob: DishBlob) -> int:
-	var row := _free_row()
+## Loads a dish that `gather` read (a thaw, a load): a new row (`at_row` when it is free, else the lowest free one), its segment at the
+## end, its clouds and husks after the pool's, its run carrying on from its saved step. Returns the row, or -1.
+func load_dish(blob: DishBlob, at_row := -1) -> int:
+	var row := at_row if at_row >= 0 and at_row < D_MAX and not _dishes.has(at_row) else _free_row()
 	if row < 0:
 		return -1
 	var s := DishSpec.from_dict(blob.spec)
@@ -239,14 +251,15 @@ func gather(row: int) -> DishBlob:
 	var blob := DishBlob.new()
 	blob.spec = cd.spec.to_dict()
 	blob.dstate = _dstate.slice(row * GpuLayout.DS_WORDS * 4, (row + 1) * GpuLayout.DS_WORDS * 4)
-	blob.records = records(row)
-	var n2 := cd.grid.n * cd.grid.n
-	blob.conc = rd.buffer_get_data(arena.buf("CONC"), cd.base * 4, n2 * 4).to_float32_array()
-	blob.conc2 = rd.buffer_get_data(arena.buf("CONC2"), cd.base * 4, n2 * 4).to_float32_array()
-	blob.dplo = rd.buffer_get_data(arena.buf("DPLO"), cd.base * 4, n2 * 4)
-	blob.dphi = rd.buffer_get_data(arena.buf("DPHI"), cd.base * 4, n2 * 4)
-	blob.clouds = _slots_of(row, "PUFF", GpuLayout.WD_CLOUD_SLOTS, false)
-	blob.husks = _slots_of(row, "HUSK", GpuLayout.WD_HUSK_SLOTS, true)
+	var got := read_parts(_field_parts(cd) + [_records_part(row)])
+	blob.conc = (got[0] as PackedByteArray).to_float32_array()
+	blob.conc2 = (got[1] as PackedByteArray).to_float32_array()
+	blob.dplo = got[2]
+	blob.dphi = got[3]
+	blob.records = got[4]
+	var slots := _slots_of(row)
+	blob.clouds = slots[0]
+	blob.husks = slots[1]
 	return blob
 
 
@@ -312,12 +325,246 @@ func pipette(row: int, centre: Vector2, radius: float, dest: Variant = null) -> 
 	_event_rows.clear()
 	_stats_fresh = true
 	var moved := _ds(dst, GpuLayout.DS_MOVED_IN)
-	var ids := PackedInt64Array()
-	if moved > 0:
-		var recs := rd.buffer_get_data(arena.buf(_cur("BUPS")), (_ds(dst, GpuLayout.DS_START) + before) * RB, moved * RB)
-		for i in moved:
-			ids.append(GpuLayout.id_of(recs, i))
-	return {"new_row": dst, "moved": moved, "ids": ids}
+	return {"new_row": dst, "moved": moved, "ids": _ids_from(_ds(dst, GpuLayout.DS_START) + before, moved)}
+
+
+## Changes a running dish's settings from its next step: `params` may hold feed_density (units to each mm² an hour), upkeep,
+## limit and flags (DP_FLAGS bits the dish asks for, as DishSpec.flags; the core keeps its own). Its spec takes them (so `gather` keeps
+## them) and its DISHP row is written again. The cap (the slots it may fill) follows the limit but never drops below the bups it has now:
+## a limit under the count is reached by the trim, step by step, as in a dish struck with it; no bup is cut. Returns the keys it did not
+## change (bloom_density and anything else that is not the core's).
+func set_params(row: int, params: Dictionary) -> Array:
+	if not _dishes.has(row):
+		return params.keys()
+	var cd: CoreDish = _dishes[row]
+	var rest: Array = []
+	for key: String in params:
+		match key:
+			"feed_density":
+				cd.spec.feed_density = clampf(float(params[key]), 0.0, StartConditions.MAX_FEED_DENSITY)
+			"upkeep":
+				cd.spec.upkeep = float(params[key])
+			"limit":
+				cd.spec.limit = maxi(int(params[key]), 1)
+			"flags":
+				cd.spec.flags = int(params[key])
+			_:
+				rest.append(key)
+	cd.cap = maxi(cap_for(cd.spec.limit), _align(count(row)))
+	cd.flags = cd.spec.flags | (1 << GpuLayout.DPF_RUNNING) | (1 << GpuLayout.DPF_ACETATE)
+	_put_dishp(row)
+	return rest
+
+
+## The slots dish `row` may fill (DP_CAP).
+func cap_of(row: int) -> int:
+	return (_dishes[row] as CoreDish).cap if _dishes.has(row) else 0
+
+
+## A new dish's cap for a limit: the limit and 5%, and a block's worth more, in whole blocks.
+static func cap_for(limit: int) -> int:
+	return ((int(limit * 1.05) + 1024 + 255) / 256) * 256
+
+
+## Changes dish `row`'s size about its centre (Dish.resize_to, BupSim::grow and shrink, NutrientField::resize), and with `resolution` > 0
+## its grid's most cells across: the dish is read whole, changed and loaded again under the same row (its segment, clouds and husks go to
+## the pool's end, which changes no dish's run). The field is resampled onto the new grid as NutrientField::resize does (bilinear, in
+## doubles, the deposits waiting folded in first; larger: scaled so no nutrient is lost; smaller: what is past the edge goes). Smaller:
+## bups whose centre is past the new edge are gone, as deaths (their death events are returned for the family tree; they give nothing
+## back, as any bup an edit removes), one straddling the edge is moved inside, and the clouds and husks past it go. The diffusion's k and
+## passes follow the new grid. Returns {row, removed, deaths (death event bytes, GpuLayout.ED_*)}, or {} when the dish could not be loaded
+## again within the budget (then it is back as it was, and `errors` says why).
+func resize(row: int, new_radius: float, resolution := -1) -> Dictionary:
+	if not _dishes.has(row):
+		return {}
+	var cd: CoreDish = _dishes[row]
+	var res := resolution if resolution > 0 else cd.spec.resolution
+	if is_equal_approx(new_radius, cd.spec.radius) and res == cd.spec.resolution:
+		return {"row": row, "removed": 0, "deaths": PackedByteArray()}
+	var blob := gather(row)
+	var made := _resized(blob, cd.grid, new_radius, res)
+	remove_dish(row)
+	if load_dish(made["blob"], row) != row:
+		load_dish(blob, row)
+		errors.append("SimCore: a resize of dish %d to %.0f um was refused (the memory budget)" % [cd.spec.number, new_radius])
+		push_warning(errors[-1])
+		return {}
+	return {"row": row, "removed": made["removed"], "deaths": made["deaths"]}
+
+
+## `blob` with its dish `new_radius` µm across its middle and `res` cells across at most (see `resize`): {blob, removed, deaths}.
+func _resized(blob: DishBlob, old: DishGrid, new_radius: float, res: int) -> Dictionary:
+	var spec := DishSpec.from_dict(blob.spec)
+	spec.radius = new_radius
+	spec.resolution = res
+	var grid := DishGrid.make(new_radius, res, spec.patchiness, spec.patch_seed)
+	var out := DishBlob.new()
+	out.spec = spec.to_dict()
+	out.world = blob.world
+	out.host = blob.host
+	var settled := blob.conc.duplicate()
+	var cell_area := old.spacing * old.spacing
+	for c in settled.size():
+		var lo := blob.dplo.decode_u32(c * 4)
+		var hi := blob.dphi.decode_u32(c * 4)
+		if lo != 0 or hi != 0:
+			settled[c] = settled[c] + (float(hi) * 4096.0 + float(lo) * 9.5367431640625e-7) / cell_area
+	var shrinking := new_radius < old.radius
+	out.conc = _resample(settled, old, grid, shrinking)
+	out.conc2 = _resample(blob.conc2, old, grid, shrinking)
+	out.dplo = arena.zeros(grid.n * grid.n * 4)
+	out.dphi = arena.zeros(grid.n * grid.n * 4)
+	var kept := PackedByteArray()
+	var deaths := PackedByteArray()
+	var removed := 0
+	var mass_um := float(_consts["mass_um"])
+	for i in blob.count():
+		var rec := blob.records.slice(i * RB, (i + 1) * RB)
+		if shrinking:
+			var x := float(rec.decode_float(GpuLayout.R_X * 4))
+			var y := float(rec.decode_float(GpuLayout.R_Y * 4))
+			var dist := sqrt(x * x + y * y)
+			if dist > new_radius:
+				deaths.append_array(death_event(rec, spec.number))
+				removed += 1
+				continue
+			_keep_inside(rec, new_radius - 0.5 * rec.decode_float(GpuLayout.R_MASS * 4) * mass_um, dist)
+		kept.append_array(rec)
+	out.records = kept
+	out.clouds = blob.clouds
+	out.husks = blob.husks
+	var ds := blob.dstate.duplicate()
+	if shrinking:
+		var r2 := new_radius * new_radius
+		out.clouds = _within(blob.clouds, func(x: float, y: float) -> bool: return x * x + y * y <= r2)
+		out.husks = _within(blob.husks, func(x: float, y: float) -> bool: return sqrt(x * x + y * y) <= new_radius)
+		for pair in [[GpuLayout.DS_CLOUD_SLOTS, (blob.clouds.size() - out.clouds.size()) / 8], [GpuLayout.DS_HUSKS, (blob.husks.size() - out.husks.size()) / 8]]:
+			ds.encode_u32(pair[0] * 4, maxi(0, ds.decode_u32(pair[0] * 4) - pair[1]))
+	out.dstate = ds
+	return {"blob": out, "removed": removed, "deaths": deaths}
+
+
+## A field of the old grid on the new one (NutrientField::resize): each inside cell of the new grid whose centre lies over the old grid
+## takes the old values there, bilinear, in doubles; the rest are 0. Larger: scaled so the total is what it was.
+static func _resample(values: PackedFloat32Array, old: DishGrid, grid: DishGrid, shrinking: bool) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	out.resize(grid.n * grid.n)
+	var old_total := 0.0
+	for v in values:
+		old_total += v
+	old_total *= old.spacing * old.spacing
+	if old_total <= 0.0 or values.is_empty():
+		return out
+	var on := old.n
+	for y in grid.n:
+		for x in grid.n:
+			var i := y * grid.n + x
+			if grid.inside[i] == 0:
+				continue
+			var cx := (x + 0.5) * grid.spacing - grid.radius
+			var cy := (y + 0.5) * grid.spacing - grid.radius
+			var fx := (cx + old.radius) / old.spacing - 0.5
+			var fy := (cy + old.radius) / old.spacing - 0.5
+			if fx < -0.5 or fy < -0.5 or fx > on - 0.5 or fy > on - 0.5:
+				continue
+			fx = clampf(fx, 0.0, on - 1.001)
+			fy = clampf(fy, 0.0, on - 1.001)
+			var x0 := int(fx)
+			var y0 := int(fy)
+			var tx := fx - x0
+			var ty := fy - y0
+			var j := y0 * on + x0
+			var top := values[j] + (values[j + 1] - values[j]) * tx
+			var bottom := values[j + on] + (values[j + on + 1] - values[j + on]) * tx
+			out[i] = top + (bottom - top) * ty
+	if not shrinking:
+		var new_total := 0.0
+		for v in out:
+			new_total += v
+		new_total *= grid.spacing * grid.spacing
+		if new_total > 0.0:
+			var scale := PackedFloat32Array([old_total / new_total])[0]
+			for i in out.size():
+				out[i] = out[i] * scale
+	return out
+
+
+## A bup straddling the edge moved inside (BupSim::keep_inside): to `limit` from the middle along its own line, facing along the wall.
+## Where it faced straight at the wall, it turns the way its id's lowest bit says (the C++ draws it from the dish's stream).
+static func _keep_inside(rec: PackedByteArray, limit: float, dist: float) -> void:
+	if dist <= limit:
+		return
+	var x := float(rec.decode_float(GpuLayout.R_X * 4))
+	var y := float(rec.decode_float(GpuLayout.R_Y * 4))
+	var nx := x / dist
+	var ny := y / dist
+	rec.encode_float(GpuLayout.R_X * 4, nx * limit)
+	rec.encode_float(GpuLayout.R_Y * 4, ny * limit)
+	var dx := float(rec.decode_float(GpuLayout.R_DX * 4))
+	var dy := float(rec.decode_float(GpuLayout.R_DY * 4))
+	var dot := dx * nx + dy * ny
+	var ax := dx - nx * dot
+	var ay := dy - ny * dot
+	var al := sqrt(ax * ax + ay * ay)
+	if al < 0.1:
+		var sgn := 1.0 if (rec.decode_u32(GpuLayout.R_ID_LO * 4) & 1) == 0 else -1.0
+		ax = -ny * sgn
+		ay = nx * sgn
+		al = 1.0
+	rec.encode_float(GpuLayout.R_DX * 4, ax / al)
+	rec.encode_float(GpuLayout.R_DY * 4, ay / al)
+
+
+## The slots (8 floats each) whose place `keep` says yes to.
+static func _within(slots: PackedFloat32Array, keep: Callable) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	for k in slots.size() / 8:
+		if keep.call(float(slots[k * 8]), float(slots[k * 8 + 1])):
+			out.append_array(slots.slice(k * 8, k * 8 + 8))
+	return out
+
+
+## A death event (GpuLayout's ED_* words, step 0 of its batch) for a bup an edit removed in dish number `number`: it gives nothing back.
+static func death_event(rec: PackedByteArray, number: int) -> PackedByteArray:
+	var e := PackedByteArray()
+	e.resize(GpuLayout.DEATH_WORDS * 4)
+	var w := func(word: int) -> float: return rec.decode_float(word * 4)
+	e.encode_u32(GpuLayout.ED_ID_LO * 4, rec.decode_u32(GpuLayout.R_ID_LO * 4))
+	e.encode_u32(GpuLayout.ED_ID_HI * 4, rec.decode_u32(GpuLayout.R_ID_HI * 4))
+	e.encode_u32(GpuLayout.ED_STEP * 4, number << GpuLayout.EV_DISH_SHIFT)
+	e.encode_u32(GpuLayout.ED_TRAITS * 4, _traits(int(w.call(GpuLayout.R_DIVISIONS)), w.call(GpuLayout.R_REACH), w.call(GpuLayout.R_DONOR)))
+	for pair in [[GpuLayout.ED_MASS, GpuLayout.R_MASS], [GpuLayout.ED_X, GpuLayout.R_X], [GpuLayout.ED_Y, GpuLayout.R_Y], [GpuLayout.ED_ENERGY, GpuLayout.R_ENERGY],
+			[GpuLayout.ED_BIRTH_MASS, GpuLayout.R_BIRTH_MASS]]:
+		e.encode_u32(pair[0] * 4, rec.decode_u32(pair[1] * 4))
+	for g in 4:
+		e.encode_u32((GpuLayout.ED_SPEED + g) * 4, rec.decode_u32((GpuLayout.R_SPEED + g) * 4))
+	return e
+
+
+## Birth events (GpuLayout's EB_* words, step 0, no parent) for records the pool never saw born: a new dish's founders, which the family
+## tree then holds as its roots (the single-dish path's BupSim.add_bup made their records).
+static func founder_births(recs: PackedByteArray) -> PackedByteArray:
+	var out := PackedByteArray()
+	out.resize(recs.size() / RB * GpuLayout.BIRTH_WORDS * 4)
+	for i in recs.size() / RB:
+		var o := i * RB
+		var e := i * GpuLayout.BIRTH_WORDS * 4
+		var w := func(word: int) -> float: return recs.decode_float(o + word * 4)
+		out.encode_u32(e + GpuLayout.EB_ID_LO * 4, recs.decode_u32(o + GpuLayout.R_ID_LO * 4))
+		out.encode_u32(e + GpuLayout.EB_ID_HI * 4, recs.decode_u32(o + GpuLayout.R_ID_HI * 4))
+		out.encode_u32(e + GpuLayout.EB_DIVISIONS * 4, int(w.call(GpuLayout.R_DIVISIONS)))
+		out.encode_u32(e + GpuLayout.EB_TRAITS * 4, _traits(int(w.call(GpuLayout.R_MUTATIONS)), w.call(GpuLayout.R_REACH), w.call(GpuLayout.R_DONOR)))
+		for pair in [[GpuLayout.EB_SPEED, GpuLayout.R_SPEED], [GpuLayout.EB_SENSE, GpuLayout.R_SENSE], [GpuLayout.EB_METABOLISM, GpuLayout.R_METABOLISM],
+				[GpuLayout.EB_SIZE, GpuLayout.R_SIZE], [GpuLayout.EB_HUE, GpuLayout.R_HUE], [GpuLayout.EB_SAT, GpuLayout.R_SAT], [GpuLayout.EB_VAL, GpuLayout.R_VAL],
+				[GpuLayout.EB_HARM, GpuLayout.R_HARM], [GpuLayout.EB_MUTATOR, GpuLayout.R_MUTATOR]]:
+			out.encode_u32(e + pair[0] * 4, recs.decode_u32(o + pair[1] * 4))
+	return out
+
+
+## An event's traits word (the `events` kernel's): `low` (mutations in a birth, divisions in a death) in the low 20 bits, the reach word
+## above them, the F factor at bit 30.
+static func _traits(low: int, reach: float, donor: float) -> int:
+	return (low & GpuLayout.EV_LOW_MASK) | ((int(reach + 0.5) & GpuLayout.EV_REACH_MASK) << GpuLayout.EV_REACH_SHIFT) | ((1 << GpuLayout.EV_DONOR_SHIFT) if donor > 0.5 else 0)
 
 
 ## An edit of dish `row`'s field (WorldEdit.DROP, ERASE), made before the next batch. Returns false for an edit that is the dish's
@@ -457,18 +704,24 @@ func _record_step(cl: int, s: int) -> void:
 	_disp(cl, "pool_bin_sort", _groups(bins))
 	_disp(cl, "pool_clear", cg)
 	_disp(cl, "pool_puff_clear", hg)
-	_disp(cl, "pool_swim_demand", bg)
+	for kname: String in (["pool_swim", "pool_demand"] if lone_passes else ["pool_swim_demand"]):
+		_disp(cl, kname, bg)
 	_disp(cl, "pool_cells", cg)
 	_disp(cl, "pool_puff_scale", hg)
 	var buckets := GpuKernelsLife.conj_buckets(slots)
 	_disp(cl, "pool_conj_clear", maxi(bg, _groups(buckets)))
-	_disp(cl, "pool_apply_count", bg)
+	for kname: String in (["pool_apply", "pool_conj_count"] if lone_passes else ["pool_apply_count"]):
+		_disp(cl, kname, bg)
 	_disp(cl, "pool_puff_commit", hg)
 	_disp(cl, "pool_ac_cells", cg)
 	_scan(cl, "pool_conj_scan", buckets)
 	_disp(cl, "pool_conj_scatter", bg)
-	_disp(cl, "pool_ac_conj_life", bg)
-	_disp(cl, "pool_donor_life", maxi(1, bg / 16))
+	if lone_passes:
+		for kname: String in lone_order:
+			_disp(cl, kname, bg)
+	else:
+		_disp(cl, "pool_ac_conj_life", bg)
+		_disp(cl, "pool_donor_life", maxi(1, bg / 16))
 	_scan(cl, "pool_scan_s", slots)
 	_scan(cl, "pool_scan_k", slots)
 	_disp(cl, "pool_finalize", 1)
@@ -651,9 +904,12 @@ func _ensure_room(steps: int, ev: Dictionary) -> bool:
 	return false
 
 
-## The budget refused the room something needs: OVERFLOW_BUDGET is set for good and the reason kept in `errors` (and pushed as an error).
+## The budget refused the room something needs: OVERFLOW_BUDGET is set for good and the reason kept in `errors` (and pushed as an error),
+## once while the same room is refused again and again.
 func _refuse(why: String) -> void:
 	_overflow |= OVERFLOW_BUDGET
+	if not errors.is_empty() and errors[-1] == "SimCore: " + why:
+		return
 	errors.append("SimCore: " + why)
 	push_error("SimCore: " + why)
 
@@ -692,7 +948,7 @@ func _make_room(row: int, s: DishSpec, grid: DishGrid, count: int, clouds := 0, 
 	cd.bins_across = bins_across
 	cd.bins = bins
 	cd.bin_base = arena.alloc_bins(bins)
-	cd.cap = ((int(s.limit * 1.05) + 1024 + 255) / 256) * 256
+	cd.cap = cap_for(s.limit)
 	cd.flags = s.flags | (1 << GpuLayout.DPF_RUNNING) | (1 << GpuLayout.DPF_ACETATE)
 	cd.seed32 = (s.seed ^ (s.seed >> 32)) & 0xFFFFFFFF
 	_after_growth()
@@ -759,22 +1015,23 @@ func _append_slots(buf_name: String, top_word: int, slots: PackedFloat32Array, r
 	_set_wd(top_word, top + m)
 
 
-## The live clouds (or husks) of `row` in pool order, word 5 made 1.0.
-func _slots_of(row: int, buf_name: String, top_word: int, husks: bool) -> PackedFloat32Array:
-	var top := _wd(top_word)
-	var out := PackedFloat32Array()
-	if top == 0:
-		return out
-	var raw := rd.buffer_get_data(arena.buf(buf_name), 0, top * 32)
+## The live clouds and husks of `row` in pool order, word 5 made 1.0: [clouds, husks].
+func _slots_of(row: int) -> Array:
+	var got := read_parts([["PUFF", 0, _wd(GpuLayout.WD_CLOUD_SLOTS) * 32], ["HUSK", 0, _wd(GpuLayout.WD_HUSK_SLOTS) * 32]])
 	var word := GpuLayout.PUFF_ROW_BASE + row
-	var f := raw.to_float32_array()
-	for k in top:
-		if raw.decode_u32((k * 8 + 5) * 4) != word:
-			continue
-		if husks and (f[k * 8 + 6] < 0.5 or int(f[k * 8 + 4]) >= GpuKernelsHusks.HUSK_PIECES):
-			continue
-		for j in 8:
-			out.append(1.0 if j == 5 else f[k * 8 + j])
+	var out: Array = []
+	for kind in 2:
+		var raw: PackedByteArray = got[kind]
+		var f := raw.to_float32_array()
+		var mine := PackedFloat32Array()
+		for k in raw.size() / 32:
+			if raw.decode_u32((k * 8 + 5) * 4) != word:
+				continue
+			if kind == 1 and (f[k * 8 + 6] < 0.5 or int(f[k * 8 + 4]) >= GpuKernelsHusks.HUSK_PIECES):
+				continue
+			for j in 8:
+				mine.append(1.0 if j == 5 else f[k * 8 + j])
+		out.append(mine)
 	return out
 
 
@@ -841,18 +1098,70 @@ func world_word(word: int) -> int:
 
 ## The dish's records in its segment's order.
 func records(row: int) -> PackedByteArray:
-	var n := _ds(row, GpuLayout.DS_COUNT)
-	if n == 0:
-		return PackedByteArray()
-	return rd.buffer_get_data(arena.buf(_cur("BUPS")), _ds(row, GpuLayout.DS_START) * RB, n * RB)
+	return read_parts([_records_part(row)])[0]
 
 
+## The ids of the dish's bups in its segment's order (8 bytes a bup read back, not the records).
 func live_ids(row: int) -> PackedInt64Array:
-	var recs := records(row) if _dishes.has(row) else PackedByteArray()
-	var ids := PackedInt64Array()
-	for i in recs.size() / RB:
-		ids.append(GpuLayout.id_of(recs, i))
-	return ids
+	if not _dishes.has(row):
+		return PackedInt64Array()
+	return _ids_from(_ds(row, GpuLayout.DS_START), _ds(row, GpuLayout.DS_COUNT))
+
+
+## The ids of `n` records from slot `first` on: `pool_ids` writes them to CHILD's start (free between iterations), read as 64-bit ints.
+func _ids_from(first: int, n: int) -> PackedInt64Array:
+	if n <= 0:
+		return PackedInt64Array()
+	_run_list(func(cl: int) -> void: _disp(cl, "pool_ids", _groups(n), float(first), float(n)))
+	return (read_parts([["CHILD", 0, n * 8]])[0] as PackedByteArray).to_int64_array()
+
+
+## [name, offset, bytes] of the dish's records, for `read_parts`.
+func _records_part(row: int) -> Array:
+	return [_cur("BUPS"), _ds(row, GpuLayout.DS_START) * RB, _ds(row, GpuLayout.DS_COUNT) * RB] if _dishes.has(row) else ["BUPS", 0, 0]
+
+
+## The dish's glucose, acetate and waiting deposits (CONC, CONC2, DPLO, DPHI), for `read_parts`.
+func _field_parts(cd: CoreDish) -> Array:
+	var bytes := cd.grid.n * cd.grid.n * 4
+	return [["CONC", cd.base * 4, bytes], ["CONC2", cd.base * 4, bytes], ["DPLO", cd.base * 4, bytes], ["DPHI", cd.base * 4, bytes]]
+
+
+## Parts of the buffers in one read back ([buffer name, byte offset, bytes] each; the records' and block table's names are the physical
+## ones, `_cur`'s): each part is copied on the device into one scratch buffer, which is read back once. Reading a part of a big buffer
+## straight back costs about what the whole buffer does (the device's staging is the buffer's size: 1 MB of a 128 MB buffer took 5.0 ms,
+## against 0.74 ms copied out first [measured, M1 Pro]). Returns the parts' bytes in order.
+func read_parts(parts: Array) -> Array:
+	var total := 0
+	for p: Array in parts:
+		total += int(p[2])
+	var out: Array = []
+	if total == 0:
+		for p: Array in parts:
+			out.append(PackedByteArray())
+		return out
+	var scratch := _scratch
+	if total > SCRATCH_KEEP:
+		scratch = rd.storage_buffer_create(total)
+	elif total > _scratch_bytes:
+		if _scratch.is_valid():
+			rd.free_rid(_scratch)
+		_scratch_bytes = clampi(int(_scratch_bytes * 1.5), total, SCRATCH_KEEP)
+		_scratch = rd.storage_buffer_create(_scratch_bytes)
+		scratch = _scratch
+	var at := 0
+	for p: Array in parts:
+		if int(p[2]) > 0:
+			rd.buffer_copy(arena.buf(p[0]), scratch, int(p[1]), at, int(p[2]))
+		at += int(p[2])
+	var data := rd.buffer_get_data(scratch, 0, total)
+	if scratch != _scratch:
+		rd.free_rid(scratch)
+	at = 0
+	for p: Array in parts:
+		out.append(data.slice(at, at + int(p[2])))
+		at += int(p[2])
+	return out
 
 
 ## What a dish is, word for word, for comparing two runs (tests/sim/canonical_dump.gd's sections): its records; its field (the glucose,
@@ -862,22 +1171,23 @@ func canonical_dump(row: int) -> Dictionary:
 	if not _stats_fresh:
 		_refresh_stats()
 	var cd: CoreDish = _dishes[row]
-	var n2 := cd.grid.n * cd.grid.n
+	var got := read_parts(_field_parts(cd) + [_records_part(row), ["STATS", row * GpuLayout.STATS_DISH_WORDS * 4, GpuLayout.STATS_WORDS * 4]])
 	var field := PackedByteArray()
-	for nm in ["CONC", "CONC2", "DPLO", "DPHI"]:
-		field.append_array(rd.buffer_get_data(arena.buf(nm), cd.base * 4, n2 * 4))
+	for k in 4:
+		field.append_array(got[k])
 	var ds := dstate_row(row)
 	ds.encode_u32(GpuLayout.DS_START * 4, 0)
 	var ev := _events_of(row)
+	var slots := _slots_of(row)
 	return {
-		"records": records(row),
+		"records": got[4],
 		"field": field,
-		"clouds": _slots_of(row, "PUFF", GpuLayout.WD_CLOUD_SLOTS, false).to_byte_array(),
-		"husks": _slots_of(row, "HUSK", GpuLayout.WD_HUSK_SLOTS, true).to_byte_array(),
+		"clouds": (slots[0] as PackedFloat32Array).to_byte_array(),
+		"husks": (slots[1] as PackedFloat32Array).to_byte_array(),
 		"dstate": ds,
 		"births": ev[0],
 		"deaths": ev[1],
-		"stats": rd.buffer_get_data(arena.buf("STATS"), row * GpuLayout.STATS_DISH_WORDS * 4, GpuLayout.STATS_WORDS * 4),
+		"stats": got[5],
 	}
 
 
@@ -892,6 +1202,61 @@ func fraction_with_gene_at_least(row: int, gene: String, threshold: float) -> fl
 	arena.put_small("FRQ", arena.zeros(16))
 	_run_list(func(cl: int) -> void: _disp(cl, "pool_fraction", _bup_groups(), float(GpuLayout.R_SPEED + g), float(row), _float_at_least(threshold)))
 	return float(rd.buffer_get_data(arena.buf("FRQ"), 0, 4).decode_u32(0)) / n
+
+
+## The records of the tracked bups `ids` (up to GpuLayout.TRACKED) of dish `row`, searched only in its segment (a blocking read): id ->
+## its first GpuLayout.ANSWER_BYTES bytes (everything but the chemotaxis memory). An id not in the dish (dead, never there, or in another
+## dish) is left out.
+func track(row: int, ids: PackedInt64Array) -> Dictionary:
+	var out := {}
+	var n := mini(ids.size(), GpuLayout.TRACKED)
+	if n == 0 or not _dishes.has(row) or count(row) == 0:
+		return out
+	var q := arena.zeros((1 + 2 * GpuLayout.TRACKED) * 4)
+	q.encode_u32(0, n)
+	for t in n:
+		q.encode_u32((1 + 2 * t) * 4, ids[t] & 0xFFFFFFFF)
+		q.encode_u32((2 + 2 * t) * 4, (ids[t] >> 32) & 0xFFFFFFFF)
+	rd.buffer_update(arena.buf("TQ"), 0, q.size(), q)
+	var none := arena.zeros(GpuLayout.TRACKED * GpuLayout.ANSWER_BYTES)
+	for t in GpuLayout.TRACKED:
+		none.encode_u32(t * GpuLayout.ANSWER_BYTES + GpuLayout.R_ID_LO * 4, 0xFFFFFFFF)
+		none.encode_u32(t * GpuLayout.ANSWER_BYTES + GpuLayout.R_ID_HI * 4, 0xFFFFFFFF)
+	rd.buffer_update(arena.buf("TR"), 0, none.size(), none)
+	var first := _ds(row, GpuLayout.DS_START)
+	var m := count(row)
+	_run_list(func(cl: int) -> void: _disp(cl, "pool_track", _groups(m), float(first), float(m)))
+	var got: PackedByteArray = read_parts([["TR", 0, n * GpuLayout.ANSWER_BYTES]])[0]
+	for t in n:
+		var answer := got.slice(t * GpuLayout.ANSWER_BYTES, (t + 1) * GpuLayout.ANSWER_BYTES)
+		if _answer_id(answer) == ids[t]:
+			out[ids[t]] = answer
+	return out
+
+
+static func _answer_id(answer: PackedByteArray) -> int:
+	return answer.decode_u32(GpuLayout.R_ID_LO * 4) | (answer.decode_u32(GpuLayout.R_ID_HI * 4) << 32)
+
+
+## The field and the steering at points of dish `row` (`pool_probe_full`, on the field and the cloud lists of the last step): `points` holds
+## x, y, speed, sense range for each point (up to PROBES_MOST; dish-local µm). Returns for each point: the unit direction up the gradient
+## (x, y), the chance of steering up it for a bup of that speed and sense range (0.5 where there is no gradient), and the nutrient
+## concentration there (the grid's and the clouds'): 4 floats a point.
+func probe(row: int, points: PackedFloat32Array) -> PackedFloat32Array:
+	var n := mini(points.size() / 4, PROBES_MOST)
+	if n == 0 or not _dishes.has(row):
+		return PackedFloat32Array()
+	var q := points.slice(0, n * 4).to_byte_array()
+	rd.buffer_update(arena.buf("SPQ"), 0, q.size(), q)
+	_run_list(func(cl: int) -> void: _disp(cl, "pool_probe_full", 1, float(n), float(row), float(_consts["steering_window"])))
+	return (read_parts([["SPR", 0, n * 16]])[0] as PackedByteArray).to_float32_array()
+
+
+## A bup's sense range from its record's words (GpuWorld's `_sense_range`, RecordCodec's): its sense gene times the root of its size (the
+## root of its mass) over the reference size.
+func sense_range_of(answer: PackedByteArray) -> float:
+	var mass := answer.decode_float(GpuLayout.R_MASS * 4)
+	return answer.decode_float(GpuLayout.R_SENSE * 4) * sqrt(sqrt(maxf(mass, 0.0)) / float(_consts["reference_size"]))
 
 
 ## The least float (32-bit) that is not below `x`.
@@ -951,13 +1316,14 @@ func _events_of(row: int) -> Array:
 	td = mini(td, arena.event_cap)
 	var bw := GpuLayout.BIRTH_WORDS * 4
 	var dw := GpuLayout.DEATH_WORDS * 4
+	var got := read_parts([["EVB", 0, tb * bw], ["EVD", 0, td * dw]])
 	if tb > 0:
-		var eb := rd.buffer_get_data(arena.buf("EVB"), 0, tb * bw)
+		var eb: PackedByteArray = got[0]
 		for k in tb:
 			if (eb.decode_u32(k * bw + GpuLayout.EB_ID_HI * 4) >> GpuLayout.ID_HI_DISH_SHIFT) == number:
 				births.append_array(eb.slice(k * bw, (k + 1) * bw))
 	if td > 0:
-		var ed := rd.buffer_get_data(arena.buf("EVD"), 0, td * dw)
+		var ed: PackedByteArray = got[1]
 		for k in td:
 			if GpuLayout.death_dish_number(ed.decode_u32(k * dw + GpuLayout.ED_STEP * 4)) == number:
 				deaths.append_array(ed.slice(k * dw, (k + 1) * dw))

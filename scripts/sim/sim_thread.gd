@@ -50,8 +50,8 @@ var _world_dirty := {}  ## client rows whose world copy must go out with the nex
 var _plankton_seen := {}  ## client row -> the plankton count the last copy had
 var _had_bups := {}  ## client row -> true once it held a bup (an empty dish that never did is not extinct)
 var _questions := {}  ## client row -> the questions asked (see WorldClient.ask)
-var _answers := {}  ## client row -> {name: share}
-var _answered_msec := {}  ## client row -> when its fractions were last answered
+var _answers := {}  ## client row -> {fractions: {name: share}, tracked: {id: record bytes}, steer: {id: Vector3}, probes: PackedFloat32Array}
+var _answered_msec := {}  ## client row -> when its questions were last answered
 var _refused := {}  ## client row -> why, for the next snapshot
 var _view: ViewRequest = null
 var _view_dirty := false
@@ -68,8 +68,7 @@ var _texture_generation := 0
 var _births_per_step := 0.0
 var _last_timing := {}
 var _last_events: Array = [0, 0]  ## the last iteration's births and deaths
-var _scratch := RID()  ## where the reads are gathered on the device before one read back (see `_read`)
-var _scratch_bytes := 0
+var _refusal := ""  ## why the iterations are being refused (the memory budget), while they are; "" once one runs
 
 
 func _init(p_limits: PoolLimits = null, p_store: Object = null) -> void:
@@ -177,8 +176,6 @@ func _run() -> void:
 			continue
 		var busy := _iterate(k)
 		_rest(governor.rest_ms(busy))
-	if _scratch.is_valid():
-		_core.rd.free_rid(_scratch)
 	_core.release()
 	_core = null
 	_set_status("alive", false)
@@ -224,7 +221,7 @@ func _fits(k: int) -> bool:
 	for client: int in _rows:
 		var cr: int = _rows[client]
 		var n := _core.count(cr)
-		var cap := _cap_of(_core.spec_of(cr).limit)
+		var cap := _core.cap_of(cr)
 		slots += _align(mini(cap, n << mini(k, 30)))
 		for j in k:
 			events += mini(cap, n << mini(j, 30))
@@ -233,11 +230,6 @@ func _fits(k: int) -> bool:
 	if events >= SimCore.EVENT_EXACT_MOST:
 		events = maxi(SimCore.EVENT_EXACT_MOST, int(4.0 * _births_per_step * k))
 	return _core.arena.fits(maxi(slots, _core.world_word(GpuLayout.WD_SLOTS)), 0, 0, 0, 0, maxi(events, SimCore.EVENT_FLOOR))
-
-
-## SimCore's cap of a dish (DP_CAP): its limit and 5%, and a block's worth more, in whole blocks.
-static func _cap_of(limit: int) -> int:
-	return ((int(limit * 1.05) + 1024 + 255) / 256) * 256
 
 
 static func _align(v: int) -> int:
@@ -273,7 +265,12 @@ func _iterate(k: int) -> float:
 	var run_ms := (Time.get_ticks_usec() - start) / 1000.0
 	governor.advanced(ran, d, run_ms)
 	if ran == 0:
-		_error("an iteration of %d steps was refused (%s)" % [k, _core.errors[-1] if not _core.errors.is_empty() else "?"])
+		var why := "an iteration of %d steps was refused (%s)" % [k, _core.errors[-1] if not _core.errors.is_empty() else "?"]
+		if _refusal == "":
+			_error(why)  # (once while it lasts: the next iterations ask for the same room and are refused alike)
+		_refusal = why
+	else:
+		_refusal = ""
 	_iterations += 1
 	for client: int in bursts:
 		_world_dirty[client] = true
@@ -323,7 +320,8 @@ func _results(steps: int, d: float, t0: float, samples: Array) -> Dictionary:
 			"row": client, "core_row": cr, "number": _numbers[client], "count": count,
 			"clouds": ds.decode_u32(GpuLayout.DS_CLOUD_SLOTS * 4), "husks": ds.decode_u32(GpuLayout.DS_HUSKS * 4),
 			"lost": ds.decode_u32(GpuLayout.DS_BIRTHS_LOST * 4), "extinct": _had_bups.get(client, false) and count == 0,
-			"fractions": _answers.get(client, {}),
+			"fractions": (_answers.get(client, {}) as Dictionary).get("fractions", {}),
+			"answers": _answers_of(client),
 		})
 	var parts: Array = [["STATS", top * GpuLayout.STATS_DISH_WORDS * 4]]
 	if steps > 0:
@@ -356,34 +354,9 @@ func _results(steps: int, d: float, t0: float, samples: Array) -> Dictionary:
 	}
 
 
-## The first `bytes` of each buffer in `parts` ([name, bytes]), in one read: each is copied into one scratch buffer on the device and that
-## is read back once. Reading a part of a big buffer straight back costs as much as the whole buffer (the device's staging is sized to the
-## buffer: 1 MB of a 128 MB buffer took 5.0 ms, against 0.74 ms copied out first [measured, M1 Pro]).
+## The first `bytes` of each buffer in `parts` ([name, bytes]), in one right-sized read (SimCore.read_parts).
 func _read(parts: Array) -> Array:
-	var total := 0
-	for p: Array in parts:
-		total += int(p[1])
-	var out: Array = []
-	if total == 0:
-		for p: Array in parts:
-			out.append(PackedByteArray())
-		return out
-	if total > _scratch_bytes:
-		if _scratch.is_valid():
-			_core.rd.free_rid(_scratch)
-		_scratch_bytes = maxi(total, int(_scratch_bytes * 1.5))
-		_scratch = _core.rd.storage_buffer_create(_scratch_bytes)
-	var at := 0
-	for p: Array in parts:
-		if int(p[1]) > 0:
-			_core.rd.buffer_copy(_core.arena.buf(p[0]), _scratch, 0, at, int(p[1]))
-		at += int(p[1])
-	var data := _core.rd.buffer_get_data(_scratch, 0, total)
-	at = 0
-	for p: Array in parts:
-		out.append(data.slice(at, at + int(p[1])))
-		at += int(p[1])
-	return out
+	return _core.read_parts(parts.map(func(p: Array) -> Array: return [p[0], 0, p[1]]))
 
 
 func _timing() -> Dictionary:
@@ -395,6 +368,7 @@ func _timing() -> Dictionary:
 	t["delta"] = governor.delta()
 	t["iterations"] = _iterations
 	t["device"] = _status.get("device", "")
+	t["refused_iteration"] = _refusal
 	return t
 
 
@@ -485,21 +459,46 @@ func _take_handles() -> void:
 		_state.unlock()
 
 
-## The shares asked for (ask's "fractions": name -> [gene, threshold]), at most every ANSWER_MSEC a dish.
+## The questions asked (WorldClient.ask), at most every ANSWER_MSEC a dish: the shares ("fractions": name -> [gene, threshold]), the
+## tracked bups' records ("tracked": ids, up to GpuLayout.TRACKED) with the steering at each one's place for its speed and sense range,
+## and the field at points ("probes": [x, y, speed, sense range] each, dish-local).
 func _answer() -> void:
 	var now := Time.get_ticks_msec()
 	for client: int in _questions:
-		if not _rows.has(client):
+		if not _rows.has(client) or now - int(_answered_msec.get(client, -1000000)) < ANSWER_MSEC:
 			continue
-		var fr: Dictionary = (_questions[client] as Dictionary).get("fractions", {})
-		if fr.is_empty() or now - int(_answered_msec.get(client, -1000000)) < ANSWER_MSEC:
+		var q: Dictionary = _questions[client]
+		if q.is_empty():
+			_answers.erase(client)
 			continue
 		_answered_msec[client] = now
-		var out := {}
+		var cr: int = _rows[client]
+		var shares := {}
+		var fr: Dictionary = q.get("fractions", {})
 		for name: Variant in fr:
-			var q: Array = fr[name]
-			out[name] = _core.fraction_with_gene_at_least(_rows[client], String(q[0]), float(q[1]))
-		_answers[client] = out
+			var f: Array = fr[name]
+			shares[name] = _core.fraction_with_gene_at_least(cr, String(f[0]), float(f[1]))
+		var tracked := _core.track(cr, PackedInt64Array(q.get("tracked", [])))
+		var points := PackedFloat32Array()
+		var ids: Array = tracked.keys()
+		for id: int in ids:
+			var r: PackedByteArray = tracked[id]
+			points.append_array(PackedFloat32Array([r.decode_float(GpuLayout.R_X * 4), r.decode_float(GpuLayout.R_Y * 4), r.decode_float(GpuLayout.R_SPEED * 4), _core.sense_range_of(r)]))
+		var asked := PackedFloat32Array()
+		for p: Variant in q.get("probes", []):
+			asked.append_array(PackedFloat32Array(p))
+		points.append_array(asked.slice(0, (SimCore.PROBES_MOST - ids.size()) * 4))
+		var got := _core.probe(cr, points)
+		var steer := {}
+		for k in ids.size():
+			steer[ids[k]] = Vector3(got[k * 4], got[k * 4 + 1], got[k * 4 + 2])
+		_answers[client] = {"fractions": shares, "tracked": tracked, "steer": steer, "probes": got.slice(ids.size() * 4)}
+
+
+## What a snapshot answers for a dish (Snapshot.answers' row).
+func _answers_of(client: int) -> Dictionary:
+	var a: Dictionary = _answers.get(client, {})
+	return {"tracked": a.get("tracked", {}), "steer": a.get("steer", {}), "probes": a.get("probes", PackedFloat32Array())}
 
 
 static func _copy_world(w: DishWorld) -> DishWorldCopy:
@@ -537,7 +536,7 @@ func _handle(cmd: SimCommand) -> void:
 		SimCommand.KIND_PIPETTE:
 			_pipette(int(a["row"]), a["centre"], float(a["radius"]), int(a["new_row"]), cmd.reply)
 		SimCommand.KIND_RESIZE:
-			_unsupported(cmd, "resize")
+			_resize(int(a["row"]), float(a["radius"]), int(a.get("resolution", -1)), cmd.reply)
 		SimCommand.KIND_SET_PARAMS:
 			_set_params(int(a["row"]), a["params"])
 		SimCommand.KIND_EDIT_WORLD:
@@ -575,6 +574,12 @@ func _add_dish(client: int, spec: DishSpec) -> void:
 	_map(client, cr)
 	_worlds[client] = _new_world(_core.spec_of(cr), spec.world)
 	_had_bups[client] = spec.founders.size() > 0
+	if spec.founders.size() > 0:
+		var births := SimCore.founder_births(spec.founders)
+		var now := governor.clock
+		worker.push_op(func(st: Object) -> void:
+			if st != null:
+				st.apply_events(births, PackedByteArray(), now, 0.0))
 
 
 func _map(client: int, cr: int) -> void:
@@ -657,7 +662,7 @@ func _thaw(client: int, blob: DishBlob) -> void:
 		w = DishWorld.new()
 		w.load_blob(blob.world, governor.clock)
 	_worlds[client] = w
-	var live := _ids_of(blob.records)
+	var live := _core.live_ids(cr)
 	_had_bups[client] = live.size() > 0
 	var number: int = _numbers[client]
 	var data: PackedByteArray = blob.host.get("lineage", PackedByteArray())
@@ -696,16 +701,58 @@ func _pipette(client: int, centre: Vector2, radius: float, dest: int, reply: Sim
 			reply.complete({"new_row": dest, "number": number, "moved": moved, "ids": ids}))
 
 
-## What SimCore can change of a running dish: its world's bloom. Feed, upkeep, limit and flags have no SimCore call yet.
+## A running dish's settings: the bloom is its world's; the feed, upkeep, limit and flags the core's (SimCore.set_params), and the flags'
+## plankton husks the world's too.
 func _set_params(client: int, params: Dictionary) -> void:
 	if not _rows.has(client):
 		return
-	var rest := params.keys()
+	var w: DishWorld = _worlds[client]
+	var core_params := params.duplicate()
 	if params.has("bloom_density"):
-		(_worlds[client] as DishWorld).set_bloom(float(params["bloom_density"]))
-		rest.erase("bloom_density")
+		w.set_bloom(float(params["bloom_density"]))
+		core_params.erase("bloom_density")
+	if params.has("flags"):
+		w.plankton_husks = ((int(params["flags"]) >> GpuLayout.DPF_PLANKTON_HUSKS) & 1) == 1
+	var rest := _core.set_params(_rows[client], core_params)
 	if not rest.is_empty():
-		_error("set_params %s: not supported by SimCore yet" % [rest])
+		_error("set_params %s: no such setting" % [rest])
+
+
+## A running dish's new size (and, with `resolution` > 0, its grid's most cells across): SimCore.resize, its world's size and medium, and
+## when smaller its sources and plankton past the new edge gone; the bups the edge passed died, so their deaths go to the family tree in
+## event order. The reply: {row, removed}, or an error when the budget refused it (the dish is then as it was).
+func _resize(client: int, radius: float, resolution: int, reply: SimReply) -> void:
+	if not _rows.has(client):
+		if reply != null:
+			reply.complete(null, "no such dish")
+		return
+	var res := _core.resize(_rows[client], radius, resolution)
+	if res.is_empty():
+		_error(_core.errors[-1] if not _core.errors.is_empty() else "the resize was refused")
+		if reply != null:
+			reply.complete(null, _core.errors[-1] if not _core.errors.is_empty() else "the resize was refused")
+		return
+	var s := _core.spec_of(_rows[client])
+	var w: DishWorld = _worlds[client]
+	if radius < w.radius:
+		var c := w.copy()
+		var sources: Dictionary = c["sources"]
+		for id: int in sources:
+			if (sources[id]["pos"] as Vector2).length() > radius:
+				w.apply({"op": "remove_source", "id": id})
+		for p: Dictionary in c["plankton"]:
+			if (p["pos"] as Vector2).length() > radius:
+				w.apply({"op": "remove_plankton", "pos": p["pos"], "radius": 0.0})
+	w.radius = radius
+	w.set_medium(s.diffusion(), 2.0 * radius / DishGrid.cells_across(radius, s.resolution), Dish.CLOUD_HANDOVER, Dish.NUTRIENT_ENERGY)
+	_world_dirty[client] = true
+	var deaths: PackedByteArray = res["deaths"]
+	var now := governor.clock
+	worker.push_op(func(st: Object) -> void:
+		if st != null and deaths.size() > 0:
+			st.apply_events(PackedByteArray(), deaths, now, 0.0)
+		if reply != null:
+			reply.complete({"row": client, "removed": res["removed"]}))
 
 
 func _edit(client: int, e: WorldEdit) -> void:
@@ -726,7 +773,7 @@ func _save_all(reply: SimReply) -> void:
 	for client: int in clients:
 		var blob := _core.gather(_rows[client])
 		blob.world = (_worlds[client] as DishWorld).save()
-		var live := _ids_of(blob.records)
+		var live := _core.live_ids(_rows[client])
 		var number: int = _numbers[client]
 		blobs.append(blob)
 		worker.push_op(func(st: Object) -> void:
@@ -738,10 +785,3 @@ func _save_all(reply: SimReply) -> void:
 		if reply != null:
 			reply.complete(blobs))
 
-
-static func _ids_of(records: PackedByteArray) -> PackedInt64Array:
-	var ids := PackedInt64Array()
-	ids.resize(records.size() / GpuLayout.RECORD_BYTES)
-	for i in ids.size():
-		ids[i] = GpuLayout.id_of(records, i)
-	return ids

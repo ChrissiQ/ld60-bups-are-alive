@@ -1,0 +1,353 @@
+extends SceneTree
+## SimCore's calls beyond the step: right-sized reads, set_params, resize, the tracked
+## bups' records and the probes, the founders in the family tree, and a refused iteration (the memory budget). Windowed only:
+##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/core_calls_test.gd
+##
+## Expected values, written before the first run [derived unless marked]:
+## R  reads: `records`, `live_ids` (the `pool_ids` kernel) and `gather`'s field equal what a straight `buffer_get_data` of the same range
+##    gives, byte for byte, after 20 steps of a dish of 60 founders beside another dish (a read copies the bytes, nothing else).
+## P  set_params: a dish struck with spec Y (feed 0, upkeep 1, limit 1000, no flags) and given X (feed 5, upkeep 1.3, limit 400,
+##    stationary and death husks) by set_params before its first step runs as the dish struck with X: 0 differing words after 40 steps
+##    (records, field, clouds, husks, DSTATE but the start, events, stats) [derived: the same DISHP words, the cap the limit's since the
+##    count is far below it]; Y left alone differs (so the comparison can see it); giving X's own values again after 20 steps changes
+##    nothing (0 words after 40); `gather`'s spec has X's values; bloom_density is handed back as not the core's.
+## Z  resize (NutrientField::resize, BupSim::grow and shrink): growing a 3 mm dish of 200 founders (20 steps run) to 4.5 mm keeps every
+##    record byte for byte and the field's total (sum x spacing², the waiting deposits folded in) to within 1e-6 of itself, and the
+##    diffusion's passes become max(2, 2 ceil(k_total / 0.4)) of the new spacing; shrinking it to 1.5 mm removes exactly the bups whose
+##    centre lies past 1.5 mm (one death event of 56 bytes each), keeps the others (those inside 1.5 mm less half their length byte
+##    for byte), leaves none past the new edge and no cloud past it; both run on for 20 steps with WORLD.overflow 0. 300 plankton clouds are
+##    dropped over the 4.5 mm dish first (a step of their discs): the ones past 1.5 mm go with the shrink, the others stay.
+## T  track: the records of three ids of a dish are its records' first ANSWER_BYTES bytes; an id of the dish beside it and an id no bup
+##    has are left out.
+## Q  probe: in a dish with no bups and a uniform medium (32 units/mm², no patches, no feed) after one step, a point at the middle reads
+##    the uniform concentration (to 1e-5 of it) and no gradient (equal cells stay equal under diffusion, bit for bit), so the way (0, 0)
+##    and the chance 0.5.
+## F  founders: their birth events (no parent) give the family tree one record each; export_dish of the founders writes more than 8 bytes
+##    and lists them all; after 360 steps (two hours) with each iteration's events applied, every bup with a parent has a chain rooted at a
+##    founder, and there are such bups; the
+##    chain of every live bup is the same in a store that imports the dish's export (a freeze and thaw's lineage).
+## O  a refused iteration: an empty dish whose one step brings 1,500 plankton clouds (1,138 cloud slots) with the budget at the bytes the
+##    pool holds: `run` returns 0 steps, OVERFLOW_BUDGET is set, WORLD's overflow 0, the error names the cloud slots, the dish's dump is
+##    unchanged; the same with 1,500 plankton husks names the husk slots; with the budget raised again the step runs (the flag stays).
+##    Through SimThread: 8,000 founders in a pool of 16,384 slots with the budget at the bytes it holds: the iterations are refused, the
+##    thread reports it once (status errors 1, the snapshot's timing["refused_iteration"] set), and a freeze still replies with its blob.
+
+var _store_ok := ClassDB.class_exists("LineageStore")
+
+
+func _init() -> void:
+	if not SimHarness.begin(self, "core_calls_test", "(SimCore's calls)"):
+		return
+	_reads()
+	_set_params()
+	_resize()
+	_track_and_probe()
+	_founders()
+	_refused()
+	_refused_through_thread()
+	TestUtil.finish(self, "OK core_calls_test")
+
+
+static func _spec(number: int, s: Scenario) -> DishSpec:
+	var spec := DishSpec.new()
+	spec.number = number
+	spec.radius = s.radius
+	spec.resolution = s.resolution
+	spec.limit = s.limit
+	spec.seed = s.seed_value
+	spec.flags = s.dish_flags()
+	spec.nutrient_density = s.nutrient_density
+	spec.feed_density = s.feed_density
+	spec.founders = s.founder_records(number)
+	return spec
+
+
+static func _diff(core: SimCore, a: int, other: SimCore, b: int) -> String:
+	return SimHarness.diff(CanonicalDump.coerce(core.canonical_dump(a)), CanonicalDump.coerce(other.canonical_dump(b)))
+
+
+func _reads() -> void:
+	var h := SimHarness.make([Scenario.small(60, 1500.0).seed(4), Scenario.small(10, 900.0).seed(5)]).step(20)
+	var core: SimCore = h.core
+	var start := core.dstate_row(0).decode_u32(GpuLayout.DS_START * 4)
+	var n := core.count(0)
+	var direct := core.rd.buffer_get_data(core.arena.buf(core._cur("BUPS")), start * GpuLayout.RECORD_BYTES, n * GpuLayout.RECORD_BYTES)
+	TestUtil.show(n >= 60 and core.records(0) == direct, "R records of %d bups equal a straight read" % n)
+	var ids := PackedInt64Array()
+	for i in n:
+		ids.append(GpuLayout.id_of(direct, i))
+	TestUtil.show(core.live_ids(0) == ids, "R live_ids (pool_ids) equal the records' ids in order")
+	var blob := core.gather(0)
+	var cd: SimCore.CoreDish = core._dishes[0]
+	var conc := core.rd.buffer_get_data(core.arena.buf("CONC"), cd.base * 4, cd.grid.n * cd.grid.n * 4)
+	TestUtil.show(blob.conc.to_byte_array() == conc and blob.records == direct, "R gather's field and records equal straight reads")
+	core.release()
+
+
+func _set_params() -> void:
+	var y := Scenario.small(30, 2000.0).seed(11)
+	y.nutrient_density = 2.0
+	var x := y.copy()
+	x.feed_density = 5.0
+	x.limit = 400
+	x.with_flags({"stationary": true, "death_husks": true})
+	var want := {"feed_density": 5.0, "upkeep": 1.3, "limit": 400, "flags": x.dish_flags()}
+	var cx := SimCore.new()
+	var sx := _spec(1, x)
+	sx.upkeep = 1.3
+	var rx := cx.add_dish(sx)
+	var cy := SimCore.new()
+	var ry := cy.add_dish(_spec(1, y))
+	var rest := cy.set_params(ry, want.merged({"bloom_density": 2.0}))
+	TestUtil.show(rest == ["bloom_density"], "P set_params hands back what is not the core's: %s" % [rest])
+	var cz := SimCore.new()
+	var rz := cz.add_dish(_spec(1, y))
+	var cw := SimCore.new()
+	var rw := cw.add_dish(sx)
+	for c: SimCore in [cx, cy, cz, cw]:
+		c.run(20, 20.0)
+	cw.set_params(rw, want)
+	for c: SimCore in [cx, cy, cz, cw]:
+		c.run(20, 20.0)
+	var line := _diff(cx, rx, cy, ry)
+	TestUtil.show(line == "", "P a dish given X by set_params runs as one struck with X%s" % (": " + line if line != "" else ""))
+	TestUtil.show(_diff(cx, rx, cz, rz) != "", "P the dish left with Y differs from X")
+	line = _diff(cx, rx, cw, rw)
+	TestUtil.show(line == "", "P giving X's own values again changes nothing%s" % (": " + line if line != "" else ""))
+	var spec := DishSpec.from_dict(cy.gather(ry).spec)
+	TestUtil.show(spec.feed_density == 5.0 and spec.upkeep == 1.3 and spec.limit == 400 and spec.flags == x.dish_flags(), "P gather keeps the new settings")
+	TestUtil.show(cx.overflow() == 0 and cy.overflow() == 0, "P no overflow")
+	for c: SimCore in [cx, cy, cz, cw]:
+		c.release()
+
+
+func _resize() -> void:
+	var s := Scenario.small(200, 3000.0).seed(21)
+	s.bloom_density = 3.0
+	var h := SimHarness.make([s]).step(20)
+	var core: SimCore = h.core
+	var before := core.gather(0)
+	var cd: SimCore.CoreDish = core._dishes[0]
+	var total_before := _total(before, cd.grid)
+	var res := core.resize(0, 4500.0)
+	var grown := core.gather(0)
+	cd = core._dishes[0]
+	TestUtil.show(res.get("removed", -1) == 0 and grown.records == before.records, "Z growing keeps all %d records byte for byte" % before.count())
+	var total_after := _total(grown, cd.grid)
+	TestUtil.show(absf(total_after - total_before) <= 1e-6 * total_before, "Z growing keeps the field's total: %.6f -> %.6f" % [total_before, total_after])
+	var k_total := Biology.WATER_DIFFUSION / Biology.MEDIUM_THICKNESS * 20.0 / (cd.grid.spacing * cd.grid.spacing)
+	TestUtil.show(cd.grid.radius == 4500.0 and cd.iterations == maxi(2, 2 * ceili(k_total / 0.4)), "Z the diffusion's passes follow the new grid (%d at %.1f um)" % [cd.iterations, cd.grid.spacing])
+	h.scenarios[0].radius = 4500.0
+	h._worlds[0].radius = 4500.0
+	h.step(20)
+	TestUtil.show(core.overflow() == 0 and h.invariants().is_empty(), "Z the grown dish runs on: %s" % [h.invariants()])
+	var plan := IterationPlan.new()
+	var discs := PackedFloat64Array()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 22
+	for k in 300:
+		var a := rng.randf() * TAU
+		var r := 4000.0 * sqrt(rng.randf())
+		discs.append_array(PackedFloat64Array([1.0, r * cos(a), r * sin(a), 50.0, 20.0]))
+	plan.events = {0: {"discs": discs, "husks": PackedFloat64Array(), "puffs": PackedFloat64Array(), "deposits": PackedFloat64Array()}}
+	core.run(1, 20.0, plan)
+	var big := core.gather(0)
+	var clouds_inside := 0
+	for k in big.clouds.size() / 8:
+		if float(big.clouds[k * 8]) * big.clouds[k * 8] + float(big.clouds[k * 8 + 1]) * big.clouds[k * 8 + 1] <= 1500.0 * 1500.0:
+			clouds_inside += 1
+	var outside := 0
+	var mass_um := float(SimConstants.build()["mass_um"])
+	var kept_same := {}
+	for i in big.count():
+		var o := i * GpuLayout.RECORD_BYTES
+		var at := Vector2(big.records.decode_float(o + GpuLayout.R_X * 4), big.records.decode_float(o + GpuLayout.R_Y * 4))
+		var d := sqrt(float(at.x) * at.x + float(at.y) * at.y)
+		if d > 1500.0:
+			outside += 1
+		elif d <= 1500.0 - 0.5 * big.records.decode_float(o + GpuLayout.R_MASS * 4) * mass_um:
+			kept_same[GpuLayout.id_of(big.records, i)] = big.records.slice(o, o + GpuLayout.RECORD_BYTES)
+	res = core.resize(0, 1500.0)
+	var small := core.gather(0)
+	TestUtil.show(outside > 0 and res.get("removed", -1) == outside and small.count() == big.count() - outside, "Z shrinking removes the %d bups past the new edge (%d left)" % [outside, small.count()])
+	TestUtil.show((res["deaths"] as PackedByteArray).size() == outside * GpuLayout.DEATH_WORDS * 4, "Z one death event each")
+	var same := 0
+	var past := 0
+	for i in small.count():
+		var o := i * GpuLayout.RECORD_BYTES
+		var id := GpuLayout.id_of(small.records, i)
+		if kept_same.has(id) and kept_same[id] == small.records.slice(o, o + GpuLayout.RECORD_BYTES):
+			same += 1
+		if Vector2(small.records.decode_float(o + GpuLayout.R_X * 4), small.records.decode_float(o + GpuLayout.R_Y * 4)).length() > 1500.0:
+			past += 1
+	TestUtil.show(same == kept_same.size() and past == 0, "Z the %d bups well inside are unchanged (%d), none past the edge (%d)" % [kept_same.size(), same, past])
+	var clouds_past := 0
+	for k in small.clouds.size() / 8:
+		if Vector2(small.clouds[k * 8], small.clouds[k * 8 + 1]).length() > 1500.0:
+			clouds_past += 1
+	TestUtil.show(big.clouds.size() / 8 > clouds_inside and clouds_inside > 0 and clouds_past == 0 and small.clouds.size() / 8 == clouds_inside, "Z the clouds past the edge go (%d of %d before), the %d inside stay (%d)" % [big.clouds.size() / 8 - clouds_inside, big.clouds.size() / 8, clouds_inside, small.clouds.size() / 8])
+	h.scenarios[0].radius = 1500.0
+	h._worlds[0].radius = 1500.0
+	h.step(20)
+	TestUtil.show(core.overflow() == 0 and h.invariants().is_empty(), "Z the shrunk dish runs on: %s" % [h.invariants()])
+	core.release()
+
+
+static func _total(blob: DishBlob, grid: DishGrid) -> float:
+	var sum := 0.0
+	for c in blob.conc.size():
+		var lo := blob.dplo.decode_u32(c * 4)
+		var hi := blob.dphi.decode_u32(c * 4)
+		sum += blob.conc[c] + (float(hi) * 4096.0 + float(lo) * 9.5367431640625e-7) / (grid.spacing * grid.spacing)
+	return sum * grid.spacing * grid.spacing
+
+
+func _track_and_probe() -> void:
+	var h := SimHarness.make([Scenario.small(80, 1500.0).seed(31), Scenario.small(20, 1500.0).seed(32)]).step(10)
+	var core: SimCore = h.core
+	var recs := core.records(0)
+	var ids := PackedInt64Array([GpuLayout.id_of(recs, 0), GpuLayout.id_of(recs, 5), GpuLayout.id_of(recs, 9), core.live_ids(1)[0], GpuLayout.make_id(77, 5)])
+	var got := core.track(0, ids)
+	var right := got.size() == 3
+	for k in 3:
+		var i: int = [0, 5, 9][k]
+		right = right and got.get(ids[k], PackedByteArray()) == recs.slice(i * GpuLayout.RECORD_BYTES, i * GpuLayout.RECORD_BYTES + GpuLayout.ANSWER_BYTES)
+	TestUtil.show(right, "T track finds the three bups of its dish, record for record, and neither the other dish's nor a missing id (%d found)" % got.size())
+	core.release()
+	var c := SimCore.new()
+	var spec := DishSpec.new()
+	spec.number = 1
+	spec.radius = 1500.0
+	spec.seed = 3
+	spec.patchiness = 0.0
+	var row := c.add_dish(spec)
+	c.run(1, 20.0)
+	var p := c.probe(row, PackedFloat32Array([0.0, 0.0, 20.0, 1.0]))
+	var uniform := 32.0 * Dish.CONCENTRATION_PER_DENSITY
+	TestUtil.show(p.size() == 4 and absf(p[3] - uniform) <= 1e-5 * uniform and p[0] == 0.0 and p[1] == 0.0 and p[2] == 0.5, "Q a probe at the middle of a uniform medium reads %.4f (want %.4f), way (%.3f, %.3f), chance %.3f" % [p[3] if p.size() > 3 else -1.0, uniform, p[0] if p.size() > 0 else -1.0, p[1] if p.size() > 1 else -1.0, p[2] if p.size() > 2 else -1.0])
+	c.release()
+
+
+func _founders() -> void:
+	if not _store_ok:
+		print("SKIP core_calls_test founders: no LineageStore in this build")
+		return
+	var s := Scenario.small(20, 1500.0).seed(41)
+	var spec := _spec(1, s)
+	var store: Object = ClassDB.instantiate("LineageStore")
+	store.set_constants(Cell.RESERVE_PER_MASS, Cell.ADD_MASS_FACTOR)
+	store.apply_events(SimCore.founder_births(spec.founders), PackedByteArray(), 0.0, 0.0)
+	var founders := {}
+	for i in 20:
+		founders[GpuLayout.id_of(spec.founders, i)] = true
+	TestUtil.show(store.record_count() == 20, "F the founders' births give the tree %d records" % store.record_count())
+	var core := SimCore.new()
+	var row := core.add_dish(spec)
+	TestUtil.show(store.export_dish(1, core.live_ids(row))["bytes"].size() > 8, "F the export of the founders is more than 8 bytes")
+	var t := 0.0
+	for k in 18:
+		core.run(20, 20.0)
+		var d := core.canonical_dump(row)
+		store.apply_events(d["births"], d["deaths"], t + 20.0, 20.0)
+		t += 400.0
+	var recs := core.records(row)
+	var rooted := 0
+	var with_parents := 0
+	for i in recs.size() / GpuLayout.RECORD_BYTES:
+		var chain: PackedInt64Array = store.chain(GpuLayout.id_of(recs, i))
+		if chain.size() >= 2:
+			with_parents += 1
+			if founders.has(chain[0]):
+				rooted += 1
+	TestUtil.show(with_parents > 0 and rooted == with_parents, "F every chain of a bup with a parent is rooted at a founder (%d of %d)" % [rooted, with_parents])
+	var live := core.live_ids(row)
+	var ex: Dictionary = store.export_dish(1, live)
+	var other: Object = ClassDB.instantiate("LineageStore")
+	other.set_constants(Cell.RESERVE_PER_MASS, Cell.ADD_MASS_FACTOR)
+	other.import_bytes(ex["bytes"], PackedInt64Array(), live, 1)
+	var same := 0
+	for id: int in live:
+		if other.chain(id) == store.chain(id) and store.chain(id).size() > 0:
+			same += 1
+	TestUtil.show(same == live.size(), "F after an export and import every live bup's chain is the same (%d of %d)" % [same, live.size()])
+	core.release()
+
+
+func _refused() -> void:
+	for kind: String in ["discs", "husks"]:
+		var limits := PoolLimits.new()
+		limits.cloud_slots = 256
+		limits.husk_slots = 256
+		var core := SimCore.new(limits)
+		var spec := DishSpec.new()
+		spec.number = 1
+		spec.radius = 3000.0
+		spec.seed = 5
+		if kind == "husks":
+			spec.flags = 1 << GpuLayout.DPF_PLANKTON_HUSKS
+		var row := core.add_dish(spec)
+		core.run(1, 20.0)
+		limits.memory_budget_bytes = core.arena.bytes_now()
+		var rows := PackedFloat64Array()
+		var rng := RandomNumberGenerator.new()
+		rng.seed = 9
+		for k in 1500:
+			var a := rng.randf() * TAU
+			var r := 2500.0 * sqrt(rng.randf())
+			if kind == "discs":
+				rows.append_array(PackedFloat64Array([1.0, r * cos(a), r * sin(a), 50.0, 20.0]))
+			else:
+				rows.append_array(PackedFloat64Array([1.0, r * cos(a), r * sin(a), 50.0]))
+		var plan := IterationPlan.new()
+		plan.events = {row: {"discs": rows if kind == "discs" else PackedFloat64Array(), "husks": rows if kind == "husks" else PackedFloat64Array(),
+			"puffs": PackedFloat64Array(), "deposits": PackedFloat64Array()}}
+		var before := CanonicalDump.coerce(core.canonical_dump(row))
+		var res := core.run(1, 20.0, plan)
+		var want := "cloud slots" if kind == "discs" else "husk slots"
+		var err: String = core.errors[-1] if not core.errors.is_empty() else ""
+		TestUtil.show(int(res["steps"]) == 0 and (core.overflow() & SimCore.OVERFLOW_BUDGET) != 0 and (core.overflow() & SimCore.OVERFLOW_DEVICE) == 0 and core.world_word(GpuLayout.WD_OVERFLOW) == 0,
+			"O %s: the step is refused, OVERFLOW_BUDGET set, no device overflow (steps %d, overflow %d)" % [kind, int(res["steps"]), core.overflow()])
+		TestUtil.show(err.contains(want), "O %s: the error names the %s: %s" % [kind, want, err])
+		var line := SimHarness.diff(before, CanonicalDump.coerce(core.canonical_dump(row)))
+		TestUtil.show(line == "", "O %s: nothing ran (the dump is unchanged)%s" % [kind, ": " + line if line != "" else ""])
+		limits.memory_budget_bytes = 6 * 1024 * 1024 * 1024
+		res = core.run(1, 20.0, plan)
+		TestUtil.show(int(res["steps"]) == 1 and core.overflow() == SimCore.OVERFLOW_BUDGET, "O %s: with room again the step runs; the flag stays (overflow %d)" % [kind, core.overflow()])
+		core.release()
+
+
+func _refused_through_thread() -> void:
+	var thread := SimThread.new(PoolLimits.new(), null)
+	thread.start()
+	var until := Time.get_ticks_msec() + 20000
+	while not thread.status()["ready"] and Time.get_ticks_msec() < until:
+		OS.delay_msec(10)
+	var s := Scenario.small(8000, 3000.0).seed(51)
+	s.limit = 1000000
+	thread.submit(SimCommand.new(SimCommand.KIND_ADD_DISH, {"row": 0, "spec": _spec(1, s)}))
+	var squeeze := SimReply.new()
+	thread.submit(SimCommand.new(SimThread.KIND_INSPECT, {"call": func(core: SimCore, _rows: Dictionary) -> int:
+		core.limits.memory_budget_bytes = core.arena.bytes_now()
+		return core.arena.bytes_now()}, squeeze))
+	_wait(squeeze)
+	for f in 30:
+		thread.submit(SimCommand.new(SimCommand.KIND_SET_TIME, {"speed": 600.0, "paused": false, "real_dt": 1.0 / 60.0}))
+		OS.delay_msec(16)
+	OS.delay_msec(300)
+	var errors: Array = thread.status()["errors"]
+	var refusals := errors.filter(func(e: String) -> bool: return e.contains("refused"))
+	var snap: Snapshot = thread.worker.latest()
+	TestUtil.show(refusals.size() == 1, "O through SimThread the refusal is reported once (%d errors: %s)" % [errors.size(), errors])
+	TestUtil.show(snap != null and String(snap.timing.get("refused_iteration", "")).contains("refused"), "O the snapshot says the iterations are refused")
+	var freeze := SimReply.new()
+	thread.submit(SimCommand.new(SimCommand.KIND_FREEZE, {"row": 0}, freeze))
+	_wait(freeze)
+	TestUtil.show(freeze.is_done() and freeze.error() == "" and freeze.value() is DishBlob and (freeze.value() as DishBlob).count() == 8000, "O a freeze still replies with the dish's blob (%s)" % [freeze.error()])
+	thread.stop()
+	TestUtil.show(not thread.status()["alive"], "O the thread stops and joins")
+
+
+static func _wait(reply: SimReply) -> void:
+	var until := Time.get_ticks_msec() + 20000
+	while not reply.is_done() and Time.get_ticks_msec() < until:
+		OS.delay_msec(5)

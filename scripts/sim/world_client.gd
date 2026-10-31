@@ -65,11 +65,13 @@ func pipette(row: int, centre: Vector2, radius: float) -> SimReply:
 	return _send(SimCommand.KIND_PIPETTE, {"row": row, "centre": centre, "radius": radius, "new_row": dest}, true)
 
 
-func resize(row: int, radius: float) -> SimReply:
-	return _send(SimCommand.KIND_RESIZE, {"row": row, "radius": radius}, true)
+## The dish's new size about its centre (µm), and with `resolution` > 0 its grid's most cells across (SimCore.resize). The reply's value:
+## {row, removed (the bups past a smaller dish's edge, which died)}; null with an error when the memory budget refused it.
+func resize(row: int, radius: float, resolution := -1) -> SimReply:
+	return _send(SimCommand.KIND_RESIZE, {"row": row, "radius": radius, "resolution": resolution}, true)
 
 
-## Changes a running dish's settings (`params`: bloom_density; feed_density, upkeep, limit and flags once SimCore can change them).
+## Changes a running dish's settings from its next step (`params`: bloom_density, feed_density, upkeep, limit, flags: DishSpec's names).
 func set_params(row: int, params: Dictionary) -> void:
 	_send(SimCommand.KIND_SET_PARAMS, {"row": row, "params": params.duplicate()})
 
@@ -105,8 +107,10 @@ func set_view(row: int, view: ViewRequest) -> void:
 	_send(SimCommand.KIND_SET_VIEW, {"row": row, "view": v})
 
 
-## The questions about dish `row`, kept until asked again: {"fractions": {name: [gene, threshold]}} (the share of bups whose gene is at
-## least the threshold, in the dish's DishState.fractions under the same name).
+## The questions about dish `row`, kept until asked again and answered every tenth of a second or so: {"fractions": {name: [gene,
+## threshold]}} (the share of bups whose gene is at least the threshold, in the dish's DishState.fractions under the same name), "tracked":
+## ids (up to GpuLayout.TRACKED: their records and the steering at each, in the snapshot's answers), "probes": [x, y, speed, sense range]
+## points (dish-local: the way up the gradient there, the chance of steering up it, the concentration).
 func ask(row: int, questions: Dictionary) -> void:
 	_send(SimCommand.KIND_ASK, {"row": row, "questions": questions.duplicate(true)})
 

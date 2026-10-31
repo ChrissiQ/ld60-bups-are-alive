@@ -166,7 +166,7 @@ func _iteration(item: Dictionary) -> void:
 		ds.cloud_count = r["clouds"]
 		ds.husk_count = r["husks"]
 		snap.dishes[row] = ds
-		snap.answers[row] = {"tracked": {}, "probes": [], "steer": {}}
+		snap.answers[row] = r.get("answers", {"tracked": {}, "steer": {}, "probes": PackedFloat32Array()})
 		for s: Array in item["samples"]:
 			if not _history.has(row):
 				_history[row] = []

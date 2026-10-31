@@ -2,7 +2,8 @@ class_name GpuKernelsCore
 extends RefCounted
 ## The pooled world's host operations as kernels (SimCore, scripts/sim/sim_core.gd; see gpu/kernels.gd for how a kernel is made): a
 ## dish's clouds and husks leaving with it, the field edits (a drop of nutrient, the eraser), the check that a step's next layout fits the
-## record slots, the goals' question, and the copies of the published pictures into the shared textures.
+## record slots, the goals' question, the ids of a run of records, the tracked bups' records, and the copies of the published pictures into
+## the shared textures.
 
 ## The clouds and husks of dish row `pcs.pa` leave the pool (its row is about to be another dish's): their slots become empty, and the
 ## next compaction or cull drops them.
@@ -78,6 +79,34 @@ void f(uint i, uint d, uint l) {
 BUP_LOOP(f)
 """
 
+## The ids of `pcs.pb` records from slot `pcs.pa` on, as (low word, high word) pairs from CHILD's start: what SimCore reads for a dish's
+## live ids and a pipette's moved ids (8 bytes a bup instead of its record). CHILD holds a step's newborns only within the step, so between
+## iterations it is free.
+const K_IDS := """
+void f(uint k) {
+	uint b = (uint(pcs.pa) + k) * RECORD_WORDS;
+	CHILD_U[k * 2u] = BUPS_U[b + R_ID_LO];
+	CHILD_U[k * 2u + 1u] = BUPS_U[b + R_ID_HI];
+}
+GRID_LOOP(f, uint(pcs.pb))
+"""
+
+## The tracked bups' records among `pcs.pb` records from slot `pcs.pa` on (one dish's segment, so only that dish's bups are found). TQ: how
+## many ids (up to TRACKED), then each id's low and high word. The bup with an id copies its first ANSWER_WORDS words into TR (ANSWER_WORDS
+## words an id, in TQ's order); the host fills TR's id words with 0xFFFFFFFF first, and they stay so where the id is not found.
+const K_TRACK := """
+void f(uint k) {
+	uint n = min(TQ[0], TRACKED);
+	uint b = (uint(pcs.pa) + k) * RECORD_WORDS, lo = BUPS_U[b + R_ID_LO], hi = BUPS_U[b + R_ID_HI];
+	for (uint t = 0u; t < n; t++) {
+		if (TQ[1u + 2u * t] == lo && TQ[2u + 2u * t] == hi) {
+			for (uint w = 0u; w < ANSWER_WORDS; w++) TR[t * ANSWER_WORDS + w] = BUPS_U[b + w];
+		}
+	}
+}
+GRID_LOOP(f, uint(pcs.pb))
+"""
+
 ## The published pictures into the shared textures (after the sync; the storage buffers are laid out as the textures): a thread a texel.
 ## `pcs.pa` is the texture's width, `pcs.pb` the texels written.
 const K_COPY_PAYLOAD := """
@@ -116,6 +145,8 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "pool_erase_cells", K_ERASE_CELLS, ["WORLD", "CELLDISH", "DISHP", "INSIDE", "CONC", "EDA"], "", 64, t)
 	GpuKernels.add(out, "pool_erase_puffs", K_ERASE_PUFFS, ["WORLD", "PUFF", "EDA"], "", 64, t)
 	GpuKernels.add(out, "pool_fraction", K_FRACTION, ["WORLD", "BLKDISH", "DSTATE", "BUPS", "FRQ"], "", 64, {"FRQ": "uint"})
+	GpuKernels.add(out, "pool_ids", K_IDS, ["BUPS_U", "CHILD_U"])
+	GpuKernels.add(out, "pool_track", K_TRACK, ["BUPS_U", "TQ", "TR"], "", 64, {"TQ": "uint", "TR": "uint"})
 	GpuKernels.add(out, "pool_slot_check", K_SLOT_CHECK, ["WORLD", "DNEXT", "DSTATE"], dn, 64, GpuKernelsLife.POOL_TYPES)
 	GpuKernels.add(out, "pool_copy_payload", K_COPY_PAYLOAD, ["PAYLOAD", "IDTEX"], "", 64, GpuKernelsDraw.POOL_DRAW_TYPES)
 	GpuKernels.add(out, "pool_copy_rgba8", K_COPY_RGBA8, ["PIX"], "", 64, t)
