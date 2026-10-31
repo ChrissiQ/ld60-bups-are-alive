@@ -8,8 +8,8 @@ extends SceneTree
 ## Expected values, written before the first run:
 ## - no deadlock: a new snapshot at least every WATCHDOG_S = 10 s throughout [derived: an iteration at 2M is one step of about 20 ms
 ##   [measured] plus its readback and publish, so 10 s is hundreds of iterations]; else the test fails at once and quits.
-## - every CYCLE_S = 20 s: a pipette of the small dish (a retarget into a new dish), a freeze of that new dish (its blob holds the bups
-##   moved), a thaw of the blob, a trash of the thawed dish; an edit of each kind on the small dish (a drop, a source placed, moved off,
+## - every CYCLE_S = 20 s: a pipette of the small dish (a retarget into a new dish), a freeze of that new dish (its blob is that dish,
+##   by number: its count has moved on from the bups moved, as the dish ran in between), a thaw of the blob, a trash of the thawed dish; an edit of each kind on the small dish (a drop, a source placed, moved off,
 ##   removed, plankton placed and removed, an erase); a question (a fraction); the main view moved between the dishes. Every
 ##   SAVE_EVERY_S = 180 s a save of every dish. Each reply arrives within REPLY_S = 10 s [derived: a reply waits at most for the iteration
 ##   in flight (about 20 ms) and, for a freeze or a save, a whole read of the dish (a 2M save reads about 230 MB, under a second)].
@@ -143,9 +143,9 @@ func _cycle(n: int, big: int, small: int, thawed: int) -> int:
 		if not (v is Dictionary):
 			return false
 		var fr := _w.freeze(int(v["new_row"]))
-		var moved := int(v["moved"])
+		var number := int(v["number"])
 		_expect("freeze", fr, func(b: Variant) -> bool:
-			if not (b is DishBlob) or (b as DishBlob).count() != moved:
+			if not (b is DishBlob) or (b as DishBlob).number() != number:
 				return false
 			_thawed_rows.append(_w.thaw(b))
 			return true)

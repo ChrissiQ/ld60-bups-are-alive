@@ -67,6 +67,9 @@ var _texture_rids := {}  ## kind -> the RIDs the handles were taken from
 var _texture_generation := 0
 var _births_per_step := 0.0
 var _last_timing := {}
+var _last_events: Array = [0, 0]  ## the last iteration's births and deaths
+var _scratch := RID()  ## where the reads are gathered on the device before one read back (see `_read`)
+var _scratch_bytes := 0
 
 
 func _init(p_limits: PoolLimits = null, p_store: Object = null) -> void:
@@ -174,6 +177,8 @@ func _run() -> void:
 			continue
 		var busy := _iterate(k)
 		_rest(governor.rest_ms(busy))
+	if _scratch.is_valid():
+		_core.rd.free_rid(_scratch)
 	_core.release()
 	_core = null
 	_set_status("alive", false)
@@ -280,7 +285,8 @@ func _iterate(k: int) -> float:
 	_last_timing = {
 		"iteration_ms": busy, "steps": ran, "step_ms_ema": governor.step_ms_ema, "duty": governor.duty,
 		"sync_ms": float(res.get("gpu_usec", 0)) / 1000.0, "record_ms": float(res.get("record_usec", 0)) / 1000.0,
-		"publish_ms": item["publish_ms"], "readback_ms": item["readback_ms"], "rest_ms": governor.rest_ms(busy),
+		"publish_ms": item["publish_ms"], "readback_ms": item["readback_ms"], "rest_ms": governor.rest_ms(busy), "run_ms": run_ms,
+		"births": _last_events[0], "deaths": _last_events[1],
 	}
 	item["timing"] = _timing()
 	worker.push_iteration(item)
@@ -319,18 +325,17 @@ func _results(steps: int, d: float, t0: float, samples: Array) -> Dictionary:
 			"lost": ds.decode_u32(GpuLayout.DS_BIRTHS_LOST * 4), "extinct": _had_bups.get(client, false) and count == 0,
 			"fractions": _answers.get(client, {}),
 		})
-	var eb := PackedByteArray()
-	var ed := PackedByteArray()
+	var parts: Array = [["STATS", top * GpuLayout.STATS_DISH_WORDS * 4]]
 	if steps > 0:
 		_births_per_step = maxf(float(births) / steps, _births_per_step * 0.9)
 		var cap := _core.arena.event_cap
-		if mini(births, cap) > 0:
-			eb = _core.rd.buffer_get_data(_core.arena.buf("EVB"), 0, mini(births, cap) * GpuLayout.BIRTH_WORDS * 4)
-		if mini(deaths, cap) > 0:
-			ed = _core.rd.buffer_get_data(_core.arena.buf("EVD"), 0, mini(deaths, cap) * GpuLayout.DEATH_WORDS * 4)
-	var stats := PackedByteArray()
-	if top > 0:
-		stats = _core.rd.buffer_get_data(_core.arena.buf("STATS"), 0, top * GpuLayout.STATS_DISH_WORDS * 4)
+		parts.append(["EVB", mini(births, cap) * GpuLayout.BIRTH_WORDS * 4])
+		parts.append(["EVD", mini(deaths, cap) * GpuLayout.DEATH_WORDS * 4])
+	var got := _read(parts)
+	var stats: PackedByteArray = got[0]
+	var eb: PackedByteArray = got[1] if steps > 0 else PackedByteArray()
+	var ed: PackedByteArray = got[2] if steps > 0 else PackedByteArray()
+	_last_events = [births if steps > 0 else 0, deaths if steps > 0 else 0]
 	var readback_ms := (Time.get_ticks_usec() - t_read) / 1000.0
 	var worlds := {}
 	for client: int in _rows:
@@ -349,6 +354,36 @@ func _results(steps: int, d: float, t0: float, samples: Array) -> Dictionary:
 		"births": eb, "deaths": ed, "rows": rows, "stats": stats, "samples": samples, "worlds": worlds, "refused": refused,
 		"payload": _payload, "field_view": _field_view, "readback_ms": readback_ms, "publish_ms": (Time.get_ticks_usec() - t_pub) / 1000.0,
 	}
+
+
+## The first `bytes` of each buffer in `parts` ([name, bytes]), in one read: each is copied into one scratch buffer on the device and that
+## is read back once. Reading a part of a big buffer straight back costs as much as the whole buffer (the device's staging is sized to the
+## buffer: 1 MB of a 128 MB buffer took 5.0 ms, against 0.74 ms copied out first [measured, M1 Pro]).
+func _read(parts: Array) -> Array:
+	var total := 0
+	for p: Array in parts:
+		total += int(p[1])
+	var out: Array = []
+	if total == 0:
+		for p: Array in parts:
+			out.append(PackedByteArray())
+		return out
+	if total > _scratch_bytes:
+		if _scratch.is_valid():
+			_core.rd.free_rid(_scratch)
+		_scratch_bytes = maxi(total, int(_scratch_bytes * 1.5))
+		_scratch = _core.rd.storage_buffer_create(_scratch_bytes)
+	var at := 0
+	for p: Array in parts:
+		if int(p[1]) > 0:
+			_core.rd.buffer_copy(_core.arena.buf(p[0]), _scratch, 0, at, int(p[1]))
+		at += int(p[1])
+	var data := _core.rd.buffer_get_data(_scratch, 0, total)
+	at = 0
+	for p: Array in parts:
+		out.append(data.slice(at, at + int(p[1])))
+		at += int(p[1])
+	return out
 
 
 func _timing() -> Dictionary:

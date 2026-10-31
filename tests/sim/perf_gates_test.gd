@@ -29,7 +29,8 @@ extends SceneTree
 ##     [measured baseline, a pixel hash].
 ##   The interface column (frame p95 and worst on the game screen) is measured in the interface gate on the final tree; the main frames printed here are
 ##   this script's (no game screen), for reference only. The 1M pipette and gates C, D and the 1,000-dish interface stay stubs.
-##   Args (windowed): `-- gate=E|F|G|x1|all` (default all; E alone takes about 11 minutes).
+##   Args (windowed): `-- gate=E|F|G|x1|all` (default all; E alone takes about 11 minutes); `seconds=N` shortens E's window (a diagnosis,
+##   not the gate).
 
 const BASELINE := "res://tools/gpu/baseline/perf_pre_pool.json"
 const DISPLAY_FRAME_MS := 8.333  ## ms [measured]: a frame of the 120 Hz display of the one machine the baseline was measured on (`environment.machine` in BASELINE)
@@ -285,6 +286,7 @@ func _measure(label: String, spec: DishSpec, speed: float, seconds: float, edits
 ## Paused, `n` sources placed one at a time: the frames from the call to the first snapshot whose copy of the dish's world has it.
 func _edit_latency(w: WorldClient, row: int, n: int) -> Array:
 	var got: Array = []
+	_seen_worlds.clear()
 	w.set_time(1.0, true, 0.0)
 	for i in 10:
 		await process_frame
@@ -365,6 +367,7 @@ func _print_run(m: Dictionary) -> void:
 	var t: Dictionary = m.get("timing", {})
 	if m.has("note"):
 		print("GATE_RUN %s: %s" % [m["label"], m["note"]])
+	print("GATE_RUN %s: timing %s" % [m["label"], m.get("timing", {})])
 	print("GATE_RUN %s: setup %.1f s; %s; last iteration: %s steps, %.2f ms busy, step ema %.3f ms, duty %.2f, publish %.2f ms, readback %.2f ms, lineage %.2f ms; dropped %.0f s in all; overflow %s; status %s" % [
 		m["label"], float(m.get("setup_s", 0.0)), frame_figures(m.get("frames", [])), t.get("steps"), float(t.get("iteration_ms", 0.0)),
 		float(t.get("step_ms_ema", 0.0)), float(t.get("duty", 0.0)), float(t.get("publish_ms", 0.0)), float(t.get("readback_ms", 0.0)),
@@ -372,7 +375,11 @@ func _print_run(m: Dictionary) -> void:
 
 
 func _gate_e_speed(baseline: Dictionary) -> void:
-	var m := await _measure("E", filled_spec(100000, DISH_45MM), 10000.0, E_SECONDS)
+	var e_seconds := E_SECONDS
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("seconds="):
+			e_seconds = float(a.substr(8))
+	var m := await _measure("E", filled_spec(100000, DISH_45MM), 10000.0, e_seconds)
 	_print_run(m)
 	var windows := window_speeds(m.get("samples", []), E_WINDOW)
 	var speed := run_speed(m.get("samples", []))
