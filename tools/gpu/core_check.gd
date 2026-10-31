@@ -9,10 +9,12 @@ extends SceneTree
 ##    in both [derived: a growth copies what the buffers hold and moves nothing; a dish's run does not depend on the pool's sizes].
 ## C2 shrink: a dish of 300,000 founders taken out of a pool that then runs a small dish: the record slots shrink to the limits' floor or
 ##    twice the slots in use, and the buffers the arena holds fall by the slots' share (380 B a slot) [derived]; the device's own count of
-##    buffer memory falls by about as much [placeholder: a probe read twice the expected footprint after a 3 GiB buffer was freed].
+##    buffer memory falls by about as much once the device has passed the frames a freed buffer waits for (RenderingDevice disposes of a
+##    freed buffer when the frame slot it was freed in comes round again: a few submits later) [placeholder: a probe read twice the
+##    expected footprint after a 3 GiB buffer was freed].
 ## C3 edits: a drop of 1,000 units of energy at the centre of an empty dish raises its grid's total (concentration x cell area) by 1,000
-##    within 1e-5 relative (float32 sums) [derived]; an eraser of radius 200 µm and strength 1 at the centre leaves the cell under the
-##    centre at 1 - d / r of what it held (d its centre's distance) [derived, NutrientField::erase_disc].
+##    within 1e-5 relative (float32 sums) [derived]; an eraser of radius 200 µm and strength 1 at the centre takes the share 1 - d / r of
+##    the cell under the centre, leaving d / r of what it held (d its centre's distance) [derived, NutrientField::erase_disc].
 ## C4 publish: the payload, id, haze, steering and thumbnail textures read back equal the storage buffers the kernels wrote, word for word
 ##    [derived]; with every texture bound on the main side's frame now, nothing is published (no free texture) [derived].
 ## C5 lasting clouds: a dish of 20 mm (400 µm cells: a burst's cloud lives about 25 steps, a death's about 40) with 2,000 founders, a bloom
@@ -111,7 +113,11 @@ func c2_shrink() -> void:
 	core.arena.shrink_after_msec = 0
 	h.step(2)
 	h.step(2)
+	var mem_now := core.rd.get_memory_usage(RenderingDevice.MEMORY_BUFFERS)
+	for k in 4:
+		core._refresh_stats()
 	var mem_small := core.rd.get_memory_usage(RenderingDevice.MEMORY_BUFFERS)
+	print("C2 the device's buffer memory right after the shrink %.1f MB, four submits later %.1f MB" % [mem_now / 1048576.0, mem_small / 1048576.0])
 	var arena_small := core.arena.bytes_now()
 	var freed_expected := (slots_big - core.arena.slot_cap) * 380
 	print("C2 record slots %d -> %d; the arena's buffers %.1f -> %.1f MB (expected a fall of about %.1f MB); the device's buffer memory %.1f -> %.1f MB" % [slots_big, core.arena.slot_cap, arena_big / 1048576.0, arena_small / 1048576.0, freed_expected / 1048576.0, mem_big / 1048576.0, mem_small / 1048576.0])
@@ -154,7 +160,7 @@ func c3_edits() -> void:
 	core.run(0, 20.0)
 	var left: float = core.canonical_dump(row)["field"].decode_float(c * 4)
 	var d := sqrt(2.0) * cx
-	ok(is_equal_approx(left, held * (1.0 - d / 200.0)), "C3 the eraser left the centre cell at %.6f of %.6f (expected %.6f)" % [left, held, held * (1.0 - d / 200.0)])
+	ok(is_equal_approx(left, held * d / 200.0), "C3 the eraser left the centre cell at %.6f of %.6f (expected %.6f)" % [left, held, held * d / 200.0])
 	var e := WorldEdit.new()
 	e.kind = WorldEdit.Kind.PLACE_SOURCE
 	ok(not core.queue_edit(row, e) and e.as_world_op()["op"] == "add_source", "C3 a source is the dish's world's edit, not the core's")
