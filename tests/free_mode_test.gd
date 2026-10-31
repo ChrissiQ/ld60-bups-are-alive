@@ -1,13 +1,10 @@
 extends SceneTree
 ## Run: godot --headless --path . -s tests/free_mode_test.gd
-## Checks start conditions, nutrient layouts, and that free mode has no goals and no saving.
-## Backs up the real save in memory and restores it if anything touches it.
+## Checks start conditions, what a dish asks of the simulation, and that free mode has no goals and no saving.
+## The simulation is a FakeWorld: what a dish or the game screen asks of it is read from its log, and the bups, sources and plankton it serves
+## come back in the snapshots a frame or two later.
 
-
-
-## Sets a dish's bloom to this many plankton a day (the game sets a density: this is for tests that count them).
-func _bloom_per_day(d: Dish, per_day: float) -> void:
-	d.bloom_density = per_day / (PI * pow(d.radius / StartConditions.UM_PER_MM, 2))
+var fake: FakeWorld
 
 
 func _make_dish() -> Dish:
@@ -18,107 +15,94 @@ func _make_dish() -> Dish:
 	return d
 
 
-func _first(d: Dish) -> Dictionary:
-	return d.bup_info(d.bup_ids()[0])
+## The world's replies reach the dish a few frames after the command; a bare dish has no screen to tell the world a frame passed, so this does.
+func _settle() -> void:
+	for i in 3:
+		WorldClient.shared().set_time(1.0, true, 1.0 / 60.0)
+		await process_frame
 
 
-func _radii(points: Array) -> Array:
+## The dish the newest ADD_DISH asked for.
+func _spec() -> DishSpec:
+	return fake.calls_of(SimCommand.KIND_ADD_DISH)[-1]["args"]["spec"]
+
+
+## One word of each founder's record in `spec`.
+func _founder_words(spec: DishSpec, word: int) -> Array:
+	var all := spec.founders.to_float32_array()
 	var out := []
-	for p in points:
-		out.append(p.distance_to(Vector2(500, 400)))
+	for i in spec.founders.size() / GpuLayout.RECORD_BYTES:
+		out.append(all[i * GpuLayout.RECORD_WORDS + word])
 	return out
 
 
+func _edits(kind: WorldEdit.Kind) -> Array[WorldEdit]:
+	var out: Array[WorldEdit] = []
+	for c in fake.calls_of(SimCommand.KIND_EDIT_WORLD):
+		var e: WorldEdit = c["args"]["edit"]
+		if e.kind == kind:
+			out.append(e)
+	return out
 
-func _init() -> void:
+
+## Whether `hues` are evenly spaced round the wheel.
+func _evenly_spaced(hues: Array) -> bool:
+	hues.sort()
+	for k in hues.size():
+		if absf(fposmod(hues[(k + 1) % hues.size()] - hues[k], 1.0) - 1.0 / hues.size()) > 0.01:
+			return false
+	return true
+
+
+func _initialize() -> void:
+	fake = TestUtil.use_fake_world(self)
 	# --- Defaults must equal the old hard-coded goal-mode start.
 	var d := _make_dish()
 	d.strike()
-	TestUtil.check(d.population() == 4, "default bups = 4, got %d" % d.population())
-	TestUtil.check(absf(TestUtil.density(d) - 32.0) < 0.5, "default starting nutrient = 32 units/mm² (about 10,000 units in the 10 mm dish), got %.2f" % TestUtil.density(d))
-	TestUtil.check(d.radius == 45000.0 and d.bup_limit == 100000, "the default dish is 45 mm in radius with room for 100,000 bups, got %.0f and %d" % [d.radius, d.bup_limit])
+	await _settle()
+	var spec := _spec()
+	TestUtil.check(d.population() == 4 and spec.founders.size() == 4 * GpuLayout.RECORD_BYTES, "default bups = 4, got %d" % d.population())
+	TestUtil.check(is_equal_approx(spec.nutrient_density, 32.0), "default starting nutrient = 32 units/mm² (about 10,000 units in the 10 mm dish), got %.2f" % spec.nutrient_density)
+	TestUtil.check(d.radius == 45000.0 and d.bup_limit == 100000 and spec.radius == 45000.0 and spec.limit == 100000, "the default dish is 45 mm in radius with room for 100,000 bups, got %.0f and %d" % [d.radius, d.bup_limit])
 
-	# --- Counts and clamping.
+	# --- Counts and clamping (what the dish asks the world to start with).
 	var s := TestUtil.small_start()
 	s.bups = 120
 	s.nutrient_density = 150
 	d.strike(s)
-	TestUtil.check(d.population() == 120, "120 bups, got %d" % d.population())
-	TestUtil.check(absf(TestUtil.density(d) - 150.0) < 3.0, "150 units/mm² of starting nutrient, got %.1f" % TestUtil.density(d))
+	await _settle()
+	TestUtil.check(d.population() == 120 and is_equal_approx(_spec().nutrient_density, 150.0), "120 bups with 150 units/mm² of starting nutrient, got %d and %.1f" % [d.population(), _spec().nutrient_density])
 	s.bups = 9999
 	s.nutrient_density = 9999999  # (more than the most the game allows)
 	d.strike(s)
-	TestUtil.check(d.population() == Dish.MAX_CELLS, "bups clamped to MAX_CELLS")
-	TestUtil.check(absf(TestUtil.density(d) - StartConditions.MAX_NUTRIENT_DENSITY) < StartConditions.MAX_NUTRIENT_DENSITY * 0.02, "starting nutrient clamped to its maximum")
+	TestUtil.check(_spec().founders.size() == Dish.MAX_CELLS * GpuLayout.RECORD_BYTES, "bups clamped to the dish's limit")
+	TestUtil.check(is_equal_approx(_spec().nutrient_density, StartConditions.MAX_NUTRIENT_DENSITY), "starting nutrient clamped to its maximum")
 	s.nutrient_density = 0
 	d.strike(s)
-	TestUtil.check(d.field.is_empty(), "0 starting nutrient means a bare dish")
-
-	# --- With no patchiness the starting nutrient is spread evenly, wherever you look (see below for the patchy kind).
-	d.strike(TestUtil.small_start())
-	d.field.reset(d.radius)
-	d.field.set_patchiness(0.0, 1.0, 0)
-	d.field.fill(0.001)
-	var centre_c := d.field.sample(Vector2.ZERO)
-	var edge_c := d.field.sample(Vector2(d.radius * 0.8, 0.0))
-	TestUtil.check(centre_c > 0.0 and absf(centre_c - edge_c) < centre_c * 0.02, "without patchiness the medium is uniform (%.5f vs %.5f)" % [centre_c, edge_c])
+	TestUtil.check(_spec().nutrient_density == 0.0, "0 starting nutrient means a bare dish")
 
 	# --- Nutrient rate is part of the start conditions.
 	var r := StartConditions.new()
 	r.feed_density = 17.0
 	d.strike(r)
-	TestUtil.check(d.feed_density == 17.0, "start rate applied, got %.1f" % d.feed_density)
+	TestUtil.check(d.feed_density == 17.0 and _spec().feed_density == 17.0, "start rate applied, got %.1f" % d.feed_density)
 	r.feed_density = 999.0
 	d.strike(r)
 	TestUtil.check(d.feed_density == StartConditions.MAX_FEED_DENSITY, "rate clamped to max")
 	d.strike(TestUtil.small_start())
 	TestUtil.check(d.feed_density == 0.0, "no feed by default, got %.1f" % d.feed_density)
-
-	# --- The feed adds nutrient evenly at the chosen rate.
-	d.strike(TestUtil.small_start())
-	d.clear_bups()
-	d.field.reset(d.radius)
-	d.feed_density = 12.0
-	d.advance(3600.0)
-	TestUtil.check(absf(TestUtil.density(d) - 12.0) < 0.3, "the feed adds rate x time to every mm² (%.2f units/mm² in an hour at 12/mm²/h)" % TestUtil.density(d))
-	# The nutrient put in is patchy, richer and poorer places that stay put, though the total is what was asked for.
-	var patchy := _make_dish()
-	patchy.set_seed(8)
 	var patch_start := StartConditions.new()
 	patch_start.dish_radius = 4000.0
 	patch_start.nutrient_density = 100.0
+	var patchy := _make_dish()
+	patchy.set_seed(8)
 	patchy.strike(patch_start)
-	var cell_values: PackedFloat32Array = patchy.field.values()
-	var seen := []
-	for i in patchy.field.size * patchy.field.size:
-		if patchy.field.accepts(patchy.field.cell_centre(i)):
-			seen.append(cell_values[i])
-	var seen_mean := 0.0
-	for v in seen:
-		seen_mean += v
-	seen_mean /= seen.size()
-	var seen_spread := 0.0
-	for v in seen:
-		seen_spread += (v - seen_mean) * (v - seen_mean)
-	seen_spread = sqrt(seen_spread / seen.size()) / seen_mean
-	TestUtil.check(absf(TestUtil.density(patchy) - 100.0) < 2.0 and absf(seen_spread - Dish.NUTRIENT_PATCHINESS) < 0.1, "the starting nutrient is uneven (spread %.2f of the mean) with the density asked for (%.1f)" % [seen_spread, TestUtil.density(patchy)])
-	patchy.feed_density = 20.0
-	patchy.advance(3600.0)
-	TestUtil.check(absf(TestUtil.density(patchy) - 120.0) < 3.0, "the feed adds its density on average (%.1f)" % TestUtil.density(patchy))
-	var same_seed := _make_dish()
-	same_seed.set_seed(8)
-	same_seed.strike(patch_start)
 	var other_seed := _make_dish()
 	other_seed.set_seed(9)
 	other_seed.strike(patch_start)
-	var probe := Vector2(1000, 500)
-	TestUtil.check(same_seed.patch_seed != other_seed.patch_seed and not is_equal_approx(other_seed.field.sample(probe), same_seed.field.sample(probe)), "a landscape depends on the seed: another seed, other patches")
-	var landscape_copy := _make_dish()
-	TestUtil.check(landscape_copy.from_dict(TestUtil.saved(patchy)) and landscape_copy.patch_seed == patchy.patch_seed, "the landscape's seed survives save and load")
+	TestUtil.check(patchy.patch_seed != other_seed.patch_seed and _spec().patch_seed == other_seed.patch_seed, "a landscape depends on the seed: another seed, other patches")
 	patchy.free()
-	same_seed.free()
 	other_seed.free()
-	landscape_copy.free()
 
 	# --- Dish size.
 	var small := StartConditions.new()
@@ -126,168 +110,100 @@ func _init() -> void:
 	small.bups = 100
 	small.nutrient_density = 100
 	d.strike(small)
-	TestUtil.check(d.radius == 150.0, "dish radius 150, got %.0f" % d.radius)
-	var inside_small := true
-	for id in d.bup_ids():
-		inside_small = inside_small and (d.bup_info(id)["pos"] as Vector2).length() <= d.radius
+	await _settle()
+	TestUtil.check(d.radius == 150.0 and _spec().radius == 150.0, "dish radius 150, got %.0f" % d.radius)
+	var small_xs := _founder_words(_spec(), GpuLayout.R_X)
+	var small_ys := _founder_words(_spec(), GpuLayout.R_Y)
+	var inside_small := d.population() == 100 and small_xs.size() == 100
+	for i in small_xs.size():
+		inside_small = inside_small and Vector2(small_xs[i], small_ys[i]).length() <= d.radius
 	TestUtil.check(inside_small, "everything starts inside a small dish")
-	TestUtil.check(absf(TestUtil.density(d) - 100.0) < 3.0, "...with its starting nutrient density (%.1f)" % TestUtil.density(d))
 	small.dish_radius = 5.0
 	d.strike(small)
 	TestUtil.check(d.radius == StartConditions.MIN_SIM_RADIUS, "radius clamped to the smallest the simulation runs")
 	small.dish_radius = 99999.0
 	d.strike(small)
 	TestUtil.check(d.radius == StartConditions.MAX_DISH_RADIUS, "radius clamped to max")
-	var big := StartConditions.new()
-	big.dish_radius = 450.0
-	d.strike(big)
-	var d_copy := _make_dish()
-	TestUtil.check(d_copy.from_dict(TestUtil.saved(d)), "from_dict ok")
-	TestUtil.check(d_copy.radius == 450.0, "dish radius survives save/load, got %.0f" % d_copy.radius)
+	small.dish_radius = 3000.0
+	small.bups = 200
+	d.strike(small)
+	var xs := _founder_words(_spec(), GpuLayout.R_X)
+	var ys := _founder_words(_spec(), GpuLayout.R_Y)
+	var within := xs.size() == 200
+	for i in xs.size():
+		within = within and Vector2(xs[i], ys[i]).length() <= d.radius
+	TestUtil.check(within, "200 bups start inside the dish")
 
-	# --- Dropping nutrient: a dose into the medium.
+	# --- Dropping nutrient: a dose into the medium (the drop is asked of the world, as an edit).
 	d.strike(TestUtil.small_start())
-	d.field.reset(d.radius)
 	var click := d.global_position + Vector2(40, -25)
-	TestUtil.check(d.drop_nutrients(click, 1) and absf(TestUtil.units(d) - 1.0) < 0.01, "one unit dropped adds one unit of nutrient")
-	TestUtil.check(d.field.sample(click - d.global_position) > d.field.sample(click - d.global_position + Vector2(100, 0)), "a drop is densest where it lands")
-	d.field.reset(d.radius)
-	TestUtil.check(d.drop_nutrients(click, 30) and absf(TestUtil.units(d) - 30.0) < 0.01, "a dose of 30 adds 30 units")
+	var before := _edits(WorldEdit.Kind.DROP).size()
+	TestUtil.check(d.drop_nutrients(click, 1) and d.drop_nutrients(click, 30), "a drop inside the dish is accepted")
+	var drops := _edits(WorldEdit.Kind.DROP)
+	TestUtil.check(drops.size() == before + 2 and is_equal_approx(drops[-2].amount, 1.0 * Dish.NUTRIENT_ENERGY) and is_equal_approx(drops[-1].amount, 30.0 * Dish.NUTRIENT_ENERGY) and drops[-1].position.is_equal_approx(click - d.global_position), "one unit and a dose of 30 are asked of the world at the place clicked")
 	TestUtil.check(Dish.scatter_radius(1) == 0.0, "no spread for one")
 	TestUtil.check(Dish.scatter_radius(10) < Dish.scatter_radius(40), "a bigger dose spreads wider")
-	d.field.reset(d.radius)
-	TestUtil.check(not d.drop_nutrients(d.global_position + Vector2(d.radius + 50.0, 0.0), 5) and d.field.is_empty(), "a drop outside the dish adds nothing")
+	TestUtil.check(not d.drop_nutrients(d.global_position + Vector2(d.radius + 50.0, 0.0), 5) and _edits(WorldEdit.Kind.DROP).size() == before + 2, "a drop outside the dish asks for nothing")
+	TestUtil.check(d.nutrients_placed == 31, "the counter adds what was dropped, got %d" % d.nutrients_placed)
+	d.strike(TestUtil.small_start())
+	TestUtil.check(d.nutrients_placed == 0, "a new dish resets the counter")
 
-	# --- Big dishes: the grid keeps a fine spacing as far as its cost limit allows, and the crowd limit
-	# grows with the radius. (300 µm: 48 cells of 12.5 µm; 1.2 mm: 96 cells of 25 µm; 6 mm: capped at 100.)
-	TestUtil.check(NutrientField.size_for(300.0) == 48 and NutrientField.size_for(1200.0) == 96 and NutrientField.size_for(6000.0) == Dish.FIELD_MAX_ACROSS, "the grid size follows the dish radius up to its limit (%d, %d, %d)" % [NutrientField.size_for(300.0), NutrientField.size_for(1200.0), NutrientField.size_for(6000.0)])
-	var big_field := NutrientField.new()
-	big_field.reset(1200.0)
-	TestUtil.check(is_equal_approx(big_field.spacing, 25.0), "a 1.2 mm dish has 25 µm grid cells (%.1f)" % big_field.spacing)
+	# --- The crowd limit grows with the radius; the nutrient detail and the medium go to the world with the dish.
 	TestUtil.check(Dish.cap_for(150.0) == Dish.MAX_CELLS and Dish.cap_for(300.0) == Dish.MAX_CELLS and Dish.cap_for(1200.0) == 1200 and Dish.cap_for(6000.0) == 6000, "the crowd limit grows with the radius")
-	var large := _make_dish()
-	var large_start := StartConditions.new()
-	large_start.dish_radius = 1200.0
-	large_start.bup_limit = Dish.cap_for(1200.0)
-	large_start.bups = 200
-	large_start.nutrient_density = 500
-	large.strike(large_start)
-	TestUtil.check(large.bup_limit == 1200 and large.field.size == 96 and large.population() == 200 and absf(TestUtil.density(large) - 500.0) < 10.0, "a big dish starts with its own grid, limit and nutrient")
-	large.place_source(large.global_position + Vector2(400, 0), 10.0)
-	large.advance(600.0)
-	var large_copy := _make_dish()
-	TestUtil.check(large_copy.from_dict(TestUtil.saved(large)) and large_copy.radius == 1200.0 and large_copy.field.size == 96, "a big dish survives save and load")
-	# The nutrient detail (cells across the grid) is a start condition: a finer grid on a big dish, kept through resize, save and load.
 	var fine_start := StartConditions.new()
 	fine_start.nutrient_resolution = 200
-	var fine_dish := _make_dish()
-	fine_dish.strike(fine_start)
-	TestUtil.check(StartConditions.new().nutrient_resolution == 100 and fine_dish.field.size == 200 and is_equal_approx(fine_dish.field.get_spacing(), 2.0 * fine_dish.radius / 200.0), "the nutrient detail sets the cells across a dish's grid (%d)" % fine_dish.field.size)
-	fine_dish.resize_to(fine_dish.radius * 1.5)
-	TestUtil.check(fine_dish.field.size == 200, "a resized dish keeps its nutrient detail")
-	var fine_copy := _make_dish()
-	TestUtil.check(fine_copy.from_dict(TestUtil.saved(fine_dish)) and fine_copy.field.size == 200 and fine_copy.field.get_max_across() == 200, "the nutrient detail survives save and load")
-	var plain := _make_dish()
-	plain.strike(StartConditions.new())
-	var plain_copy := _make_dish()
-	TestUtil.check(plain_copy.from_dict(TestUtil.saved(plain)) and plain_copy.field.size == 100, "the usual nutrient detail survives save and load")
-	# The medium thickness (an advanced option): how fast the nutrient spreads, kept through resize, save and load.
+	d.strike(fine_start)
+	TestUtil.check(StartConditions.new().nutrient_resolution == 100 and d.resolution == 200 and _spec().resolution == 200, "the nutrient detail sets the cells across a dish's grid (%d)" % d.resolution)
+	d.resize_to(d.radius * 0.5)
+	TestUtil.check(d.resolution == 200, "a resized dish keeps its nutrient detail")
 	var thin_start := StartConditions.new()
 	thin_start.medium_thickness = 4.0
-	var thin_dish := _make_dish()
-	thin_dish.strike(thin_start)
-	var usual_dish := _make_dish()
-	usual_dish.strike(StartConditions.new())
-	TestUtil.check(is_equal_approx(thin_dish.field.get_diffusion(), Biology.WATER_DIFFUSION / 4.0) and is_equal_approx(usual_dish.field.get_diffusion(), Biology.NUTRIENT_DIFFUSION), "the medium thickness sets how fast the nutrient spreads (%.1f in 4x water, %.1f in the usual medium)" % [thin_dish.field.get_diffusion(), usual_dish.field.get_diffusion()])
-	var thin_copy := _make_dish()
-	TestUtil.check(thin_copy.from_dict(TestUtil.saved(thin_dish)) and is_equal_approx(thin_copy.medium_thickness, 4.0) and is_equal_approx(thin_copy.field.get_diffusion(), Biology.WATER_DIFFUSION / 4.0), "the medium thickness survives save and load")
-	var usual_copy := _make_dish()
-	TestUtil.check(usual_copy.from_dict(TestUtil.saved(usual_dish)) and is_equal_approx(usual_copy.field.get_diffusion(), Biology.NUTRIENT_DIFFUSION), "the usual medium survives save and load")
+	d.strike(thin_start)
+	TestUtil.check(is_equal_approx(d.medium_thickness, 4.0) and is_equal_approx(_spec().medium_thickness, 4.0), "the medium thickness is part of what the world is asked to start with")
 	TestUtil.check(StartConditions.from_dict({"medium_thickness": 0.0}).medium_thickness == StartConditions.MIN_MEDIUM_THICKNESS and StartConditions.from_dict({"medium_thickness": 1000.0}).medium_thickness == StartConditions.MAX_MEDIUM_THICKNESS, "the medium thickness is clamped when loaded")
 	TestUtil.check(StartConditions.from_dict({"nutrient_resolution": 9999}).nutrient_resolution == StartConditions.MAX_NUTRIENT_RESOLUTION and StartConditions.from_dict({"nutrient_resolution": 10}).nutrient_resolution == StartConditions.MIN_NUTRIENT_RESOLUTION, "the nutrient detail is clamped when loaded")
-	TestUtil.check(absf(TestUtil.units(large_copy) - TestUtil.units(large)) < 0.5, "...with its dissolved nutrient (%.1f vs %.1f)" % [TestUtil.units(large_copy), TestUtil.units(large)])
-	TestUtil.check(large_copy.bup_limit == 1200, "...and its bup limit")
-	large.free()
-	large_copy.free()
 
-	# --- The bups' picture has room for the bups there are, not for the limit; and bups stay visible when the dish is drawn small.
-	var picture := _make_dish()
-	await process_frame  # (so the dish has built its picture)
-	var picture_start := TestUtil.small_start()
-	picture_start.bup_limit = 100000
-	picture_start.bups = 4
-	picture.strike(picture_start)
-	picture._process(0.0)
-	TestUtil.check(picture.drawing.bups_mesh.multimesh.instance_count <= 1024, "with a 100,000 limit but 4 bups the picture holds %d, not 100,000" % picture.drawing.bups_mesh.multimesh.instance_count)
-	for i in 3000:
-		picture.add_bup(picture.global_position + Vector2(i % 50, i / 50), Genome.founder(), 30.0)
-	picture._process(0.0)
-	TestUtil.check(picture.drawing.bups_mesh.multimesh.instance_count >= picture.population() and picture.drawing.bups_mesh.multimesh.visible_instance_count == picture.population(), "...and grows with the colony (%d of %d)" % [picture.drawing.bups_mesh.multimesh.instance_count, picture.population()])
-	picture.scale = Vector2.ONE * 0.02
-	picture._process(0.0)
-	var small_picture: PackedFloat32Array = picture.sim.render_buffer(picture.pixel(), 1)
-	TestUtil.check(small_picture[12] >= Cell.MIN_VISIBLE_LENGTH_PX * picture.pixel() - 0.01 and small_picture[13] >= Cell.MIN_VISIBLE_WIDTH_PX * picture.pixel() - 0.01, "a dish drawn at 2%% size still draws each bup at least %.0f px long and %.0f px thick" % [Cell.MIN_VISIBLE_LENGTH_PX, Cell.MIN_VISIBLE_WIDTH_PX])
-	picture.free()
-
-	# --- Bup numbers and names: birth order, kept for life; names die with their bup.
-	var numbered := _make_dish()
+	# --- Bup numbers and names: birth order, kept for life.
 	var number_start := TestUtil.small_start()
 	number_start.bups = 5
+	var numbered := _make_dish()
 	numbered.strike(number_start)
+	await _settle()
 	var founders: PackedInt64Array = numbered.bup_ids()
-	var in_order := true
+	var in_order := founders.size() == 5
 	for i in founders.size():
-		in_order = in_order and founders[i] == i + 1
-	TestUtil.check(in_order, "the founders are numbered 1, 2, 3 ... in order")
-	var later: int = numbered.add_bup(numbered.global_position, Genome.founder(), 30.0)
-	TestUtil.check(later == 6 and numbered.bup_name(later) == "%s #6" % Cell.title_for(Genome.founder()["size"]), "the next bup born is the next number ('%s')" % numbered.bup_name(later))
-	var big_genome := Genome.founder()
-	big_genome["size"] = 7.0
-	var big_one: int = numbered.add_bup(numbered.global_position, big_genome, 30.0)
-	TestUtil.check(numbered.bup_name(big_one) == "big bup #%d" % big_one, "the size word goes with the number ('%s')" % numbered.bup_name(big_one))
-	numbered.rename_bup(later, "  Finnigan\n ")
-	TestUtil.check(numbered.bup_name(later) == "Finnigan" and numbered.bup_default_name(later) == "bup #6" and numbered.bup_custom_name(later) == "Finnigan", "a bup can be given a name, tidied up")
-	numbered.rename_bup(later, "x".repeat(100))
-	TestUtil.check(numbered.bup_name(later).length() == BupNames.MAX_LENGTH, "names are kept to a sensible length")
-	numbered.rename_bup(later, "Finnigan")
+		in_order = in_order and founders[i] == GpuLayout.make_id(numbered.number, i + 1)
+	TestUtil.check(in_order, "the founders are numbered 1, 2, 3 ... in order, in the dish's own range")
+	var first: int = founders[0]
+	numbered.rename_bup(first, "  Finnigan\n ")
+	TestUtil.check(numbered.bup_name(first) == "Finnigan" and numbered.bup_default_name(first).contains("#") and numbered.bup_custom_name(first) == "Finnigan", "a bup can be given a name, tidied up")
+	numbered.rename_bup(first, "x".repeat(100))
+	TestUtil.check(numbered.bup_name(first).length() == BupNames.MAX_LENGTH, "names are kept to a sensible length")
+	numbered.rename_bup(first, "Finnigan")
 	numbered.rename_bup(9999, "Nobody")
-	TestUtil.check(numbered.bup_name(9999) == "" and numbered.bup_custom_name(9999) == "", "there is no name for a bup that isn't there")
-	numbered.advance(60.0)
-	TestUtil.check(numbered.bup_name(later) == "Finnigan", "the number and name last through the bup's life")
-	var restored := _make_dish()
-	TestUtil.check(restored.from_dict(TestUtil.saved(numbered)), "a dish with named bups saves and loads")
-	TestUtil.check(restored.bup_name(later) == "Finnigan" and restored.bup_ids() == numbered.bup_ids(), "the numbers and names survive a save and load")
-	TestUtil.check(restored.add_bup(restored.global_position, Genome.founder(), 30.0) == numbered.sim.get_next_id(), "...and the next number carries on where it was")
-	numbered.remove_bup(later)
-	TestUtil.check(numbered.bup_custom_name(later) == "" and not numbered.has_record(later), "a name goes with its bup's record")
+	await _settle()
+	TestUtil.check(numbered.bup_custom_name(first) == "Finnigan", "the name lasts")
+	fake.kill_ids(numbered.row, PackedInt64Array([first]))
+	await _settle()
+	TestUtil.check(not numbered.has_bup(first) and numbered.population() == 4, "a bup killed in the world is gone from the dish")
 	numbered.strike(number_start)
-	TestUtil.check(numbered.bup_ids()[0] == 1 and numbered.bup_name(1).ends_with("#1"), "starting the dish over starts the numbers at 1 again")
-	# Family records, with names, survive a save and load: a dead ancestor keeps its record and its name.
-	var family := _make_dish()
-	family.strike(number_start)
-	family.clear_bups()
-	family.time = 4.0 * 3600.0 + 125.0
-	family.sim.set_time(family.time)
-	var gran: int = family.add_bup(family.global_position, Genome.founder(), 200.0, 4.0, 8.0, 0, Vector2.RIGHT)
-	family.step(1.0)  # she divides
-	var kid := -1
-	for id in family.bup_ids():
-		if id != gran:
-			kid = id
-	family.rename_bup(gran, "Gran")
-	family.time += 3600.0
-	family.sim.set_time(family.time)
-	family.remove_bup(gran)
-	TestUtil.check(family.has_record(gran) and family.bup_name(gran) == "Gran" and family.lineage_info(gran)["born"] == 242 and family.lineage_info(gran)["died"] == 302, "a dead ancestor keeps her record and her name, with birth and death to the minute (%s)" % [family.lineage_info(gran)])
-	var family_copy := _make_dish()
-	TestUtil.check(family_copy.from_dict(TestUtil.saved(family)), "a dish with a family history saves and loads")
-	TestUtil.check(family_copy.lineage_chain(kid) == family.lineage_chain(kid) and family_copy.bup_name(gran) == "Gran" and not family_copy.lineage_info(gran)["alive"] and family_copy.lineage_info(gran)["died"] == 302, "the family line, the dead ancestor and her name come back")
-	family_copy.remove_bup(kid)
-	TestUtil.check(not family_copy.has_record(gran) and not family_copy.has_record(kid), "and are dropped as before when nothing living descends from them")
-	family.free()
-	family_copy.free()
+	await _settle()
+	TestUtil.check(numbered.bup_ids()[0] == GpuLayout.make_id(numbered.number, 1) and numbered.bup_name(numbered.bup_ids()[0]).contains("#"), "starting the dish over starts the numbers again")
+
+	# --- The watch list: a watched bup is kept, until taken off.
+	var watching := _make_dish()
+	watching.strike(number_start)
+	await _settle()
+	var watched_id: int = watching.bup_ids()[0]
+	TestUtil.check(watching.watch_bup(watched_id) and not watching.watch_bup(watched_id) and watching.is_watched(watched_id) and watching.watched == [watched_id], "a bup goes on the watch list once")
+	TestUtil.check(not watching.watch_bup(123456), "a bup with no record can't be watched")
+	watching.unwatch_bup(watched_id)
+	TestUtil.check(watching.watched.is_empty(), "taken off the list, it is no longer watched")
+	watching.watch_bup(watched_id)
+	watching.strike(TestUtil.small_start())
+	TestUtil.check(watching.watched.is_empty(), "a new dish starts with nothing watched")
+	watching.free()
 	numbered.free()
-	restored.free()
 
 	# --- The setup screen keeps the bup limit at or above the number of founders.
 	var limit_setup: Control = load(Scenes.FREE_SETUP).instantiate()
@@ -305,14 +221,16 @@ func _init() -> void:
 	founded_start.bups = 3
 	founded_start.founders = [{"name": "Finnigan", "color": "#ff0000"}, {}]
 	founded.strike(founded_start)
-	TestUtil.check(founded.bup_name(1) == "Finnigan" and founded.bup_name(2).ends_with("#2") and founded.bup_name(3).ends_with("#3"), "a founder given a name has it; the others keep their numbers (%s, %s)" % [founded.bup_name(1), founded.bup_name(2)])
-	var red_info := founded.bup_info(1)
-	TestUtil.check(red_info["hue"] < 0.01 and absf(red_info["sat"] - 1.0) < 0.01 and absf(red_info["val"] - 1.0) < 0.01, "a founder coloured red starts red (hue %.2f, sat %.2f, val %.2f)" % [red_info["hue"], red_info["sat"], red_info["val"]])
-	TestUtil.check(absf(founded.bup_info(2)["hue"] - Genome.founder()["hue"]) < 0.001 and absf(founded.bup_info(3)["sat"] - Genome.founder()["sat"]) < 0.001, "founders with no colour chosen start in the default green")
-	var saved_colour := _make_dish()
-	TestUtil.check(saved_colour.from_dict(TestUtil.saved(founded)) and absf(saved_colour.bup_info(1)["hue"] - red_info["hue"]) < 0.001 and saved_colour.bup_name(1) == "Finnigan", "colours and names are saved and loaded with the dish")
+	await _settle()
+	var ids3 := founded.bup_ids()
+	TestUtil.check(founded.bup_name(ids3[0]) == "Finnigan" and founded.bup_name(ids3[1]).contains("#") and founded.bup_name(ids3[2]).contains("#"), "a founder given a name has it; the others keep their numbers (%s, %s)" % [founded.bup_name(ids3[0]), founded.bup_name(ids3[1])])
+	var red := Genome.color_from_hex("#ff0000")
+	var hues3 := _founder_words(_spec(), GpuLayout.R_HUE)
+	var sats3 := _founder_words(_spec(), GpuLayout.R_SAT)
+	var vals3 := _founder_words(_spec(), GpuLayout.R_VAL)
+	TestUtil.check(absf(hues3[0] - red.h) < 0.01 and absf(sats3[0] - 1.0) < 0.01 and absf(vals3[0] - 1.0) < 0.01, "a founder coloured red starts red (hue %.2f, sat %.2f, val %.2f)" % [hues3[0], sats3[0], vals3[0]])
+	TestUtil.check(absf(hues3[1] - Genome.founder()["hue"]) < 0.001 and absf(sats3[2] - Genome.founder()["sat"]) < 0.001, "founders with no colour chosen start in the default green")
 	founded.free()
-	saved_colour.free()
 
 	# --- The founders screen: a row for each founder, to name and colour; random colours; what is chosen is kept.
 	var kept_start := Session.free_start
@@ -439,347 +357,107 @@ func _init() -> void:
 	# --- Goal mode's dish starts with founders in evenly spaced colours; free mode stays green unless the player says otherwise.
 	var goal_dish := _make_dish()
 	goal_dish.strike()
-	var goal_hues := []
-	for id in goal_dish.bup_ids():
-		goal_hues.append(goal_dish.bup_info(id)["hue"])
-	goal_hues.sort()
-	var goal_even: bool = goal_hues.size() == 4
-	for k in goal_hues.size():
-		goal_even = goal_even and absf(fposmod(goal_hues[(k + 1) % goal_hues.size()] - goal_hues[k], 1.0) - 0.25) < 0.01
-	TestUtil.check(goal_even, "the goal game's four founders start in evenly spaced colours (%s)" % [goal_hues])
+	var goal_hues := _founder_words(_spec(), GpuLayout.R_HUE)
+	TestUtil.check(goal_hues.size() == 4 and _evenly_spaced(goal_hues), "the goal game's four founders start in evenly spaced colours (%s)" % [goal_hues])
 	goal_dish.strike(TestUtil.small_start())
-	var free_hues := []
-	for id in goal_dish.bup_ids():
-		free_hues.append(goal_dish.bup_info(id)["hue"])
+	var free_hues := _founder_words(_spec(), GpuLayout.R_HUE)
 	free_hues.sort()
 	TestUtil.check(free_hues.size() == 4 and absf(free_hues[1] - free_hues[0]) > 0.2, "...and so do a free-mode dish's, from the defaults (%s)" % [free_hues])
 	goal_dish.free()
 
-	# --- A dish can be enlarged with everything in it, but never shrunk.
+	# --- A dish can be enlarged with everything in it, but never shrunk below the smallest; a smaller one is asked of the world, which cuts it.
 	var growing := _make_dish()
 	growing.strike(TestUtil.small_start())
-	growing.place_source(growing.global_position + Vector2(100, 0), 5.0)
-	growing.field.deposit(Vector2(-60.0, 30.0), 200.0)
-	growing.advance(120.0)
-	var ids_before := growing.bup_ids()
-	var positions_before := []
-	for id in ids_before:
-		positions_before.append(growing.bup_info(id)["pos"])
-	var units_before := TestUtil.units(growing)
-	var centre_before := Vector2.ZERO
-	var mass_before := 0.0
-	var values_before := growing.field.values()
-	for i in values_before.size():
-		var m_i: float = values_before[i] * growing.field.spacing * growing.field.spacing
-		mass_before += m_i
-		centre_before += growing.field.cell_centre(i) * m_i
-	centre_before /= mass_before
+	await _settle()
+	var resizes_before := fake.calls_of(SimCommand.KIND_RESIZE).size()
 	growing.resize_to(1500.0)
-	TestUtil.check(growing.radius == 1500.0 and growing.field.size == NutrientField.size_for(1500.0), "resize_to enlarges the dish and its grid")
-	TestUtil.check(growing.bup_ids() == ids_before, "...keeping every bup")
-	var same_places := true
-	for i in ids_before.size():
-		same_places = same_places and (growing.bup_info(ids_before[i])["pos"] as Vector2).is_equal_approx(positions_before[i])
-	TestUtil.check(same_places, "...where they were")
-	TestUtil.check(absf(TestUtil.units(growing) - units_before) < 0.001 * maxf(units_before, 1.0) + 0.01, "...and all its nutrient (%.2f before, %.2f after)" % [units_before, TestUtil.units(growing)])
-	TestUtil.check(growing.sources.size() == 1, "...and its sources")
-	# The nutrient stays where it was, with empty dish around it: it is not stretched over the bigger dish.
-	var grown_values := growing.field.values()
-	var nutrient_mass := 0.0
-	var nutrient_centre := Vector2.ZERO
-	var farthest := 0.0
-	for i in grown_values.size():
-		var cell_mass: float = grown_values[i] * growing.field.spacing * growing.field.spacing
-		nutrient_mass += cell_mass
-		nutrient_centre += growing.field.cell_centre(i) * cell_mass
-		if grown_values[i] > 1e-7:
-			farthest = maxf(farthest, growing.field.cell_centre(i).length())
-	nutrient_centre /= nutrient_mass
-	TestUtil.check(nutrient_centre.distance_to(centre_before) < 2.0, "...the nutrient's centre of mass hasn't moved (%s then, %s now)" % [centre_before, nutrient_centre])
-	TestUtil.check(farthest <= 300.0 + growing.field.spacing, "...and it still reaches only as far as the old dish did (%.0f µm of 300; cells %.0f µm)" % [farthest, growing.field.spacing])
-	TestUtil.check(growing.field.sample(Vector2(900.0, 0.0)) == 0.0, "...with nothing in the new space around it")
+	var resizes := fake.calls_of(SimCommand.KIND_RESIZE)
+	TestUtil.check(growing.radius == 1500.0 and resizes.size() == resizes_before + 1 and is_equal_approx(resizes[-1]["args"]["radius"], 1500.0), "resize_to asks the world for the new size and the dish follows")
 	growing.resize_to(99999.0)
 	TestUtil.check(growing.radius == StartConditions.MAX_DISH_RADIUS, "...and never outgrows the largest")
+	growing.resize_to(10.0)
+	TestUtil.check(growing.radius == StartConditions.MIN_DISH_RADIUS, "...and never goes below the smallest dish")
+	growing.feed_density = 8.0
+	growing.bloom_density = 0.25
+	growing.resize_to(1500.0)
+	TestUtil.check(is_equal_approx(growing.feed_density, 8.0) and is_equal_approx(growing.bloom_density, 0.25) and is_equal_approx(growing.bloom_per_day(), 0.25 * PI * 1.5 * 1.5), "the feed and the bloom are densities, so they stay as they were, and the bloom's plankton a day follow the area (%.3f a day)" % growing.bloom_per_day())
+	growing.resize_to(3000.0)
+	TestUtil.check(is_equal_approx(growing.bloom_per_day(), 0.25 * PI * 9.0), "growing again gives the bloom more plankton a day with the area")
+	await _settle()
 	growing.change_limit(1)
 	TestUtil.check(growing.bup_limit == growing.population(), "the bup limit can't be set below the bups there are (%d)" % growing.bup_limit)
-	growing.advance(60.0)
-	TestUtil.check(growing.population() > 0, "an enlarged dish keeps running")
 	growing.free()
 
-	# --- The watch list: watched bups, and their ancestors, keep their records after they die, until taken off.
-	var watching := _make_dish()
-	watching.strike(TestUtil.small_start())
-	watching.clear_bups()
-	var elder := watching.add_bup(watching.global_position, Genome.founder(), 30.0)
-	var young: int = watching.sim.add_bup(Vector2(5, 5), Genome.founder(), 30.0, -1.0, -1.0, 1, Vector2.RIGHT, -1, elder)
-	TestUtil.check(watching.watch_bup(young) and not watching.watch_bup(young) and watching.is_watched(young) and watching.watched == [young], "a bup goes on the watch list once")
-	watching.remove_bup(elder)
-	watching.remove_bup(young)
-	TestUtil.check(not watching.has_bup(young) and watching.has_record(young) and watching.has_record(elder), "a watched bup keeps its record after it dies, and so does its ancestor")
-	var saved_watch := TestUtil.saved(watching)
-	var watch_copy := _make_dish()
-	TestUtil.check(watch_copy.from_dict(saved_watch) and watch_copy.watched == [young] and watch_copy.has_record(young), "the watch list survives save and load")
-	watch_copy.free()
-	watching.unwatch_bup(young)
-	TestUtil.check(watching.watched.is_empty() and not watching.has_record(young) and not watching.has_record(elder), "taken off the list, the records go (nothing else needs them)")
-	TestUtil.check(not watching.watch_bup(123456), "a bup with no record can't be watched")
-	var crowd_ids: Array[int] = []
-	for i in Dish.MAX_WATCHED + 5:
-		crowd_ids.append(watching.add_bup(watching.global_position + Vector2(i % 20, i / 20) * 2.0, Genome.founder(), 30.0))
-	var added := 0
-	for id in crowd_ids:
-		if watching.watch_bup(id):
-			added += 1
-	TestUtil.check(added == Dish.MAX_WATCHED and watching.watched.size() == Dish.MAX_WATCHED, "the list holds %d and no more (%d)" % [Dish.MAX_WATCHED, added])
-	watching.strike(TestUtil.small_start())
-	TestUtil.check(watching.watched.is_empty(), "a new dish starts with nothing watched")
-	watching.free()
-
-	# --- A dish can shrink about its centre: what is past the new edge goes, the rest keeps its density.
-	var shrinking := _make_dish()
-	var shrink_start := StartConditions.new()
-	shrink_start.dish_radius = 3000.0
-	shrink_start.nutrient_density = 30000
-	shrinking.strike(shrink_start)
-	shrinking.clear_bups()
-	var kept_ids: Array[int] = []
-	var lost_ids: Array[int] = []
-	for offset in [Vector2(500, 0), Vector2(0, -1200)]:
-		kept_ids.append(shrinking.add_bup(shrinking.global_position + offset, Genome.founder(), 30.0))
-	for offset in [Vector2(2000, 0), Vector2(-2500, 100)]:
-		lost_ids.append(shrinking.add_bup(shrinking.global_position + offset, Genome.founder(), 30.0))
-	shrinking.place_source(shrinking.global_position + Vector2(500, 0), 5.0)
-	shrinking.place_source(shrinking.global_position + Vector2(2200, 0), 5.0)
-	shrinking.plankton.append(Plankton.new(Vector2(1000, 0), 0.0, 1e9, 300.0, 0.0))
-	shrinking.plankton.append(Plankton.new(Vector2(2500, 0), 0.0, 1e9, 300.0, 0.0))
-	shrinking.feed_density = 8.0
-	shrinking.bloom_density = 0.25
-	var density_before := shrinking.field.sample(Vector2.ZERO)
-	shrinking.resize_to(1500.0)
-	TestUtil.check(shrinking.radius == 1500.0 and shrinking.field.size == NutrientField.size_for(1500.0), "a dish shrinks to the size asked")
-	var survivors_inside := true
-	for id in shrinking.sim.bup_ids():
-		survivors_inside = survivors_inside and shrinking.bup_world_pos(id).distance_to(shrinking.global_position) <= 1500.0
-	TestUtil.check(shrinking.population() == 2 and survivors_inside, "bups past the new edge die and the rest are inside (%d left)" % shrinking.population())
-	var kept_alive := true
-	for id in kept_ids:
-		kept_alive = kept_alive and shrinking.has_bup(id) and shrinking.has_record(id)
-	var lost_gone := true
-	for id in lost_ids:
-		lost_gone = lost_gone and not shrinking.has_bup(id) and not shrinking.has_record(id)
-	TestUtil.check(kept_alive and lost_gone, "the bups inside live on, and the dead ones' records are freed (no descendants, not open anywhere)")
-	TestUtil.check(shrinking.sources.size() == 1 and shrinking.plankton.size() == 1, "sources and plankton past the edge go (%d sources, %d plankton left)" % [shrinking.sources.size(), shrinking.plankton.size()])
-	TestUtil.check(is_equal_approx(shrinking.feed_density, 8.0) and is_equal_approx(shrinking.bloom_density, 0.25) and is_equal_approx(shrinking.bloom_per_day(), 0.25 * PI * 1.5 * 1.5), "the feed and the bloom are densities, so they stay as they were, and the bloom's plankton a day follow the area (%.2f, %.3f, %.3f a day)" % [shrinking.feed_density, shrinking.bloom_density, shrinking.bloom_per_day()])
-	TestUtil.check(absf(shrinking.field.sample(Vector2.ZERO) - density_before) < 0.06 * density_before, "the nutrient left keeps its concentration (%.4f then, %.4f now)" % [density_before, shrinking.field.sample(Vector2.ZERO)])
-	shrinking.resize_to(10.0)
-	TestUtil.check(shrinking.radius == StartConditions.MIN_DISH_RADIUS, "and never below the smallest dish")
-	shrinking.resize_to(3000.0)
-	TestUtil.check(is_equal_approx(shrinking.feed_density, 8.0) and is_equal_approx(shrinking.bloom_density, 0.25) and is_equal_approx(shrinking.bloom_per_day(), 0.25 * PI * 9.0), "growing again gives the bloom more plankton a day with the area, and leaves the feed and the bloom densities alone")
-	shrinking.advance(60.0)
-	TestUtil.check(shrinking.population() <= 2, "a shrunken dish keeps running")
-	shrinking.free()
-
-	# --- The bup limit is a start condition: chosen, enforced, saved, and clamped when loaded.
+	# --- The bup limit is a start condition: chosen, enforced, and clamped when loaded.
 	var limited := _make_dish()
 	var limit_start := TestUtil.small_start()
 	limit_start.bup_limit = 50
 	limit_start.bups = 200
 	limited.strike(limit_start)
-	TestUtil.check(limited.bup_limit == 50 and limited.population() == 50, "the bup limit caps the starting crowd (%d)" % limited.population())
-	limited.advance(3.0 * 3600.0)
-	TestUtil.check(limited.population() <= 50, "...and the colony as it grows (%d)" % limited.population())
-	var limit_copy := _make_dish()
-	TestUtil.check(limit_copy.from_dict(TestUtil.saved(limited)) and limit_copy.bup_limit == 50, "the limit survives save and load")
+	await _settle()
+	TestUtil.check(limited.bup_limit == 50 and limited.population() == 50 and _spec().limit == 50, "the bup limit caps the starting crowd (%d)" % limited.population())
 	TestUtil.check(StartConditions.from_dict({"bup_limit": 99999999}).bup_limit == StartConditions.MAX_BUP_LIMIT and StartConditions.from_dict({"bup_limit": 1}).bup_limit == StartConditions.MIN_BUP_LIMIT, "a saved limit is clamped to the slider's range")
 	TestUtil.check(StartConditions.MAX_DISH_RADIUS == 90000.0 and StartConditions.MAX_BUP_LIMIT == 2000000, "free mode offers dishes up to 90000 µm and limits up to 2,000,000")
 	limited.free()
-	limit_copy.free()
 
-	# --- Nothing can be put where it would vanish: every spot near the rim is either refused, or takes
-	# its full dose; a spot the grid can't hold is never accepted as a source.
+	# --- Nothing can be put where it would vanish: a spot the grid can't hold is refused as a source, a plankton and a dose.
 	d.strike(TestUtil.small_start())
 	var refused := 0
 	var accepted := 0
-	var lost := 0
 	for angle in range(0, 360, 3):
 		for margin in [0.0, 1.0, 3.0, 6.0, 9.0, 12.0]:
 			var at: Vector2 = d.global_position + Vector2.from_angle(deg_to_rad(float(angle))) * (d.radius - margin)
-			d.field.reset(d.radius)
-			d.sources.clear()
 			if d.can_place_at(at):
 				accepted += 1
-				d.field.deposit(at - d.global_position, 10.0)
-				if absf(d.field.total() - 10.0) > 0.01:
-					lost += 1
-				TestUtil.check(d.place_source(at, 5.0), "a spot that can take nutrient accepts a source (%d deg, %.0f from the rim)" % [angle, margin])
 			else:
 				refused += 1
-				TestUtil.check(not d.place_source(at, 5.0) and not d.drop_nutrients(at, 3), "a spot that can't hold nutrient accepts neither a source nor a dose (%d deg, %.0f from the rim)" % [angle, margin])
-	TestUtil.check(lost == 0 and accepted > 0 and refused > 0, "no accepted rim spot loses its nutrient (%d accepted, %d refused, %d lost)" % [accepted, refused, lost])
-	d.sources.clear()
+				TestUtil.check(not d.place_source(at, 5.0) and not d.drop_nutrients(at, 3) and not d.place_plankton(at), "a spot that can't hold nutrient accepts neither a source, a plankton nor a dose (%d deg, %.0f from the rim)" % [angle, margin])
+	TestUtil.check(accepted > 0 and refused > 0, "some rim spots are accepted and some refused (%d, %d)" % [accepted, refused])
+	TestUtil.check(d.place_source(d.global_position, 5.0), "a spot that can take nutrient accepts a source")
 
-	# --- Dropped-nutrient counter.
+	# --- The eraser asks the world to take nutrient out of a patch.
 	d.strike(TestUtil.small_start())
-	TestUtil.check(d.nutrients_placed == 0, "counter starts at 0")
-	d.drop_nutrients(click, 1)
-	d.drop_nutrients(click, 30)
-	TestUtil.check(d.nutrients_placed == 31, "counter adds what was dropped, got %d" % d.nutrients_placed)
-	d.drop_nutrients(d.global_position + Vector2(d.radius + 50.0, 0.0), 5)
-	TestUtil.check(d.nutrients_placed == 31, "a rejected drop isn't counted")
-	var copy := _make_dish()
-	TestUtil.check(copy.from_dict(TestUtil.saved(d)) and copy.nutrients_placed == d.nutrients_placed, "counter survives save/load")
-	d.strike(TestUtil.small_start())
-	TestUtil.check(d.nutrients_placed == 0, "a new dish resets the counter")
-
-	# --- The eraser takes nutrient out of a patch, most at its middle.
-	d.strike(TestUtil.small_start())
-	d.clear_bups()
-	d.field.reset(d.radius)
-	d.field.set_patchiness(0.0, 1.0, 0)  # (an even medium, so the brush's effect is plain to see)
-	d.field.fill(1.0)
-	var total_filled: float = d.field.total()
 	var patch := d.global_position + Vector2(-80, 40)
-	var middle_before := d.field.sample(patch - d.global_position)
-	var removed := d.erase_nutrient(patch, 40.0)
-	TestUtil.check(removed > 0.0 and d.field.sample(patch - d.global_position) < middle_before * 0.25, "erasing lowers the nutrient at the middle of the brush")
-	var rim := patch + Vector2(36, 0)
-	TestUtil.check(d.field.sample(rim - d.global_position) > d.field.sample(patch - d.global_position), "...and less towards its edge")
-	TestUtil.check(absf(d.field.sample(d.global_position + Vector2(150, 150) - d.global_position) - middle_before) < middle_before * 0.01, "...and not at all outside it")
-	TestUtil.check(absf((total_filled - d.field.total()) / Dish.NUTRIENT_ENERGY - removed) < 0.01, "erasing reports the units it removed")
+	var erases_before := _edits(WorldEdit.Kind.ERASE).size()
+	d.erase_nutrient(patch, 40.0)
+	var erases := _edits(WorldEdit.Kind.ERASE)
+	TestUtil.check(erases.size() == erases_before + 1 and erases[-1].position.is_equal_approx(patch - d.global_position) and is_equal_approx(erases[-1].radius, 40.0), "the eraser asks the world to erase a brush of its size where it was put")
 
-	# --- Plankton: placed by hand, as many as the dish holds, they float until they burst into nutrient; a bloom adds more at random.
+	# --- Plankton: placed by hand, as many as the dish holds; a bloom is a density, clamped.
 	var bloom := _make_dish()
 	bloom.strike(TestUtil.small_start())
-	bloom.field.reset(bloom.radius)
+	await _settle()
 	var bloom_spot := bloom.global_position + Vector2(40, 30)
 	TestUtil.check(bloom.plankton.is_empty() and bloom.bloom_density == 0.0, "a new dish has no plankton in the water and no bloom")
-	TestUtil.check(bloom.place_plankton(bloom_spot) and bloom.plankton.size() == 1, "a plankton can be placed")
-	TestUtil.check(not bloom.place_plankton(bloom.global_position + Vector2(bloom.radius + 10.0, 0)), "plankton can't be placed outside the dish")
-	var lifetime: float = bloom.plankton[0].burst_at - bloom.time
-	TestUtil.check(lifetime >= Dish.PLANKTON_MEAN_LIFE * (1.0 - Dish.PLANKTON_LIFE_SPREAD) and lifetime <= Dish.PLANKTON_MEAN_LIFE * (1.0 + Dish.PLANKTON_LIFE_SPREAD), "it bursts at a random time within a set span of the mean life (%.0f s)" % lifetime)
-	var before_burst := TestUtil.units(bloom)
-	bloom.plankton[0].burst_at = bloom.time + 1.0
-	bloom.advance(Dish.BURST_CHECK_SECONDS)  # (they are looked over for bursts once in this long)
-	TestUtil.check(bloom.plankton.is_empty() and absf(TestUtil.units(bloom) - before_burst - Dish.PLANKTON_UNITS) < 1.0, "a plankton that bursts is gone and leaves its %.0f units of nutrient (%.1f)" % [Dish.PLANKTON_UNITS, TestUtil.units(bloom) - before_burst])
-	for i in 30:
+	TestUtil.check(bloom.place_plankton(bloom_spot) and not bloom.place_plankton(bloom.global_position + Vector2(bloom.radius + 10.0, 0)), "a plankton can be placed, but not outside the dish")
+	await _settle()
+	TestUtil.check(bloom.plankton.size() == 1, "the plankton comes back in the world's copy of the dish (%d)" % bloom.plankton.size())
+	for i in 29:
 		bloom.place_plankton(bloom_spot)
+	await _settle()
 	TestUtil.check(bloom.plankton.size() == 30, "there is no limit on how many the player places but the dish's (%d)" % bloom.plankton.size())
-	bloom.plankton.clear()
-	bloom.resize_to(Dish.DEFAULT_RADIUS)  # (the 300 µm dish is too small for a bloom of any size: a day's worth is a fraction of a plankton)
-	_bloom_per_day(bloom, 240.0)
-	bloom.advance(3600.0)
-	TestUtil.check(bloom.plankton.size() >= 8 and bloom.plankton.size() <= 12, "a bloom of 240 a day (10 an hour) adds one every 6 minutes, so about ten are floating after an hour (%d)" % bloom.plankton.size())
-	# They arrive on a fixed schedule: exactly one every 6 minutes, whatever else is random.
-	var drip := _make_dish()
-	drip.strike(TestUtil.small_start())
-	drip.clear_bups()
-	drip.resize_to(Dish.DEFAULT_RADIUS)
-	_bloom_per_day(drip, 240.0)
-	var arrivals_seen: Array[float] = []
-	var seen_ids := {}
-	for i in int(3600.0 / 10.0):
-		drip.step(10.0)
-		for cell in drip.plankton:
-			if not seen_ids.has(cell.get_instance_id()):
-				seen_ids[cell.get_instance_id()] = true
-				arrivals_seen.append(drip.time)
-	var even := arrivals_seen.size() >= 9
-	for i in range(1, arrivals_seen.size()):
-		even = even and absf((arrivals_seen[i] - arrivals_seen[i - 1]) - 360.0) < 10.5
-	TestUtil.check(even, "the bloom drips plankton in on a fixed schedule, one every 6 minutes (%s)" % [arrivals_seen]) 
 	bloom.bloom_density = 1000.0
 	TestUtil.check(bloom.bloom_density == StartConditions.MAX_BLOOM_DENSITY, "the bloom density cannot be set above the most the game allows")
-	var biggest_per_step := StartConditions.MAX_BLOOM_DENSITY * PI * pow(StartConditions.MAX_DISH_RADIUS / StartConditions.UM_PER_MM, 2) / 86400.0 * Dish.MAX_STEP
-	var biggest_floating := StartConditions.MAX_BLOOM_DENSITY * PI * pow(StartConditions.MAX_DISH_RADIUS / StartConditions.UM_PER_MM, 2) * Dish.PLANKTON_MEAN_LIFE / 86400.0
-	TestUtil.check(biggest_per_step < Dish.MAX_BLOOM_ARRIVALS_PER_STEP and biggest_floating < Dish.MAX_PLANKTON, "the most bloom on the biggest dish fits what a step can add (%.0f of %d) and what the dish can hold (%.0f of %d)" % [biggest_per_step, Dish.MAX_BLOOM_ARRIVALS_PER_STEP, biggest_floating, Dish.MAX_PLANKTON])
-	# The bursts, which are what feed the colony, come at steady enough intervals: no long gaps with nothing.
-	var steady := _make_dish()
-	steady.strike(TestUtil.small_start())
-	steady.clear_bups()
-	steady.resize_to(Dish.DEFAULT_RADIUS)
-	_bloom_per_day(steady, 24.0)
-	var gaps := []
-	var last_burst := 0.0
-	var floating := steady.plankton.size()
-	for i in int(72.0 * 3600.0 / 20.0):
-		steady.step(20.0)
-		if steady.plankton.size() < floating:  # (one burst, at least, since the last step)
-			gaps.append(steady.time - last_burst)
-			last_burst = steady.time
-		floating = steady.plankton.size()
-	var longest := 0.0
-	for g: float in gaps:
-		longest = maxf(longest, g)
-	TestUtil.check(gaps.size() >= 40 and longest < 3.0 * 3600.0, "at 24 a day the nutrient arrives about hourly with no gap past 3 hours (%d bursts, longest gap %.1f h)" % [gaps.size(), longest / 3600.0])
-	# A paused dish is redrawn once with no trails: the picture made while time moved may carry them.
-	bloom._process(0.0)
-	bloom.step(5.0)
-	bloom._process(0.0)
-	TestUtil.check(bloom.drawing.trails_may_show, "a picture made as time moved may carry trails")
-	var stamp_then: Array = bloom.drawing.render_stamp
-	bloom._process(0.0)
-	TestUtil.check(not bloom.drawing.trails_may_show and bloom.drawing.render_stamp == stamp_then, "the next picture, with nothing moving, is made once more, and then no trails remain")
-	bloom.bloom_density = 0.0
-	bloom.plankton.clear()
-	bloom.advance(600.0)
-	TestUtil.check(bloom.plankton.is_empty(), "with no bloom nothing appears by itself")
-	bloom.place_plankton(bloom_spot)
-	var cost_before: float = bloom.bup_info(bloom.sim.bup_ids()[0])["upkeep"]
-	bloom.upkeep_factor = 10.0
-	var cost_after: float = bloom.bup_info(bloom.sim.bup_ids()[0])["upkeep"]
-	TestUtil.check(cost_after > 5.0 * cost_before and cost_after < 10.0 * cost_before, "a higher upkeep factor makes staying alive cost more (%.5f to %.5f a second)" % [cost_before, cost_after])
-	bloom.bloom_density = 0.07
-	var bloom_copy := _make_dish()
-	TestUtil.check(bloom_copy.from_dict(TestUtil.saved(bloom)) and bloom_copy.plankton.size() == 1 and is_equal_approx(bloom_copy.plankton[0].burst_at, bloom.plankton[0].burst_at) and bloom_copy.bloom_density == 0.07, "plankton and the bloom density survive save and load")
 	TestUtil.check(StartConditions.from_dict({"bloom_density": 9999}).bloom_density == StartConditions.MAX_BLOOM_DENSITY and StartConditions.new().bloom_density == 0.0, "the bloom density is a start condition: none by default, clamped when loaded")
+	bloom.free()
 
-# --- Selecting and inspecting: bups and sources are picked, the medium is read anywhere.
+	# --- Selecting and inspecting: sources are picked.
 	d.strike(TestUtil.small_start())
-	d.clear_bups()
-	d.field.reset(d.radius)
+	await _settle()
 	var spot := d.global_position + Vector2(60, -30)
 	d.place_source(spot, 2.0)
-	TestUtil.check(d.source_at(spot) == d.sources[0], "source_at finds the source under a point")
+	await _settle()
+	TestUtil.check(d.sources.size() == 1 and d.source_at(spot) == d.sources[0], "source_at finds the source under a point")
 	TestUtil.check(d.source_at(spot + Vector2(Dish.SOURCE_PICK_RADIUS + 2.0, 0.0)) == null, "just outside the pick radius finds none")
 	TestUtil.check(d.source_at(spot + Vector2(Dish.SOURCE_PICK_RADIUS + 2.0, 0.0), 4.0) == d.sources[0], "slack widens a source's target")
 	d.select_at(spot)
 	TestUtil.check(d.selected.source == d.sources[0] and d.selected.bup == -1, "select_at selects the source")
 	d.select_at(d.global_position + Vector2(-200, 200))
 	TestUtil.check(d.selected.source == null and d.selected.bup == -1, "selecting empty space lets go of the selection")
-	d.add_bup(spot, Genome.founder(), 30.0)
-	d.select_at(spot)
-	TestUtil.check(d.selected.source != null and d.selected.bup == -1, "a source is picked over a bup on top of it")
-	d.hover_at(spot)
-	TestUtil.check(d.hovered.source != null and d.hovered.bup == -1, "...and so is its hover")
-	d.select_at(spot + Vector2(Dish.SOURCE_PICK_RADIUS - 2.0, 0.0))
-	TestUtil.check(d.selected.source != null, "a click a little away from a source still picks it (within %.0f µm)" % Dish.SOURCE_PICK_RADIUS)
-	d.clear_bups()
-	d.select_at(spot)
-	TestUtil.check(d.selected.source != null and d.selected.bup == -1, "selecting a source clears the bup selection")
 	d.hover_at(spot)
 	TestUtil.check(d.hovered.source == d.sources[0] and d.hovered.bup == -1, "hover_at highlights a source")
 	d.clear_hover()
 	TestUtil.check(d.hovered.source == null and d.hovered.bup == -1, "clear_hover clears both kinds")
-	# The medium at a point: concentration, which way it rises, what is near.
-	d.sources.clear()
-	var values := []
-	for i in d.field.size * d.field.size:
-		values.append(0.05 + 0.0002 * d.field.cell_centre(i).x)
-	d.field.load_values(values)
-	d.add_bup(spot + Vector2(30, 0), Genome.founder(), 30.0)
-	d.add_bup(spot + Vector2(200, 0), Genome.founder(), 30.0)
-	d.place_source(spot + Vector2(0, 70), 2.0)
-	var info := d.nutrient_at(spot)
-	TestUtil.check((info["offset"] as Vector2).is_equal_approx(Vector2(60, -30)), "point info: position relative to the dish centre")
-	TestUtil.check(is_equal_approx(info["distance"], Vector2(60, -30).length()), "point info: distance from the centre")
-	TestUtil.check(absf(info["concentration"] - (0.05 + 0.0002 * 60.0)) < 0.002, "point info: concentration here (%.4f)" % info["concentration"])
-	TestUtil.check((info["gradient"] as Vector2).x > 0.00015 and absf((info["gradient"] as Vector2).y) < 0.00005, "point info: the medium rises towards +x")
-	TestUtil.check(is_equal_approx(info["nearest_bup"], 30.0) and is_equal_approx(info["nearest_source"], 70.0), "point info: nearest bup and source")
-	d.clear_bups()
-	d.sources.clear()
-	TestUtil.check(d.nutrient_at(spot)["nearest_bup"] == -1.0 and d.nutrient_at(spot)["nearest_source"] == -1.0, "point info with nothing near")
-	d.select_at(spot)
-	d.place_source(spot, 2.0)
 	d.select_at(spot)
 	d.strike(TestUtil.small_start())
 	TestUtil.check(d.selected.source == null and d.selected.bup == -1, "a new dish clears any selection")
@@ -818,38 +496,6 @@ func _init() -> void:
 	TestUtil.check(HistoryGraph.tick_step(2.0 * 86400.0, 24.0) == 86400.0, "ticks counted in days are whole days apart")
 	TestUtil.check(not HistoryGraph.ticks_in_days(HistoryGraph.Span.LAST_WEEK, 168.0 * 3600.0) and HistoryGraph.ticks_in_days(HistoryGraph.Span.ALL, 8.0 * 86400.0) and HistoryGraph.ticks_in_days(HistoryGraph.Span.LAST_72, 8.0 * 86400.0) and not HistoryGraph.ticks_in_days(HistoryGraph.Span.ALL, 3600.0), "the axis counts days past a week, and for the whole run once it is a couple of days")
 	TestUtil.check(HistoryGraph.format_time(86400.0 * 3.0, true) == "3d" and HistoryGraph.format_time(86400.0 * 1500.0, true) == "1,500d" and HistoryGraph.format_time(3600.0 * 5.0) == "5h", "days and hours on the ticks")
-	# The history goes on after the colony dies out, so its time stays true: the population drops to zero and the traits stay.
-	var gone := _make_dish()
-	gone.strike(TestUtil.small_start())
-	for i in 40:
-		gone.step(20.0)
-	var recorded: int = gone.history.fine["pop"].size()
-	var sense_then: float = gone.history.fine["sense"][-1]
-	gone.clear_bups()
-	for i in 40:
-		gone.step(20.0)
-	TestUtil.check(gone.history.fine["pop"].size() > recorded and gone.history.fine["pop"][-1] == 0 and gone.history.fine["sense"][-1] == sense_then and gone.history.fine["pop"].size() == int(gone.time / DishHistory.INTERVAL), "the history keeps its time after the colony dies out (%d samples for %.0f s)" % [gone.history.fine["pop"].size(), gone.time])
-	gone.free()
-	var whole := _make_dish()
-	whole.strike(TestUtil.small_start())
-	whole.clear_bups()
-	whole.add_bup(whole.global_position, Genome.founder(), 30.0)
-	var samples := 6000
-	var sum_pop := 0.0
-	for i in samples:
-		whole._record_history()
-		sum_pop += whole.history.fine["pop"][-1]
-	var whole_n: int = whole.history.whole["pop"].size()
-	TestUtil.check(whole_n < DishHistory.ALL_LEN and whole.history.whole_factor == 8 and whole_n * whole.history.whole_factor <= samples and (whole_n + 1) * whole.history.whole_factor > samples, "the whole-run history stays under its limit by merging pairs (%d samples, each of %d)" % [whole_n, whole.history.whole_factor])
-	TestUtil.check(whole.history.fine["pop"].size() == DishHistory.LEN, "the fine history keeps its week")
-	var mean_all := 0.0
-	for v in whole.history.whole["pop"]:
-		mean_all += v
-	TestUtil.check(absf(mean_all / whole_n - sum_pop / samples) < 0.01, "...and its samples are means, so they keep the average")
-	var whole_copy := _make_dish()
-	TestUtil.check(whole_copy.from_dict(TestUtil.saved(whole)) and whole_copy.history.whole["pop"].size() == whole_n and whole_copy.history.whole_factor == whole.history.whole_factor, "the whole-run history survives save and load")
-	whole.free()
-	whole_copy.free()
 	TestUtil.check(DishHistory.LEN * DishHistory.INTERVAL == 168.0 * 3600.0, "the dish keeps a week of samples")
 	TestUtil.check(HistoryGraph.harm_axis_max([]) == 10.0 and HistoryGraph.harm_axis_max([4.0, 9.9]) == 10.0 and HistoryGraph.harm_axis_max([12.0]) == 20.0 and HistoryGraph.harm_axis_max([35.0]) == 50.0 and HistoryGraph.harm_axis_max([5.0, 99.0]) == 100.0, "the harm axis grows to hold the data, up to 100%")
 	TestUtil.check(HistoryGraph.tick_text(0.4, 2.0) == "0.4" and HistoryGraph.tick_text(10.0, 120.0) == "10" and HistoryGraph.tick_text(150.0, 150.0) == "150", "trait ticks use sensible decimals")
@@ -858,8 +504,7 @@ func _init() -> void:
 	graph.dish = d
 	root.add_child(graph)
 	d.strike(TestUtil.small_start())
-	for i in 200:
-		d.step(1.0 / 30.0)
+	await _settle()
 	for trait_i in HistoryGraph.TRAITS.size():
 		graph.trait_index = trait_i
 		graph.queue_redraw()
@@ -871,76 +516,17 @@ func _init() -> void:
 	var wipe := _make_dish()
 	wipe.extinct.connect(func() -> void: extinct_count[0] += 1)
 	wipe.strike(TestUtil.small_start())
-	wipe.clear_bups()
-	for i in 12:
-		wipe.step(0.1)
-	TestUtil.check(extinct_count[0] == 1, "extinct is signalled once, not on every step (%d)" % extinct_count[0])
+	await _settle()
+	fake.kill_ids(wipe.row, fake.ids_in(wipe.row))
+	await _settle()
+	await _settle()
+	TestUtil.check(extinct_count[0] == 1, "extinct is signalled once, not on every frame (%d)" % extinct_count[0])
 	wipe.strike(TestUtil.small_start())
-	wipe.clear_bups()
-	wipe.step(0.1)
-	wipe.step(0.1)
+	await _settle()
+	fake.kill_ids(wipe.row, fake.ids_in(wipe.row))
+	await _settle()
 	TestUtil.check(extinct_count[0] == 2, "a new dish that dies signals again (%d)" % extinct_count[0])
-
-	# --- After a load, history samples still land on multiples of the interval.
-	var run := _make_dish()
-	run.strike(TestUtil.small_start())
-	run.place_source(run.global_position + Vector2(30, 30), 3.0)  # so there is a source to save and to corrupt
-	while run.time < 1.25 * DishHistory.INTERVAL:
-		run.step(0.5)
-	var reloaded := _make_dish()
-	TestUtil.check(reloaded.from_dict(TestUtil.saved(run)), "a dish mid-run reloads")
-	var samples_before: int = reloaded.history.fine["pop"].size()
-	while reloaded.history.fine["pop"].size() == samples_before:
-		reloaded.step(0.05)
-	var drift := absf(reloaded.time - DishHistory.INTERVAL * round(reloaded.time / DishHistory.INTERVAL))
-	TestUtil.check(drift < 0.06, "the first sample after a load falls on a multiple of %.0fs (t=%.2f)" % [DishHistory.INTERVAL, reloaded.time])
-
-	# --- A bad save is rejected whole and leaves the dish exactly as it was.
-	var good: Dictionary = TestUtil.saved(run)
-	var victim := _make_dish()
-	victim.strike(TestUtil.small_start())
-	victim.place_source(victim.global_position + Vector2(50, 20), 2.0)
-	victim.select_at(victim.global_position + Vector2(50, 20))
-	var cells_before := victim.bup_ids()
-	var sources_before: Array = victim.sources.duplicate()
-	var radius_before := victim.radius
-	var time_before := victim.time
-	var broken := {
-		"no bups block": func(x: Dictionary) -> void: x.erase("cells"),
-		"bups in the old format, a list": func(x: Dictionary) -> void: x["cells"] = [{"pos": [1.0, 1.0]}],
-		"bups block of the wrong size for a record": func(x: Dictionary) -> void: x["cells"] = DishCodec.pack_bytes(PackedByteArray([1, 2, 3])),
-		"bups block that does not decompress to its size": func(x: Dictionary) -> void: x["cells"]["raw"] = int(x["cells"]["raw"]) + 96,
-		"no family records": func(x: Dictionary) -> void: x.erase("lineage"),
-		"family records cut short": func(x: Dictionary) -> void: x["lineage"]["z"] = str(x["lineage"]["z"]).substr(0, 20),
-		"source position too short": func(x: Dictionary) -> void: x["sources"][0]["pos"] = [3.0],
-		"source rate is text": func(x: Dictionary) -> void: x["sources"][0]["rate"] = "fast",
-		"nutrient field is the wrong size": func(x: Dictionary) -> void: x["field"] = [0.1, 0.2],
-		"bups block empty": func(x: Dictionary) -> void: x["cells"] = {},
-		"history not a dictionary": func(x: Dictionary) -> void: x["history"] = [1],
-		"history holds text": func(x: Dictionary) -> void: x["history"]["pop"][0] = "no",
-		"radius is text": func(x: Dictionary) -> void: x["radius"] = "big",
-		"time is not a number": func(x: Dictionary) -> void: x["time"] = NAN,
-		"no nutrient detail": func(x: Dictionary) -> void: x.erase("nutrient_resolution"),
-		"no medium thickness": func(x: Dictionary) -> void: x.erase("medium_thickness"),
-		"no clouds": func(x: Dictionary) -> void: x.erase("clouds"),
-		"a cloud of four numbers": func(x: Dictionary) -> void: x["clouds"] = [[1.0, 2.0, 3.0, 4.0]],
-		"history without a series": func(x: Dictionary) -> void: x["history"].erase("key"),
-		"no whole-run history": func(x: Dictionary) -> void: x.erase("history_all"),
-		"whole-run history without a series": func(x: Dictionary) -> void: x["history_all"].erase("pop"),
-		"no whole-run history factor": func(x: Dictionary) -> void: x.erase("history_all_factor"),
-	}
-	for what in broken:
-		var bad: Dictionary = good.duplicate(true)
-		broken[what].call(bad)
-		TestUtil.check(not victim.from_dict(bad), "rejects a save where: %s" % what)
-		TestUtil.check(victim.bup_ids() == cells_before and victim.sources == sources_before and victim.radius == radius_before and victim.time == time_before, "...and leaves the dish untouched (%s)" % what)
-	TestUtil.check(victim.selected.source != null, "...including the selection (a rejected load changes nothing)")
-	# Odd but harmless values are made safe instead of rejected.
-	var odd: Dictionary = good.duplicate(true)
-	odd["radius"] = 99999
-	TestUtil.check(victim.from_dict(odd), "a save with out-of-range values still loads")
-	TestUtil.check(victim.radius == StartConditions.MAX_DISH_RADIUS, "...with the radius clamped (%.0f)" % victim.radius)
-	TestUtil.check(victim.selected.source == null and victim.selected.bup == -1, "a successful load clears the selection")
+	wipe.free()
 
 	# --- StartConditions: one source for limits, and an honest copy().
 	TestUtil.check(StartConditions.MAX_BUPS <= StartConditions.MAX_BUP_LIMIT, "the bups slider cap never exceeds the limit slider's")
@@ -1067,46 +653,12 @@ func _init() -> void:
 	TestUtil.check(rt.get_parsed_text() == "TIME 12s  [PAUSED]  (x3)", "brackets and text survive styling: '%s'" % rt.get_parsed_text())
 	rt.queue_free()
 
-	# --- Each bup is drawn at its true size, or on its own at the least that shows: never thinner or shorter than a few pixels, with no bup enlarging another.
-	var drawing := BupSim.new()
-	drawing.reset(300.0, 2)
-	var newborn_bup := drawing.add_bup(Vector2.ZERO, Genome.founder(), 50.0, 2.0, 4.0, 0, Vector2.RIGHT)  # 1 µm long: mass 4
-	var adult_bup := drawing.add_bup(Vector2.ZERO, Genome.founder(), 50.0, 4.0, 8.0, 0, Vector2.RIGHT)  # 4 µm long: mass 16
-	var huge_bup := drawing.add_bup(Vector2.ZERO, Genome.founder(), 50.0, 6.0, 8.0, 0, Vector2.RIGHT)  # 9 µm long: mass 36
-	var near := drawing.render_buffer(0.5, 3)  # zoomed in: half a micrometre a pixel
-	TestUtil.check(is_equal_approx(near[12], 1.0) and is_equal_approx(near[28], 4.0) and is_equal_approx(near[44], 9.0) and is_equal_approx(near[13], Biology.WIDTH), "where bups are big enough to see they are exactly true size (%.2f, %.2f, %.2f µm)" % [near[12], near[28], near[44]])
-	var far := drawing.render_buffer(3.0, 3)  # 3 µm a pixel: the least that shows is 6 µm long and 3 µm thick
-	TestUtil.check(is_equal_approx(far[12], 6.0) and is_equal_approx(far[28], 6.0) and is_equal_approx(far[44], 9.0) and is_equal_approx(far[13], 3.0), "a bup too small to see is drawn at the least that shows, on its own: the big one is unchanged (%.2f, %.2f, %.2f µm; %.2f thick)" % [far[12], far[28], far[44], far[13]])
-	TestUtil.check(is_equal_approx(drawing.bup_radius(adult_bup, 3.0), 3.0) and is_equal_approx(drawing.bup_radius(huge_bup, 3.0), 4.5), "the ring and the picking follow what is drawn")
-	var lone := BupSim.new()
-	lone.reset(300.0, 3)
-	lone.add_bup(Vector2.ZERO, Genome.founder(), 50.0, 2.0, 4.0, 0, Vector2.RIGHT)  # 1 µm long
-	TestUtil.check(lone.pick_bup(Vector2(2.0, 0.0), 0.0, 3.0) != -1 and lone.pick_bup(Vector2(2.0, 0.0), 0.0, 0.5) == -1, "a bup that is drawn bigger than it is can be picked by the size it is drawn at")
-
 	# --- The selection ring is a fixed 12 px, and only grows when its subject is over half its diameter.
 	TestUtil.check(Dish.ring_radius_pixels(1.0) == 12.0 and Dish.ring_radius_pixels(6.0) == 12.0, "the ring keeps its size for a subject up to half its diameter")
 	TestUtil.check(is_equal_approx(Dish.ring_radius_pixels(8.0), 32.0) and is_equal_approx(Dish.ring_radius_pixels(32.0), 128.0), "...and above that grows to keep the subject a quarter of it (8 px -> 32, 32 px -> 128)")
 
-	# --- Picking bups.
-	d.strike(TestUtil.small_start())
-	var target: int = d.bup_ids()[0]
-	for id in d.bup_ids():  # alone, so a neighbour can't be the nearer pick
-		if id != target:
-			d.remove_bup(id)
-	var target_pos := d.bup_world_pos(target)
-	var target_radius: float = d.sim.bup_radius(target, d.pixel())
-	TestUtil.check(d.cell_at(target_pos) == target, "cell_at finds the bup under a point")
-	TestUtil.check(d.cell_at(target_pos + Vector2(target_radius + 3.0, 0.0), 0.0) != target, "no slack: just outside misses")
-	TestUtil.check(d.cell_at(target_pos + Vector2(target_radius + 3.0, 0.0), 4.0) == target, "slack widens the target")
-	TestUtil.check(d.cell_at(d.global_position + Vector2(d.radius * 2.0, 0.0)) == -1, "far from every bup finds none")
-
-	# --- Bups all start inside the dish at any count.
-	s.bups = 200
-	s.nutrient_density = 60
-	d.strike(s)
-	TestUtil.check(_radii(Array(d.bup_ids()).map(func(id: int) -> Vector2: return d.bup_world_pos(id))).max() <= d.radius, "200 bups inside dish")
-
 	# --- Free mode scene: no goals, no saving, uses start conditions, same sim.
+	fake = TestUtil.use_fake_world(self)
 	var save_before := FileAccess.get_file_as_string(SaveGame.PATH) if FileAccess.file_exists(SaveGame.PATH) else ""
 	var had_save := FileAccess.file_exists(SaveGame.PATH)
 	var mtime_before := FileAccess.get_modified_time(SaveGame.PATH) if had_save else 0
@@ -1121,7 +673,8 @@ func _init() -> void:
 	root.add_child(m)
 	await process_frame
 	TestUtil.check(m.free_mode, "main.free_mode")
-	TestUtil.check(m.dish.population() == 150 and absf(TestUtil.density(m.dish) - 40.0) < 1.0 and m.dish.feed_density == 11.0, "free scene started with chosen conditions (%d bups, %.0f units/mm², feed %.0f)" % [m.dish.population(), TestUtil.density(m.dish), m.dish.feed_density])
+	await _settle()
+	TestUtil.check(m.dish.population() == 150 and is_equal_approx(_spec().nutrient_density, 40.0) and m.dish.feed_density == 11.0, "free scene started with chosen conditions (%d bups, %.0f units/mm², feed %.0f)" % [m.dish.population(), _spec().nutrient_density, m.dish.feed_density])
 	for i in 60:
 		await process_frame
 	TestUtil.check(m.tracker.index == 0, "no goal progress in free mode (pop %d >= 1,000 would complete goal 1)" % m.dish.population())
@@ -1134,10 +687,14 @@ func _init() -> void:
 	await process_frame
 	hud_text = m.vitals.get_parsed_text()
 	TestUtil.check(hud_text.contains("/ 2,000"), "...and follows a change of limit ('%s')" % hud_text)
+	fake.device = "Test GPU"
 	m._open_menu()
 	TestUtil.check(m.pause_menu.initial_panel.visible and m.pause_menu.initial_bups.value_label.text == "150" and m.pause_menu.initial_nutrients.value_label.text == "40/mm²" and m.pause_menu.initial_rate.value_label.text == "11.0 /mm²/h" and m.pause_menu.initial_dish.value_label.text == "0.3 mm" and m.pause_menu.initial_limit.value_label.text == UiText.thousands(chosen.bup_limit), "the Escape menu records how the dish started, unchanged by later changes (dish %s)" % m.pause_menu.initial_dish.value_label.text)
-	TestUtil.check(m.pause_menu.initial_bups.name_label.text == "Bups" and m.pause_menu.initial_rate.name_label.text == "Nutrient feed rate", "its rows carry their labels")
-	TestUtil.check(m.pause_menu.initial_running.visible and m.pause_menu.initial_running.name_label.text == "Simulating on" and m.pause_menu.initial_running.value_label.text == "CPU (auto)", "the record says where the bups are simulated now: the processor, chosen by the game")
+	TestUtil.check(m.pause_menu.initial_bups.name_label.text == Strings.t("pause.record_bups") and m.pause_menu.initial_rate.name_label.text == Strings.t("pause.record_nutrient_feed"), "its rows carry their labels")
+	TestUtil.check(m.pause_menu.initial_running.visible and m.pause_menu.initial_running.name_label.text == Strings.t("pause.record_device") and m.pause_menu.initial_running.value_label.text == "Test GPU", "the record names the device the world simulates on")
+	fake.device = ""
+	m.pause_menu.open(m.dish, true, chosen)
+	TestUtil.check(m.pause_menu.initial_running.value_label.text == Strings.t("pause.running_cpu"), "...and says CPU when the world has no device")
 	TestUtil.check(not m.pause_menu.initial_backend.visible, "the record has no row for the GPU setting while it is Auto (like the other advanced settings at their defaults)")
 	var gpu_start := chosen.copy()
 	gpu_start.sim_backend = StartConditions.BACKEND_GPU
@@ -1166,22 +723,22 @@ func _init() -> void:
 	await process_frame
 
 	# The free scene begins the dish from the free start conditions.
+	fake = TestUtil.use_fake_world(self)
 	Session.mode = Session.Mode.FREE
 	var m2: Node = load(Scenes.GAME).instantiate()
 	root.add_child(m2)
-	await process_frame
-	TestUtil.check(m2.dish.population() == 150 and absf(TestUtil.density(m2.dish) - 40.0) < 1.0 and m2.dish.feed_density == 11.0, "the free scene begins with the free start conditions")
+	await _settle()
+	TestUtil.check(m2.dish.population() == 150 and is_equal_approx(_spec().nutrient_density, 40.0) and m2.dish.feed_density == 11.0, "the free scene begins with the free start conditions")
 	m2.queue_free()
 	await process_frame
 
 	# Goal mode scene still uses the default start and has goals.
+	fake = TestUtil.use_fake_world(self)
 	Session.mode = Session.Mode.GOALS
 	Session.load_requested = false
 	var m3: Node = load(Scenes.GAME).instantiate()
 	root.add_child(m3)
-	# Checked straight after _ready, before the first frame: once frames run, the sim feeds
-	# and eats nutrient, so the amounts would depend on how long the first frame took.
-	TestUtil.check(not m3.free_mode and m3.dish.population() == 4 and absf(TestUtil.density(m3.dish) - 32.0) < 0.5 and m3.dish.feed_density == 0.0, "goal mode default start: seeded with nutrient, no feed")
+	TestUtil.check(not m3.free_mode and _spec().founders.size() == 4 * GpuLayout.RECORD_BYTES and is_equal_approx(_spec().nutrient_density, 32.0) and m3.dish.feed_density == 0.0, "goal mode default start: seeded with nutrient, no feed")
 	await process_frame
 	TestUtil.check(m3.goal_card.visible and m3.goal_kicker.text.begins_with("EXPERIMENT 1 / "), "goal mode shows the goal card")
 	TestUtil.check(not m3.vitals.get_parsed_text().contains("dish"), "goal mode's readout has no dish line")
@@ -1213,13 +770,14 @@ func _backend_rule_tests() -> void:
 	TestUtil.check(StartConditions.from_dict(chosen.to_dict()).death_husks and chosen.copy().death_husks and not StartConditions.new().death_husks and not StartConditions.from_dict({"death_husks": 1}).death_husks, "the husks setting is saved and loaded with the rest, starts off, and anything but a boolean is off")
 	chosen.death_husks = false
 	var goal_dish := TestUtil.dish_from(self, null)
+	var goal_spec := _spec()
 	var fresh := StartConditions.new()
 	var differs := []
-	if not (goal_dish.bup_limit == fresh.bup_limit):
+	if not (goal_dish.bup_limit == fresh.bup_limit and goal_spec.limit == fresh.bup_limit):
 		differs.append(0)
 	if not (goal_dish.radius == fresh.dish_radius):
 		differs.append(1)
-	if not (absf(TestUtil.density(goal_dish) - fresh.nutrient_density) < 1.0):
+	if not (is_equal_approx(goal_spec.nutrient_density, fresh.nutrient_density)):
 		differs.append(2)
 	if not (goal_dish.feed_density == fresh.feed_density):
 		differs.append(3)
@@ -1231,18 +789,13 @@ func _backend_rule_tests() -> void:
 		differs.append(6)
 	if not (goal_dish.plankton_husks == fresh.plankton_husks):
 		differs.append(7)
-	if not (goal_dish.population() == fresh.bups):
+	if not (goal_spec.founders.size() == fresh.bups * GpuLayout.RECORD_BYTES):
 		differs.append(8)
 	if not (is_equal_approx(goal_dish.medium_thickness, fresh.medium_thickness)):
 		differs.append(9)
 	TestUtil.check(differs.is_empty(), "goal mode's dish begins from the free-mode defaults, `StartConditions.new()`, and nothing else (differs: %s)" % [differs])
 	goal_dish.free()
 	TestUtil.check(StartConditions.from_dict({"sim_backend": "fast"}).sim_backend == auto and StartConditions.from_dict({"sim_backend": 3}).sim_backend == auto and StartConditions.from_dict({}).sim_backend == auto, "a setting that is not one of the three is Auto")
-	var d := _make_dish()
-	d.strike(chosen)
-	TestUtil.check(d.backend.setting == on and d.backend_running() == "cpu", "a dish takes the setting from its start (and runs on the processor where there is no GPU path: %s)" % d.backend_running())
-	d.strike()
-	TestUtil.check(d.backend.setting == auto, "goal mode's dish (no start given) is always Auto")
 	# Fine steps (x1) run on the GPU too: On wants it whatever the crowd, Off never, Auto when the processor could not keep up.
 	TestUtil.check(BackendRule.wants_gpu(on, 0.0167, 1, 400, 100, false, true) and not BackendRule.wants_gpu(off, 0.0167, 1, 400, 1000000, true, true), "a fine step (x1): On is the GPU's, Off never")
 	TestUtil.check(BackendRule.wants_gpu(auto, 0.0167, 1, 400, 1000000, false, true) and not BackendRule.wants_gpu(auto, 0.0167, 1, 400, 5000, false, true), "a fine step (x1): Auto gives a million bups to the GPU and keeps 5,000 on the processor")
@@ -1299,13 +852,5 @@ func _backend_rule_tests() -> void:
 	var fine_grid := BackendRule.frame_costs(18.5, 400, 7, 2000)
 	TestUtil.check(big.x > small.x and big.y > small.y and fine_grid.x > small.x and fine_grid.y > small.y, "both backends cost more with more bups and with a finer grid")
 	TestUtil.check((big.x - small.x) > 3.0 * (big.y - small.y), "...the processor's cost rises faster with the crowd")
-	# Without a GPU nothing is ever loaded, and no frame wants it.
-	var w := _make_dish()
-	w.strike(chosen)
 	# The takeover wait is real seconds, not a count of frames: the frames that make it are fewer when each is longer (a frame counts at most 0.1 s).
 	TestUtil.check(BackendRule.wait_frames(1.0 / 60.0) == 30 and BackendRule.wait_frames(1.0 / 120.0) == 60 and BackendRule.wait_frames(0.1) == 5, "the GPU's wait (%.1f s) is 30 frames at 60 Hz, 60 at 120 Hz and 5 at the 0.1 s cap" % BackendRule.GPU_WAIT_SECONDS)
-	for i in BackendRule.wait_frames(1.0 / 60.0) + 1:  # (past the wait: a dish that wanted the GPU would have taken it by now)
-		w._choose_backend(1.67)
-	TestUtil.check(w.backend.gpu_wanted_seconds == 0.0 and not w.gpu_active, "no frame wants the GPU where there is none, and the processor runs after the whole wait")
-	w.set_backend_setting("garbage")
-	TestUtil.check(w.backend.setting == auto, "a setting that is not one of the three is Auto, for the dish too")
