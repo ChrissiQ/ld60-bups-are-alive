@@ -261,7 +261,7 @@ void main() {
 # ---- the pooled world: the same lives for every dish of the pool at once (see gpu/kernels.gd, POOL_FUNCS) ------------------------------
 # A dish's bups are the segment of slots it occupies (BLKDISH, DS_START, DS_COUNT); its random streams, ranks, ids, limit and counters are
 # its own (keyed by the bup's place l in its segment), so a dish's run is the same alone or among others. A step's order:
-#   pool_conj_clear, pool_conj_count, pool_conj_scan_*, pool_conj_scatter, pool_ac_conj (the acetate's uptake, then conjugation)
+#   pool_conj_clear, pool_conj_count, pool_conj_scan_*, pool_conj_scatter, pool_conj_apply (conjugation)
 #   pool_life, pool_scan_s_* (SURV -> EXCS), pool_scan_k_* (KID -> EXCK), pool_finalize, pool_slot_check (kernels_core.gd)
 #   (the death clouds read: SURV 0 for a bup not kept, R_PY -2 for one dead of starvation or chance, its rank among its dish's dead
 #   l - (EXCS[i] - DN_SURV_BASE), the dish's dead DS_COUNT - DS_SURVIVORS)
@@ -332,6 +332,11 @@ static func swapped(text: String, from: String, to: String) -> String:
 ## body less P_DEATH_GIVE x the mass of a death by starvation or chance, all of a trimmed bup), a lethal daughter's share, and a
 ## daughter's reserve past what her mass holds.
 static func pool_life() -> String:
+	return pool_life_slot() + "SLOT_LOOP(life_slot)\n"
+
+
+## `pool_life`'s function of one slot, life_slot(i, d, l), without its loop.
+static func pool_life_slot() -> String:
 	var t := swapped(K_LIFE, """void main() {
 	uint i = gl_GlobalInvocationID.x;
 	if (i >= uint(P[P_CAPACITY])) return;
@@ -352,7 +357,7 @@ static func pool_life() -> String:
 	t = swapped(t, "	if (natural || trimmed) return;", "	if (natural || trimmed) {\n\t\tLEDGER(d, LG_LIFE, energy + P[P_COST_PER_MASS] * mass - (natural && P[P_DEATH_GIVE] > 0.0 ? P[P_DEATH_GIVE] * mass : 0.0))\n\t\treturn;\n\t}")
 	t = swapped(t, "		if (!lethal) {\n", "		LEDGER(d, LG_LIFE, lethal ? de + P[P_COST_PER_MASS] * dm : de - min(de, P[P_RESERVE_PER_MASS] * dm))\n		if (!lethal) {\n")
 	assert(not t.contains("CNT["), "pool_life still reads CNT")
-	return t + "SLOT_LOOP(life_slot)\n"
+	return t
 
 
 ## Each dish's counts after `life` and the scans, and the next layout (one group of 256 threads, POOL_ROWS_PER_THREAD rows each): for a
@@ -555,13 +560,34 @@ void conj_apply(uint i, uint d, uint l) {
 BUP_LOOP(conj_apply)
 """
 
-## `pool_ac_apply` and `pool_conj_apply` in one pass over the bups (what the step runs; the two kernels stay for the checks that run them
-## alone): each record is read once for both. A bup takes up its acetate first, as it would in the pass before, since a recipient's
-## metabolism, which sets its yield, may then change; the rest of conjugation reads only the donors' genes, places and masses, which
-## neither part writes.
-static func pool_ac_conj() -> String:
-	return loop_function(GpuKernelsField.K_POOL_AC_APPLY, "f", "ac_apply") + loop_function(K_POOL_CONJ_APPLY, "conj_apply", "conj_apply") \
-		+ "void ac_conj(uint i, uint d, uint l) { ac_apply(i, d, l); conj_apply(i, d, l); }\nBUP_LOOP(ac_conj)\n"
+## `pool_ac_apply`, `pool_conj_apply` and `pool_life` in one pass over the slots (what the step runs; the three kernels stay for the checks
+## that run them alone), with `pool_donor_life` after it: each record is read once for all three. A bup takes up its acetate first, as it
+## would in the pass before, since a recipient's metabolism, which sets its yield, may then change; then conjugation, which reads only the
+## donors' genes, places and masses; then its life. Only a donor's record is read by another thread (a recipient's), and a donor's life
+## changes its mass, so the donors (those of the donors' index, CBKT) live in `pool_donor_life`, after every recipient has read them.
+static func pool_ac_conj_life() -> String:
+	return loop_function(GpuKernelsField.K_POOL_AC_APPLY, "f", "ac_apply") + loop_function(K_POOL_CONJ_APPLY, "conj_apply", "conj_apply") + pool_life_slot() + """
+void ac_conj_life(uint i, uint d, uint l) {
+	if (d != NO_DISH && l < DS(d, DS_COUNT)) {
+		ac_apply(i, d, l);
+		conj_apply(i, d, l);
+		if (CBKT[i] != NOT_DONOR) return;
+	}
+	life_slot(i, d, l);
+}
+SLOT_LOOP(ac_conj_life)
+"""
+
+
+## The donors' lives, after `pool_ac_conj_life`: every donor is in DLIST once, and the scatter leaves the last bucket's DOFF at their number.
+static func pool_donor_life() -> String:
+	return pool_life_slot() + """
+void donor_life(uint k) {
+	uint i = DLIST[k], d = BLKDISH[i >> BLK_SHIFT];
+	life_slot(i, d, i - DS(d, DS_START));
+}
+GRID_LOOP(donor_life, DOFF[CONJ_BUCKETS - 1u])
+"""
 
 
 ## `pool_apply` and `pool_conj_count` in one pass over the bups (what the step runs, after `pool_conj_clear`): the donors' index needs only
@@ -719,7 +745,8 @@ static func _register_pool(out: Dictionary) -> void:
 	GpuKernels.add(out, "pool_conj_apply", K_POOL_CONJ_APPLY, ["P", "BUPS", "WORLD", "BLKDISH", "DSTATE", "DCNT", "DOFF", "DLIST", "DBIT"], conj, 64, t)
 	GpuKernels.add(out, "pool_apply_count", pool_apply_count(), ["P", "WORLD", "BLKDISH", "DSTATE", "DISHP", "BUPS", "EFF", "WANT", "WANTC", "CELLOF", "SCALE", "ENTD", "BINS", "BINC", "PSCALE", "OWNER", "CONC", "CONC2", "WANT2", "CELL2", "AWLO", "AWHI", "ADLO", "ADHI", "CBKT", "DCNT", "DBIT"],
 		GpuKernels.FIXED_FUNCS + GpuKernelsField.POOL_READF + GpuKernelsClouds.POOL_CLOUD_FUNCS + conj, 64, t)
-	GpuKernels.add(out, "pool_ac_conj", pool_ac_conj(), ["P", "BUPS", "WORLD", "BLKDISH", "DSTATE", "DISHP", "WANT2", "CELL2", "SCALE2", "DCNT", "DOFF", "DLIST", "DBIT"], conj, 64, t)
+	GpuKernels.add(out, "pool_ac_conj_life", pool_ac_conj_life(), ["P", "BUPS", "CHILD", "SURV", "KID", "WORLD", "BLKDISH", "DSTATE", "DISHP", "WANT2", "CELL2", "SCALE2", "CBKT", "DCNT", "DOFF", "DLIST", "DBIT"], conj + FLAG_FUNC, 64, t)
+	GpuKernels.add(out, "pool_donor_life", pool_donor_life(), ["P", "BUPS", "CHILD", "SURV", "KID", "WORLD", "BLKDISH", "DSTATE", "DISHP", "DOFF", "DLIST"], conj + FLAG_FUNC, 64, t)
 	GpuKernels.add(out, "pool_life", pool_life(), ["P", "BUPS", "CHILD", "SURV", "KID", "WORLD", "BLKDISH", "DSTATE", "DISHP"], FLAG_FUNC)
 	GpuKernels.add_grid_scan(out, "pool_scan_s", "SURV", "EXCS", "GSUM", "GOFF", "WORLD[WD_SLOTS]", ["WORLD"])
 	GpuKernels.add_grid_scan(out, "pool_scan_k", "KID", "EXCK", "GSUM", "GOFF", "WORLD[WD_SLOTS]", ["WORLD"])

@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://bk75pe6pvo5jv"
+path="res://.godot/imported/pool_ac_conj_life.glsl-c4b81e0449f3dfea40d188acfe21b95c.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_ac_conj_life.glsl"
+dest_files=["res://.godot/imported/pool_ac_conj_life.glsl-c4b81e0449f3dfea40d188acfe21b95c.res"]
+
+[params]
+
