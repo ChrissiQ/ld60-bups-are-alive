@@ -4,8 +4,8 @@
 layout(local_size_x = 64) in;
 layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs;
 layout(set = 0, binding = 0, std430) buffer B_VP { uint VP[]; };
-layout(set = 0, binding = 1, std430) buffer B_VMARK { uint VMARK[]; };
-layout(set = 0, binding = 2, std430) buffer B_VOFF { uint VOFF[]; };
+layout(set = 0, binding = 1, std430) buffer B_VCOUNT { uint VCOUNT[]; };
+layout(set = 0, binding = 2, std430) buffer B_VOFFS { uint VOFFS[]; };
 layout(set = 0, binding = 3, std430) buffer B_INST { vec4 INST[]; };
 layout(set = 0, binding = 4, std430) buffer B_VOUT { uint VOUT[]; };
 const uint BLK_SHIFT = 8u;
@@ -75,8 +75,8 @@ const uint VW_X0 = 1u;
 const uint VW_COUNT = 0u;
 
 void f(uint j) {
-	uint n = VP[VW_COUNT];
-	uint total = n == 0u ? 0u : VOFF[n - 1u] + VMARK[n - 1u];
+	uint g = uint(pcs.pa) - 1u;
+	uint total = VOFFS[g] + VCOUNT[g];
 	if (j == 0u) VOUT[VO_VISIBLE] = total;
 	if (j < total || j >= VP[VW_CAPACITY]) return;
 	INST[j * 4u] = vec4(0.0); INST[j * 4u + 1u] = vec4(0.0); INST[j * 4u + 2u] = vec4(0.0); INST[j * 4u + 3u] = vec4(0.0);

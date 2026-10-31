@@ -29,16 +29,21 @@ const IMPORT_FORMATS := {
 	"steer": RenderingDevice.DATA_FORMAT_R8G8B8A8_SRGB,
 	"thumbs": RenderingDevice.DATA_FORMAT_R8G8B8A8_SRGB,
 }
-const KERNELS := ["view_mark", "view_scan_chunks", "view_scan_sums", "view_scan_add", "view_scatter", "view_tail", "view_pick", "view_pick2", "view_answer"]
+const KERNELS := ["view_count", "view_sums", "view_scatter", "view_tail", "view_pick", "view_pick2", "view_answer"]
 const MIN_SLOTS := Dish.RENDER_MIN_CAPACITY
 const NONE := 0xFFFFFFFF
+const MAX_GROUPS := 4096  ## the most groups view_count and view_scatter run with (each a run of texels)
 
 var rd: RenderingDevice
 var frame_queue_size := 2
 var errors: Array[String] = []
+var profile := {}  ## on a local device with `profiling`: kernel name -> µs of its last dispatch (each its own submit, wall clock)
+var profiling := false
+
+var _local := false  ## a local device (tools): its work is submitted and waited for, not run with the frame
 
 var _made := {}  ## kernel name -> ShaderSet.create's entry
-var _bufs := {}  ## VP, VMARK, VOFF, VSUMS, VOFFS, VPD, VOUT, P -> RID
+var _bufs := {}  ## P, VP, VCOUNT, VOFFS, VPD, VOUT -> RID
 var _texels := 0  ## the per-texel buffers' size
 var _sets := {}  ## "kernel|index" -> uniform set
 var _inst := RID()  ## the MultiMesh buffer the sets bind
@@ -55,13 +60,16 @@ var _visible := {}  ## the last visible count read back: {count, key}
 var _pick_request: Variant = null  ## {local, slack, pixel_um, near, hover, seq}
 var _pick_seq := 0
 var _answers := {}  ## "hover" / "click" -> the last pick answer
-var _follow: Array = []  ## ids whose place is looked up every build
+var _follow: Array = []  ## ids whose place is looked up (at every build, and when the list changes)
+var _follow_asked := false  ## the list changed since the last look-up
 var _places := {}  ## id -> Vector3(x, y, length) from the last answer
 
 
-func _init(limits_frame_queue := 2) -> void:
+## `device`: a local device to run on instead of the main one (tools: `build` there is submitted and waited for).
+func _init(limits_frame_queue := 2, device: RenderingDevice = null) -> void:
 	frame_queue_size = limits_frame_queue
-	rd = RenderingServer.get_rendering_device()
+	_local = device != null
+	rd = device if _local else RenderingServer.get_rendering_device()
 	if rd == null:
 		errors.append("no main rendering device")
 		return
@@ -70,13 +78,13 @@ func _init(limits_frame_queue := 2) -> void:
 	for kname: String in KERNELS:
 		defs[kname] = all[kname]
 	var shaders := ShaderSet.imported(defs)
-	RenderingServer.call_on_render_thread(func() -> void: _made = shaders.create(rd))
+	_on_device(func() -> void: _made = shaders.create(rd))
 	errors.append_array(shaders.errors)
 	for kname: String in KERNELS:
 		if not _made.has(kname) and not errors.any(func(e: String) -> bool: return e.begins_with(kname)):
 			errors.append("%s: not made" % kname)
 	_vp.resize(GpuKernelsView.VW_WORDS * 4)
-	RenderingServer.call_on_render_thread(_make_constants)
+	_on_device(_make_constants)
 
 
 ## Whether the bups can be drawn here (a main device and every kernel made).
@@ -103,7 +111,7 @@ func offer(kind: String, index: int, generation: int, handles: PackedInt64Array,
 			return
 		if not cur.is_empty():
 			_retire(kind)
-		RenderingServer.call_on_render_thread(_import.bind(kind, generation, handles, size))
+		_on_device(_import.bind(kind, generation, handles, size))
 	if not _imports.has(kind):
 		return
 	var was: int = _shown.get(kind, -1)
@@ -137,7 +145,7 @@ func tick() -> void:
 	var keep: Array = []
 	for r: Dictionary in _retired:
 		if now - int(r["last"]) > frame_queue_size + 1:
-			RenderingServer.call_on_render_thread(_free_textures.bind(r["rids"]))
+			_on_device(_free_textures.bind(r["rids"]))
 		else:
 			keep.append(r)
 	_retired = keep
@@ -191,6 +199,12 @@ func draw_frame(camera: Rect2, pixel_um: float, multimesh: RID) -> void:
 		return
 	var capacity := RenderingServer.multimesh_get_instance_count(multimesh)
 	var target := RenderingServer.multimesh_get_buffer_rd_rid(multimesh)
+	draw_into(camera, pixel_um, target, capacity, multimesh)
+
+
+## `draw_frame` into `target`, a storage buffer of `capacity` instances on this renderer's device (the MultiMesh's, or a tool's: then
+## `multimesh` is RID() and nothing is told the visible count).
+func draw_into(camera: Rect2, pixel_um: float, target: RID, capacity: int, multimesh := RID()) -> void:
 	if capacity <= 0 or not target.is_valid():
 		return
 	var count := mini(_payload.count, _imports["payload"]["size"].x * _imports["payload"]["size"].y)
@@ -201,16 +215,22 @@ func draw_frame(camera: Rect2, pixel_um: float, multimesh: RID) -> void:
 	slots = mini(maxi(slots, mini(MIN_SLOTS, capacity)), capacity)
 	var build := [view_key, _payload.seq, _shown["payload"], slots, target]
 	var rebuild: bool = build != _last_build
-	var asking: bool = _pick_request != null or not _follow.is_empty()
+	var asking: bool = _pick_request != null or (not _follow.is_empty() and (rebuild or _follow_asked))
 	if not rebuild and not asking:
 		return
 	_last_build = build
-	if rebuild:
+	if rebuild and multimesh.is_valid():
 		RenderingServer.multimesh_set_visible_instances(multimesh, slots)
 	var pick: Variant = _pick_request
 	_pick_request = null
+	_follow_asked = false
 	_put_vp(count, camera, pixel_um, slots, capacity, pick)
-	RenderingServer.call_on_render_thread(_build.bind(count, target, _shown["payload"], pick, view_key, rebuild))
+	_on_device(_build.bind(count, target, _shown["payload"], pick, view_key, rebuild))
+
+
+## The next `draw_frame` builds the instances again even if nothing it knows of changed (the layer was hidden, a tool's timing).
+func forget_build() -> void:
+	_last_build = []
 
 
 ## Asks which bup is at `local` (dish-local µm): BupSim.pick_bup's rule (within half its drawn length at `pixel_um` plus `slack`, the
@@ -238,7 +258,10 @@ func near_count() -> Vector2:
 
 ## The bups (at most GpuKernelsView.FINDS: the selected and the hovered) whose places every build looks up, for their rings.
 func follow(ids: Array) -> void:
-	_follow = ids.slice(0, GpuKernelsView.FINDS)
+	var wanted := ids.slice(0, GpuKernelsView.FINDS)
+	if wanted != _follow:
+		_follow = wanted
+		_follow_asked = true
 
 
 ## Where a followed bup was in the last payload drawn: Vector3(x, y, its length in µm), or null when it is not in it.
@@ -247,6 +270,13 @@ func place_of(id: int) -> Variant:
 
 
 # ---- the device's side (render thread) ------------------------------------------------------------------------------------------------
+
+func _on_device(work: Callable) -> void:
+	if _local:
+		work.call()
+	else:
+		RenderingServer.call_on_render_thread(work)
+
 
 func _make_constants() -> void:
 	var consts := SimConstants.build()
@@ -257,8 +287,8 @@ func _make_constants() -> void:
 	_bufs["P"] = rd.storage_buffer_create(p.size() * 4, p.to_byte_array())
 	_bufs["VP"] = rd.storage_buffer_create(GpuKernelsView.VW_WORDS * 4)
 	_bufs["VOUT"] = rd.storage_buffer_create(GpuKernelsView.VO_WORDS * 4)
-	_bufs["VSUMS"] = rd.storage_buffer_create(4096 * 4)
-	_bufs["VOFFS"] = rd.storage_buffer_create(4096 * 4)
+	_bufs["VCOUNT"] = rd.storage_buffer_create(MAX_GROUPS * 4)
+	_bufs["VOFFS"] = rd.storage_buffer_create(MAX_GROUPS * 4)
 
 
 func _import(kind: String, generation: int, handles: PackedInt64Array, size: Vector2i) -> void:
@@ -290,7 +320,7 @@ func _retire(kind: String) -> void:
 	_imports.erase(kind)
 	_shown.erase(kind)
 	if kind == "payload" or kind == "ids":
-		RenderingServer.call_on_render_thread(_free_sets)
+		_on_device(_free_sets)
 
 
 func _free_textures(rids: Array) -> void:
@@ -314,7 +344,7 @@ func _ensure_texels(texels: int) -> void:
 	if texels <= _texels:
 		return
 	_free_sets()
-	for nm in ["VMARK", "VOFF", "VPD"]:
+	for nm in ["VPD"]:
 		if _bufs.has(nm):
 			rd.free_rid(_bufs[nm])
 		_bufs[nm] = rd.storage_buffer_create(texels * 4)
@@ -358,24 +388,38 @@ func _build(count: int, target: RID, index: int, pick: Variant, view_key: Array,
 		init[GpuKernelsView.VO_NEAR] = 0
 		rd.buffer_update(_bufs["VOUT"], 0, init.size() * 4, init.to_byte_array())
 	var groups := GpuKernels.bup_groups(count)
-	var scan_groups := GpuKernels.scan_groups(maxi(count, 1))
-	var cl := rd.compute_list_begin()
+	var runs := mini(GpuKernels.scan_groups(maxi(count, 1)), MAX_GROUPS)
+	var cl := -1 if profiling and _local else rd.compute_list_begin()
 	if rebuild:
-		_dispatch(cl, "view_mark", index, groups)
-		_dispatch(cl, "view_scan_chunks", index, scan_groups)
-		_dispatch(cl, "view_scan_sums", index, 1, float(scan_groups))
-		_dispatch(cl, "view_scan_add", index, scan_groups)
-		_dispatch(cl, "view_scatter", index, groups)
-		_dispatch(cl, "view_tail", index, GpuKernels.bup_groups(_vp.decode_u32(GpuKernelsView.VW_SLOTS * 4)))
+		_dispatch(cl, "view_count", index, runs)
+		_dispatch(cl, "view_sums", index, 1, float(runs))
+		_dispatch(cl, "view_scatter", index, runs)
+		_dispatch(cl, "view_tail", index, GpuKernels.bup_groups(_vp.decode_u32(GpuKernelsView.VW_SLOTS * 4)), float(runs))
 	if asking:
 		_dispatch(cl, "view_pick", index, groups)
 		_dispatch(cl, "view_pick2", index, groups)
 		_dispatch(cl, "view_answer", index, 1)
-	rd.compute_list_end()
-	rd.buffer_get_data_async(_bufs["VOUT"], _on_answer.bind(view_key if rebuild else [], pick, asking), 0, GpuKernelsView.VO_WORDS * 4)
+	if cl >= 0:
+		rd.compute_list_end()
+	if _local:
+		rd.submit()
+		rd.sync()
+		_on_answer(rd.buffer_get_data(_bufs["VOUT"], 0, GpuKernelsView.VO_WORDS * 4), view_key if rebuild else [], pick, asking)
+	else:
+		rd.buffer_get_data_async(_bufs["VOUT"], _on_answer.bind(view_key if rebuild else [], pick, asking), 0, GpuKernelsView.VO_WORDS * 4)
 
 
+## `cl` -1: (profiling on a local device) the kernel in a list and a submit of its own, timed.
 func _dispatch(cl: int, kname: String, index: int, groups: int, pa := 0.0) -> void:
+	if cl < 0:
+		var t0 := Time.get_ticks_usec()
+		var own := rd.compute_list_begin()
+		_dispatch(own, kname, index, groups, pa)
+		rd.compute_list_end()
+		rd.submit()
+		rd.sync()
+		profile[kname] = Time.get_ticks_usec() - t0
+		return
 	var k: Dictionary = _made[kname]
 	rd.compute_list_bind_compute_pipeline(cl, k["pipeline"])
 	rd.compute_list_bind_uniform_set(cl, _set_of(kname, index), 0)
@@ -457,7 +501,7 @@ func release() -> void:
 	if rd == null:
 		return
 	_pictures.clear()
-	RenderingServer.call_on_render_thread(_release_now)
+	_on_device(_release_now)
 
 
 func _release_now() -> void:

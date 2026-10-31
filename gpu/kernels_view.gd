@@ -6,12 +6,15 @@ extends RefCounted
 ## device. The textures are imported in a format other than the one the simulation made them in (RGBA32UI as RGBA32I, RG32UI as RG32I:
 ## see ViewRenderer), so the kernels read them as signed images and take the bits back as unsigned.
 ##
-## view_build, every frame the camera or the payload changed:
-## - view_mark: a thread a texel marks the bups whose quad reaches into the camera's rectangle (VMARK, 0 or 1);
-## - view_scan_*: an exclusive prefix sum of the marks (VOFF), so a visible bup's instance is its place among the visible ones in the
-##   dish's own order (the draw order is the payload's: where bups overlap the later still shows, and nothing flickers);
-## - view_scatter: each visible bup's instance, as `render_bups` (gpu/kernels_draw.gd) writes one with no trail: its length and width
-##   no less than the least footprint in screen pixels, a margin of a pixel, its colour;
+## view_build, every frame the camera or the payload changed, a stream compaction in the dish's own order over G groups of 256 (each
+## group a run of texels, as the grid scan of gpu/kernels.gd cuts them; few dispatches, each texel read twice, nothing per texel written
+## but the instances):
+## - view_count: each group counts the bups of its run whose quad reaches into the camera's rectangle (VCOUNT, a word a group);
+## - view_sums: an exclusive prefix sum of the groups' counts (VOFFS);
+## - view_scatter: each group goes through its run again a tile at a time, and each visible bup's instance goes to its place among the
+##   visible ones (the draw order is the payload's: where bups overlap the later still shows, and nothing flickers), as `render_bups`
+##   (gpu/kernels_draw.gd) writes one with no trail: its length and width no less than the least footprint in screen pixels, a margin of a
+##   pixel, its colour;
 ## - view_tail: the instances past the visible ones, up to the slots drawn, written as nothing, and the visible count for the host.
 ## The questions (the pointer's pick, BupSim.pick_bup's rule; the nearest bup and how many are near; where the bups the rings follow are):
 ## view_pick, view_pick2, view_answer, after view_build in the same list.
@@ -47,12 +50,12 @@ const VO_PLACE_WORDS := 5
 const VO_PLACES := VO_PICKED + VO_PLACE_WORDS  ## each found bup: id low, id high, x, y, length
 const VO_WORDS := VO_PLACES + FINDS * VO_PLACE_WORDS
 
-const TYPES := {"VP": "uint", "VMARK": "uint", "VOFF": "uint", "VSUMS": "uint", "VOFFS": "uint", "VPD": "uint", "VOUT": "uint", "INST": "vec4"}
+const TYPES := {"VP": "uint", "VCOUNT": "uint", "VOFFS": "uint", "VPD": "uint", "VOUT": "uint", "INST": "vec4"}
 
 ## The image bindings of each kernel (binding -> the texture ViewRenderer binds there: "payload" or "ids"), past its storage buffers.
 const IMAGE_BINDINGS := {
-	"view_mark": {3: "payload"},
-	"view_scatter": {5: "payload"},
+	"view_count": {3: "payload"},
+	"view_scatter": {4: "payload"},
 	"view_pick": {4: "payload", 5: "ids"},
 	"view_answer": {2: "payload", 3: "ids"},
 }
@@ -67,29 +70,44 @@ uvec4 payload_at(uint k) { return uvec4(imageLoad(PAYTEX, texel_at(k))); }
 float vpf(uint w) { return uintBitsToFloat(VP[w]); }
 """
 
-## Half the reach of a bup's quad from its middle along either axis: half the drawn length (no less than the least footprint) and the
-## pixel of margin round it, or half the drawn width and its margin if that is more.
-const K_MARK := """
-void f(uint k) {
+## Whether texel k's bup reaches into the camera's rectangle: half the reach of its quad from its middle along either axis is half its drawn
+## length (no less than the least footprint) and the pixel of margin round it, or half its drawn width and its margin if that is more.
+## The run of texels group g of G takes (as the grid scan cuts them).
+const BUILD_FUNCS := """
+uint visible_at(uint k) {
 	uvec4 px = payload_at(k);
 	vec2 shape = unpackHalf2x16(px[PL_SHAPE]);
-	uint keep = 0u;
-	if (shape.x > 0.0) {
-		float pixel = vpf(VW_PIXEL);
-		float half_reach = 0.5 * max(max(shape.x, P[P_MIN_LENGTH_PX] * pixel), max(P[P_WIDTH], P[P_MIN_WIDTH_PX] * pixel)) + pixel;
-		float x = uintBitsToFloat(px[PL_X]), y = uintBitsToFloat(px[PL_Y]);
-		if (x + half_reach >= vpf(VW_X0) && x - half_reach <= vpf(VW_X1) && y + half_reach >= vpf(VW_Y0) && y - half_reach <= vpf(VW_Y1)) keep = 1u;
-	}
-	VMARK[k] = keep;
+	if (!(shape.x > 0.0)) return 0u;
+	float pixel = vpf(VW_PIXEL);
+	float half_reach = 0.5 * max(max(shape.x, P[P_MIN_LENGTH_PX] * pixel), max(P[P_WIDTH], P[P_MIN_WIDTH_PX] * pixel)) + pixel;
+	float x = uintBitsToFloat(px[PL_X]), y = uintBitsToFloat(px[PL_Y]);
+	return (x + half_reach >= vpf(VW_X0) && x - half_reach <= vpf(VW_X1) && y + half_reach >= vpf(VW_Y0) && y - half_reach <= vpf(VW_Y1)) ? 1u : 0u;
 }
-GRID_LOOP(f, VP[VW_COUNT])
+uvec2 run_of(uint g, uint groups) {
+	uint n = VP[VW_COUNT], c = (n + groups - 1u) / groups;
+	uint start = min(g * c, n);
+	return uvec2(start, min(start + c, n));
+}
+"""
+
+const K_COUNT := """
+shared uint total;
+void main() {
+	uint lid = gl_LocalInvocationID.x;
+	uvec2 run = run_of(gl_WorkGroupID.x, gl_NumWorkGroups.x);
+	if (lid == 0u) total = 0u;
+	barrier();
+	uint mine = 0u;
+	for (uint k = run.x + lid; k < run.y; k += 256u) mine += visible_at(k);
+	atomicAdd(total, mine);
+	barrier();
+	if (lid == 0u) VCOUNT[gl_WorkGroupID.x] = total;
+}
 """
 
 const K_SCATTER := """
-void f(uint k) {
-	if (VMARK[k] == 0u) return;
-	uint j = VOFF[k];
-	if (j >= VP[VW_CAPACITY]) return;
+shared uint tmp[256];
+void put(uint k, uint j) {
 	uvec4 px = payload_at(k);
 	vec2 shape = unpackHalf2x16(px[PL_SHAPE]);
 	float pixel = vpf(VW_PIXEL);
@@ -104,13 +122,35 @@ void f(uint k) {
 	INST[j * 4u + 2u] = vec4(vec3(float((c >> PL_RED_SHIFT) & 255u), float((c >> PL_GREEN_SHIFT) & 255u), float((c >> PL_BLUE_SHIFT) & 255u)) / 255.0, 1.0);
 	INST[j * 4u + 3u] = vec4(len, width, margin, 0.0);
 }
-GRID_LOOP(f, VP[VW_COUNT])
+void main() {
+	uint lid = gl_LocalInvocationID.x;
+	uvec2 run = run_of(gl_WorkGroupID.x, gl_NumWorkGroups.x);
+	uint carry = VOFFS[gl_WorkGroupID.x];
+	for (uint base = run.x; base < run.y; base += 256u) {
+		uint k = base + lid;
+		uint keep = k < run.y ? visible_at(k) : 0u;
+		tmp[lid] = keep;
+		barrier();
+		for (uint off = 1u; off < 256u; off <<= 1u) {
+			uint t = lid >= off ? tmp[lid - off] : 0u;
+			barrier();
+			tmp[lid] += t;
+			barrier();
+		}
+		uint j = carry + tmp[lid] - keep;
+		if (keep != 0u && j < VP[VW_CAPACITY]) put(k, j);
+		uint sum = tmp[255];
+		barrier();
+		carry += sum;
+	}
+}
 """
 
+## pcs.pa: the groups view_count and view_scatter ran with.
 const K_TAIL := """
 void f(uint j) {
-	uint n = VP[VW_COUNT];
-	uint total = n == 0u ? 0u : VOFF[n - 1u] + VMARK[n - 1u];
+	uint g = uint(pcs.pa) - 1u;
+	uint total = VOFFS[g] + VCOUNT[g];
 	if (j == 0u) VOUT[VO_VISIBLE] = total;
 	if (j < total || j >= VP[VW_CAPACITY]) return;
 	INST[j * 4u] = vec4(0.0); INST[j * 4u + 1u] = vec4(0.0); INST[j * 4u + 2u] = vec4(0.0); INST[j * 4u + 3u] = vec4(0.0);
@@ -199,14 +239,12 @@ static func register(out: Dictionary) -> void:
 	var head := declarations()
 	var add := func(kernel_name: String, body: String, buffers: Array) -> void:
 		GpuKernels.add(out, kernel_name, body, buffers, head + _images(kernel_name) + (VIEW_FUNCS if IMAGE_BINDINGS.has(kernel_name) else ""), 64, TYPES)
-	add.call("view_mark", K_MARK, ["P", "VP", "VMARK"])
-	# (the grid scan of gpu/kernels.gd, over the marks, with the count read from VP)
-	var scan := {"SRC": "VMARK", "DST": "VOFF", "SUMS": "VSUMS", "OFFS": "VOFFS", "COUNT": "VP[VW_COUNT]"}
-	GpuKernels.add(out, "view_scan_chunks", GpuKernels._fill(GpuKernels.K_GSCAN_CHUNKS, scan), ["VP", "VMARK", "VOFF", "VSUMS"], head, 256, TYPES)
-	GpuKernels.add(out, "view_scan_sums", GpuKernels._fill(GpuKernels.K_GSCAN_SUMS, scan), ["VSUMS", "VOFFS"], "", 256, TYPES)
-	GpuKernels.add(out, "view_scan_add", GpuKernels._fill(GpuKernels.K_GSCAN_ADD, scan), ["VP", "VOFF", "VOFFS"], head, 256, TYPES)
-	add.call("view_scatter", K_SCATTER, ["P", "VP", "VMARK", "VOFF", "INST"])
-	GpuKernels.add(out, "view_tail", K_TAIL, ["VP", "VMARK", "VOFF", "INST", "VOUT"], head, 64, TYPES)
+	var build := head + _images("view_count") + VIEW_FUNCS + BUILD_FUNCS
+	GpuKernels.add(out, "view_count", K_COUNT, ["P", "VP", "VCOUNT"], build, 256, TYPES)
+	# (the grid scan's second level of gpu/kernels.gd, over the groups' counts)
+	GpuKernels.add(out, "view_sums", GpuKernels._fill(GpuKernels.K_GSCAN_SUMS, {"SUMS": "VCOUNT", "OFFS": "VOFFS"}), ["VCOUNT", "VOFFS"], "", 256, TYPES)
+	GpuKernels.add(out, "view_scatter", K_SCATTER, ["P", "VP", "VOFFS", "INST"], head + _images("view_scatter") + VIEW_FUNCS + BUILD_FUNCS, 256, TYPES)
+	GpuKernels.add(out, "view_tail", K_TAIL, ["VP", "VCOUNT", "VOFFS", "INST", "VOUT"], head, 64, TYPES)
 	add.call("view_pick", K_PICK, ["P", "VP", "VPD", "VOUT"])
 	GpuKernels.add(out, "view_pick2", K_PICK2, ["VP", "VPD", "VOUT"], head, 64, TYPES)
 	add.call("view_answer", K_ANSWER, ["VP", "VOUT"])

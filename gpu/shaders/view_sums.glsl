@@ -3,7 +3,7 @@
 #version 450
 layout(local_size_x = 256) in;
 layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs;
-layout(set = 0, binding = 0, std430) buffer B_VSUMS { uint VSUMS[]; };
+layout(set = 0, binding = 0, std430) buffer B_VCOUNT { uint VCOUNT[]; };
 layout(set = 0, binding = 1, std430) buffer B_VOFFS { uint VOFFS[]; };
 const uint CNT_BUPS = 0u;
 const int P_CELLS = 1;
@@ -24,7 +24,7 @@ void main() {
 	uint carry = 0u;
 	for (uint base = 0u; base < G; base += 256u) {
 		uint idx = base + lid;
-		uint v = idx < G ? VSUMS[idx] : 0u;
+		uint v = idx < G ? VCOUNT[idx] : 0u;
 		tmp[lid] = v;
 		barrier();
 		for (uint off = 1u; off < 256u; off <<= 1u) {

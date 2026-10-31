@@ -3,21 +3,26 @@ extends SceneTree
 ## drawing a real Dish's bups from them, the canvas reading them, the pick on the payload, and the transport under the real simulation.
 ## Windowed, through the lock, one at a time:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/view_check.gd -- picture
-##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/view_check.gd -- soak <seconds> <bups> <zoom> [fitcost|-] [pace_ms]
+##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/view_check.gd -- buildcost <bups>
+##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/view_check.gd -- soak <seconds> <bups> <zoom> [fitcost] [pace=<ms>] [bare]
 ##
 ## picture: a measured state (200,000 bups, seed 3, 90 mm, on the processor, paused) drawn by the single-dish path's Dish, then the same records loaded
 ##   into a SimCore (a local device on this thread), published, imported and drawn by the same Dish through ViewRenderer, at fit zoom and
 ##   20, 100 and 500 times it; each kind's import compared byte for byte with the simulation's texture; the haze and the payload read
 ##   through canvas shaders into a SubViewport; picks and near counts on the payload against BupSim's.
+## buildcost: view_build's cost on a local device (no frame around it), wall clock around submit and sync, at fit zoom, 1.5 x, 20 x and
+##   100 x, for a dish of `bups` (the soak's state, one step run): the whole build and each kernel in a submit of its own.
 ## soak: a SimCore on a thread of this script's own (SimThread is another script's) runs a dish of `bups` (18 s steps, as many
 ##   steps an iteration as fit T_ITER) and publishes after every iteration's sync; each payload's spare colour byte is stamped with its
 ##   number, and each haze's blue byte with its own (a submit of this script's own, before the main side is told), so the main side can
 ##   check every frame that the payload it draws from is one whole payload (a compute read of every texel), and every 30 frames that the
 ##   haze a canvas shader reads is one whole haze (the payload is an integer texture, which only the kernels read).
-##   The first 30 s show a second dish of 3,000 bups that grows (its payload's textures are made afresh as it does), then the big one,
+##   The first 20 s show a second dish of 3,000 bups that grows (its payload's textures are made afresh as it does), then the big one,
 ##   at `zoom` times fit; a hover pick every 90 frames; `fitcost` ends with 20 s at fit zoom with the bups shown and 20 s hidden.
-##   `pace_ms`: an iteration starts no sooner than this after the last began (as the sim thread paces itself at low speeds), for the
-##   share of iterations that publish at shorter iterations.
+##   `pace=<ms>`: an iteration starts no sooner than this after the last began (as the sim thread paces itself at low speeds), for the
+##   share of iterations that publish at other iteration lengths, or (a long pace) a simulation that is nearly idle. `bare`: the main
+##   side draws nothing of the dish and checks nothing (the frame the simulation's load alone leaves); `noverify`, `nocanvas`, `nohover`
+##   leave out one check each, `nohaze` the dish's haze, `nodraw` the dish's bups from the view (to tell what a frame's time is spent on).
 ##
 ## Expected values, written before the first run:
 ## - picture against the single-dish path's [derived: the same capsule shader and footprint; the angle a half float (0.11 degrees at pi), the colour a
@@ -113,7 +118,9 @@ var sim_log: Array = []
 var sim_thread: Thread
 var soak_bups := 2000000
 var pace_ms := 0.0
-var main_row_switch_at := 30.0
+var bare := false
+var skip: Array = []
+var main_row_switch_at := 20.0
 var want_big := false
 
 
@@ -128,9 +135,18 @@ func _run() -> void:
 	match a[0] if a.size() > 0 else "":
 		"picture":
 			await _picture()
+		"buildcost":
+			_buildcost(int(a[1]) if a.size() > 1 else 2000000)
 		"soak":
-			pace_ms = float(a[5]) if a.size() > 5 else 0.0
-			await _soak(float(a[1]) if a.size() > 1 else 60.0, int(a[2]) if a.size() > 2 else 2000000, float(a[3]) if a.size() > 3 else 20.0, a.size() > 4 and a[4] == "fitcost")
+			for x: String in a.slice(4):
+				if x.begins_with("pace="):
+					pace_ms = float(x.substr(5))
+				elif x == "bare":
+					bare = true
+				elif x in ["noverify", "nocanvas", "nohover", "nohaze", "nodraw"]:
+					skip.append(x)
+			print("VIEWCHECK soak options: pace %.1f ms, bare %s, skipped %s" % [pace_ms, bare, skip])
+			await _soak(float(a[1]) if a.size() > 1 else 60.0, int(a[2]) if a.size() > 2 else 2000000, float(a[3]) if a.size() > 3 else 20.0, a.has("fitcost"))
 		_:
 			print("usage: picture | soak <seconds> <bups> <zoom> [fitcost]")
 	quit(0)
@@ -167,7 +183,7 @@ func _make_dish(parent: Node, n: int, limit: int) -> void:
 		dish.sim.add_bup(dish.sim.random_point(dish.radius * 0.95), Genome.founder(), Dish.FOUNDER_ENERGY * dish.sim.random_float(), sqrt(grown), born_with, 0, Vector2.RIGHT)
 	camera = Camera2D.new()
 	parent.add_child(camera)
-	var view := Vector2(parent.get_viewport().get_visible_rect().size) if parent is not SubViewport else Vector2((parent as SubViewport).size)
+	var view := (parent as Viewport).get_visible_rect().size
 	var room := minf(view.x * 0.5 - 40.0, view.y * 0.5 - 120.0)
 	fit = clampf(room / dish.radius, 0.002, 1.0)
 	var waited := 0
@@ -403,6 +419,15 @@ static func _payload_info(core: SimCore, row: int, index: int, generation: int, 
 	return info
 
 
+## How many display refreshes passed with no new frame over `frames` (their times in ms): the refreshes their span holds less the frames.
+static func _missed(frames: PackedFloat32Array) -> int:
+	var period := 1000.0 / DisplayServer.screen_get_refresh_rate(DisplayServer.window_get_current_screen())
+	var total := 0.0
+	for f in frames:
+		total += f
+	return roundi(total / period) - frames.size()
+
+
 static func _summary(v: Array) -> Dictionary:
 	if v.is_empty():
 		return {}
@@ -412,6 +437,53 @@ static func _summary(v: Array) -> Dictionary:
 	for x in s:
 		total += float(x)
 	return {"n": s.size(), "mean": snappedf(total / s.size(), 0.001), "p50": s[s.size() / 2], "p95": s[mini(int(s.size() * 0.95), s.size() - 1)], "p99": s[mini(int(s.size() * 0.99), s.size() - 1)], "max": s[-1], "min": s[0]}
+
+
+# ---- buildcost ---------------------------------------------------------------------------------------------------------------------
+
+func _buildcost(bups: int) -> void:
+	var dev := RenderingServer.create_local_rendering_device()
+	var core := SimCore.new(null, false, dev)
+	var row := core.add_dish(_soak_spec(1, bups, bups, 0.9))
+	core.run(1, STEP)
+	var req := ViewRequest.new()
+	req.row = row
+	var pub := core.publish(req)
+	var view := ViewRenderer.new(2, dev)
+	view.set_payload(_payload_info(core, row, pub["payload"], 1, 1))
+	var capacity := ceili(bups * 1.05)
+	var inst := dev.storage_buffer_create(capacity * 64)
+	var screen := Vector2(1280, 720)
+	var fit_scale := minf(screen.x * 0.5 - 40.0, screen.y * 0.5 - 120.0) / RADIUS
+	var rows := {}
+	for mult: float in [1.0, 1.5, 20.0, 100.0]:
+		var px := 1.0 / (fit_scale * mult)
+		var cam := Rect2(-screen * 0.5 * px, screen * px)
+		var whole: Array = []
+		for rep in 12:
+			view.forget_build()
+			var t0 := Time.get_ticks_usec()
+			view.draw_into(cam, px, inst, capacity)
+			whole.append((Time.get_ticks_usec() - t0) / 1000.0)
+		view.profiling = true
+		var kernels := {}
+		for rep in 6:
+			view.forget_build()
+			view.draw_into(cam, px, inst, capacity)
+			for k: String in view.profile:
+				if not kernels.has(k):
+					kernels[k] = []
+				kernels[k].append(view.profile[k] / 1000.0)
+		view.profiling = false
+		var per := {}
+		for k: String in kernels:
+			per[k] = _summary(kernels[k])["p50"]
+		rows["x%s" % str(mult)] = {"visible": view._visible.get("count", -1), "build_ms": _summary(whole), "kernel_ms_p50": per}
+	print("VIEWCHECK BUILDCOST " + JSON.stringify({"bups": core.count(row), "errors": view.errors + core.errors, "rows": rows}))
+	dev.free_rid(inst)
+	view.release()
+	core.release()
+	dev.free()
 
 
 # ---- soak ---------------------------------------------------------------------------------------------------------------------------
@@ -439,7 +511,10 @@ func _soak(seconds: float, bups: int, zoom: float, fitcost: bool) -> void:
 	_set_zoom(zoom)
 	renderer = ViewRenderer.new(int(ProjectSettings.get_setting("rendering/rendering_device/vsync/frame_queue_size", 2)))
 	print("ViewRenderer errors: %s" % [renderer.errors])
-	dish.drawing.view = renderer
+	if bare or skip.has("nohaze"):
+		dish.show_layer(Dish.Layer.MEDIUM, false)
+	if not bare and not skip.has("nodraw"):
+		dish.drawing.view = renderer
 	RenderingServer.call_on_render_thread(func() -> void:
 		var s := RDShaderSource.new()
 		s.language = RenderingDevice.SHADER_LANGUAGE_GLSL
@@ -452,7 +527,7 @@ func _soak(seconds: float, bups: int, zoom: float, fitcost: bool) -> void:
 	# the canvas's read of the payload
 	var cv := SubViewport.new()
 	cv.size = Vector2i(64, 64)
-	cv.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	cv.render_target_update_mode = SubViewport.UPDATE_DISABLED  # (drawn once every 30 frames, for the check)
 	var haze_sprite: Sprite2D = null
 	root.add_child(cv)
 	sim_thread = Thread.new()
@@ -518,19 +593,27 @@ func _soak(seconds: float, bups: int, zoom: float, fitcost: bool) -> void:
 		for kind in ["haze", "steer", "thumbs"]:
 			if ann.has(kind):
 				renderer.offer(kind, ann[kind]["index"], ann[kind]["generation"], ann[kind]["handles"], ann[kind]["size"])
+		if bare or skip.has("nodraw"):
+			renderer.tick()
+		if bare:
+			if t >= seconds:
+				break
+			continue
 		# the payload's stamp, checked every frame by compute; the haze's every 30 frames through the canvas
 		var shown := renderer.payload()
-		if shown.texture_index >= 0:
+		if shown.texture_index >= 0 and not skip.has("noverify"):
 			var texels := shown.size.x * shown.size.y
 			var rid := renderer.imported_texture("payload", shown.texture_index)
 			RenderingServer.call_on_render_thread(_verify.bind(main_rd, rid, shown.seq & 255, texels, frames % 2))
-		if ann.has("haze"):
+		if ann.has("haze") and not skip.has("nocanvas"):
 			_shown_stamps.append(int(ann["haze"]["seq"]) & 255)
 			if _shown_stamps.size() > 8:
 				_shown_stamps.pop_front()
 			if haze_sprite == null:
 				haze_sprite = _raw_sprite(renderer.texture("haze"), cv.size)
 				cv.add_child(haze_sprite)
+			if frames % 30 == 28:
+				cv.render_target_update_mode = SubViewport.UPDATE_ONCE
 			if frames % 30 == 0:
 				var vt := RenderingServer.texture_get_rd_texture(cv.get_texture().get_rid())
 				main_rd.texture_get_data_async(vt, 0, _on_canvas.bind(_shown_stamps.duplicate()))
@@ -544,7 +627,7 @@ func _soak(seconds: float, bups: int, zoom: float, fitcost: bool) -> void:
 				dish.hovered.bup = a["id"]
 				if dish.drawing.view_ring(a["id"]) != null:
 					hover_rings += 1
-		if frames % 90 == 0 and pending_pick < 0 and shown.texture_index >= 0:
+		if frames % 90 == 0 and pending_pick < 0 and shown.texture_index >= 0 and not skip.has("nohover"):
 			var view_rect := dish.get_global_transform_with_canvas().affine_inverse() * dish.get_viewport_rect()
 			var at := view_rect.position + view_rect.size * Vector2(rng.randf_range(0.2, 0.8), rng.randf_range(0.2, 0.8))
 			pending_pick = renderer.pick(at, 6.0 * dish.pixel(), dish.pixel(), true, 20.0 * dish.pixel())
@@ -572,13 +655,22 @@ func _soak(seconds: float, bups: int, zoom: float, fitcost: bool) -> void:
 			break
 	# the frames after the first 2 s, before any fit-zoom part
 	var steady := PackedFloat32Array()
+	var small_phase: Array = []
+	var big_phase: Array = []
 	for i in frame_ms.size():
 		if frame_at[i] >= 2.0 and frame_at[i] < seconds:
 			steady.append(frame_ms[i])
+			if frame_at[i] < main_row_switch_at:
+				small_phase.append(frame_ms[i])
+			elif frame_at[i] >= main_row_switch_at + 2.0:
+				big_phase.append(frame_ms[i])
 	var slow: Array = []
+	var over := 0
 	for i in frame_ms.size():
-		if frame_at[i] >= 2.0 and frame_at[i] < seconds and frame_ms[i] > 12.5 and slow.size() < 40:
-			slow.append("t=%.1f %.1f" % [frame_at[i], frame_ms[i]])
+		if frame_at[i] >= 2.0 and frame_at[i] < seconds and frame_ms[i] > 12.5:
+			over += 1
+			if slow.size() < 40:
+				slow.append("t=%.1f %.1f" % [frame_at[i], frame_ms[i]])
 	mtx.lock()
 	stop = true
 	mtx.unlock()
@@ -592,7 +684,8 @@ func _soak(seconds: float, bups: int, zoom: float, fitcost: bool) -> void:
 	await _frames(6)
 	var result := {
 		"seconds": seconds, "bups": bups, "zoom": zoom, "frames": frame_ms.size(),
-		"frame_ms_steady": _summary(Array(steady)), "frames_over_12_5_ms": slow,
+		"frame_ms_steady": _summary(Array(steady)), "vsyncs_missed_steady": _missed(steady), "frame_ms_small_dish": _summary(small_phase), "frame_ms_big_dish": _summary(big_phase), "bare": bare, "skipped": skip,
+		"frames_over_12_5_ms": over, "first_over_12_5_ms": slow,
 		"verified_frames": _verified, "torn_frames": _torn_frames, "torn_texels": _torn_texels, "torn_notes": _torn_notes,
 		"canvas_checks": _canvas_checks, "canvas_bad": _canvas_bad, "canvas_notes": _canvas_notes,
 		"hover": {"picks": hover_latency.size(), "hits": hover_hits, "rings_drawn_at_answer": hover_rings, "frames": _summary(hover_latency)},
@@ -601,7 +694,12 @@ func _soak(seconds: float, bups: int, zoom: float, fitcost: bool) -> void:
 	if fitcost:
 		result["fit_shown"] = _summary(fit_rows["shown"])
 		result["fit_hidden"] = _summary(fit_rows["hidden"])
+	# nothing may draw with the imports once they are freed: the dish and the canvas check let go of them first
 	dish.drawing.view = null
+	dish.queue_redraw()
+	if haze_sprite != null:
+		haze_sprite.queue_free()
+	await _frames(4)
 	renderer.release()
 	RenderingServer.call_on_render_thread(func() -> void:
 		main_rd.free_rid(_verify_shader)
