@@ -574,23 +574,37 @@ func upload_events(steps: int, events_for: Callable) -> void:
 
 # ---- dishes for the checks ---------------------------------------------------------------------------------------------------
 
-## A dish's state: struck from `sc` (its field, owners, feed weights, founders), its founders copied to `bups` bups spread over the dish
-## with reserves from a fifth to full, a share `key` with the acetate key, some acetate, and `clouds` clouds.
-static func make_state(tree: SceneTree, sc: StartConditions, seed_v: int, bups: int, key: float, clouds: int) -> GpuSim.State:
+## A dish's state: struck from `sc` as the CPU dish was struck (BupSim and its NutrientField: the field, owners, feed weights, founders),
+## its founders copied to `bups` bups spread over the dish with reserves from a fifth to full, a share `key` with the acetate key, some
+## acetate, and `clouds` clouds. `tree` is not used (the state needs no node).
+static func make_state(_tree: SceneTree, sc: StartConditions, seed_v: int, bups: int, key: float, clouds: int) -> GpuSim.State:
 	sc.spread_founders()
-	var dish := Dish.new()
-	tree.root.add_child(dish)
-	dish.process_mode = Node.PROCESS_MODE_DISABLED
-	dish.set_seed(seed_v)
-	dish.strike(sc)
-	var st := GpuSim.State.of_field(dish.field, dish.radius, dish.sim.export_state_bytes(), SimConstants.build())
+	var radius := clampf(sc.dish_radius, StartConditions.MIN_SIM_RADIUS, StartConditions.MAX_DISH_RADIUS)
+	var sim := BupSim.new()
+	var field: NutrientField = sim.get_field()
+	field.set_max_across(clampi(sc.nutrient_resolution, StartConditions.MIN_NUTRIENT_RESOLUTION, StartConditions.MAX_NUTRIENT_RESOLUTION))
+	field.set_diffusion(0.0 if is_equal_approx(sc.medium_thickness, Biology.MEDIUM_THICKNESS) else Biology.WATER_DIFFUSION / sc.medium_thickness)
+	sim.reset(radius, seed_v)
+	var founders := clampi(sc.bups, 1, maxi(sc.bup_limit, 1))
+	var spread := minf(radius * 0.8, 40.0 + 40.0 * sqrt(maxf(founders - 4.0, 0.0)))
+	for i in founders:
+		var founder := Genome.founder()
+		var chosen: Dictionary = sc.founders[i] if i < sc.founders.size() else {}
+		if chosen.has("color"):
+			founder = Genome.with_color(founder, Genome.color_from_hex(chosen["color"]))
+		var born_with := Cell.mass_to_add(founder)
+		var grown := born_with * (1.0 + sim.random_float())
+		sim.add_bup(sim.random_point(spread), founder, Dish.FOUNDER_ENERGY, sqrt(grown), born_with, 0, Vector2.RIGHT)
+	field.set_patchiness(Dish.NUTRIENT_PATCHINESS, radius, int(sim.random_float() * 2147483647.0))
+	field.fill(clampf(sc.nutrient_density, 0.0, StartConditions.MAX_NUTRIENT_DENSITY) * Dish.CONCENTRATION_PER_DENSITY)
+	var st := GpuSim.State.of_field(field, radius, sim.export_state_bytes(), SimConstants.build())
 	st.dish_seed = seed_v * 7919 + 13
 	st.limit = maxi(bups, 1)
 	st.feed = Dish.feed_per_second(sc.feed_density)
-	st.upkeep = dish.upkeep_factor
+	st.upkeep = 1.0
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_v
-	st.bups = spread_bups(st.bups, bups, dish.radius, rng, key, st.constants)
+	st.bups = spread_bups(st.bups, bups, radius, rng, key, st.constants)
 	var n := st.cells_across
 	st.acetate = PackedFloat32Array()
 	st.acetate.resize(n * n)
@@ -599,10 +613,8 @@ static func make_state(tree: SceneTree, sc: StartConditions, seed_v: int, bups: 
 			st.acetate[c] = rng.randf() * 0.002
 	var pf := PackedFloat32Array()
 	for k in clouds:
-		pf.append_array(random_cloud(rng, dish.radius, st.spacing, 1.0 if k % 2 == 0 else 0.001, st.constants))
+		pf.append_array(random_cloud(rng, radius, st.spacing, 1.0 if k % 2 == 0 else 0.001, st.constants))
 	st.clouds = pf
-	tree.root.remove_child(dish)
-	dish.free()
 	return st
 
 
