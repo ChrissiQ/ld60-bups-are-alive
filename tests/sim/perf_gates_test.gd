@@ -38,7 +38,10 @@ extends SceneTree
 ##   read in the code: SimCore.pipette reads back DSTATE and WORLD and the moved ids only (`_ids_from`), the store gets `retarget_ids`];
 ##   the reply within one iteration of the command, <= T_ITER_MS (25 ms [placeholder: Governor.T_ITER_MS, fixed by a soak]) + the
 ##   iteration's sync. [measured: about 140 ms, waiting for the new dish's grid (DishGrid.make on the worker pool): expected to
-##   fail; the grid's own time is measured beside it, on the main thread, and printed.]
+##   fail; the grid's own time is measured beside it, on the main thread, and printed.] The screen's side of the reply (a Dish adopting
+##   the receiver, as Main._finish_pipette does, and drawing it: its MultiMesh sized for ceil(1.05 x the source's 1M limit)): adopt < one
+##   display frame and no frame of the 20 after it over 3 display frames [derived: adopt only sets fields and sends commands; the drawing
+##   grows its instance buffer once].
 ##   Args (windowed): `-- gate=E|F|G|x1|55|all` (default all; E alone takes about 11 minutes); `seconds=N` shortens E's window (a diagnosis,
 ##   not the gate).
 
@@ -74,7 +77,12 @@ const REQUIRED := [
 ]
 
 
+var _holder: Node2D  ## the 1M pipette's dish nodes (added while the test starts: the root takes no child later)
+
+
 func _initialize() -> void:
+	_holder = Node2D.new()
+	root.add_child(_holder)
 	var baseline := load_baseline()
 	for path: Array in REQUIRED:
 		TestUtil.show(lookup(baseline, path) != null, "baseline has %s" % "/".join(path))
@@ -543,6 +551,7 @@ func _row_55() -> void:
 	var iterations := int(t.get("iterations", 0)) - it0
 	var got: Variant = reply.value()
 	var moved: int = int(got.get("moved", -1)) if got is Dictionary else -1
+	var adopt := await _adopted(w, row, spec, got, tell)
 	var made := DishGrid.make(spec.radius, spec.resolution, spec.patchiness, 4321)
 	var timed := w.inspect(func(core: SimCore, rows: Dictionary) -> Array:
 		var p0 := Time.get_ticks_usec()
@@ -562,4 +571,37 @@ func _row_55() -> void:
 	var bound := Governor.T_ITER_MS + float(t.get("sync_ms", 0.0))
 	print("PIPETTE1M [measured] 1M dish at x10,000: %d bups moved; the call %d us on the main thread; reply after %.1f ms (%d iterations ended meanwhile; last iteration %.2f ms, sync %.2f ms); the worst frame of the wait %.1f ms; the new dish's grid (DishGrid.make, 100 cells, on this thread) %.1f ms median of 3; a second pipette's pass alone (SimCore.pipette with its grid made, %d bups) %.1f ms" % [moved, call_us, reply_ms, iterations, float(t.get("iteration_ms", 0.0)), float(t.get("sync_ms", 0.0)), worst_ms, grid_ms[1], timed.value()[1], pass_ms])
 	TestUtil.show(moved > 0 and call_us < 1000 and worst_ms <= 3.0 * DISPLAY_FRAME_MS, "the pipette of a 1M dish moved %d bups; the main thread's call %d us (< 1 ms), no frame of the wait over 3 display frames (worst %.1f ms)" % [moved, call_us, worst_ms])
+	print("PIPETTE1M [measured] the screen's side of the reply: Dish.adopt of the receiver (the source's 1M limit) %.2f ms; the worst of the 20 frames after it, the receiver drawn in the main view (its picture made for ceil(1.05 x 1M) instances), %.1f ms; Main's own part (_finish_pipette: the strip, the dish set) not measured here" % [adopt[0], adopt[1]])
+	TestUtil.show(adopt[0] < DISPLAY_FRAME_MS and adopt[1] <= 3.0 * DISPLAY_FRAME_MS, "taking the reply stalls no frame (adopt %.2f ms, then the worst frame %.1f ms)" % [adopt[0], adopt[1]])
 	TestUtil.show(reply_ms <= bound, "the reply within one iteration of the command (<= T_ITER %.0f ms + sync = %.1f ms): %.1f ms" % [Governor.T_ITER_MS, bound, reply_ms])
+
+
+## The screen's side of a pipette's reply: Dish nodes for the source (out of the main view) and the receiver (adopted from the reply, in the
+## main view, as Main._finish_pipette makes it); [adopt's ms, the worst frame of the 20 after it in ms].
+func _adopted(w: WorldClient, row: int, spec: DishSpec, got: Variant, tell: Callable) -> Array:
+	if not (got is Dictionary):
+		return [INF, INF]
+	var camera := Camera2D.new()
+	_holder.add_child(camera)
+	camera.make_current()
+	camera.zoom = Vector2.ONE * (500.0 / spec.radius)
+	var source := Dish.new()
+	source.world = w
+	source.number = spec.number
+	source.radius = spec.radius
+	source.resolution = spec.resolution
+	source.bup_limit = spec.limit
+	source.picture_scale = 0.1
+	_holder.add_child(source)
+	source.row = row
+	var receiver := Dish.new()
+	receiver.world = w
+	_holder.add_child(receiver)
+	var a0 := Time.get_ticks_usec()
+	receiver.adopt(int(got["new_row"]), int(got["number"]), source)
+	var adopt_ms := (Time.get_ticks_usec() - a0) / 1000.0
+	var worst := 0.0
+	for i in 20:
+		await process_frame
+		worst = maxf(worst, float(tell.call()) * 1000.0)
+	return [adopt_ms, worst]

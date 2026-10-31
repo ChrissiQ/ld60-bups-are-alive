@@ -23,15 +23,17 @@ extends SceneTree
 ##   receiver's number, its family chain unchanged; the receiver's DS_MOVED_IN and the source's DS_MOVED_OUT equal the bups moved; the
 ##   bups alive in the tree are the same ids; a founder's living descendants in the source plus the receiver are what they were;
 ##   the receiver's generation (its stats) is the mean of the moved bups' divisions within 1e-4 relative; a watched bup that moved
-##   is on the receiver's watch list (Main moves it); the question about the old dish is up.
-## - "Freeze": the source leaves the running dishes for the freezer; the receiver's chains are unchanged. Thawed: a dish under the source's
+##   is on the receiver's watch list (Main moves it); LineageStore.export_dish of the receiver lists every ancestor of its bups (those the
+##   source holds too); the question about the old dish is up. Left to the harness tests: the positions shifted, the other bups and dishes
+##   untouched word for word and no death counted (round_trip_test, invariants_test).
+## - "Freeze": the source leaves the running dishes for the freezer and its row the pool; the receiver's chains are unchanged. Thawed: a dish under the source's
 ##   number with the same bups, every chain of its bups as before the freeze, the tree's record count as before the freeze (no duplicate)
 ##   and the receiver's pins' holders unchanged.
 ## - A second pipette (from the receiver) answered "Trash": the old dish leaves for good; the new receiver's chains and its watched bups'
 ##   pins unchanged.
 ## - save: the main dish gathered by the world (save_all), written by DishCodec and SaveGame to a scratch file and read back: records,
 ##   grid, clouds, husks and DSTATE equal the blob's; loaded as a dish of the world again (Dish.load_blob), the pool holds those records
-##   and that grid word for word.
+##   and that grid word for word (the run carried on bit for bit after a load is continuation_test and codec_continuation_test).
 
 const MAX_FRAMES := 20000
 const SAVE_PATH := "user://game_check_save.json"
@@ -370,6 +372,15 @@ func _pipettes(source: Dish) -> void:
 	div /= maxi(rb.count(), 1)
 	var gen: float = receiver.population_stats()["generation"]
 	TestUtil.show(absf(gen - div) <= 1e-4 * maxf(div, 1.0), "the receiver's generation %.5f is its bups' mean divisions %.5f" % [gen, div])
+	var exported: Dictionary = store.export_dish(receiver.number, PackedInt64Array(moved))
+	var listed := {}
+	for id: int in exported.get("ids", PackedInt64Array()):
+		listed[id] = true
+	var missing := 0
+	for id: int in moved:
+		for a: int in store.chain(id):
+			missing += 0 if listed.has(a) else 1
+	TestUtil.show(missing == 0, "the receiver's export holds every ancestor of its bups, the source's shared ones too (%d records, %d missing)" % [listed.size(), missing])
 	var moved_watch := watched_ids.filter(func(id: int) -> bool: return moved.has(id))
 	TestUtil.show(moved_watch.size() >= 3 and moved_watch.all(func(id: int) -> bool: return receiver.is_watched(id) and not source.is_watched(id)), "the watched bups that moved (%d) are watched in the receiver" % moved_watch.size())
 	var receiver_chains := _chains(store, moved)
@@ -379,6 +390,7 @@ func _pipettes(source: Dish) -> void:
 		holds_before[id] = store.holds(id)
 	var records_before: int = store.record_count()
 
+	var source_row := source.row
 	main._answer_old_dish("freeze")
 	for i in 600:
 		if not main.freezer_shelf.entries.is_empty() and not main._waits(main.freezer_shelf.entries[0]):
@@ -387,6 +399,8 @@ func _pipettes(source: Dish) -> void:
 	pause()
 	await settle()
 	TestUtil.show(main.dishes.all(func(dd: Dish) -> bool: return dd.number != source_number) and main.freezer_shelf.entries.size() == 1 and _same_chains(store, receiver_chains) == 0, "frozen, the source left the running dishes; the receiver's chains unchanged")
+	var pool_rows: Array = await inspect(func(core: SimCore, rows: Dictionary) -> Array: return [rows.has(source_row), core.running_rows().size()])
+	TestUtil.show(not pool_rows[0] and pool_rows[1] == main.dishes.size(), "the frozen dish's row left the pool (still mapped %s; %d dishes run in the pool, %d on the screen)" % [pool_rows[0], pool_rows[1], main.dishes.size()])
 	var entry: Dictionary = main.freezer_shelf.entries[0]
 	main.thaw(entry)
 	for i in 600:
@@ -425,8 +439,8 @@ func _pipettes(source: Dish) -> void:
 	pause()
 	await settle()
 	var pins_ok := true
-	for id: int in pins:
-		pins_ok = pins_ok and store.holds(id) == pins[id]
+	for id: int in pins:  # (holds counts the record's children too, which births and deaths change: a pin keeps it at 1 or more)
+		pins_ok = pins_ok and store.has_record(id) and store.holds(id) >= 1 and second.is_watched(id)
 	TestUtil.show(main.dishes.all(func(dd: Dish) -> bool: return dd.number != receiver_number) and _same_chains(store, second_chains) == 0 and pins_ok and pins.size() >= 3, "the old dish trashed; the new receiver's %d chains unchanged, its %d watched bups' pins intact" % [second_ids.size(), pins.size()])
 	await consistent("after the trash", second)
 
@@ -522,4 +536,5 @@ func _perf(bups: int, radius: float, speed: float, seconds: float) -> void:
 			frame_ms.append((now - _last_usec) / 1000.0)
 		_last_usec = now
 	var real := (Time.get_ticks_msec() - t0) / 1000.0
+	TestUtil.show(frame_ms.size() > 0 and d.time > w0, "perf: the dish ran and was drawn (%d frames)" % frame_ms.size())
 	print("PERF bups=%d (%d at the end) radius=%.0f speed=x%.0f: frame ms p50 %.2f p95 %.2f p99 %.2f max %.2f, achieved x%.0f over %.0f s, timing %s" % [bups, d.population(), radius, speed, _pct(frame_ms, 0.5), _pct(frame_ms, 0.95), _pct(frame_ms, 0.99), _pct(frame_ms, 1.0), (d.time - w0) / real, real, g.world.latest().timing])
