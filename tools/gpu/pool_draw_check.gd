@@ -13,8 +13,10 @@ extends SceneTree
 ## D3 steer map of ids 4, 10001 and 20000: alpha within 1 of bup_steer_bytes (STEER_ALPHA), RGB equal where alpha > 0. [derived: as D2,
 ##    plus the erfc fit's 1.2e-7 and the float central difference]
 ## D4 pool_probe_full at the 40 queries_info bups and the 50 medium_points: the unit direction and the chance within 1e-5 of the
-##    fixture's steering (0.5 and (0,0) where it has none), the concentration within 1e-5 relative of field.read. [derived: float32 against
-##    the double the CPU sums in; the erfc fit's error 1.2e-7 on a chance of at most 1]
+##    fixture's steering (0.5 and (0,0) where it has none), the concentration within 1e-5 relative of field.read; at the medium points the
+##    gradient's size within 1e-4 relative of the length of field.read's (y, z), or 1e-12 /µm where that is below 1e-8 (flat). [derived:
+##    float32 against the double the CPU sums in; the erfc fit's error 1.2e-7 on a chance of at most 1; a gradient is a central difference,
+##    so it keeps fewer good digits than the concentration]
 ## D5 payload: x and y within 2e-5 relative of the records; length (mass x mass_um) and angle (atan2) within one half-float ulp; colour
 ##    within 1 byte of Color.from_hsv; a dead bup (R_PY -2) and the texels past the count all zero; the ids in IDTEX equal the records'.
 ## D6 thumbnails: the counts sum to the bups alive, the most in the tile equals THUMBMAX, the atlas has alpha 255 where the count is the
@@ -206,7 +208,7 @@ func _probe(rig: Rig, n: int, records: PackedByteArray) -> void:
 	var expect := []
 	for it: Dictionary in _info_lines():
 		queries.append_array(PackedFloat32Array([it["pos"].x, it["pos"].y, it["speed"], it["sense_range"]]))
-		expect.append([it["steering"].x, it["steering"].y, it["steering"].z, NAN])
+		expect.append([it["steering"].x, it["steering"].y, it["steering"].z, NAN, NAN])
 	var info_n := expect.size()
 	var med := FileAccess.get_file_as_string(DIR + "medium_points.txt")
 	var re := RegEx.create_from_string("point (Vector2\\([^)]*\\)) read (Vector3\\([^)]*\\)) steering_at (Vector3\\([^)]*\\))")
@@ -218,21 +220,30 @@ func _probe(rig: Rig, n: int, records: PackedByteArray) -> void:
 		var rd: Vector3 = str_to_var(m.get_string(2))
 		var s: Vector3 = str_to_var(m.get_string(3))
 		queries.append_array(PackedFloat32Array([p.x, p.y, 30.0, 60.0]))
-		expect.append([s.x, s.y, s.z, rd.x])
+		expect.append([s.x, s.y, s.z, rd.x, Vector2(rd.y, rd.z).length()])
 	var qb := queries.to_byte_array()
 	rig.rd.buffer_update(rig.bufs["SPQ"], 0, qb.size(), qb)
 	_run(rig, "pool_probe_full", 1, float(expect.size()), 0.0, Dish.STEERING_WINDOW)
-	var r := rig.read("SPR", 0, expect.size() * 16).to_float32_array()
+	var pf := GpuLayout.PROBE_FLOATS
+	var r := rig.read("SPR", 0, expect.size() * pf * 4).to_float32_array()
 	var worst := 0.0
 	var worst_c := 0.0
+	var worst_g := 0.0
+	var gradients_off := 0
 	for i in expect.size():
 		var e: Array = expect[i]
 		for k in 3:
-			worst = maxf(worst, absf(r[i * 4 + k] - e[k]))
+			worst = maxf(worst, absf(r[i * pf + k] - e[k]))
 		if not is_nan(e[3]):
-			worst_c = maxf(worst_c, absf(r[i * 4 + 3] - e[3]) / maxf(absf(e[3]), 1e-9))
-	print("D4 probe: %d queries (%d bups), steering off by at most %s, concentration relative %s" % [expect.size(), info_n, worst, worst_c])
-	_check(expect.size() == 90 and worst <= 1e-5 and worst_c <= 1e-5, "D4 probe")
+			worst_c = maxf(worst_c, absf(r[i * pf + 3] - e[3]) / maxf(absf(e[3]), 1e-9))
+		if not is_nan(e[4]):
+			var off := absf(r[i * pf + 4] - e[4])
+			var flat: bool = e[4] < 1e-8
+			worst_g = maxf(worst_g, off if flat else off / e[4])
+			if (flat and off > 1e-12) or (not flat and off > 1e-4 * e[4]):
+				gradients_off += 1
+	print("D4 probe: %d queries (%d bups), steering off by at most %s, concentration relative %s, gradient's size off by at most %s (relative; absolute where flat), %d past the bound" % [expect.size(), info_n, worst, worst_c, worst_g, gradients_off])
+	_check(expect.size() == 90 and worst <= 1e-5 and worst_c <= 1e-5 and gradients_off == 0, "D4 probe")
 
 
 static func _half_ulp(v: float) -> float:

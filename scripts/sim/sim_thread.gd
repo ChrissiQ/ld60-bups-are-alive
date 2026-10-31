@@ -21,6 +21,8 @@ extends RefCounted
 
 const KIND_INSPECT := &"inspect"  ## tests and tools: args {call: Callable(core: SimCore, rows: Dictionary client -> core row)}; the reply's value is what it returns
 const KIND_WORLD_SEED := &"world_seed"  ## args {seed}: the world's seed (new dishes' seeds are drawn from it and their number)
+const KIND_BEGIN_GAME := &"begin_game"  ## args {game_began}: a new game (WorldClient.begin_game): the numbers start again, the family tree's times count from it
+const HUSK_VIEW_MSEC := 100  ## the least real time between two reads of the main dish's husks (dish.gd's HUSK_REFRESH_MSEC)
 const FIELD_VIEW_MSEC := 100  ## the least real time between two field pictures (dish.gd's HAZE_REFRESH_MSEC)
 const THUMBS_MSEC := 1000  ## the least real time between two thumbnail atlases
 const ANSWER_MSEC := 100  ## the least real time between two answers to a dish's fraction questions
@@ -63,6 +65,9 @@ var _iterations := 0
 var _payload: PayloadInfo = null
 var _field_view: FieldViewInfo = null
 var _field_version := 0
+var _husk_view: Dictionary = {}  ## Snapshot.husk_view as last read
+var _husk_msec := -1000000
+var _game_began := 0.0  ## s: the world time the game began at; the family tree's times count from it (WorldClient.begin_game)
 var _texture_rids := {}  ## kind -> the RIDs the handles were taken from
 var _texture_generation := 0
 var _births_per_step := 0.0
@@ -357,7 +362,8 @@ func _results(steps: int, d: float, t0: float, samples: Array) -> Dictionary:
 	return {
 		"steps": steps, "delta": d, "t0": t0, "sim_time": governor.clock, "achieved": _achieved(), "paused": governor.paused,
 		"births": eb, "deaths": ed, "rows": rows, "stats": stats, "samples": samples, "worlds": worlds, "refused": refused,
-		"payload": _payload, "field_view": _field_view, "readback_ms": readback_ms, "publish_ms": (Time.get_ticks_usec() - t_pub) / 1000.0,
+		"payload": _payload, "field_view": _field_view, "husk_view": _husk_view, "readback_ms": readback_ms,
+		"publish_ms": (Time.get_ticks_usec() - t_pub) / 1000.0, "game_began": _game_began,
 	}
 
 
@@ -426,6 +432,9 @@ func _publish() -> void:
 	_give_bound()
 	var out := _core.publish(v)
 	_take_handles()
+	if _view.want_husks and (now - _husk_msec >= HUSK_VIEW_MSEC or _view_dirty):
+		_husk_msec = now
+		_husk_view = {"row": _view.row, "version": int(_husk_view.get("version", 0)) + 1, "transforms": _core.husk_view(v.row)}
 	if out.has("payload"):
 		var p := PayloadInfo.new()
 		p.texture_index = out["payload"]
@@ -435,15 +444,18 @@ func _publish() -> void:
 		p.generation = int((_handles.get("payload", {}) as Dictionary).get("generation", 0))
 		p.seq = _core.publish_seq
 		_payload = p
-	if out.has("haze"):
+	if out.has("haze") or out.has("steer"):
 		_field_msec = now
 		_field_version += 1
-		var f := FieldViewInfo.new()
-		f.texture_index = out["haze"]
+		var f := FieldViewInfo.new()  # (a new one: the snapshots hand the last one out to the main thread)
 		var s := _core.spec_of(v.row)
 		f.n = DishGrid.cells_across(s.radius, s.resolution)
+		var same := _field_view != null and _field_view.n == f.n  # (a kind not written this time keeps its last picture, of the same grid)
+		f.texture_index = out.get("haze", _field_view.texture_index if same else -1)
+		f.seq = _core.publish_seq if out.has("haze") else (_field_view.seq if same else 0)
+		f.steer_index = out.get("steer", _field_view.steer_index if same else -1)
+		f.steer_seq = _core.publish_seq if out.has("steer") else (_field_view.steer_seq if same else 0)
 		f.version = _field_version
-		f.seq = _core.publish_seq
 		_field_view = f
 	if out.has("thumbs"):
 		_thumbs_msec = now
@@ -498,26 +510,35 @@ func _answer() -> void:
 		points.append_array(asked.slice(0, (SimCore.PROBES_MOST - ids.size()) * 4))
 		var got := _core.probe(cr, points)
 		var steer := {}
+		var pf := GpuLayout.PROBE_FLOATS
 		for k in ids.size():
-			steer[ids[k]] = Vector3(got[k * 4], got[k * 4 + 1], got[k * 4 + 2])
-		_answers[client] = {"fractions": shares, "tracked": tracked, "steer": steer, "probes": got.slice(ids.size() * 4)}
+			steer[ids[k]] = Vector3(got[k * pf], got[k * pf + 1], got[k * pf + 2])
+		var places := PackedFloat32Array()
+		for h: Variant in (q.get("husks", []) as Array).slice(0, GpuLayout.HUSK_QUERIES):
+			places.append_array(PackedFloat32Array(h))
+		var husks: Array = []
+		var found := _core.husk_near(cr, places)
+		for k in found.size():
+			husks.append({"at": Vector2(places[k * 3], places[k * 3 + 1]), "reach": places[k * 3 + 2], "found": found[k]})
+		_answers[client] = {"fractions": shares, "tracked": tracked, "steer": steer, "probes": got.slice(ids.size() * pf), "husks": husks}
 
 
 ## What a snapshot answers for a dish (Snapshot.answers' row).
 func _answers_of(client: int) -> Dictionary:
 	var a: Dictionary = _answers.get(client, {})
-	return {"tracked": a.get("tracked", {}), "steer": a.get("steer", {}), "probes": a.get("probes", PackedFloat32Array())}
+	return {"tracked": a.get("tracked", {}), "steer": a.get("steer", {}), "probes": a.get("probes", PackedFloat32Array()), "husks": a.get("husks", [])}
 
 
 static func _copy_world(w: DishWorld) -> DishWorldCopy:
 	var c := w.copy()
 	var out := DishWorldCopy.new()
 	out.version = Time.get_ticks_usec()
+	out.time = c["time"]
 	out.plankton = c["plankton"]
 	var sources: Array = []
 	var ss: Dictionary = c["sources"]
 	for id: int in ss:
-		sources.append({"id": id, "pos": ss[id]["pos"], "rate": ss[id]["rate"]})
+		sources.append({"id": id, "pos": ss[id]["pos"], "rate": ss[id]["rate"], "emitted": ss[id]["emitted"]})
 	out.sources = sources
 	return out
 
@@ -559,6 +580,9 @@ func _handle(cmd: SimCommand) -> void:
 			_save_all(cmd.reply)
 		KIND_WORLD_SEED:
 			_core.world_seed = int(a["seed"])
+		KIND_BEGIN_GAME:
+			_core.begin_game()
+			_game_began = float(a["game_began"])
 		KIND_INSPECT:
 			var value: Variant = (a["call"] as Callable).call(_core, _rows.duplicate())
 			if cmd.reply != null:
@@ -584,7 +608,7 @@ func _add_dish(client: int, spec: DishSpec) -> void:
 	_had_bups[client] = spec.founders.size() > 0
 	if spec.founders.size() > 0:
 		var births := SimCore.founder_births(spec.founders)
-		var now := governor.clock
+		var now := governor.clock - _game_began
 		worker.push_op(func(st: Object) -> void:
 			if st != null:
 				st.apply_events(births, PackedByteArray(), now, 0.0))
@@ -616,8 +640,9 @@ func _new_world(s: DishSpec, start: Dictionary) -> DishWorld:
 	return w
 
 
+## The game's time in whole minutes (the family tree's).
 func _minutes() -> int:
-	return int(governor.clock / 60.0)
+	return int((governor.clock - _game_began) / 60.0)
 
 
 func _remove_dish(client: int) -> void:
@@ -780,7 +805,7 @@ func _resize(client: int, radius: float, resolution: int, reply: SimReply) -> vo
 	w.set_medium(s.diffusion(), 2.0 * radius / DishGrid.cells_across(radius, s.resolution), Dish.CLOUD_HANDOVER, Dish.NUTRIENT_ENERGY)
 	_world_dirty[client] = true
 	var deaths: PackedByteArray = res["deaths"]
-	var now := governor.clock
+	var now := governor.clock - _game_began
 	worker.push_op(func(st: Object) -> void:
 		if st != null and deaths.size() > 0:
 			st.apply_events(PackedByteArray(), deaths, now, 0.0)

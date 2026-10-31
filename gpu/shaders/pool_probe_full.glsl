@@ -31,6 +31,7 @@ const uint DS_START = 0u;
 const uint DS_STEP = 8u;
 const uint DS_WORDS = 32u;
 const uint NO_DISH = 4294967295u;
+const uint PROBE_FLOATS = 5u;
 const int P_CELLS = 1;
 const int P_DETECTION_FLOOR = 9;
 const int P_GRADIENT_NOISE = 11;
@@ -158,6 +159,7 @@ void f(uint i) {
 	float glen = sqrt(gx * gx + gy * gy);
 	vec3 answer = vec3(0.0, 0.0, 0.5);
 	if (glen > 1e-12) answer = vec3(gx / glen, gy / glen, steering_chance_d(d, speed, sense_range, c, glen, pcs.pc));
-	SPR[i * 4u] = answer.x; SPR[i * 4u + 1u] = answer.y; SPR[i * 4u + 2u] = answer.z; SPR[i * 4u + 3u] = c;
+	uint o = i * PROBE_FLOATS;
+	SPR[o] = answer.x; SPR[o + 1u] = answer.y; SPR[o + 2u] = answer.z; SPR[o + 3u] = c; SPR[o + 4u] = glen;
 }
 GRID_LOOP(f, uint(pcs.pa))

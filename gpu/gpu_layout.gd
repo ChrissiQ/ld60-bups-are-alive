@@ -188,6 +188,9 @@ const EV_DISH_SHIFT := 13
 const EV_DISH_BITS := 19
 const EV_DISH_MASK := 0x7FFFF
 
+const PROBE_FLOATS := 5  ## a point's answer (SPR, `pool_probe_full`): the way up the gradient (x, y, a unit vector), the chance of steering up it, the concentration, the gradient's size
+const HUSK_QUERIES := 4  ## the places one `husk_near` call asks about (HNQ: x, y, reach, a spare 0 each)
+const HN_WORDS := 8  ## a husk question's answer (HNR, uint words): the nearest's squared distance (float bits; 0xFFFFFFFF none), its slot + 1 (0 none), then its x, y, energy, age and pieces let go (float bits), a spare 0
 const PUFF_ROW_BASE := 0x3F800000  ## a cloud's word 5 (and its event's) is the float whose bits are this plus its dish's row: 1.0 and up, so "alive" stays `>= 0.5` and 0.0 is a free slot (no denormals, which a copy through a float register could flush)
 
 ## DISHP[d]: host to device, uploaded when changed. Floats and uints by their bits; words 22-31 are spare.

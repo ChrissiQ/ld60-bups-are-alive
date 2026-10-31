@@ -135,6 +135,66 @@ void main() {
 }
 """
 
+## What the screen asks of dish row `pcs.pa`'s live husks (live as in `pool_husk_mark`: alive and with a piece not yet let go), between
+## steps. HUSK2, the cull's scratch, is free then.
+## `pool_husk_view`: each one as a 2D MultiMesh transform (8 floats: a unit basis, its place), packed into HUSK2 in no set order (HVC[0]
+## counts them; the screen draws them all alike, so the order does not show).
+const K_VIEW := """
+void f(uint k) {
+	uint o = k * 8u;
+	if (HUSK[o + 6u] < 0.5 || int(HUSK[o + 4u]) >= HUSK_PIECES || floatBitsToUint(HUSK[o + 5u]) - PUFF_ROW_BASE != uint(pcs.pa)) return;
+	uint q = atomicAdd(HVC[0], 1u) * 8u;
+	HUSK2[q] = 1.0; HUSK2[q + 1u] = 0.0; HUSK2[q + 2u] = 0.0; HUSK2[q + 3u] = HUSK[o];
+	HUSK2[q + 4u] = 0.0; HUSK2[q + 5u] = 1.0; HUSK2[q + 6u] = 0.0; HUSK2[q + 7u] = HUSK[o + 1u];
+}
+GRID_LOOP(f, WORLD[WD_HUSK_SLOTS])
+"""
+
+## `pool_husk_near`, `pool_husk_near2`, `pool_husk_near3`: for each of `pcs.pb` places (HNQ: x, y, reach), the nearest live husk within
+## reach (BupSim::husk_near: of those as near, the last in the pool's order), in three passes: the least squared distance, the highest slot
+## at it, then that husk's x, y, energy, age and pieces into its answer (HNR, HN_WORDS a place; the host sets each to none first).
+const NEAR_FUNCS := """
+bool husk_of(uint k, out uint o) {
+	o = k * 8u;
+	return HUSK[o + 6u] >= 0.5 && int(HUSK[o + 4u]) < HUSK_PIECES && floatBitsToUint(HUSK[o + 5u]) - PUFF_ROW_BASE == uint(pcs.pa);
+}
+bool within(uint o, uint q, out uint bits) {
+	float dx = HUSK[o] - HNQ[q * 4u], dy = HUSK[o + 1u] - HNQ[q * 4u + 1u], r = HNQ[q * 4u + 2u];
+	float d2 = dx * dx + dy * dy;
+	bits = floatBitsToUint(d2);
+	return d2 <= r * r;
+}
+"""
+
+const K_NEAR := """
+void f(uint k) {
+	uint o, bits;
+	if (!husk_of(k, o)) return;
+	for (uint q = 0u; q < uint(pcs.pb); q++) if (within(o, q, bits)) atomicMin(HNR[q * HN_WORDS], bits);
+}
+GRID_LOOP(f, WORLD[WD_HUSK_SLOTS])
+"""
+
+const K_NEAR2 := """
+void f(uint k) {
+	uint o, bits;
+	if (!husk_of(k, o)) return;
+	for (uint q = 0u; q < uint(pcs.pb); q++) if (within(o, q, bits) && bits == HNR[q * HN_WORDS]) atomicMax(HNR[q * HN_WORDS + 1u], k + 1u);
+}
+GRID_LOOP(f, WORLD[WD_HUSK_SLOTS])
+"""
+
+const K_NEAR3 := """
+void main() {
+	if (gl_GlobalInvocationID.x != 0u) return;  // (one thread: a dispatch of 1 runs a whole group of 64)
+	for (uint q = 0u; q < uint(pcs.pb); q++) {
+		uint a = q * HN_WORDS, k = HNR[a + 1u];
+		if (k == 0u) continue;
+		for (uint w = 0u; w < 5u; w++) HNR[a + 2u + w] = floatBitsToUint(HUSK[(k - 1u) * 8u + w]);
+	}
+}
+"""
+
 ## The live husks of each dish at its cadence (see `pool_cloud_live` in kernels_clouds.gd), in CLIVE from D_MAX.
 const K_LIVE := """
 void f(uint k) {
@@ -148,7 +208,8 @@ GRID_LOOP(f, WORLD[WD_HUSK_SLOTS])
 
 
 static func register(out: Dictionary) -> void:
-	var types := {"HUSK": "float", "HUSK2": "float", "HDUE": "uint", "HEXC": "uint", "HAL": "uint", "HKEEP": "uint", "CBASE": "uint", "CLIVE": "uint"}
+	var types := {"HUSK": "float", "HUSK2": "float", "HDUE": "uint", "HEXC": "uint", "HAL": "uint", "HKEEP": "uint", "CBASE": "uint", "CLIVE": "uint",
+		"HVC": "uint", "HNQ": "float", "HNR": "uint"}
 	var funcs: String = HUSK_FUNCS % [str(Biology.HUSK_SECONDS), HUSK_PIECES]
 	var fixed := GpuKernels.FIXED_FUNCS
 	var dep := GpuKernelsClouds.POOL_DEP_FUNCS
@@ -164,3 +225,7 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "pool_husk_copy", K_COPY.replace("kept_count()", "(WORLD[WD_HUSK_SLOTS] > 0u ? HKEEP[WORLD[WD_HUSK_SLOTS] - 1u] + HAL[WORLD[WD_HUSK_SLOTS] - 1u] : 0u)"), ["WORLD", "HUSK", "HUSK2", "HAL", "HKEEP"], "", 64, types)
 	GpuKernels.add(out, "pool_husk_set_count", K_SET_COUNT, ["WORLD", "HAL", "HKEEP"], "", 64, types)
 	GpuKernels.add(out, "pool_husk_live", K_LIVE, ["WORLD", "DSTATE", "HUSK", "CLIVE"], funcs, 64, types)
+	GpuKernels.add(out, "pool_husk_view", K_VIEW, ["WORLD", "HUSK", "HUSK2", "HVC"], funcs, 64, types)
+	GpuKernels.add(out, "pool_husk_near", K_NEAR, ["WORLD", "HUSK", "HNQ", "HNR"], funcs + NEAR_FUNCS, 64, types)
+	GpuKernels.add(out, "pool_husk_near2", K_NEAR2, ["WORLD", "HUSK", "HNQ", "HNR"], funcs + NEAR_FUNCS, 64, types)
+	GpuKernels.add(out, "pool_husk_near3", K_NEAR3, ["HUSK", "HNR"], "", 64, types)

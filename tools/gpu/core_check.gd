@@ -166,7 +166,7 @@ func c3_edits() -> void:
 	h.core = core
 	var row := h.add(s)
 	var before := _grid_total(core, row)
-	ok(core.queue_edit(row, WorldEdit.drop(Vector2.ZERO, 1000.0)), "C3 a drop is the core's edit")
+	ok(core.queue_edit(row, WorldEdit.drop(Vector2.ZERO, 1000.0, 100.0)), "C3 a drop is the core's edit")
 	core.run(0, 20.0)
 	var after := _grid_total(core, row)
 	ok(absf(after - before - 1000.0) <= 1e-5 * after, "C3 a drop of 1,000 raised the grid's total %.3f -> %.3f" % [before, after])
@@ -284,7 +284,7 @@ func c7_edits_and_rows() -> void:
 	var gone := Scenario.small(0, 600.0)
 	gone.nutrient_density = 4.0
 	var row := h.add(gone)
-	core.queue_edit(row, WorldEdit.drop(Vector2.ZERO, 1000.0))
+	core.queue_edit(row, WorldEdit.drop(Vector2.ZERO, 1000.0, 100.0))
 	h.remove(row)
 	var next := Scenario.small(0, 600.0)
 	next.nutrient_density = 4.0
@@ -294,7 +294,7 @@ func c7_edits_and_rows() -> void:
 	var now := _grid_total(core, again)
 	ok(again == row and absf(now - start) <= 1e-5 * start, "C7 a drop queued on a trashed dish does not reach the dish in its row next (row %d, %.3f -> %.3f)" % [again, start, now])
 	var before := _grid_total(core, again)
-	core.queue_edit(again, WorldEdit.drop(Vector2.ZERO, 1000.0))
+	core.queue_edit(again, WorldEdit.drop(Vector2.ZERO, 1000.0, 100.0))
 	var blob: Variant = core.freeze(again)
 	var n := DishGrid.cells_across(600.0, 100)
 	var sp := 1200.0 / n

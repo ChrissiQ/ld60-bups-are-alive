@@ -117,6 +117,7 @@ func set_view(row: int, view: ViewRequest) -> void:
 	v.pixel_um = view.pixel_um
 	v.want_field_view = view.want_field_view
 	v.want_thumbnails = view.want_thumbnails
+	v.want_husks = view.want_husks
 	v.steer = view.steer
 	v.haze = view.haze
 	v.steer_alpha = view.steer_alpha
@@ -126,7 +127,8 @@ func set_view(row: int, view: ViewRequest) -> void:
 ## The questions about dish `row`, kept until asked again and answered every tenth of a second or so: {"fractions": {name: [gene,
 ## threshold]}} (the share of bups whose gene is at least the threshold, in the dish's DishState.fractions under the same name), "tracked":
 ## ids (up to GpuLayout.TRACKED: their records and the steering at each, in the snapshot's answers), "probes": [x, y, speed, sense range]
-## points (dish-local: the way up the gradient there, the chance of steering up it, the concentration).
+## points (dish-local: the way up the gradient there, the chance of steering up it, the concentration, the gradient's size), "husks":
+## [x, y, reach] places (dish-local, up to GpuLayout.HUSK_QUERIES: the nearest live husk within reach of each).
 func ask(row: int, questions: Dictionary) -> void:
 	_send(SimCommand.KIND_ASK, {"row": row, "questions": questions.duplicate(true)})
 
@@ -134,6 +136,13 @@ func ask(row: int, questions: Dictionary) -> void:
 ## Every running dish as a DishBlob (each with its own lineage), in row order; the dishes run on.
 func save_all() -> SimReply:
 	return _send(SimCommand.KIND_SAVE_ALL, {}, true)
+
+
+## A new game begins (sent before its first dish is asked for): the dishes' numbers start again past the running dishes' (from 1 when
+## none runs), and the family tree's times count from `game_began` (the world time the game began at: Main.game_began), so a bup's birth
+## and death read on the game's clock, and a loaded game's go on from the times its save kept.
+func begin_game(game_began: float) -> void:
+	_send(SimThread.KIND_BEGIN_GAME, {"game_began": game_began})
 
 
 ## The world's seed (a new dish's seed is drawn from it and its number when its spec has none).

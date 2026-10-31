@@ -139,9 +139,10 @@ func _iteration(item: Dictionary) -> void:
 	if store != null and steps > 0:
 		var births: PackedByteArray = item["births"]
 		var deaths: PackedByteArray = item["deaths"]
+		var began := float(item.get("game_began", 0.0))  # (the family tree's times are the game's: SimThread, WorldClient.begin_game)
 		if births.size() > 0 or deaths.size() > 0:
-			store.apply_events(births, deaths, float(item["t0"]) + float(item["delta"]), float(item["delta"]))
-		store.set_time(float(item["sim_time"]))
+			store.apply_events(births, deaths, float(item["t0"]) + float(item["delta"]) - began, float(item["delta"]))
+		store.set_time(float(item["sim_time"]) - began)
 	var lineage_us := Time.get_ticks_usec() - t0
 	lineage_usec += lineage_us
 	_snap_mutex.lock()
@@ -168,7 +169,7 @@ func _iteration(item: Dictionary) -> void:
 		ds.cloud_count = r["clouds"]
 		ds.husk_count = r["husks"]
 		snap.dishes[row] = ds
-		snap.answers[row] = r.get("answers", {"tracked": {}, "steer": {}, "probes": PackedFloat32Array()})
+		snap.answers[row] = r.get("answers", {"tracked": {}, "steer": {}, "probes": PackedFloat32Array(), "husks": []})
 		for s: Array in item["samples"]:
 			if not _history.has(row):
 				_history[row] = []
@@ -190,6 +191,7 @@ func _iteration(item: Dictionary) -> void:
 	snap.payloads = _payloads.map(func(p: Array) -> PayloadInfo: return p[0])
 	snap.payload = published
 	snap.field_view = item["field_view"]
+	snap.husk_view = item.get("husk_view", {})
 	var timing: Dictionary = (item["timing"] as Dictionary).duplicate()
 	timing["lineage_ms"] = lineage_us / 1000.0
 	timing["worker_queue"] = queued()

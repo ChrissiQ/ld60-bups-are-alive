@@ -41,7 +41,7 @@ var rd: RenderingDevice
 var limits: PoolLimits
 var arena: SimArena
 var world_seed := 1  ## a new dish's seed is drawn from this and its number when its spec has none
-var next_number := 1  ## the number a pipette's new dish takes: past every number a dish of this world has had (numbers are never reused); the host saves it with the game, as world_seed
+var next_number := 1  ## the number a pipette's new dish takes: past every number a dish of this game has had (numbers are never reused within a game: `begin_game`)
 var errors: Array[String] = []  ## kernels that did not load or build, and the room the memory budget refused
 
 var _own_device := false
@@ -1064,9 +1064,14 @@ func _apply_edits() -> void:
 			continue
 		var cd: CoreDish = _dishes[row]
 		if e.kind == WorldEdit.Kind.DROP:
+			var x := e.position.x
+			var y := e.position.y
+			var v := maxf(0.25 * e.radius * e.radius, DishGrid.MIN_CLOUD_VARIANCE)
+			if cd.grid.accepts(x, y) and sqrt(v) < float(_consts["cloud_handover"]) * cd.grid.spacing and _drop_cloud(row, x, y, e.amount, v):
+				continue
 			var cells := PackedInt32Array()
 			var amounts := PackedFloat32Array()
-			cd.grid.deposit_xy(e.position.x, e.position.y, e.amount, cd.base, cells, amounts)
+			cd.grid.deposit_disc(x, y, e.radius, e.amount, cd.base, cells, amounts)
 			if cells.is_empty():
 				continue
 			arena.put_small("EDC", cells.to_byte_array())
@@ -1081,6 +1086,22 @@ func _apply_edits() -> void:
 				_disp(cl, "pool_erase_puffs", _groups(maxi(_wd(GpuLayout.WD_CLOUD_SLOTS), 64)), float(row), e.position.x, e.position.y))
 	_edits.clear()
 	_stats_fresh = false
+
+
+## A dropped dose as a cloud of dish `row` (variance `v`, cut 1, as a plankton's burst: `_world_events`' discs), taken as the world's
+## events are, by `pool_ev_puffs` (its dish's next cloud slot, or the grid past the dish's quota), from a one-row EVR and EVP of its own:
+## the batch writes its own after. It is in the clouds' lists, so in the pictures and the probes, from the next step on. False, with nothing
+## done, when the memory budget has no room for another cloud slot (the dose then goes onto the grid).
+func _drop_cloud(row: int, x: float, y: float, energy: float, v: float) -> bool:
+	if not arena.ensure_clouds(_wd(GpuLayout.WD_CLOUD_SLOTS) + 1):
+		return false
+	_after_growth()
+	var ranges := PackedInt32Array([0, 1, 0, 0]).to_byte_array()
+	var cloud := PackedFloat32Array([x, y, energy, v, 1.0, _row_word(row)]).to_byte_array()
+	rd.buffer_update(arena.buf("EVR"), 0, ranges.size(), ranges)
+	rd.buffer_update(arena.buf("EVP"), 0, cloud.size(), cloud)
+	_run_list(func(cl: int) -> void: _disp(cl, "pool_ev_puffs", 1, 0.0))
+	return true
 
 
 # ---- reading --------------------------------------------------------------------------------------------------------------------------
@@ -1256,9 +1277,9 @@ static func _answer_id(answer: PackedByteArray) -> int:
 
 
 ## The field and the steering at points of dish `row` (`pool_probe_full`, on the field and the cloud lists of the last step): `points` holds
-## x, y, speed, sense range for each point (up to PROBES_MOST; dish-local µm). Returns for each point: the unit direction up the gradient
-## (x, y), the chance of steering up it for a bup of that speed and sense range (0.5 where there is no gradient), and the nutrient
-## concentration there (the grid's and the clouds'): 4 floats a point.
+## x, y, speed, sense range for each point (up to PROBES_MOST; dish-local µm). Returns for each point GpuLayout.PROBE_FLOATS floats: the
+## unit direction up the gradient (x, y), the chance of steering up it for a bup of that speed and sense range (0.5 where there is no
+## gradient), the nutrient concentration there (the grid's and the clouds') and the gradient's size (concentration per µm).
 func probe(row: int, points: PackedFloat32Array) -> PackedFloat32Array:
 	var n := mini(points.size() / 4, PROBES_MOST)
 	if n == 0 or not _dishes.has(row):
@@ -1266,7 +1287,56 @@ func probe(row: int, points: PackedFloat32Array) -> PackedFloat32Array:
 	var q := points.slice(0, n * 4).to_byte_array()
 	rd.buffer_update(arena.buf("SPQ"), 0, q.size(), q)
 	_run_list(func(cl: int) -> void: _disp(cl, "pool_probe_full", 1, float(n), float(row), float(_consts["steering_window"])))
-	return (read_parts([["SPR", 0, n * 16]])[0] as PackedByteArray).to_float32_array()
+	return (read_parts([["SPR", 0, n * GpuLayout.PROBE_FLOATS * 4]])[0] as PackedByteArray).to_float32_array()
+
+
+## Dish `row`'s live husks (alive, with a piece not yet let go: what the cull keeps) as 2D MultiMesh transforms, 8 floats each (a unit
+## basis, the husk's place in the dish), in no set order: `pool_husk_view` packs them into HUSK2 (the cull's scratch, free between steps),
+## read back in one right-sized read (the dish's husk counter bounds them; a second read when it did not).
+func husk_view(row: int) -> PackedFloat32Array:
+	var most := mini(_ds(row, GpuLayout.DS_HUSKS), _wd(GpuLayout.WD_HUSK_SLOTS)) if _dishes.has(row) else 0
+	if most <= 0:
+		return PackedFloat32Array()
+	arena.put_small("HVC", arena.zeros(16))
+	_run_list(func(cl: int) -> void: _disp(cl, "pool_husk_view", _groups(_wd(GpuLayout.WD_HUSK_SLOTS)), float(row)), false)
+	var got := read_parts([["HVC", 0, 4], ["HUSK2", 0, most * 32]])
+	var n := (got[0] as PackedByteArray).decode_u32(0)
+	if n > most:
+		got[1] = read_parts([["HUSK2", 0, n * 32]])[0]
+	return (got[1] as PackedByteArray).slice(0, n * 32).to_float32_array()
+
+
+## For each place of dish `row` (`places`: x, y, reach, up to GpuLayout.HUSK_QUERIES; dish-local µm), the nearest live husk within reach
+## (BupSim::husk_near): PackedFloat32Array([x, y, energy, age, pieces let go]), or an empty one for none.
+func husk_near(row: int, places: PackedFloat32Array) -> Array:
+	var n := mini(places.size() / 3, GpuLayout.HUSK_QUERIES)
+	var out: Array = []
+	if n == 0 or not _dishes.has(row) or _wd(GpuLayout.WD_HUSK_SLOTS) == 0:
+		for k in n:
+			out.append(PackedFloat32Array())
+		return out
+	var q := PackedFloat32Array()
+	var none := PackedInt32Array()
+	for k in n:
+		q.append_array(PackedFloat32Array([places[k * 3], places[k * 3 + 1], places[k * 3 + 2], 0.0]))
+		var answer := PackedInt32Array()
+		answer.resize(GpuLayout.HN_WORDS)
+		answer[0] = -1
+		none.append_array(answer)
+	var qb := q.to_byte_array()
+	var nb := none.to_byte_array()
+	rd.buffer_update(arena.buf("HNQ"), 0, qb.size(), qb)
+	rd.buffer_update(arena.buf("HNR"), 0, nb.size(), nb)
+	var kg := _groups(_wd(GpuLayout.WD_HUSK_SLOTS))
+	_run_list(func(cl: int) -> void:
+		_disp(cl, "pool_husk_near", kg, float(row), float(n))
+		_disp(cl, "pool_husk_near2", kg, float(row), float(n))
+		_disp(cl, "pool_husk_near3", 1, float(row), float(n)), false)
+	var got: PackedByteArray = read_parts([["HNR", 0, n * GpuLayout.HN_WORDS * 4]])[0]
+	for k in n:
+		var a := k * GpuLayout.HN_WORDS * 4
+		out.append(got.slice(a + 8, a + 28).to_float32_array() if got.decode_u32(a + 4) != 0 else PackedFloat32Array())
+	return out
 
 
 ## A bup's sense range from its record's words (GpuWorld's `_sense_range`, RecordCodec's): its sense gene times the root of its size (the
@@ -1740,8 +1810,16 @@ func _derived_seed(number: int) -> int:
 	return h if h != 0 else 1
 
 
+## A new game begins in this world: the dishes' numbers start again past the running dishes' (1 when none runs), so numbers stay unique
+## within a game and a game's first pipette makes dish 2.
+func begin_game() -> void:
+	next_number = 1
+	for row: int in _dishes:
+		next_number = maxi(next_number, (_dishes[row] as CoreDish).spec.number + 1)
+
+
 ## A new dish for a pipette's bups: the source's size, grid, limit and settings, a fresh medium, the next number (`next_number`: past
-## every dish this world has had, running, frozen or gone; taken now, so a dish added before this one is made does not take it), its seed
+## every dish this game has had, running, frozen or gone; taken now, so a dish added before this one is made does not take it), its seed
 ## and its landscape's seed drawn as `add_dish` would.
 func receiver_spec(row: int) -> DishSpec:
 	var s := (_dishes[row] as CoreDish).spec.copy()

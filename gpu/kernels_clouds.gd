@@ -725,9 +725,10 @@ float steering_chance_d(uint d, float speed, float sense_range, float c, float g
 }
 """
 
-## The full point answer of dish row `pcs.pb` for `pcs.pa` queries (SPQ: x, y, speed, sense range; SPR: the unit direction up the gradient, the
-## chance of steering up it, the concentration; `pcs.pc` the steering window): `BupSim::steering_at` and the hover card's nutrient, from the
-## grid snapshot and the clouds as the single dish reads them. No gradient (1e-12 or less) gives (0, 0, 0.5).
+## The full point answer of dish row `pcs.pb` for `pcs.pa` queries (SPQ: x, y, speed, sense range; SPR, PROBE_FLOATS a point: the unit
+## direction up the gradient, the chance of steering up it, the concentration, the gradient's size; `pcs.pc` the steering window):
+## `BupSim::steering_at` and the hover card's nutrient, from the grid snapshot and the clouds as the single dish reads them. No gradient
+## (1e-12 or less) gives (0, 0, 0.5).
 const K_POOL_PROBE_FULL := """
 void f(uint i) {
 	uint d = uint(pcs.pb);
@@ -739,7 +740,8 @@ void f(uint i) {
 	float glen = sqrt(gx * gx + gy * gy);
 	vec3 answer = vec3(0.0, 0.0, 0.5);
 	if (glen > 1e-12) answer = vec3(gx / glen, gy / glen, steering_chance_d(d, speed, sense_range, c, glen, pcs.pc));
-	SPR[i * 4u] = answer.x; SPR[i * 4u + 1u] = answer.y; SPR[i * 4u + 2u] = answer.z; SPR[i * 4u + 3u] = c;
+	uint o = i * PROBE_FLOATS;
+	SPR[o] = answer.x; SPR[o + 1u] = answer.y; SPR[o + 2u] = answer.z; SPR[o + 3u] = c; SPR[o + 4u] = glen;
 }
 GRID_LOOP(f, uint(pcs.pa))
 """

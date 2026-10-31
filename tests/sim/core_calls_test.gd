@@ -21,7 +21,7 @@ extends SceneTree
 ##    has are left out.
 ## Q  probe: in a dish with no bups and a uniform medium (32 units/mm², no patches, no feed) after one step, a point at the middle reads
 ##    the uniform concentration (to 1e-5 of it) and no gradient (equal cells stay equal under diffusion, bit for bit), so the way (0, 0)
-##    and the chance 0.5.
+##    and the chance 0.5, and a gradient of size 0.
 ## F  founders: their birth events (no parent) give the family tree one record each; export_dish of the founders writes more than 8 bytes
 ##    and lists them all; after 360 steps (two hours) with each iteration's events applied, every bup with a parent has a chain rooted at a
 ##    founder, and there are such bups; the
@@ -34,7 +34,7 @@ extends SceneTree
 ## S  through SimThread with a LineageStore (the path WorldClient's calls take): a dish of 20 founders run a few iterations and frozen
 ##    replies with lineage bytes of more than 8 and lineage ids holding every live id of its blob; for a second dish of 40 founders,
 ##    asking for two of its ids and a probe gives, in a later snapshot, their records (ANSWER_BYTES each, the right ids), a steering
-##    Vector3 each and 4 floats for the probe; set_params' feed reaches the core's spec; a pipette of a 700 µm disc replies with moved
+##    Vector3 each and GpuLayout.PROBE_FLOATS (5) floats for the probe; set_params' feed reaches the core's spec; a pipette of a 700 µm disc replies with moved
 ##    > 0 and new_row 2 while the iterations run on (the new dish's grid is made on the worker pool), and dish 2 is in a later snapshot
 ##    with that count; resizing the second dish to 400 µm replies with removed > 0 and the core's spec says 400.
 
@@ -231,7 +231,7 @@ func _track_and_probe() -> void:
 	c.run(1, 20.0)
 	var p := c.probe(row, PackedFloat32Array([0.0, 0.0, 20.0, 1.0]))
 	var uniform := 32.0 * Dish.CONCENTRATION_PER_DENSITY
-	TestUtil.show(p.size() == 4 and absf(p[3] - uniform) <= 1e-5 * uniform and p[0] == 0.0 and p[1] == 0.0 and p[2] == 0.5, "Q a probe at the middle of a uniform medium reads %.4f (want %.4f), way (%.3f, %.3f), chance %.3f" % [p[3] if p.size() > 3 else -1.0, uniform, p[0] if p.size() > 0 else -1.0, p[1] if p.size() > 1 else -1.0, p[2] if p.size() > 2 else -1.0])
+	TestUtil.show(p.size() == GpuLayout.PROBE_FLOATS and p[4] == 0.0 and absf(p[3] - uniform) <= 1e-5 * uniform and p[0] == 0.0 and p[1] == 0.0 and p[2] == 0.5, "Q a probe at the middle of a uniform medium reads %.4f (want %.4f), way (%.3f, %.3f), chance %.3f" % [p[3] if p.size() > 3 else -1.0, uniform, p[0] if p.size() > 0 else -1.0, p[1] if p.size() > 1 else -1.0, p[2] if p.size() > 2 else -1.0])
 	c.release()
 
 
@@ -389,7 +389,7 @@ func _through_thread() -> void:
 	for id: int in ids:
 		var r: PackedByteArray = tracked.get(id, PackedByteArray())
 		right = right and r.size() == GpuLayout.ANSWER_BYTES and SimCore._answer_id(r) == id and (ans.get("steer", {}) as Dictionary).get(id) is Vector3
-	TestUtil.show(right and (ans.get("probes", PackedFloat32Array()) as PackedFloat32Array).size() == 4, "S the snapshot answers the tracked bups (%d), their steering and the probe" % tracked.size())
+	TestUtil.show(right and (ans.get("probes", PackedFloat32Array()) as PackedFloat32Array).size() == GpuLayout.PROBE_FLOATS, "S the snapshot answers the tracked bups (%d), their steering and the probe" % tracked.size())
 	thread.submit(SimCommand.new(SimCommand.KIND_SET_PARAMS, {"row": 1, "params": {"feed_density": 7.0}}))
 	var feed := SimReply.new()
 	thread.submit(SimCommand.new(SimThread.KIND_INSPECT, {"call": func(core: SimCore, rows: Dictionary) -> float: return core.spec_of(rows[1]).feed_density}, feed))
