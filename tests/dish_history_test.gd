@@ -9,6 +9,8 @@ extends SceneTree
 ##    one exactly); each iteration's samples handed over twice (a snapshot not yet acknowledged carries them again) add nothing.
 ##  - A load at 130 s (a history read back, the clock at 130): a sample for 120 s (taken at 126) is refused; from 130 in steps of
 ##    7 s the next sample is at 242 s (the first step end past 240), and the one after at 361 s.
+##  - A thaw 600 s after the freeze (the history padded by the time away, read back at 726 s): 5 level samples are added (600 /
+##    120), each the last figures; a sample for 720 s (taken at 721) is refused; from 726 in steps of 7 s the next is at 845 s (past 840).
 ##  - one sample of counts and means comes out as the series: pop the count, each gene's mean, harm, donor and key as percents
 ##    (x100), the mutator and the generation as they are.
 ##  - 6,000 samples keep the fine history at LEN (5,040) and the whole run at 750 samples of 8 each (1,024 at 1, thinned to 512 at
@@ -21,6 +23,7 @@ extends SceneTree
 func _initialize() -> void:
 	_sample_times()
 	_after_load()
+	_after_thaw()
 	_series()
 	_whole_run()
 	_extinct()
@@ -82,6 +85,21 @@ func _after_load() -> void:
 	TestUtil.check(not h.record(126.0, stats(100)) and h.fine["pop"].size() == 1, "after a load at 130 s a sample for 120 s is not taken again")
 	var times := run(h, 130.0, 34, 7.0)  # (to 368 s)
 	TestUtil.check(times.size() == 2 and absf(times[0] - 242.0) < 1e-6 and absf(times[1] - 361.0) < 1e-6, "a load at 130 s goes on at 242 s and 361 s, past 240 and 360 (%s)" % [times])
+
+
+func _after_thaw() -> void:
+	var frozen := DishHistory.new()
+	frozen.begin(0.0)
+	run(frozen, 0.0, 18, 7.0)  # (to 126 s: one sample)
+	var data := frozen.write()
+	DishHistory.pad(data, 600.0)
+	var h := DishHistory.new()
+	h.load(DishHistory.read(data), 726.0)
+	var pops: Array = h.fine["pop"]
+	TestUtil.check(pops.size() == 6 and pops.all(func(v: Variant) -> bool: return v == pops[0]), "a thaw 600 s on pads the history with 5 level samples (%s)" % [pops])
+	TestUtil.check(not h.record(721.0, stats(100)), "after the thaw a sample for 720 s is not taken")
+	var times := run(h, 726.0, 17, 7.0)
+	TestUtil.check(times.size() == 1 and absf(times[0] - 845.0) < 1e-6, "after the thaw the next sample is at 845 s, past 840 (%s)" % [times])
 
 
 func _series() -> void:

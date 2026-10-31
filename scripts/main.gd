@@ -677,13 +677,21 @@ func thaw(entry: Dictionary) -> void:
 		return
 	var blob: DishBlob = reply.value()
 	blob.host.merge(entry["host"], true)
+	var history: Dictionary = (entry["host"]["history"] as Dictionary).duplicate(true)
+	DishHistory.pad(history, scheduler.world_time() - float(blob.world.get("time", scheduler.world_time())))  # (it goes on level for the time it was away, so the graph's time axis stays the world's)
+	blob.host["history"] = history
 	var emptied: Dish = null  # (the last running dish died out while others were frozen and stayed, empty: the thawed dish takes its place)
 	if dishes.size() == 1 and _extinct_queue.is_empty() and dishes[0].time > 0.0 and dishes[0].population() == 0:
 		emptied = dishes[0]
-	var d := add_dish(null, entry["number"])
+	var d := Dish.new()  # (not struck: a new dish under its number would put founders' records under the frozen dish's own ids)
+	add_child(d)
+	d.global_position = _free_slot_position()
 	if not d.load_blob(blob):
-		_remove_dish(d)
+		d.queue_free()
 		return
+	for layer: int in Dish.Layer.values():
+		d.show_layer(layer, dish.layer_shown(layer))
+	_register_dish(d, entry["number"])
 	if emptied != null:
 		set_main_dish(d)
 		_remove_dish(emptied)
