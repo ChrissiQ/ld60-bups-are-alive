@@ -5,3 +5,4 @@ extends RefCounted
 var texture_index := -1
 var n := 0
 var version := 0
+var seq := 0  ## the number of the publish that wrote it (SimCore.publish_seq), which the main side gives back with each use

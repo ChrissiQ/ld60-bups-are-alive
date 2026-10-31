@@ -79,9 +79,9 @@ func ack(seq: int) -> void:
 		thread.worker.ack(seq)
 
 
-func texture_bound(kind: String, index: int, frame: int) -> void:
+func texture_bound(kind: String, index: int, frame: int, seq: int) -> void:
 	if thread != null:
-		thread.texture_bound(kind, index, frame)
+		thread.texture_bound(kind, index, frame, seq)
 
 
 func texture_handles() -> Dictionary:

@@ -150,10 +150,11 @@ func poll() -> void:
 	snapshot_changed.emit(snap)
 
 
-## The main side bound texture `index` of `kind` on its frame `frame`: the simulation will not write it again until it is safely done.
-func texture_bound(kind: String, index: int, frame: int) -> void:
+## The main side used texture `index` of `kind`, holding publish `seq` (PayloadInfo.seq, FieldViewInfo.seq), on its frame `frame`: every
+## use is told, every frame, so the simulation writes a texture again only once it is safely done with (SimCore's header).
+func texture_bound(kind: String, index: int, frame: int, seq: int) -> void:
 	if backend.has_method("texture_bound"):
-		backend.texture_bound(kind, index, frame)
+		backend.texture_bound(kind, index, frame, seq)
 
 
 ## The family tree (a LineageStore; null when the backend keeps none).

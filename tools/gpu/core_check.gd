@@ -16,7 +16,10 @@ extends SceneTree
 ##    within 1e-5 relative (float32 sums) [derived]; an eraser of radius 200 µm and strength 1 at the centre takes the share 1 - d / r of
 ##    the cell under the centre, leaving d / r of what it held (d its centre's distance) [derived, NutrientField::erase_disc].
 ## C4 publish: the payload, id, haze, steering and thumbnail textures read back equal the storage buffers the kernels wrote, word for word
-##    [derived]; with every texture bound on the main side's frame now, nothing is published (no free texture) [derived].
+##    [derived]. The reuse rule [derived: a texture never written is free; a written one is free once the main side has told of a newer
+##    publish in use, on a frame more than frame_queue_size + 1 frames before the newest frame it told of]: with no use told, TEXTURES
+##    publishes take TEXTURES different textures and the next publishes nothing; told that the newest is in use on frame 10, nothing is
+##    published on frame 10 nor on 10 + frame_queue_size + 1, and every kind is on 10 + frame_queue_size + 2, none into the newest's texture.
 ## C5 lasting clouds: a dish of 20 mm (400 µm cells: a burst's cloud lives about 25 steps, a death's about 40) with 2,000 founders, a bloom
 ##    of 10 and every flag but plankton husks, alone and among seven random others: equal after every 20 of 300 steps (a plankton floats
 ##    an hour first, so bursts begin after about 170 steps), with clouds there at the end: about 73 [derived: 2.9 bursts a step x 25
@@ -190,7 +193,6 @@ func c4_publish() -> void:
 	view.row = 0
 	view.want_field_view = true
 	view.want_thumbnails = true
-	core.texture_bound("payload", 0, 0)
 	var got := core.publish(view)
 	ok(got.has("payload") and got.has("haze") and got.has("steer") and got.has("thumbs"), "C4 every kind was published: %s" % [got])
 	if not got.has("payload"):
@@ -209,10 +211,24 @@ func c4_publish() -> void:
 	var recs: PackedByteArray = h.dump(0)["records"]
 	var px := core.rd.texture_get_data(pay, 0)
 	ok(px.decode_u32(GpuLayout.PL_X * 4) == recs.decode_u32(GpuLayout.R_X * 4) and px.decode_u32(GpuLayout.PL_Y * 4) == recs.decode_u32(GpuLayout.R_Y * 4), "C4 the first texel is the first bup's place")
-	for kind in ["payload", "haze", "steer", "thumbs"]:
-		for i in SimCore.TEXTURES:
-			core.texture_bound(kind, i, 10)
-	ok(core.publish(view).is_empty(), "C4 with every texture bound this frame nothing is published")
+	var taken := {got["payload"]: true}
+	var last := got
+	for i in SimCore.TEXTURES - 1:
+		last = core.publish(view)
+		if last.has("payload"):
+			taken[last["payload"]] = true
+	ok(taken.size() == SimCore.TEXTURES, "C4 with no use told, %d publishes take %d different textures (%d)" % [SimCore.TEXTURES, SimCore.TEXTURES, taken.size()])
+	ok(core.publish(view).is_empty(), "C4 then, with no newer publish in use on the main side, nothing is published")
+	var newest := core.publish_seq
+	var fq := core.limits.frame_queue_size
+	for kind: String in last:
+		core.texture_bound(kind, last[kind], 10, newest)
+	ok(core.publish(view).is_empty(), "C4 the newest in use on frame 10: nothing is published on frame 10")
+	core.texture_bound("payload", last["payload"], 10 + fq + 1, newest)
+	ok(core.publish(view).is_empty(), "C4 nor on frame 10 + frame_queue_size + 1")
+	core.texture_bound("payload", last["payload"], 10 + fq + 2, newest)
+	var again := core.publish(view)
+	ok(again.size() == last.size() and not again.values().any(func(i: int) -> bool: return last.values().has(i)), "C4 on frame 10 + frame_queue_size + 2 every kind is published, none into the newest's texture (%s, newest %s)" % [again, last])
 
 
 func c5_lasting_clouds() -> void:

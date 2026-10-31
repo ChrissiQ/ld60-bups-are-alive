@@ -6,7 +6,7 @@ extends RefCounted
 ## the thumbnails' atlas as textures. Main thread only (its device calls go through RenderingServer.call_on_render_thread, which runs
 ## them at once in this project, where the render thread is the main thread); `take_bound` may be called from any thread.
 ##
-## The textures (four of each kind, written by SimCore.publish after its sync):
+## The textures (SimCore.TEXTURES of each kind, written by SimCore.publish after its sync):
 ## - The simulation hands over, for each kind, its textures' native handles (`driver_handles`, called on its own thread), their size and
 ##   a generation that changes whenever it made them afresh; `offer` says which of them it published last.
 ## - Each is imported in a different, view-compatible format (payload RGBA32UI as RGBA32I, ids RG32UI as RG32I, the RGBA8 pictures as

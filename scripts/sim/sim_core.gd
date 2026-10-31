@@ -13,6 +13,14 @@ extends RefCounted
 ## `remove_dish` (its blocks become padding at once, its clouds and husks empty slots) and comes back by `load_dish` from what `gather`
 ## read; `resize` and `set_params` change a running dish. `publish` writes the main dish's pictures into the next free shared texture after
 ## the sync. Reads of parts of the buffers go through a right-sized copy (`read_parts`).
+##
+## The shared textures: each publish has a number (`publish_seq`, never reused) that every texture it wrote holds, and the
+## main side tells each use of a texture with the number it held (`texture_bound`). A texture is written again only once the main side has
+## told of a newer publish of its kind in use, on a frame more than frame_queue_size + 1 frames before the newest frame it has told of: the
+## main side's uses of a kind never go back to an older publish, so once it uses a newer one it never uses this one again, and its last use
+## of it was on that frame or before. A texture never written is free. A texture holding the newest publish the main side has told of, or
+## a newer one, is never written over, so a kind the main side does not use (tells nothing of) stops being published once its textures
+## are all written, until it is used.
 
 const D_MAX := GpuLayout.D_MAX
 const RB := GpuLayout.RECORD_BYTES
@@ -22,7 +30,7 @@ const HUSK_CULL_EVERY := 32  ## world steps between culls of the husks (any cade
 const EVENT_FLOOR := 32768  ## the event ring's least size (births, and as many deaths)
 const EVENT_EXACT_MOST := 1 << 21  ## past this bound of an iteration's births the ring is sized from what the last iterations had
 const MAX_STEPS := GpuLayout.MAX_STEPS_PER_BATCH
-const TEXTURES := 4  ## shared textures of each kind
+const TEXTURES := 8  ## shared textures of each kind: at one publish a display frame a texture is held about 6 frames (shown the frame after its publish, superseded the next, then frame_queue_size + 2 frames), the rest is room for a late frame
 const HARD_BOUND_MOST := 1 << 18  ## the cloud (and husk) slots past which an iteration's room is estimated instead of bounded [placeholder: about 135 MB of cloud buffers at 516 B a slot]
 const OVERFLOW_DEVICE := 1  ## `overflow()` bits: a kernel found a buffer full (WORLD's flag)
 const OVERFLOW_BUDGET := 2  ## the room an iteration needed would pass the memory budget: it was refused, nothing ran
@@ -55,9 +63,13 @@ var _stats_fresh := false  ## STATS sample 0 is every running dish's current sta
 var _deaths_per_step := 0.0  ## the most deaths a step of the last iterations had (all dishes), for the clouds' headroom
 var _births_per_step := 0.0
 var _textures := {}  ## kind -> Array of TEXTURES texture RIDs (publish)
-var _texture_frames := {}  ## kind -> Array of the frame each texture was last bound on the main side (the host tells: `texture_bound`)
-var _published := {}  ## kind -> index of the texture published last
+var _texture_seqs := {}  ## kind -> Array: the publish each texture holds (-1: never written)
+var _texture_used := {}  ## kind -> Array: the last frame the main side told it used each texture on, holding what it holds now
+var _superseded := {}  ## kind -> Array: the frame on which the main side first told of a newer publish of the kind than each texture holds (-1: not yet)
+var _seen_seq := {}  ## kind -> the newest publish of the kind the main side has told of
+var _next_texture := {}  ## kind -> where the search for a free texture starts (the one after the last written)
 var _frame := 0  ## the main side's frame count as last told
+var publish_seq := 0  ## the number of the last publish that wrote a texture
 var _temp_sets: Array[RID] = []  ## the copy kernels' sets of one publish
 var _profile: Variant = null  ## while `profile_steps` runs: kernel name -> Array of µs, each dispatch its own submit
 var _scratch := RID()  ## where `read_parts` gathers what it reads (up to SCRATCH_KEEP bytes)
@@ -1338,9 +1350,9 @@ func _events_of(row: int) -> Array:
 # ---- publish ------------------------------------------------------------------------------------------------------------------------
 
 ## The main dish's pictures into the next free shared texture of each kind, after the iteration's sync: its payload and
-## ids (bups after the last step), and when asked its field's haze and steering pictures and every dish's thumbnail. A texture is written
-## only if the main side last bound it more than frame_queue_size + 1 frames ago (`texture_bound`); a kind with no free texture is not
-## published this time. Returns kind -> the texture index written.
+## ids (bups after the last step), and when asked its field's haze and steering pictures and every dish's thumbnail. Only a free texture is
+## written (see the header); a kind with none is not published this time. Every texture written holds this publish's number, `publish_seq`
+## after the call. Returns kind -> the texture index written.
 func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 	var out := {}
 	if view == null or not _dishes.has(view.row):
@@ -1384,16 +1396,35 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 	_temp_sets.clear()
 	for pair in [["payload", w], ["haze", fw], ["steer", sw], ["thumbs", tw]]:
 		if pair[1] >= 0:
-			_published[pair[0]] = pair[1]
 			out[pair[0]] = pair[1]
+	if out.is_empty():
+		return out
+	publish_seq += 1
+	for kind: String in out:
+		var i: int = out[kind]
+		_texture_seqs[kind][i] = publish_seq
+		_texture_used[kind][i] = -1
+		_superseded[kind][i] = -1
+		_next_texture[kind] = (i + 1) % TEXTURES
 	return out
 
 
-## The main side bound texture `index` of `kind` on its frame `frame` (it tells the core, so a texture it may still read is not written).
-func texture_bound(kind: String, index: int, frame: int) -> void:
+## The main side used texture `index` of `kind`, holding publish `seq`, on its frame `frame` (see the header: every use is told, with the
+## number of the publish it held; a use told without one, seq < 0, counts as a use of the texture but never as a newer publish in use).
+func texture_bound(kind: String, index: int, frame: int, seq: int) -> void:
 	_frame = maxi(_frame, frame)
-	if _texture_frames.has(kind):
-		_texture_frames[kind][index] = frame
+	if not _texture_seqs.has(kind) or index < 0 or index >= TEXTURES:
+		return
+	var seqs: Array = _texture_seqs[kind]
+	if seq < 0 or seqs[index] == seq:
+		_texture_used[kind][index] = maxi(int(_texture_used[kind][index]), frame)
+	if seq <= int(_seen_seq.get(kind, -1)):
+		return
+	_seen_seq[kind] = seq
+	var gone: Array = _superseded[kind]
+	for i in TEXTURES:
+		if int(seqs[i]) >= 0 and int(seqs[i]) < seq and int(gone[i]) < 0:
+			gone[i] = frame
 
 
 ## The shared textures of `kind` ("payload", "ids", "haze", "steer", "thumbs"), for the main side to import.
@@ -1410,12 +1441,13 @@ func _free_texture(kind: String, size: Vector2i) -> int:
 		_make_textures(kind, size)
 		if kind == "payload":
 			_make_textures("ids", size)
-	var last: int = _published.get(kind, -1)
+	var start: int = _next_texture.get(kind, 0)
 	for k in TEXTURES:
-		var i := (last + 1 + k) % TEXTURES
-		if i == last:
-			continue
-		if _frame - int(_texture_frames[kind][i]) > limits.frame_queue_size + 1:
+		var i := (start + k) % TEXTURES
+		if int(_texture_seqs[kind][i]) < 0:
+			return i
+		var gone := int(_superseded[kind][i])
+		if gone >= 0 and _frame - maxi(gone, int(_texture_used[kind][i])) > limits.frame_queue_size + 1:
 			return i
 	return -1
 
@@ -1431,13 +1463,15 @@ func _make_textures(kind: String, size: Vector2i) -> void:
 	fmt.format = {"payload": RenderingDevice.DATA_FORMAT_R32G32B32A32_UINT, "ids": RenderingDevice.DATA_FORMAT_R32G32_UINT}.get(kind, RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM)
 	fmt.usage_bits = RenderingDevice.TEXTURE_USAGE_STORAGE_BIT | RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
 	var made: Array = []
-	var frames: Array = []
 	for k in TEXTURES:
 		made.append(rd.texture_create(fmt, RDTextureView.new()))
-		frames.append(-1000)
 	_textures[kind] = made
-	_texture_frames[kind] = frames
-	_published.erase(kind)
+	for table: Dictionary in [_texture_seqs, _texture_used, _superseded]:
+		var a: Array = []
+		a.resize(TEXTURES)
+		a.fill(-1)
+		table[kind] = a
+	_next_texture[kind] = 0
 
 
 ## A copy kernel with image bindings: its storage buffers by name, its images from `images`.

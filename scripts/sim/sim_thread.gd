@@ -16,8 +16,8 @@ extends RefCounted
 ##     copy out DSTATE, STATS and the family events; publish; answer the questions asked; push to the worker; rest
 ##
 ## Shared textures: the core makes them on this device; `texture_handles` gives their native handles (for the main device to import,
-## after a sync, which every publish has done), and `texture_bound` is how the main side says which texture it last bound on which frame,
-## so the core never writes one it may still be reading.
+## after a sync, which every publish has done), and `texture_bound` is how the main side tells each texture it used, on which frame and
+## holding which publish (PayloadInfo.seq, FieldViewInfo.seq), so the core never writes one it may still be reading (SimCore's header).
 
 const KIND_INSPECT := &"inspect"  ## tests and tools: args {call: Callable(core: SimCore, rows: Dictionary client -> core row)}; the reply's value is what it returns
 const KIND_WORLD_SEED := &"world_seed"  ## args {seed}: the world's seed (new dishes' seeds are drawn from it and their number)
@@ -38,7 +38,7 @@ var _thread := Thread.new()
 var _state := Mutex.new()  ## guards the fields below it
 var _stop := false
 var _status := {"ready": false, "alive": false, "failed": false, "device": "", "errors": []}
-var _bound: Array = []  ## [kind, index, frame] the main side reported, not yet given to the core
+var _bound: Array = []  ## [kind, index, frame, seq] the main side reported, not yet given to the core
 var _handles := {}  ## kind -> {generation, handles: Array (native handles), width, height, format}
 
 # The sim thread's own (nothing else reads or writes them).
@@ -112,10 +112,10 @@ func status() -> Dictionary:
 	return s
 
 
-## The main side bound texture `index` of `kind` on its frame `frame` (see the header).
-func texture_bound(kind: String, index: int, frame: int) -> void:
+## The main side used texture `index` of `kind`, holding publish `seq`, on its frame `frame` (see the header).
+func texture_bound(kind: String, index: int, frame: int, seq: int) -> void:
 	_state.lock()
-	_bound.append([kind, index, frame])
+	_bound.append([kind, index, frame, seq])
 	_state.unlock()
 
 
@@ -406,7 +406,7 @@ func _give_bound() -> void:
 	_bound = []
 	_state.unlock()
 	for b: Array in bound:
-		_core.texture_bound(b[0], b[1], b[2])
+		_core.texture_bound(b[0], b[1], b[2], b[3])
 
 
 func _publish() -> void:
@@ -433,7 +433,7 @@ func _publish() -> void:
 		p.sim_time = governor.clock
 		p.row = _view.row
 		p.generation = int((_handles.get("payload", {}) as Dictionary).get("generation", 0))
-		p.seq = _iterations
+		p.seq = _core.publish_seq
 		_payload = p
 	if out.has("haze"):
 		_field_msec = now
@@ -443,6 +443,7 @@ func _publish() -> void:
 		var s := _core.spec_of(v.row)
 		f.n = DishGrid.cells_across(s.radius, s.resolution)
 		f.version = _field_version
+		f.seq = _core.publish_seq
 		_field_view = f
 	if out.has("thumbs"):
 		_thumbs_msec = now

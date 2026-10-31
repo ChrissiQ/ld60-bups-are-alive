@@ -22,9 +22,11 @@ extends SceneTree
 ##     about x800 (a step about 20 ms [measured] plus the iteration's readback and publish, one step an iteration) [derived].
 ##   G: 50, 200 and 1,000 bups (limit = count), 45 mm, x10,000, 30 s each: >= x9,990 (x10,000 less what one iteration's lag of at most
 ##     T_ITER of steps leaves unmeasured over 30 s and frame capping) [derived]; the single-dish path's best is x10,000 at each size [measured baseline].
-##   x1: 1,000 and 100,000 bups, 45 mm, x1, 60 s: the share of display frames in which a new payload arrived; >= 0.99 is the gate as
-##     written, but with the step tied to the speed the sim steps 60 times a second, so on a 120 Hz display at most
-##     about 0.50 of frames can have a new one [derived]: the gate is expected to FAIL as written and is to be settled. Edit to
+##   x1: 1,000 and 100,000 bups, 45 mm, x1, 60 s: the share of display frames in which a new payload arrived; >= 0.99 is the gate. The
+##     sim steps Governor.STEPS_PER_SECOND (120) times a simulated second, so on a 120 Hz display every frame can have a new one [derived];
+##     this script shows the newest payload each frame, and a payload reaches it only if its iteration ends before the next frame's poll:
+##     about 0.97 at 1,000 and 0.86 to 0.91 at 100,000 [measured, a 20 to 40 s replay of iteration ends against the polls], so the gate is
+##     expected to FAIL at both (the main frames' jitter against an iteration of about 4.7 ms at 1,000 and 6.8 ms at 100,000). Edit to
 ##     visible (paused, a source placed, 8 times): frames until a snapshot shows it, <= 2 frames + one iteration [derived], the single-dish path's 1 frame
 ##     [measured baseline, a pixel hash].
 ##   The interface column (frame p95 and worst on the game screen) is measured in the interface gate on the final tree; the main frames printed here are
@@ -253,7 +255,7 @@ func _measure(label: String, spec: DishSpec, speed: float, seconds: float, edits
 		w.poll()
 		var snap := w.latest()
 		if snap.payload != null:
-			w.texture_bound("payload", snap.payload.texture_index, frame)
+			w.texture_bound("payload", snap.payload.texture_index, frame, snap.payload.seq)
 		if now < settle_until:
 			last_payload = snap.payload.seq if snap.payload != null else -1
 			continue
@@ -420,7 +422,7 @@ func _gate_x1_speed() -> void:
 		var share := float(m.get("payload_frames", 0)) / maxf(frames.size(), 1)
 		var edit_frames: Array = m.get("edit_frames", [])
 		var hz := DisplayServer.screen_get_refresh_rate()
-		print("GATE x1/%d [measured]: a new payload in %.3f of %d display frames (display %.0f Hz; derived most %.2f); edit to visible (frames) %s" % [n, share, frames.size(), hz, minf(1.0, 60.0 / maxf(hz, 1.0)), edit_frames])
+		print("GATE x1/%d [measured]: a new payload in %.3f of %d display frames (display %.0f Hz; derived most %.2f); edit to visible (frames) %s" % [n, share, frames.size(), hz, minf(1.0, Governor.STEPS_PER_SECOND / maxf(hz, 1.0)), edit_frames])
 		TestUtil.show(m["ok"], "gate x1 (%d bups): the run was clean" % n)
-		TestUtil.show(gate_x1(share), "gate x1 (%d bups): a new payload in >= 99%% of display frames (the step rule caps it near 60 / display Hz)" % n)
+		TestUtil.show(gate_x1(share), "gate x1 (%d bups): a new payload in >= 99%% of display frames (at most STEPS_PER_SECOND / display Hz)" % n)
 		TestUtil.show(not edit_frames.is_empty() and edit_frames.max() <= 3, "gate x1 (%d bups): edit to visible <= 2 frames + one iteration (%s)" % [n, edit_frames])

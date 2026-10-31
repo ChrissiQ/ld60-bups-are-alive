@@ -23,9 +23,7 @@ extends SceneTree
 ##   share of iterations that publish at other iteration lengths, or (a long pace) a simulation that is nearly idle. `bare`: the main
 ##   side draws nothing of the dish and checks nothing (the frame the simulation's load alone leaves); `noverify`, `nocanvas`, `nohover`
 ##   leave out one check each, `nohaze` the dish's haze, `nodraw` the dish's bups from the view (to tell what a frame's time is spent on).
-##   `holdprev`: after each publish the texture published before it is held as if the main side used it then (what SimCore's reuse rule
-##   lacks: the main side may take up a payload just before the next is published, and its use is told only after the simulation
-##   has chosen where the one after goes).
+##   Each payload and haze is announced with SimCore's number of its publish, and the main side's uses go back to SimCore with it.
 ##
 ## Expected values, written before the first run:
 ## - picture against the single-dish path's [derived: the same capsule shader and footprint; the angle a half float (0.11 degrees at pi), the colour a
@@ -38,9 +36,9 @@ extends SceneTree
 ## - soak: 0 torn payloads and 0 canvas mismatches; interface p95 <= 1.15 x the display frame (9.6 ms at 120 Hz),
 ##   max <= 3 x (25 ms) after the first 2 s; RSS not growing (last third's mean within 5% of the middle third's); hover ring <= 3 frames
 ##   after the pick, 1 or 2 expected [derived: a readback a frame or two later with frame_queue_size 2].
-## - share of iterations that publish a payload with four textures at 120 Hz [derived from SimCore's reuse rule: a texture is written
-##   once the main side's last use is more than 3 frames old as the simulation last heard, which lags a frame]: >= 95% at about 20 ms
-##   iterations (2M: the texture published two before is about 4.8 frames old); 50 to 75% at about 10 ms iterations.
+## - share of iterations that publish a payload with SimCore.TEXTURES (8) textures at 120 Hz [derived from SimCore's reuse rule: at one
+##   publish a frame a texture is held about 7 frames (shown the frame after its publish, superseded the next, then frame_queue_size + 2
+##   frames, and the simulation hears of the main side's frames once an iteration)]: >= 99% at 8.33 ms iterations and longer.
 ## - view_build at 2M on screen about 1 ms [derived]; the draw at 2M fit zoom about 10 ms [measured], so
 ##   a frame at 2M fit zoom over 9.6 ms is expected and is reported apart (shown against hidden), not as the transport's.
 
@@ -121,7 +119,6 @@ var sim_thread: Thread
 var soak_bups := 2000000
 var pace_ms := 0.0
 var bare := false
-var hold_previous := false
 var skip: Array = []
 var main_row_switch_at := 20.0
 var want_big := false
@@ -146,11 +143,9 @@ func _run() -> void:
 					pace_ms = float(x.substr(5))
 				elif x == "bare":
 					bare = true
-				elif x == "holdprev":
-					hold_previous = true
 				elif x in ["noverify", "nocanvas", "nohover", "nohaze", "nodraw"]:
 					skip.append(x)
-			print("VIEWCHECK soak options: pace %.1f ms, bare %s, skipped %s, hold previous %s" % [pace_ms, bare, skip, hold_previous])
+			print("VIEWCHECK soak options: pace %.1f ms, bare %s, skipped %s, textures %d" % [pace_ms, bare, skip, SimCore.TEXTURES])
 			await _soak(float(a[1]) if a.size() > 1 else 60.0, int(a[2]) if a.size() > 2 else 2000000, float(a[3]) if a.size() > 3 else 20.0, a.has("fitcost"))
 		_:
 			print("usage: picture | soak <seconds> <bups> <zoom> [fitcost]")
@@ -801,14 +796,12 @@ func _sim_main() -> void:
 		sim_errors.append(spirv8.compile_error_compute)
 	var stamp8_shader := core.rd.shader_create_from_spirv(spirv8)
 	var stamp8_pipeline := core.rd.compute_pipeline_create(stamp8_shader)
-	var haze_seq := 0
 	var gens := {}  ## kind -> [rids, generation]
 	var iterations := 0
 	var publishes := 0
 	var field_publishes := 0
 	var remakes := 0
 	var remake_log: Array = []
-	var previous_pub := {}
 	var step_ms := 20.0
 	var it_ms: Array = []
 	var run_ms: Array = []
@@ -818,7 +811,6 @@ func _sim_main() -> void:
 	var last_pub := Time.get_ticks_msec()
 	var last_field := 0
 	var last_thumbs := 0
-	var seq := 0
 	var share_by_phase := {"small": [0, 0], "big": [0, 0]}
 	var last_start := 0
 	while true:
@@ -830,7 +822,7 @@ func _sim_main() -> void:
 			break
 		var row := row_big if big_now else row_small
 		for b: Array in renderer.take_bound():
-			core.texture_bound(b[0], b[1], b[2])
+			core.texture_bound(b[0], b[1], b[2], b[3])
 		var k := clampi(int(T_ITER_MS / maxf(step_ms, 0.1)), 1, 64)
 		if pace_ms > 0.0:
 			k = 1
@@ -851,13 +843,6 @@ func _sim_main() -> void:
 		req.want_thumbnails = now_ms - last_thumbs >= 1000
 		req.haze = Vector3(Cell.DETECTION_FLOOR, 0.5 * 255.0 / sqrt(10.0 * Cell.HALF_SATURATION), 0.45 * 255.0)
 		var pub := core.publish(req)
-		if hold_previous:
-			# (a stand-in for the fix SimCore needs: the texture published before this one may have been taken up by the main side
-			# just before this publish, its use not yet told; it is held as if used now)
-			for kind: String in pub:
-				if previous_pub.has(kind) and previous_pub[kind] != pub[kind]:
-					core.texture_bound(kind, previous_pub[kind], core._frame)
-				previous_pub[kind] = pub[kind]
 		var t_pub := Time.get_ticks_usec()
 		if pub.has("haze"):
 			last_field = now_ms
@@ -875,9 +860,9 @@ func _sim_main() -> void:
 					remake_log.append("ms %d gen %d" % [Time.get_ticks_msec(), gens[kind][1]])
 				if kind == "payload":
 					gens["ids"] = [core.textures("ids").duplicate(), gens[kind][1]]
-			ann[kind] = {"index": pub[kind], "generation": gens[kind][1], "handles": ViewRenderer.driver_handles(core.rd, gens[kind][0]), "size": _size_of(core.rd, rids[0])}
+			ann[kind] = {"index": pub[kind], "generation": gens[kind][1], "handles": ViewRenderer.driver_handles(core.rd, gens[kind][0]), "size": _size_of(core.rd, rids[0]), "seq": core.publish_seq}
 		if pub.has("haze"):
-			haze_seq += 1
+			var haze_seq := core.publish_seq
 			var htex: RID = core.textures("haze")[pub["haze"]]
 			var hsize: Vector2i = ann["haze"]["size"]
 			if not stamp_sets.has(htex) or not core.rd.uniform_set_is_valid(stamp_sets[htex]):
@@ -894,9 +879,8 @@ func _sim_main() -> void:
 			core.rd.compute_list_end()
 			core.rd.submit()
 			core.rd.sync()
-			ann["haze"]["seq"] = haze_seq
 		if pub.has("payload"):
-			seq += 1
+			var seq := core.publish_seq
 			var tex: RID = core.textures("payload")[pub["payload"]]
 			var size: Vector2i = ann["payload"]["size"]
 			if not stamp_sets.has(tex) or not core.rd.uniform_set_is_valid(stamp_sets[tex]):
@@ -915,7 +899,6 @@ func _sim_main() -> void:
 			core.rd.submit()
 			core.rd.sync()
 			t_stamp = Time.get_ticks_usec()
-			ann["payload"]["seq"] = seq
 			ann["payload"]["count"] = core.count(row)
 			ann["payload"]["row"] = row
 			ann["ids"] = {"handles": ViewRenderer.driver_handles(core.rd, gens["ids"][0])}

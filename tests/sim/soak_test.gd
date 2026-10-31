@@ -91,7 +91,7 @@ func _initialize() -> void:
 		_w.poll()
 		var snap := _w.latest()
 		if snap.payload != null:
-			_w.texture_bound("payload", snap.payload.texture_index, frame)
+			_w.texture_bound("payload", snap.payload.texture_index, frame, snap.payload.seq)
 		if snap.seq != last_seq:
 			longest_gap = maxf(longest_gap, (now - last_seq_usec) / 1e6)
 			last_seq = snap.seq
