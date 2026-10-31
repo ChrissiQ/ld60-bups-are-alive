@@ -29,6 +29,7 @@ extends SceneTree
 ##    number; the block table is the segments. In the next batch every event of a moved bup or its descendants is the destination's
 ##    (deaths by ED_STEP's number, births by the id's) and none is the source's; count after - before = births - deaths + moved in -
 ##    moved out for every dish in both batches. The destination continued 20 steps equals it alone, loaded from its records and DSTATE.
+## C0 every pooled kernel loads from the imported SPIR-V (gpu/shaders/pool_*.glsl) and makes a shader and a pipeline on the device.
 ## C6 (mode time N, default 2,000,000): each pooled kernel's cost on one dish of N bups (2% donors, 5% at division) against the single-dish path's
 ##    counterpart, median of 7 runs less a no-op [measured]; expected about the single-dish path's for life, events, the scans (+10%), compact
 ##    (compact + copy today: about 0.5 x) [derived from the 2M figures]; the donors' index (count, scan, scatter) about 0.5 ms more
@@ -991,6 +992,15 @@ func _initialize() -> void:
 	made = shaders.create(rd)
 	ok(shaders.errors.is_empty(), "the pooled kernels compile: %s" % [shaders.errors])
 	print("device %s" % rd.get_device_name())
+	var pool_defs := {}
+	var all := GpuKernels.all()
+	for k: String in all:
+		if k.begins_with("pool_"):
+			pool_defs[k] = all[k]
+	var imported := ShaderSet.imported(pool_defs)
+	var made_imported := imported.create(rd)
+	ok(imported.errors.is_empty() and made_imported.size() == pool_defs.size(), "the %d pooled kernels load from the imported SPIR-V (gpu/shaders) and make shaders and pipelines: %s" % [pool_defs.size(), imported.errors])
+	ShaderSet.free_all(rd, made_imported)
 	if mode == "time":
 		timing(int(args[1]) if args.size() > 1 else 2000000)
 	else:
