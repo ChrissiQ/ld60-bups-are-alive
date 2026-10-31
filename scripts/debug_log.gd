@@ -82,11 +82,34 @@ static func backend(dish: Dish) -> Dictionary:
 		"gpu_wanted_seconds": dish.backend.gpu_wanted_seconds,
 		"state_on_cpu": dish._gpu_on_cpu,
 		"gpu_overflows": {},
+		"steps_cap": 0,
+		"record_usec": 0,
+		"record_steps": 0,
+		"apply_usec": 0,
+		"applied_events": 0,
+		"time_process": Performance.get_monitor(Performance.TIME_PROCESS),
+		"draw_slots": _draw_slots(dish),
+		"pick_latency_frames": {"last": 0, "max": 0},
 	}
 	var world := dish.gpu_world
+	if world != null:
+		out["steps_cap"] = world.budget.steps_cap
+		out["record_usec"] = world.record_usec
+		out["record_steps"] = world.record_steps
+		out["apply_usec"] = world.apply_usec
+		out["applied_events"] = world.applied_events
+		out["pick_latency_frames"] = world.questions.pick_latency()
 	if world != null and world.gpu != null:
 		out["gpu_overflows"] = world.overflows()
 	return out
+
+
+## The bups' picture's instance slots: drawn (visible), capacity (allocated), and the bups alive.
+static func _draw_slots(dish: Dish) -> Dictionary:
+	var mesh := dish.drawing.bups_mesh
+	if mesh == null or mesh.multimesh == null:
+		return {"drawn": 0, "capacity": 0, "live": dish.population()}
+	return {"drawn": mesh.multimesh.visible_instance_count, "capacity": mesh.multimesh.instance_count, "live": dish.population()}
 
 
 ## What decides where a dish runs, for every dish (the main one's `backend` has the rest): see DishBackend.debug.

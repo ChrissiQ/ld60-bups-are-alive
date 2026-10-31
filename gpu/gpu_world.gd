@@ -45,7 +45,9 @@ var questions := GpuQuestions.new()
 var budget := GpuStepBudget.new()
 
 var record_usec := 0  ## how long the last request took to record (µs of CPU on the render thread): for timing
+var record_steps := 0  ## the steps in the request record_usec timed (per step: record_usec / record_steps): for timing
 var apply_usec := 0  ## the time spent in BupSim.apply_events so far (µs): for timing
+var applied_events := 0  ## the births and deaths applied in that time (per event: apply_usec / applied_events): for timing
 var _mutex := Mutex.new()
 var _arrived := []  ## [kind, request id, batch seq, epoch, data] from the readbacks' callbacks (render thread), for poll()
 var _epoch := 0  ## bumped by every load or reset: results of an older epoch are dropped
@@ -654,6 +656,7 @@ func _record(request: Request) -> void:
 		_read(gpu.buffer("CONC"), 0, gpu.n * gpu.n * 4, ["conc", rid, -1, epoch])
 		_read(gpu.buffer("MIRROR"), 0, (1 + slots * 5) * 4, ["mirror", rid, -1, epoch])
 	record_usec = Time.get_ticks_usec() - started
+	record_steps = steps
 
 
 ## Reads part of a buffer for poll(): on the main device asynchronously (the data as it is at this point of the frame's work, a few
@@ -770,6 +773,7 @@ func _apply_ready() -> void:
 			var deaths: PackedByteArray = batch.deaths_data if batch.deaths_data != null else PackedByteArray()
 			sim.apply_events(births, deaths, batch.start + batch.delta, batch.delta)
 			apply_usec += Time.get_ticks_usec() - started
+			applied_events += batch.births + batch.deaths
 		_batches.erase(_next_apply)
 		_next_apply += 1
 

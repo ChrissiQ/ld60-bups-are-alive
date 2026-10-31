@@ -34,6 +34,13 @@ func _init() -> void:
 			TestUtil.check(data.has(key), "the report has %s" % key)
 		TestUtil.check(data.has("backend") and data["backend"]["setting"] == "auto" and data["backend"]["running"] == "cpu" and data["backend"]["gpu_available"] == GpuWorld.available(), "it says where the bups run: the setting, and that they run on the processor (headless has no GPU path)")
 		TestUtil.check(data["backend"].has("gpu_device") and data["backend"].has("gpu_overflows") and data["backend"]["gpu_overflows"] is Dictionary, "...the GPU's name and its overflow counters (none here)")
+		var be: Dictionary = data["backend"]
+		for key in ["steps_cap", "record_usec", "record_steps", "apply_usec", "applied_events", "time_process"]:
+			TestUtil.check(be.has(key) and (be[key] is float or be[key] is int), "backend has the number %s" % key)
+		TestUtil.check(be["steps_cap"] == 0 and be["record_usec"] == 0 and be["record_steps"] == 0 and be["apply_usec"] == 0 and be["applied_events"] == 0, "...the GPU's figures are 0 with no GPU world")
+		TestUtil.check(be.has("draw_slots") and be["draw_slots"] is Dictionary and be["draw_slots"].has("drawn") and be["draw_slots"].has("capacity") and be["draw_slots"].has("live"), "...draw_slots has drawn, capacity and live")
+		TestUtil.check(be.has("pick_latency_frames") and be["pick_latency_frames"] is Dictionary and be["pick_latency_frames"].has("last") and be["pick_latency_frames"].has("max"), "...pick_latency_frames has last and max")
+		TestUtil.check(data["dish"].has("layers_hidden") and data["dish"]["layers_hidden"] is Array, "layers_hidden is an Array")
 		TestUtil.check(data["nutrient"]["by_distance_from_centre"].size() == DebugLog.RIM_FRACTIONS.size(), "it has the nutrient by distance from the centre")
 		TestUtil.check(data["selected"].has("bup") and data["selected"]["bup"].has("genome") == false and data["selected"]["bup"].has("sense"), "it has the selected bup")
 		TestUtil.check(data["screen"]["tutorial_step"] == 0, "it says the tour is up, and where")

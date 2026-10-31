@@ -429,7 +429,7 @@ static func _mean(values: PackedFloat64Array) -> float:
 
 func _report_frames(label: String) -> void:
 	var w := dish.gpu_world
-	print("FRAMES %s: %d frames, frame ms mean %.2f p50 %.2f p95 %.2f p99 %.2f max %.2f, advance ms mean %.3f p99 %.3f max %.2f, record_usec %d, apply ms/frame %.3f, achieved x%.0f (asked x%.0f), bups %d, %.2f sim-h" % [label, frame_ms.size(), _mean(frame_ms), _pct(frame_ms, 0.5), _pct(frame_ms, 0.95), _pct(frame_ms, 0.99), _pct(frame_ms, 1.0), _mean(advance_ms), _pct(advance_ms, 0.99), _pct(advance_ms, 1.0), w.record_usec if w != null else 0, (w.apply_usec / 1000.0 / maxf(frames_run, 1)) if w != null else 0.0, achieved, speed, dish.population(), dish.time / 3600.0])
+	print("FRAMES %s: %d frames, frame ms mean %.2f p50 %.2f p95 %.2f p99 %.2f max %.2f, advance ms mean %.3f p99 %.3f max %.2f, record_usec %d, record_steps %d, apply ms/frame %.3f, applied_events %d, achieved x%.0f (asked x%.0f), bups %d, %.2f sim-h" % [label, frame_ms.size(), _mean(frame_ms), _pct(frame_ms, 0.5), _pct(frame_ms, 0.95), _pct(frame_ms, 0.99), _pct(frame_ms, 1.0), _mean(advance_ms), _pct(advance_ms, 0.99), _pct(advance_ms, 1.0), w.record_usec if w != null else 0, w.record_steps if w != null else 0, (w.apply_usec / 1000.0 / maxf(frames_run, 1)) if w != null else 0.0, w.applied_events if w != null else 0, achieved, speed, dish.population(), dish.time / 3600.0])
 
 
 func _reset_frame_stats() -> void:
@@ -437,6 +437,7 @@ func _reset_frame_stats() -> void:
 	advance_ms.clear()
 	if dish.gpu_world != null:
 		dish.gpu_world.apply_usec = 0
+		dish.gpu_world.applied_events = 0
 
 
 # ---- auto -------------------------------------------------------------------------------------------------------------------------
@@ -888,7 +889,7 @@ func _perf(bups: int, radius: float, setting: String, run_speed: float, count: i
 		await frame()
 	if dish.backend_running() == "gpu":
 		TestUtil.show(_pct(frame_ms, 0.5) < 3.0 * 1000.0 / DisplayServer.screen_get_refresh_rate() + 1000.0 / 60.0, "the GPU's budget keeps the frame near the display's (p50 %.1f ms)" % _pct(frame_ms, 0.5))
-	print("PERF bups=%d (%d at the end) radius=%.0f setting=%s running=%s speed=x%.0f: frame ms mean %.2f p50 %.2f p95 %.2f p99 %.2f max %.2f, advance ms mean %.3f p95 %.3f, record_usec %d, apply ms/frame %.3f, achieved x%.0f, buffers %.0f MB (%.0f bytes a bup slot)" % [bups, dish.population(), radius, setting, dish.backend_running(), run_speed, _mean(frame_ms), _pct(frame_ms, 0.5), _pct(frame_ms, 0.95), _pct(frame_ms, 0.99), _pct(frame_ms, 1.0), _mean(advance_ms), _pct(advance_ms, 0.95), dish.gpu_world.record_usec, dish.gpu_world.apply_usec / 1000.0 / maxf(count, 1), achieved, mb, (mb * 1048576.0) / maxf(dish.gpu_world.gpu.capacity if dish.gpu_world.gpu != null else 1, 1)])
+	print("PERF bups=%d (%d at the end) radius=%.0f setting=%s running=%s speed=x%.0f: frame ms mean %.2f p50 %.2f p95 %.2f p99 %.2f max %.2f, advance ms mean %.3f p95 %.3f, record_usec %d, record_steps %d, apply ms/frame %.3f, applied_events %d, achieved x%.0f, buffers %.0f MB (%.0f bytes a bup slot)" % [bups, dish.population(), radius, setting, dish.backend_running(), run_speed, _mean(frame_ms), _pct(frame_ms, 0.5), _pct(frame_ms, 0.95), _pct(frame_ms, 0.99), _pct(frame_ms, 1.0), _mean(advance_ms), _pct(advance_ms, 0.95), dish.gpu_world.record_usec, dish.gpu_world.record_steps, dish.gpu_world.apply_usec / 1000.0 / maxf(count, 1), dish.gpu_world.applied_events, achieved, mb, (mb * 1048576.0) / maxf(dish.gpu_world.gpu.capacity if dish.gpu_world.gpu != null else 1, 1)])
 
 
 ## The GPU frame's cost beside its steps: vsync off, frames as fast as they go, `k` steps a frame forced (the budget held open), the frame

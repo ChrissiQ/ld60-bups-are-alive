@@ -10,6 +10,7 @@ const SAME_POINT_PIXELS := 2.0  ## an answer about a point serves a question abo
 const HOVER_POINT_PIXELS := 6.0  ## a hover takes the answer for a point this many pixels away: the pointer moves on while the answer comes back a few frames later
 const QUESTION_FRAMES := 2  ## a pick or nearest question is sent again for this many frames after it was last asked
 const TRACK_FRAMES := 10  ## a tracked bup not asked for in this many frames is dropped
+const LATENCY_KEPT := 120  ## the pick answers whose latency pick_latency() keeps
 const FRACTION_FRAMES := 60  ## a fraction not asked for in this many frames is no longer asked
 
 
@@ -55,6 +56,7 @@ class Near:
 
 
 var _pick: PickAsk = null
+var _latencies: Array[int] = []  ## the frames each recent pick answer took (see _note_pick_latency)
 var _pick_answer: PickAnswer = null
 var _pixel_um := 1.0
 var _near: Array[Near] = []  ## the points asked lately (up to NEAR_SLOTS)
@@ -144,7 +146,7 @@ func knows(id: int) -> bool:
 func questions(frame: int) -> Dictionary:
 	var q := {"pick": [], "near": [], "fractions": [], "tracked": []}
 	if _pick != null and frame - _pick.frame <= QUESTION_FRAMES:
-		q["pick"] = [_pick.at, _pick.slack, _pick.pixel_um]
+		q["pick"] = [_pick.at, _pick.slack, _pick.pixel_um, _pick.frame]
 	for asked: Near in _near:
 		if frame - asked.frame <= QUESTION_FRAMES:
 			q["near"].append([asked.at, asked.near])
@@ -227,6 +229,7 @@ func take_out(data: PackedByteArray, q: Dictionary, count: int) -> void:
 			id = GpuLayout.id_of(record, 0)
 			_records[id] = record
 		_pick_answer = PickAnswer.new(q["pick"][0], q["pick"][1], id)
+		_note_pick_latency(q["pick"][3])
 	var near: Array = q["near"]
 	for s in near.size():
 		var w := o + (GpuLayout.QO_NEAR if s == 0 else GpuLayout.QO_NEAR_MORE + 2 * (s - 1)) * 4
@@ -293,7 +296,21 @@ func take_answers(answers: Dictionary) -> void:
 	_records.merge(answers["records"], true)
 	if answers.has("pick"):
 		_pick_answer = answers["pick"]
+		if _pick != null:
+			_note_pick_latency(_pick.frame)
 	_near_answers.assign(answers["near"])
+
+
+## A pick answer is stored now: its latency is the process frames since the ask it answers.
+func _note_pick_latency(asked_frame: int) -> void:
+	_latencies.append(Engine.get_process_frames() - asked_frame)
+	if _latencies.size() > LATENCY_KEPT:
+		_latencies.pop_front()
+
+
+## The frames between a pick's ask and its stored answer: the last one and the largest of the last LATENCY_KEPT.
+func pick_latency() -> Dictionary:
+	return {"last": _latencies[-1] if not _latencies.is_empty() else 0, "max": _latencies.max() if not _latencies.is_empty() else 0}
 
 
 ## Drops the least recently asked of `asked` (key -> the frame it was asked) until `most` are left.
