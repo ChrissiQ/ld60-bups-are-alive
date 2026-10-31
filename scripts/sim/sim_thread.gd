@@ -15,7 +15,8 @@ extends RefCounted
 ##     snapshot); then sleep until the next command (or, when that pass left the husks unread, until they may be read again)
 ##   else: k = the governor's steps within the pool's room and the history samples; the dishes' world events for the window; run;
 ##     answer the questions asked; copy out DSTATE, STATS and the family events; publish (with the asked-after bups' places); push to the
-##     worker; rest
+##     worker; rest. An iteration the memory budget refuses (nothing ran) puts the dishes' worlds back as they were before its events,
+##     and the next tries are fewer steps, then one step at most every REFUSED_RETRY_MSEC (`_plan_steps`)
 ##
 ## Shared textures: the core makes them on this device; `texture_handles` gives their native handles (for the main device to import,
 ## after a sync, which every publish has done), and `texture_bound` is how the main side tells each texture it used, on which frame and
@@ -30,7 +31,10 @@ const THUMBS_MSEC := 1000  ## the least real time between two thumbnail atlases
 const ANSWER_MSEC := 100  ## the least real time between two answers to a dish's fraction questions
 const SPEED_WINDOW_MSEC := 1000  ## the achieved speed is the world time over the real time of about this much
 const REST_SLICE_USEC := 1000
+const REFUSED_RETRY_MSEC := 250  ## a world whose iteration of one step was refused is tried again after this long, or at once after a command that may make room
 const TEXTURE_KINDS := ["payload", "ids", "haze", "steer", "thumbs"]
+## The commands that may give a world over the memory budget room (fewer bups or dishes, a lower limit, a smaller dish; a test's budget).
+const ROOM_KINDS := [SimCommand.KIND_REMOVE_DISH, SimCommand.KIND_FREEZE, SimCommand.KIND_RESIZE, SimCommand.KIND_SET_PARAMS, KIND_INSPECT]
 
 var limits: PoolLimits
 var store: Object = null  ## the LineageStore the worker writes (null: none)
@@ -78,6 +82,8 @@ var _births_per_step := 0.0
 var _last_timing := {}
 var _last_events: Array = [0, 0]  ## the last iteration's births and deaths
 var _refusal := ""  ## why the iterations are being refused (the memory budget), while they are; "" once one runs
+var _refused_k := 0  ## the steps of the last iteration if it was refused (0: it ran)
+var _retry_msec := -1  ## after a refused iteration of one step: when the next is tried (-1: not waiting to try)
 var _pipettes: Array = []  ## pipettes waiting for their new dish's grid, made on the worker pool: {client, centre, radius, dest, reply, spec, made, task}
 var _grids := {}  ## the grid a pipette from the main view's dish would give its new dish, made ahead on the worker pool (`_make_grid_ahead`): key (`_grid_key`) -> {task, made}
 var _mass_um := 0.0  ## a bup's drawn length per unit of mass (SimConstants' mass_um)
@@ -187,10 +193,13 @@ func _run() -> void:
 		if k <= 0:
 			if _changed or _view_dirty:
 				_quiet_pass()
+			var retry_at := _retry_msec if _retry_msec > Time.get_ticks_msec() else -1  # (a refused world's next try, still to come)
 			if _husks_owed:
-				_wait_for_command(_husk_msec + HUSK_VIEW_MSEC)
+				_wait_for_command(_husk_msec + HUSK_VIEW_MSEC if retry_at < 0 else mini(_husk_msec + HUSK_VIEW_MSEC, retry_at))
 				if Time.get_ticks_msec() >= _husk_msec + HUSK_VIEW_MSEC:
 					_changed = true  # (a pass of no steps reads them; a command that came first is drained before it)
+			elif retry_at >= 0:
+				_wait_for_command(retry_at)
 			else:
 				queue.wait()
 			continue
@@ -218,13 +227,23 @@ func _refuse_all() -> void:
 		queue.wait()
 
 
-## The steps of the next iteration (0: nothing owed).
+## The steps of the next iteration (0: nothing owed). After a refused iteration (the memory budget: SimCore.run ran nothing) the next asks
+## for half its steps; after a refused iteration of one step none is tried until REFUSED_RETRY_MSEC has passed or a command that may
+## make room was drained (`_handle`), and that try is of one step: a world that stays over the budget is tried a few times a second, not
+## once a loop.
 func _plan_steps() -> int:
 	var want := governor.owed_steps()
 	if want <= 0 or _rows.is_empty():
 		if _rows.is_empty() and want > 0:
 			governor.skip(want)  # (an empty world's clock runs on: a dish added later joins at the world's time)
 		return 0
+	if _retry_msec >= 0:
+		if Time.get_ticks_msec() < _retry_msec:
+			return 0
+		_retry_msec = -1
+		want = 1  # (one step first: the room it needs is the least an iteration can need)
+	elif _refused_k > 1:
+		want = mini(want, _refused_k / 2)
 	var d := governor.delta()
 	var cap := mini(want, governor.steps_by_time())
 	var room := _room_steps(cap)
@@ -282,8 +301,11 @@ func _iterate(k: int) -> float:
 		times.append(t0 + (j + 1) * d)
 	plan.step_times = times
 	var bursts := {}
+	var before := {}  ## client row -> its world before the window (DishWorld.checkpoint)
 	for client: int in _rows:
-		var ev: Dictionary = (_worlds[client] as DishWorld).events(t0, k, d)
+		var w: DishWorld = _worlds[client]
+		before[client] = w.checkpoint()
+		var ev: Dictionary = w.events(t0, k, d)
 		plan.events[_rows[client]] = ev
 		if (ev["discs"] as PackedFloat64Array).size() > 0 or (ev["husks"] as PackedFloat64Array).size() > 0:
 			bursts[client] = true
@@ -293,12 +315,19 @@ func _iterate(k: int) -> float:
 	var run_ms := (Time.get_ticks_usec() - start) / 1000.0
 	governor.advanced(ran, d, run_ms)
 	if ran == 0:
+		for client: int in before:  # (nothing ran: the window's bursts, releases and arrivals are owed to the next one, as if never asked)
+			(_worlds[client] as DishWorld).restore(before[client])
+		bursts.clear()
 		var why := "an iteration of %d steps was refused (%s)" % [k, _core.errors[-1] if not _core.errors.is_empty() else "?"]
 		if _refusal == "":
 			_error(why)  # (once while it lasts: the next iterations ask for the same room and are refused alike)
 		_refusal = why
+		_refused_k = k
+		if k <= 1:
+			_retry_msec = Time.get_ticks_msec() + REFUSED_RETRY_MSEC
 	else:
 		_refusal = ""
+		_refused_k = 0
 	_iterations += 1
 	for client: int in bursts:
 		_world_dirty[client] = true
@@ -635,6 +664,8 @@ func _handle(cmd: SimCommand) -> void:
 				cmd.reply.complete(value)
 		_:
 			_unsupported(cmd, String(cmd.kind))
+	if cmd.kind in ROOM_KINDS and _retry_msec > 0:
+		_retry_msec = 0  # (a refused world is tried again at once: this may have made room)
 	_changed = true
 
 

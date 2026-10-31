@@ -12,6 +12,11 @@ extends SceneTree
 ##   first release is after 1 step (age 20 >= 5), then every 3 steps (age 60 >= 60): 1 + floor(2999 / 3) = 1000 releases a source over
 ##   3000 steps, the last at step 2998, so the mass let go is rate / 60 * 20 * 16 * 2998 of the 3000 steps' (the last 2 steps stay kept).
 ## - Cell 100: handover 50 < 173, so a deposit at each release; DishWorld gives one row a window, whose mass is the window's whole.
+## - A checkpoint taken before a window and restored after it (a window the simulation refused) leaves the world as it was (its save, the
+##   pending release of a moved source, the random state): the window asked again gives the same rows as the first time, and a twin world
+##   that never had the refused window gives the same rows over the next 20 windows. The checkpoint holds the plankton without copying
+##   them, so a world of 20,000 plankton checkpoints in about what a world of none does [measured: printed]; 1,000 worlds of 3 sources
+##   each checkpoint in under 5 ms [placeholder limit].
 
 const R := 20000.0
 const DELTA := 20.0
@@ -133,6 +138,7 @@ func _initialize() -> void:
 	_test_deposit_mode()
 	_test_split_and_save()
 	_test_edits()
+	_test_checkpoint()
 	_test_cost()
 	if failures == 0:
 		print("dish_world_test OK")
@@ -279,6 +285,61 @@ func _test_edits() -> void:
 	var before := f.plankton_count()
 	f.events(1.0e6, 3, 1.0e5)  # (arrivals every 6.9 s, a step of 100,000 s: more than the cap would let in)
 	check(f.plankton_count() - before <= 3 * Dish.MAX_BLOOM_ARRIVALS_PER_STEP, "a bloom far behind is capped a step")
+
+
+func _test_checkpoint() -> void:
+	var w := _world(13, 1.0, 400.0)
+	var twin := _world(13, 1.0, 400.0)
+	var dummy := Reference.new(0)
+	_sources_for(w, dummy)
+	_sources_for(twin, dummy)
+	for k in 20:
+		w.events(k * STEPS * DELTA, STEPS, DELTA)
+		twin.events(k * STEPS * DELTA, STEPS, DELTA)
+	for world: DishWorld in [w, twin]:
+		world.apply({"op": "move_source", "id": 1, "pos": Vector2(500, 500)})  # (its release waits for the next window, at step 0)
+	var t := 20 * STEPS * DELTA
+	var saved := w.save()
+	var cp := w.checkpoint()
+	var refused := w.events(t, STEPS, DELTA)
+	w.restore(cp)
+	check(w.save() == saved, "a restored checkpoint leaves the world as it was before the window")
+	var again := w.events(t, STEPS, DELTA)
+	check(again == refused and (refused["puffs"] as PackedFloat64Array).size() > 0 and (refused["discs"] as PackedFloat64Array).size() + w.plankton_count() > 0, "the window asked again gives the same rows (the moved source's release among them)")
+	var same := again == twin.events(t, STEPS, DELTA)
+	for k in range(21, 41):
+		var cp2 := w.checkpoint()  # (one a window, as the sim thread takes them, none restored)
+		same = same and cp2.size() > 0 and w.events(k * STEPS * DELTA, STEPS, DELTA) == twin.events(k * STEPS * DELTA, STEPS, DELTA)
+	check(same and w.save() == twin.save(), "after a refused window the world goes on as one that never had it, over 20 more windows")
+	var crowded := _world(14, 0.0, 400.0)
+	for i in Dish.MAX_PLANKTON:
+		crowded.apply({"op": "add_plankton", "pos": Vector2(i % 100, i / 100)})
+	var t0 := Time.get_ticks_usec()
+	for i in 100:
+		crowded.checkpoint()
+	var crowded_us := (Time.get_ticks_usec() - t0) / 100.0
+	var many: Array = []
+	for i in 1000:
+		var m := _world(100 + i, 0.0, 400.0)
+		_sources_for(m, dummy)
+		many.append(m)
+	t0 = Time.get_ticks_usec()
+	for m: DishWorld in many:
+		m.checkpoint()
+	var many_us := Time.get_ticks_usec() - t0
+	t0 = Time.get_ticks_usec()
+	for m: DishWorld in many:
+		m.events(0.0, STEPS, DELTA)
+	var window_us := Time.get_ticks_usec() - t0
+	var bare: Array = []
+	for i in 1000:
+		bare.append(_world(2000 + i, 1.0, 400.0))
+	t0 = Time.get_ticks_usec()
+	for m: DishWorld in bare:
+		m.checkpoint()
+	var bare_us := Time.get_ticks_usec() - t0
+	print("checkpoint: a world of %d plankton %.1f us; 1,000 worlds of 3 sources %d us (their window of %d steps: %d us); 1,000 worlds with no source %d us [measured]" % [crowded.plankton_count(), crowded_us, many_us, STEPS, window_us, bare_us])
+	check(many_us < 5000, "1,000 worlds of 3 sources checkpoint in %d us (placeholder limit 5,000)" % many_us)
 
 
 func _test_cost() -> void:

@@ -35,6 +35,7 @@ var _next_source := 1
 var _bloom_due := 0.0
 var _burst_clock := 0.0  ## sim seconds since the plankton were last looked over for bursts
 var _pending: Dictionary = {}  ## the rows edits made (a removed source's release), handed out with the next window at step 0
+var _plankton_shared := false  ## a `checkpoint` holds `_plankton` as it is: the next arrival puts the plankton into a new array
 
 
 func _init(p_radius: float = 1000.0, p_seed: int = 1) -> void:
@@ -128,6 +129,30 @@ func events(t0: float, steps: int, delta: float) -> Dictionary:
 	return out
 
 
+## What `events` changes, kept so `restore` can put it back (a window the simulation then refused never happened). Cheap enough for every
+## window: the plankton are held as they are (a plankton's entry is never changed, and an arrival after this copies the list first), each
+## source's emitter is copied.
+func checkpoint() -> Dictionary:
+	_plankton_shared = true
+	var sources := {}
+	for id: int in _sources:
+		sources[id] = (_sources[id] as Dictionary).duplicate()
+	return {"time": time, "plankton": _plankton, "sources": sources, "bloom_due": _bloom_due, "burst_clock": _burst_clock, "pending": _pending,
+		"rng_state": rng.state}
+
+
+## Back to a `checkpoint` taken before the windows since (no edit may come between them).
+func restore(saved: Dictionary) -> void:
+	time = saved["time"]
+	_plankton = saved["plankton"]
+	_plankton_shared = true
+	_sources = saved["sources"]
+	_bloom_due = saved["bloom_due"]
+	_burst_clock = saved["burst_clock"]
+	_pending = saved["pending"]
+	rng.state = saved["rng_state"]
+
+
 func _plankton_events(t0: float, steps: int, delta: float, out: Dictionary) -> void:
 	var t_end := t0 + steps * delta
 	var interval := 86400.0 / bloom_per_day() if bloom_density > 0.0 else INF
@@ -168,6 +193,7 @@ func _plankton_events(t0: float, steps: int, delta: float, out: Dictionary) -> v
 					out["discs"].append_array(PackedFloat64Array([n, at.x, at.y, energy, Dish.PLANKTON_PATCH_RADIUS]))
 				gone += 1
 			_plankton = _plankton.slice(gone)
+			_plankton_shared = false  # (a new array, which no checkpoint holds)
 			next_check = n + period
 		cur = n + 1
 	if first_check <= steps:  # the clock since the last look-over
@@ -186,6 +212,9 @@ func _random_spot() -> Vector2:
 func _add_plankton(pos: Vector2, now: float) -> void:
 	var life: float = Dish.PLANKTON_MEAN_LIFE * (1.0 + Dish.PLANKTON_LIFE_SPREAD * (2.0 * rng.randf() - 1.0))
 	var p := {"pos": pos, "born_at": now, "burst_at": now + life, "units": Dish.PLANKTON_UNITS, "shape": rng.randf() * TAU}
+	if _plankton_shared:
+		_plankton = _plankton.duplicate()
+		_plankton_shared = false
 	var lo := 0  ## (after the others with the same time: bursts in the order they were made)
 	var hi := _plankton.size()
 	while lo < hi:

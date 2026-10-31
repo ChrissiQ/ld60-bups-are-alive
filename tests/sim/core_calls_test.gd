@@ -31,6 +31,9 @@ extends SceneTree
 ##    unchanged; the same with 1,500 plankton husks names the husk slots; with the budget raised again the step runs (the flag stays).
 ##    Through SimThread: 8,000 founders in a pool of 16,384 slots with the budget at the bytes it holds: the iterations are refused, the
 ##    thread reports it once (status errors 1, the snapshot's timing["refused_iteration"] set), and a freeze still replies with its blob.
+##    Over a second of x600 frames while refused, the world is tried at most 1000 / SimThread.REFUSED_RETRY_MSEC + 1 = 5 times a second
+##    [derived: after a refusal of one step the thread waits for a command that may make room or the retry time; a frame's set_time is
+##    not such a command]. The rate before the back-off was built was measured separately [measured].
 ## S  through SimThread with a LineageStore (the path WorldClient's calls take): a dish of 20 founders run a few iterations and frozen
 ##    replies with lineage bytes of more than 8 and lineage ids holding every live id of its blob; for a second dish of 40 founders,
 ##    asking for two of its ids and a probe gives, in a later snapshot, their records (ANSWER_BYTES each, the right ids), a steering
@@ -346,6 +349,8 @@ func _refused_through_thread() -> void:
 	var snap: Snapshot = thread.worker.latest()
 	TestUtil.show(refusals.size() == 1, "O through SimThread the refusal is reported once (%d errors: %s)" % [errors.size(), errors])
 	TestUtil.show(snap != null and String(snap.timing.get("refused_iteration", "")).contains("refused"), "O the snapshot says the iterations are refused")
+	var tries := _refused_tries_a_second(thread)
+	TestUtil.show(tries <= 1000.0 / SimThread.REFUSED_RETRY_MSEC + 1.0, "O a refused world is tried again at most every %d ms, not spun on: %.1f tries a second over 1 s of x600 frames [measured]" % [SimThread.REFUSED_RETRY_MSEC, tries])
 	var freeze := SimReply.new()
 	thread.submit(SimCommand.new(SimCommand.KIND_FREEZE, {"row": 0}, freeze))
 	_wait(freeze)
@@ -415,6 +420,17 @@ func _through_thread() -> void:
 	var rv: Dictionary = rs.value() if rs.value() is Dictionary else {}
 	TestUtil.show(int(rv.get("removed", 0)) > 0 and is_equal_approx(float(radius.value()), 400.0), "S resizing through the thread removed %d bups; the spec says %s um" % [int(rv.get("removed", 0)), radius.value()])
 	thread.stop()
+
+
+## The iterations a refused world is tried (SimThread's `iterations`, which counts refused ones too) a second, over a second of x600
+## frames as the game sends them.
+static func _refused_tries_a_second(thread: SimThread) -> float:
+	var before := int(thread.worker.latest().timing.get("iterations", 0))
+	var t0 := Time.get_ticks_msec()
+	_run_for(thread, 60)
+	OS.delay_msec(50)
+	var after := int(thread.worker.latest().timing.get("iterations", 0))
+	return (after - before) * 1000.0 / maxf(Time.get_ticks_msec() - t0, 1.0)
 
 
 ## Frames of x600 for `frames` sixtieths of a second (until `reply` is done, when one is given).
