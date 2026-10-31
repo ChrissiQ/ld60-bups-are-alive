@@ -261,7 +261,7 @@ void main() {
 # ---- the pooled world: the same lives for every dish of the pool at once (see gpu/kernels.gd, POOL_FUNCS) ------------------------------
 # A dish's bups are the segment of slots it occupies (BLKDISH, DS_START, DS_COUNT); its random streams, ranks, ids, limit and counters are
 # its own (keyed by the bup's place l in its segment), so a dish's run is the same alone or among others. A step's order:
-#   pool_conj_clear, pool_conj_count, pool_conj_scan_*, pool_conj_scatter, pool_conj_apply (conjugation)
+#   pool_conj_clear, pool_conj_count, pool_conj_scan_*, pool_conj_scatter, pool_ac_conj (the acetate's uptake, then conjugation)
 #   pool_life, pool_scan_s_* (SURV -> EXCS), pool_scan_k_* (KID -> EXCK), pool_finalize, pool_slot_check (kernels_core.gd)
 #   (the death clouds read: SURV 0 for a bup not kept, R_PY -2 for one dead of starvation or chance, its rank among its dish's dead
 #   l - (EXCS[i] - DN_SURV_BASE), the dish's dead DS_COUNT - DS_SURVIVORS)
@@ -555,6 +555,22 @@ void conj_apply(uint i, uint d, uint l) {
 BUP_LOOP(conj_apply)
 """
 
+## `pool_ac_apply` and `pool_conj_apply` in one pass over the bups (what the step runs; the two kernels stay for the checks that run them
+## alone): each record is read once for both. A bup takes up its acetate first, as it would in the pass before, since a recipient's
+## metabolism, which sets its yield, may then change; the rest of conjugation reads only the donors' genes, places and masses, which
+## neither part writes.
+static func pool_ac_conj() -> String:
+	return loop_function(GpuKernelsField.K_POOL_AC_APPLY, "f", "ac_apply") + loop_function(K_POOL_CONJ_APPLY, "conj_apply", "conj_apply") \
+		+ "void ac_conj(uint i, uint d, uint l) { ac_apply(i, d, l); conj_apply(i, d, l); }\nBUP_LOOP(ac_conj)\n"
+
+
+## A pooled kernel's text that ends `BUP_LOOP(fn)` without that loop, its function `fn` renamed `to`: a part of a kernel that runs
+## several parts for each bup.
+static func loop_function(text: String, fn: String, to: String) -> String:
+	assert(text.ends_with("BUP_LOOP(%s)\n" % fn), "pooled kernel: expected it to end with BUP_LOOP(%s)" % fn)
+	return swapped(text.trim_suffix("BUP_LOOP(%s)\n" % fn), "void %s(uint i, uint d, uint l) {" % fn, "void %s(uint i, uint d, uint l) {" % to)
+
+
 ## The pipette's retarget: the bups of the source dish inside a disc move to the destination dish, with their ids, genes and
 ## everything else but their place, shifted by the disc's centre (the destination's middle); no step, no draw, no event. The push constant
 ## of every pass: pa, pb the disc's centre and pc its radius (µm, the source dish's own coordinates), pd the rows (source + destination
@@ -694,6 +710,7 @@ static func _register_pool(out: Dictionary) -> void:
 	GpuKernels.add_grid_scan(out, "pool_conj_scan", "DCNT", "DOFF", "GSUM", "GOFF", CONJ_BUCKETS_EXPR.replace("CONJ_MIN_BUCKETS", "%du" % CONJ_MIN_BUCKETS), ["WORLD"])
 	GpuKernels.add(out, "pool_conj_scatter", K_POOL_CONJ_SCATTER, ["WORLD", "BLKDISH", "DSTATE", "CBKT", "DOFF", "DLIST"], conj, 64, t)
 	GpuKernels.add(out, "pool_conj_apply", K_POOL_CONJ_APPLY, ["P", "BUPS", "WORLD", "BLKDISH", "DSTATE", "DCNT", "DOFF", "DLIST", "DBIT"], conj, 64, t)
+	GpuKernels.add(out, "pool_ac_conj", pool_ac_conj(), ["P", "BUPS", "WORLD", "BLKDISH", "DSTATE", "DISHP", "WANT2", "CELL2", "SCALE2", "DCNT", "DOFF", "DLIST", "DBIT"], conj, 64, t)
 	GpuKernels.add(out, "pool_life", pool_life(), ["P", "BUPS", "CHILD", "SURV", "KID", "WORLD", "BLKDISH", "DSTATE", "DISHP"], FLAG_FUNC)
 	GpuKernels.add_grid_scan(out, "pool_scan_s", "SURV", "EXCS", "GSUM", "GOFF", "WORLD[WD_SLOTS]", ["WORLD"])
 	GpuKernels.add_grid_scan(out, "pool_scan_k", "KID", "EXCK", "GSUM", "GOFF", "WORLD[WD_SLOTS]", ["WORLD"])
