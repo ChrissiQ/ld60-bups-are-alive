@@ -1,25 +1,28 @@
 class_name DishDrawing
 extends RefCounted
 ## How a dish is drawn: the bups (one multimesh whose buffer the main view's ViewRenderer writes from the picture the simulation publishes,
-## never through `multimesh.buffer`), the dish itself with the nutrient haze, the steering map, the sources and the plankton (`draw`, for
-## Dish._draw), and the rings, the placement preview and the flash above the bups (`draw_overlay`, for the dish's DishOverlay). Nothing here
-## changes the simulation. It is a part of its Dish and holds the nodes it draws with.
+## never through `multimesh.buffer`), the husks (a multimesh of their own, under the bups, every live husk one instance, from the list the
+## simulation reads for the main view: SimCore.husk_view), the dish itself with the nutrient haze, the steering map, the sources and the
+## plankton (`draw`, for Dish._draw), and the rings, the placement preview and the flash above the bups (`draw_overlay`, for the dish's
+## DishOverlay). Nothing here changes the simulation. It is a part of its Dish and holds the nodes it draws with.
 ##
 ## The dish in the main view (picture_scale 0) tells the world what it shows (WorldClient.set_view: its camera, the scale, whether the
-## haze is wanted, the selected bup's speed and sense range for the steering map), offers the view each publish the world's playout shows
-## (WorldClient.shown_payload) with the shared textures' handles, and tells the world every texture the view used this frame and the
-## publish it held (WorldClient.texture_bound), so the simulation never writes over one still in use. The rings follow the bups' places in
-## the picture. Husks are not drawn: the pooled world publishes no picture of them yet.
+## haze and the steering map are wanted, the selected bup's speed and sense range for the map, whether its husks are), offers the view each
+## publish the world's playout shows (WorldClient.shown_payload) and the newest haze and steering map, with the shared textures' handles,
+## and tells the world every texture the view used this frame and the publish it held (WorldClient.texture_bound), so the simulation never
+## writes over one still in use. The rings follow the bups' places in the picture.
 
 var dish: Dish
 var view: ViewRenderer = null  ## the main view's picture of this dish (made when the dish is first in the main view and the world publishes)
 var bups_mesh: MultiMeshInstance2D = null  ## all the bups, drawn in one go
-var husks_mesh: MultiMeshInstance2D = null  ## the husks' layer (empty: see the header)
+var husks_mesh: MultiMeshInstance2D = null  ## every live husk, as one instance each
 var overlay: Node2D = null  ## the selection and hover rings, drawn above the bups
 var _no_view := false  ## a view was tried and cannot draw here (no main device, or its kernels did not build)
 var _view_sent: Array = []  ## what the world was last told of the view
 var _offered_payload := -1  ## the publish last given to the view
 var _offered_field := -1
+var _offered_steer := -1
+var _husk_version := -1  ## the husk list last put into the husks' multimesh (Snapshot.husk_view's version)
 var _draw_key := []  ## what the dish was last drawn from (see `refresh`)
 var _plankton_picture: ImageTexture = null  ## what a small plankton is drawn from (made when first needed)
 var _plankton_mesh: MultiMesh = null  ## where each small plankton is, for drawing them all at once
@@ -62,7 +65,7 @@ func build_children() -> void:
 	var husks := MultiMesh.new()
 	husks.transform_format = MultiMesh.TRANSFORM_2D
 	husks.mesh = husk_mesh
-	husks_mesh = MultiMeshInstance2D.new()
+	husks_mesh = MultiMeshInstance2D.new()  # (under the bups: one instance for every husk there is, drawn by the graphics card, so there is no limit on how many are shown)
 	husks_mesh.multimesh = husks
 	husks_mesh.self_modulate = Dish.HUSK_COLOR
 	dish.add_child(husks_mesh)
@@ -98,6 +101,7 @@ func process() -> void:
 		return
 	var w := dish.world
 	_send_view(w)
+	refresh_husks(w.latest().husk_view)
 	if not _ensure_view(w):
 		return
 	var handles: Dictionary = w.backend.texture_handles()
@@ -109,31 +113,39 @@ func process() -> void:
 			_offered_payload = shown.seq
 	var field := w.latest().field_view
 	var haze: Dictionary = handles.get("haze", {})
-	if field != null and field.seq != _offered_field and not haze.is_empty():
+	if field != null and field.texture_index >= 0 and field.seq != _offered_field and not haze.is_empty():
 		view.offer("haze", field.texture_index, int(haze["generation"]), PackedInt64Array(haze["handles"]), Vector2i(int(haze["width"]), int(haze["height"])), field.seq)
 		_offered_field = field.seq
+	var steer: Dictionary = handles.get("steer", {})
+	if field != null and field.steer_index >= 0 and field.steer_seq != _offered_steer and not steer.is_empty():
+		view.offer("steer", field.steer_index, int(steer["generation"]), PackedInt64Array(steer["handles"]), Vector2i(int(steer["width"]), int(steer["height"])), field.steer_seq)
+		_offered_steer = field.steer_seq
 	draw_bups_view()
 	for b: Array in view.take_bound():
 		w.texture_bound(b[0], b[1], b[2], b[3])
 	overlay.queue_redraw()
 
 
-## The world is told what the main view shows when that changes: the dish's row, the camera (dish-local), the scale, whether the haze is
-## wanted, the selected bup's speed and sense range (for the steering map) and the haze's and the map's look.
+## The world is told what the main view shows when that changes: the dish's row, the camera (dish-local), the scale, whether the haze and
+## the steering map are wanted (the haze's layer, or the map's with a bup selected: hiding the medium to see the map is the point of it)
+## and whether the husks are, the selected bup's speed and sense range (for the map) and the haze's and the map's look.
 func _send_view(w: WorldClient) -> void:
 	var camera := dish.get_global_transform_with_canvas().affine_inverse() * dish.get_viewport_rect()
 	var steer := Vector2(20.0, 50.0)
 	var chosen := dish.bup_info(dish.selected.bup) if dish.selected.bup >= 0 else {}
 	if not chosen.is_empty():
 		steer = Vector2(chosen["speed"], chosen["sense_range"])
-	var key := [dish.row, camera, dish.pixel(), dish.layer_shown(Dish.Layer.MEDIUM), steer]
+	var field := dish.layer_shown(Dish.Layer.MEDIUM) or (dish.layer_shown(Dish.Layer.STEERING) and dish.selected.bup >= 0)
+	var husks := dish.layer_shown(Dish.Layer.HUSKS) and dish.has_husks()
+	var key := [dish.row, camera, dish.pixel(), field, husks, steer]
 	if key == _view_sent:
 		return
 	_view_sent = key
 	var v := ViewRequest.new()
 	v.camera = camera
 	v.pixel_um = dish.pixel()
-	v.want_field_view = dish.layer_shown(Dish.Layer.MEDIUM)
+	v.want_field_view = field
+	v.want_husks = husks
 	v.steer = steer
 	v.haze = Vector3(Cell.DETECTION_FLOOR, 0.5 * 255.0 / sqrt(10.0 * Cell.HALF_SATURATION), 0.45 * 255.0)
 	v.steer_alpha = Dish.STEER_ALPHA
@@ -174,6 +186,39 @@ static func _with_handles(p: PayloadInfo, handles: Dictionary) -> PayloadInfo:
 	out.id_handles = PackedInt64Array(ids["handles"])
 	out.size = Vector2i(int(pay["width"]), int(pay["height"]))
 	return out
+
+
+## Puts the newest list of the dish's husks (Snapshot.husk_view) into the husks' multimesh: its room grows by doubling (at least
+## Dish.HUSK_MIN_CAPACITY) and only the husks in the list are drawn; each is a quad of the husk's drawn size (the list's transforms have a
+## unit basis, so a change of zoom needs no new list). Hidden with its layer, or in a dish that cannot have husks.
+func refresh_husks(husk_view: Dictionary) -> void:
+	var shown := dish.layer_shown(Dish.Layer.HUSKS) and dish.has_husks()
+	husks_mesh.visible = shown
+	if not shown:
+		return
+	var husks := husks_mesh.multimesh
+	var size := Vector2.ONE * dish.husk_draw_size()
+	if (husks.mesh as QuadMesh).size != size:
+		(husks.mesh as QuadMesh).size = size
+	if husk_view.is_empty() or int(husk_view["row"]) != dish.row or int(husk_view["version"]) == _husk_version:
+		return
+	_husk_version = int(husk_view["version"])
+	var transforms: PackedFloat32Array = husk_view["transforms"]
+	var count := transforms.size() / 8
+	var capacity := maxi(Dish.HUSK_MIN_CAPACITY, nearest_po2(count))
+	if husks.instance_count != capacity:
+		husks.instance_count = capacity
+	husks.custom_aabb = AABB(Vector3(-dish.radius, -dish.radius, -1.0), Vector3(2.0 * dish.radius, 2.0 * dish.radius, 2.0))  # (the whole dish, as the renderer culls by it)
+	husks.visible_instance_count = count
+	if count > 0:
+		var buffer := transforms
+		buffer.resize(capacity * 8)  # (a buffer holds the whole room; what is past the count is not drawn)
+		husks.buffer = buffer
+
+
+## The husks drawn now (the newest list's).
+func husks_drawn() -> int:
+	return husks_mesh.multimesh.visible_instance_count if husks_mesh.visible else 0
 
 
 ## A dish out of the main view is shown only in the strip, whose pictures are the world's thumbnails: nothing to make here.

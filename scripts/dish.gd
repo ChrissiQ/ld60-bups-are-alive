@@ -105,6 +105,7 @@ void fragment() {
 const PROBE_SPEED := 20.0  ## the speed and sense range a point's probe is asked with (the founder's): only its concentration is shown
 const PROBE_SENSE := 50.0
 const PROBE_MOVE := 1.0  ## µm a probed point must move before it is asked again
+const HUSK_HERE := 0.01  ## µm: how near a picked husk's place the husk asked after must lie (it is the husk there: a husk does not move)
 
 var drawing := DishDrawing.new(self)  ## how the dish is drawn: the simulation's picture of its bups, the dish, the rings above the bups
 var world: WorldClient = null  ## the simulation's world (SimService's, taken when the dish first needs it)
@@ -186,6 +187,10 @@ var _plankton_by_key := {}  ## a plankton's [born_at, pos] -> its Plankton, like
 var _asked := {}  ## the questions last sent (WorldClient.ask)
 var _fractions := {}  ## name -> [gene, threshold] for each share asked lately (fraction_with_gene_at_least)
 var _probe := Vector2.INF  ## the point of the dish whose medium is asked after (nutrient_reading)
+var _husk_point := Vector2.INF  ## the place the select tool last looked for a husk at (husk_at), and the reach it looked within
+var _husk_reach := 0.0
+var _husks_seen := {}  ## a picked husk's place -> what an answer last said of it ([x, y, energy, age, pieces let go]), until one says it is gone
+var _world_time := 0.0  ## the world time of the newest copy of the dish's world (a source's `emitted` is as of then)
 var _pending_names := {}  ## id -> a name given before the bup's family record came (a founder's, right after `strike`)
 var _extinct_signalled := false
 var _seed := 0  ## the dish's seed for the world (0: the world draws one from its own and the number)
@@ -264,6 +269,8 @@ func _reset_runtime_state() -> void:
 	_fractions = {}
 	_pending_names = {}
 	_world_version = -1
+	_husk_point = Vector2.INF
+	_husks_seen = {}
 	_sources_by_id = {}
 	_plankton_by_key = {}
 	sources.clear()
@@ -491,6 +498,7 @@ func _on_snapshot(snap: Snapshot) -> void:
 ## The newest copy of the dish's world: its sources and plankton, each kept as the same object while it lasts (so what is picked stays picked).
 func _take_world(copy: DishWorldCopy) -> void:
 	_world_version = copy.version
+	_world_time = copy.time
 	var by_id := {}
 	var list: Array[NutrientSource] = []
 	for s: Dictionary in copy.sources:
@@ -500,6 +508,7 @@ func _take_world(copy: DishWorldCopy) -> void:
 			source = NutrientSource.new(at, s["rate"])
 		source.pos = at
 		source.rate = s["rate"]
+		source.emitted = s.get("emitted", 0.0)
 		by_id[s["id"]] = source
 		list.append(source)
 	for id: int in _sources_by_id:
@@ -527,7 +536,7 @@ func _take_world(copy: DishWorldCopy) -> void:
 
 
 ## The questions the screen needs answered, sent when they change: the shares a goal watches, the selected and hovered bups' records
-## (and the steering at each), and the medium at the probed point.
+## (and the steering at each), the medium at the probed point, and the husks where the select tool looks and where the picked ones lie.
 func _ask() -> void:
 	if row < 0:
 		return
@@ -535,7 +544,17 @@ func _ask() -> void:
 	for id in [selected.bup, hovered.bup]:
 		if id >= 0 and not tracked.has(id):
 			tracked.append(id)
-	var q := {"fractions": _fractions.duplicate(), "tracked": tracked, "probes": [[_probe.x, _probe.y, PROBE_SPEED, PROBE_SENSE]] if _probe.is_finite() else []}
+	var husks: Array = []
+	if has_husks():
+		if _husk_point.is_finite():
+			husks.append([_husk_point.x, _husk_point.y, _husk_reach])
+		for place: Vector2 in [selected.husk, hovered.husk]:
+			if place != NO_HUSK and not husks.has([place.x, place.y, HUSK_HERE]):
+				husks.append([place.x, place.y, HUSK_HERE])
+	for place: Vector2 in _husks_seen.keys():
+		if place != selected.husk and place != hovered.husk:
+			_husks_seen.erase(place)
+	var q := {"fractions": _fractions.duplicate(), "tracked": tracked, "probes": [[_probe.x, _probe.y, PROBE_SPEED, PROBE_SENSE]] if _probe.is_finite() else [], "husks": husks}
 	if q != _asked:
 		_asked = q
 		_world().ask(row, q)
@@ -676,13 +695,14 @@ func bup_steering(id: int) -> Vector3:
 
 
 ## The nutrient at a point of the dish: the concentration, and the gradient's x and y. The point is asked after from now on; the
-## answer is the newest for the point asked before (a frame or two behind). The probe gives the gradient's way, not its size, so the
-## gradient here is none.
+## answer is the newest for the point asked before (a frame or two behind).
 func nutrient_reading(local: Vector2) -> Vector3:
 	if not _probe.is_finite() or _probe.distance_to(local) > PROBE_MOVE:
 		_probe = local
 	var p: Variant = _answers.get("probes")
-	return Vector3(p[3], 0.0, 0.0) if p is PackedFloat32Array and p.size() >= 4 else Vector3.ZERO
+	if not (p is PackedFloat32Array and p.size() >= GpuLayout.PROBE_FLOATS):
+		return Vector3.ZERO
+	return Vector3(p[3], p[0] * p[4], p[1] * p[4])  # (the probe gives the way up as a unit vector, and the gradient's size)
 
 
 ## What a bup is called: the name the player gave it, or else its size word and its number ("lil bup #578",
@@ -989,6 +1009,7 @@ func contains(world: Vector2) -> bool:
 
 func clear_hover() -> void:
 	hovered.clear()
+	_husk_point = Vector2.INF
 	place_preview_kind = Preview.BRUSH
 
 
@@ -1067,14 +1088,55 @@ func plankton_details(cell: Plankton) -> Dictionary:
 	return details
 
 
-## The husk under a world position, or NO_HUSK: the pooled world answers no question about a husk's place yet, so none is found.
-func husk_at(_world_pos: Vector2, _slack: float = 0.0) -> Vector2:
-	return NO_HUSK
+## The husk under a world position (within its drawn size, plus `slack`): its place in the dish, or NO_HUSK. The place is asked after
+## from now on (BupSim.husk_near's rule: the nearest live husk within reach); the answer is the newest the simulation gave of any husk
+## asked after (a frame or two behind), the nearest of them within reach of the point.
+func husk_at(world_pos: Vector2, slack: float = 0.0) -> Vector2:
+	var local := world_pos - global_position
+	var reach := husk_draw_size() * 0.5 + slack
+	if not _husk_point.is_finite() or _husk_point.distance_to(local) > PROBE_MOVE or not is_equal_approx(reach, _husk_reach):
+		_husk_point = local
+		_husk_reach = reach
+	var best := NO_HUSK
+	var best_d2 := reach * reach
+	for a: Dictionary in _answers.get("husks", []):
+		var found: PackedFloat32Array = a["found"]
+		if found.size() < 5:
+			continue
+		var at := Vector2(found[0], found[1])
+		var d2 := at.distance_squared_to(local)
+		if d2 <= best_d2:
+			best = at
+			best_d2 = d2
+			_husks_seen[at] = found
+	return best
 
 
-## What there is to know about the husk at a place in the dish: nothing, until the pooled world answers questions about husks.
-func husk_details(_local: Vector2) -> Dictionary:
-	return {}
+## What there is to know about the husk at a place in the dish (empty once it has leaked away): how long it has lain, the nutrient it
+## still holds, where it is, and what is near. From the newest answer about it; until the place is answered, from what the answer that
+## found it said.
+func husk_details(local: Vector2) -> Dictionary:
+	var found := PackedFloat32Array()
+	var gone := false
+	for a: Dictionary in _answers.get("husks", []):
+		var f: PackedFloat32Array = a["found"]
+		if f.size() >= 5 and Vector2(f[0], f[1]).distance_to(local) <= HUSK_HERE:
+			found = f
+			break
+		if f.is_empty() and (a["at"] as Vector2).distance_to(local) <= HUSK_HERE:
+			gone = true  # (asked after exactly there, and none was found: it has leaked away)
+	if found.is_empty() and not gone:
+		found = _husks_seen.get(local, PackedFloat32Array())
+	if found.is_empty():
+		_husks_seen.erase(local)
+		return {}
+	_husks_seen[local] = found
+	var details := _spot_details(local)
+	var left := exp(-0.25 * found[4])  # (what is left after the pieces already let go: see husk_share in bup_husks.cpp)
+	details["age"] = found[3]
+	details["units"] = found[2] * left / NUTRIENT_ENERGY
+	details["left"] = left
+	return details
 
 
 ## What there is to know about a spot in the dish, given its place within it: where it is, the concentration there, and how
@@ -1117,12 +1179,12 @@ func bloom_per_day() -> float:
 	return bloom_density * PI * pow(radius / StartConditions.UM_PER_MM, 2)
 
 
-## What there is to know about a source: its rate, where it lies, the concentration at it, and how many bups are close by. (What it has
-## released so far is not in the copy of the dish's world: 0.)
+## What there is to know about a source: its rate and what it has released so far, where it lies, the concentration at it, and how many
+## bups are close by. What it has released is the newest copy of the dish's world's, and its rate's worth for each second since.
 func source_details(source: NutrientSource) -> Dictionary:
 	var details := _spot_details(source.pos - global_position)
 	details["rate"] = source.rate
-	details["emitted"] = source.emitted
+	details["emitted"] = source.emitted + source.rate / 60.0 * maxf(time - _world_time, 0.0)
 	return details
 
 
@@ -1151,12 +1213,12 @@ static func scatter_radius(count: int) -> float:
 	return 0.0 if count <= 1 else NUTRIENT_SCATTER * sqrt(count)
 
 
-## Drops `count` units of nutrient into the medium at a world point (WorldEdit.DROP: shared out over the four cells about it). Returns
-## false when the point is outside the dish.
+## Drops `count` units of nutrient into the medium at a world point, spread over a small disc when there are several (`scatter_radius`:
+## the circle the tool's preview shows; WorldEdit.DROP). Returns false when the point is outside the dish.
 func drop_nutrients(world_pos: Vector2, count: int) -> bool:
 	if not can_place_at(world_pos) or count <= 0 or row < 0:
 		return false
-	_world().edit_world(row, WorldEdit.drop(world_pos - global_position, count * NUTRIENT_ENERGY))
+	_world().edit_world(row, WorldEdit.drop(world_pos - global_position, count * NUTRIENT_ENERGY, scatter_radius(count)))
 	edit_count += 1
 	nutrients_placed += count
 	return true

@@ -17,7 +17,7 @@ static func husk(d: Dictionary) -> String:
 	var offset: Vector2 = d["offset"]
 	var nearest: float = d["nearest_bup"]
 	return Strings.t("panel.husk", [
-		SimClock.format_minutes(int(d["age"] / 60.0)), d["units"], d["left"] * 100.0, offset.x, offset.y, d["distance"], concentration(d["concentration"]),
+		SimClock.format_minutes(int(d["age"] / 60.0)), d["units"], (1.0 - d["left"]) * 100.0, offset.x, offset.y, d["distance"], concentration(d["concentration"]),
 		away(nearest),
 	])
 
