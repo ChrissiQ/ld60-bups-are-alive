@@ -682,25 +682,6 @@ void f(uint i, uint d, uint l) {
 BUP_LOOP(f)
 """
 
-## The energy ledger's upkeep (LG_UPKEEP), which the host records around `pool_swim` only while the ledger is on, so that swimming stays
-## the single dish's arithmetic: `pool_ledger_mark` keeps each bup's reserve and mass in WANT2 and WANTC (free until `pool_demand` and
-## `pool_apply` write them), and `pool_ledger_swim` adds what its reserve and body (at COST_PER_MASS) lost in the swim: the upkeep, or a
-## starving bup's maintenance (its growth only moves reserve into body).
-const K_POOL_LEDGER_MARK := """
-void f(uint i, uint d, uint l) { WANT2[i] = BUPS[i * RECORD_WORDS + R_ENERGY]; WANTC[i] = BUPS[i * RECORD_WORDS + R_MASS]; }
-BUP_LOOP(f)
-"""
-
-const K_POOL_LEDGER_SWIM := """
-void f(uint i, uint d, uint l) {
-	uint b = i * RECORD_WORDS;
-	float lost = (WANT2[i] - BUPS[b + R_ENERGY]) + P[P_COST_PER_MASS] * (WANTC[i] - BUPS[b + R_MASS]);
-	LEDGER(d, LG_UPKEEP, lost)
-	LEDGER(d, LG_MADE, -lost)
-}
-BUP_LOOP(f)
-"""
-
 ## Swimming is the single dish's kernel with the dish's own words in place of P's dish slots, its stream from DISH_STREAM, and the dish's
 ## fields and clouds read through `readf_d` and `puffs_at_d`.
 static func _pooled_swim() -> String:
@@ -713,6 +694,25 @@ static func _pooled_swim() -> String:
 	body = body.replace("P[P_STATIONARY] > 0.5", "((DPU(d, DP_FLAGS) >> DPF_STATIONARY) & 1u) != 0u")
 	assert(body.ends_with("}\n") and not body.contains("BUP_RECORD_THREAD") and not body.contains("CNT["), "swim: the body no longer ends as expected")
 	return body + "BUP_LOOP(f)\n"
+
+
+## `pool_swim` and `pool_demand` in one pass over the bups (what the step runs; the two kernels stay for the checks that run them alone):
+## a bup's demand reads only its own record, which only its own swim writes, and the field's snapshot and the clouds' lists, which
+## swimming leaves alone. The energy ledger's upkeep (LG_UPKEEP) is what its reserve and body (at COST_PER_MASS) lost in the swim: the
+## upkeep, or a starving bup's maintenance (its growth only moves reserve into body).
+static func pool_swim_demand() -> String:
+	return GpuKernelsLife.loop_function(_pooled_swim(), "f", "swim") + GpuKernelsLife.loop_function(K_POOL_DEMAND, "f", "demand") + """
+void swim_demand(uint i, uint d, uint l) {
+	uint b = i * RECORD_WORDS;
+	float energy0 = BUPS[b + R_ENERGY], mass0 = BUPS[b + R_MASS];
+	swim(i, d, l);
+	float lost = (energy0 - BUPS[b + R_ENERGY]) + P[P_COST_PER_MASS] * (mass0 - BUPS[b + R_MASS]);
+	LEDGER(d, LG_UPKEEP, lost)
+	LEDGER(d, LG_MADE, -lost)
+	demand(i, d, l);
+}
+BUP_LOOP(swim_demand)
+"""
 
 
 ## Adds these kernels to `out` (see GpuKernels.all()).
@@ -737,10 +737,10 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "pool_feed", K_POOL_FEED, cell_b + ["CONC", "WGT"])
 	GpuKernels.add(out, "pool_clear", K_POOL_CLEAR, cell_b + ["DLO", "DHI", "RLO", "RHI", "ALO", "AHI"])
 	GpuKernels.add(out, "pool_snapshot", K_POOL_SNAPSHOT, cell_b + ["CONC", "OWNER", "EFF"])
-	GpuKernels.add(out, "pool_ledger_mark", K_POOL_LEDGER_MARK, bup_b + ["BUPS", "WANT2", "WANTC"])
-	GpuKernels.add(out, "pool_ledger_swim", K_POOL_LEDGER_SWIM, bup_b + ["BUPS", "WANT2", "WANTC"])
 	GpuKernels.add(out, "pool_swim", _pooled_swim(), bup_b + ["BUPS", "EFF", "TABLE", "ENTD", "BINS", "BINC"], POOL_READF + LOOKUP_FUNCS + GpuKernelsClouds.POOL_CLOUD_FUNCS)
 	GpuKernels.add(out, "pool_demand", K_POOL_DEMAND, bup_b + ["BUPS", "EFF", "OWNER", "CONC", "WANT", "WANTC", "CELLOF", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "ENTD", "BINS", "BINC", "PDLO", "PDHI"], fixed + POOL_READF + POOL_READC + GpuKernelsClouds.POOL_CLOUD_FUNCS)
+	GpuKernels.add(out, "pool_swim_demand", pool_swim_demand(), bup_b + ["BUPS", "EFF", "TABLE", "OWNER", "CONC", "WANT", "WANTC", "CELLOF", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "ENTD", "BINS", "BINC", "PDLO", "PDHI"],
+		fixed + POOL_READF + POOL_READC + LOOKUP_FUNCS + GpuKernelsClouds.POOL_CLOUD_FUNCS)
 	GpuKernels.add(out, "pool_cells", K_POOL_CELLS, cell_b + ["CONC", "OWNER", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "SCALE"], fixed)
 	GpuKernels.add(out, "pool_apply", K_POOL_APPLY, bup_b + ["BUPS", "EFF", "WANT", "WANTC", "CELLOF", "SCALE", "ENTD", "BINS", "BINC", "PSCALE", "OWNER", "CONC", "CONC2", "WANT2", "CELL2", "AWLO", "AWHI", "ADLO", "ADHI"], fixed + POOL_READF + GpuKernelsClouds.POOL_CLOUD_FUNCS)
 	GpuKernels.add(out, "pool_ac_cells", K_POOL_AC_CELLS, cell_b + ["CONC2", "AWLO", "AWHI", "ADLO", "ADHI", "SCALE2"], fixed)

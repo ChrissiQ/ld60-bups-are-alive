@@ -56,7 +56,6 @@ var _texture_frames := {}  ## kind -> Array of the frame each texture was last b
 var _published := {}  ## kind -> index of the texture published last
 var _frame := 0  ## the main side's frame count as last told
 var _temp_sets: Array[RID] = []  ## the copy kernels' sets of one publish
-var _ledger := false  ## the energy ledger is on (`keep_ledger`)
 var _profile: Variant = null  ## while `profile_steps` runs: kernel name -> Array of µs, each dispatch its own submit
 
 
@@ -458,12 +457,7 @@ func _record_step(cl: int, s: int) -> void:
 	_disp(cl, "pool_bin_sort", _groups(bins))
 	_disp(cl, "pool_clear", cg)
 	_disp(cl, "pool_puff_clear", hg)
-	if _ledger:
-		_disp(cl, "pool_ledger_mark", bg)
-	_disp(cl, "pool_swim", bg)
-	if _ledger:
-		_disp(cl, "pool_ledger_swim", bg)
-	_disp(cl, "pool_demand", bg)
+	_disp(cl, "pool_swim_demand", bg)
 	_disp(cl, "pool_cells", cg)
 	_disp(cl, "pool_puff_scale", hg)
 	var buckets := GpuKernelsLife.conj_buckets(slots)
@@ -921,7 +915,6 @@ static func _float_at_least(x: float) -> float:
 ## The energy ledger on or off (WORLD[WD_LEDGER]; off in the game): while on, the kernels add each running dish's energy flows into its
 ## DSTATE words DS_LEDGER... (see `ledger_of`); turning it on starts every running dish's sums from 0.
 func keep_ledger(on: bool) -> void:
-	_ledger = on
 	_set_wd(GpuLayout.WD_LEDGER, 1 if on else 0)
 	if not on:
 		return
