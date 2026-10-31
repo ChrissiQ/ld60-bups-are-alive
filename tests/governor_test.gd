@@ -19,6 +19,12 @@ extends SceneTree
 ##    10 x delta.
 ##  - duty on a display of 8.333 ms: 2 frames of 10 ms leave it 1.0; a third makes it 0.9; a frame of 8.5 ms then makes it 0.945; rest
 ##    after 10 ms busy at 0.9 is 1.111 ms; at 1.0 it is 0; it never goes under 0.1.
+##  - pacing, on a display of 1/120 s at x1: 1,200 frames whose ends sit 1/120 s apart plus a jitter drawn in +-1.5 ms (each frame's length
+##    the difference of two ends) each run exactly one step, and the time owed in all is the real time within half a display frame
+##    [derived: what is left over after a frame is its end's jitter less the first's, within 3 ms, under half a frame (4.17 ms)]; the
+##    same frames with no display known leave some frames with no step [derived: the owed fraction starts on a whole step, so a frame
+##    shorter than the one before steps 0]; 600 frames 0.8% longer than the display's run within one step of the real time's steps and
+##    owe it within half a display frame [derived: a frame of two display frames every 63].
 ##  - history samples (interval 120 s): from 0 with 10 steps of 20 s, one sample after step index 5; from 100 s with 3 steps, after index 0;
 ##    at most 16 an iteration: from 0, steps of 20 s allow 101 steps (the 17th sample would fall after step index 101).
 
@@ -33,6 +39,7 @@ func _init() -> void:
 	_advanced()
 	_duty()
 	_samples()
+	_pacing()
 	TestUtil.finish(self, "GOVERNOR TEST OK")
 
 
@@ -146,3 +153,51 @@ func _samples() -> void:
 	var most := Governor.steps_for_samples(0.0, 20.0, 120.0, 16, Governor.MAX_STEPS)
 	TestUtil.check(most == 101, "16 samples allow 101 steps of 20 s from 0 (got %d)" % most)
 	TestUtil.check(Governor.sample_steps(0.0, most, 20.0, 120.0, 16).size() == 16, "and those steps hold 16 samples")
+
+
+func _pacing() -> void:
+	const FRAMES := 1200
+	var period := 1.0 / 120.0
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	var g := Governor.new()
+	g.step_ms_ema = 0.5
+	var plain := Governor.new()
+	plain.step_ms_ema = 0.5
+	var last_jitter := 0.0
+	var real := 0.0
+	var single := 0
+	var plain_none := 0
+	for f in FRAMES:
+		var jitter := rng.randf_range(-0.0015, 0.0015)
+		var dt := period + jitter - last_jitter
+		last_jitter = jitter
+		real += dt
+		if _paced_frame(g, dt, period) == 1:
+			single += 1
+		plain.set_time(1.0, false, dt)
+		var kp := plain.steps()
+		if kp == 0:
+			plain_none += 1
+		plain.advanced(kp, plain.delta(), 0.5 * kp)
+	TestUtil.check(single == FRAMES, "pacing: %d jittered frames of a 1/120 s display each run one step (%d did)" % [FRAMES, single])
+	TestUtil.check(absf(g.target - real) <= 0.5 * period, "pacing: the time owed is the real time within half a frame (off by %.3f ms)" % ((g.target - real) * 1000.0))
+	TestUtil.check(plain_none > 0, "without a display known, some of the same frames run no step (%d)" % plain_none)
+	var slow := Governor.new()
+	slow.step_ms_ema = 0.5
+	var ran := 0
+	real = 0.0
+	for f in 600:
+		var dt := 1.008 * period
+		real += dt
+		ran += _paced_frame(slow, dt, period)
+	TestUtil.check(absf(slow.target - real) <= 0.5 * period and absi(ran - int(floor(real / period))) <= 1, "pacing: frames 0.8%% long owe the real time within half a frame (off by %.3f ms; %d steps for %.2f)" % [(slow.target - real) * 1000.0, ran, real / period])
+
+
+## One frame of `dt` on a display of `period` (s) at x1, as the sim thread hands it to the governor; runs what is owed and returns the steps.
+func _paced_frame(g: Governor, dt: float, period: float) -> int:
+	g.frame(dt * 1000.0, period * 1000.0)
+	g.set_time(1.0, false, dt)
+	var k := g.steps()
+	g.advanced(k, g.delta(), 0.5 * k)
+	return k

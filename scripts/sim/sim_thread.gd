@@ -528,8 +528,8 @@ func _handle(cmd: SimCommand) -> void:
 	var a := cmd.args
 	match cmd.kind:
 		SimCommand.KIND_SET_TIME:
-			governor.set_time(float(a.get("speed", 1.0)), bool(a.get("paused", false)), float(a.get("real_dt", 0.0)))
 			governor.frame(float(a.get("real_dt", 0.0)) * 1000.0, float(a.get("display_ms", 0.0)))
+			governor.set_time(float(a.get("speed", 1.0)), bool(a.get("paused", false)), float(a.get("real_dt", 0.0)))
 			if governor.paused:
 				_speed_marks.clear()
 			return

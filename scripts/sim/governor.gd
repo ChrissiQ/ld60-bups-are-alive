@@ -5,8 +5,13 @@ extends RefCounted
 ## keeps its frame rate. Pure arithmetic: the caller gives every time (no clock is read here), so a test drives it with a fake one.
 ##
 ## - Step length: `step_length(speed) = min(MAX_STEP, speed / STEPS_PER_SECOND)`, from the speed alone, never from the frame.
-## - Owed time: each frame adds `speed x min(real_dt, MAX_FRAME_SECONDS)` (nothing while paused); what is owed is kept to at most
+## - Owed time: each frame adds `speed x min(paced real_dt, MAX_FRAME_SECONDS)` (nothing while paused); what is owed is kept to at most
 ##   OWED_ITERATIONS iterations' worth, so a slow machine drops time (the achieved speed shows it) instead of piling it up.
+## - Pacing: once the display's frame is known (`frame`), a frame counts as a whole number of display frames: its length plus what earlier
+##   frames left over, rounded to the nearest (a half down), the rest left over for the next. So the time owed is the real time within
+##   half a display frame, and a frame whose end is off its display frame's by less than that owes exactly one display frame. Without it
+##   the jitter of the frames' measured lengths (about 1 ms at 120 Hz) puts the whole steps owed by frames as long as a step at 0 in one
+##   frame and 2 in the next whenever the owed time's fraction of a step sits near a whole step, and those frames show no new picture.
 ## - Steps of an iteration: as many as are owed, at most what fits T_ITER_MS at the measured cost of a step, MAX_STEPS, and the bounds
 ##   the caller gives (the room the pool can grow to, the history samples an iteration can hold).
 ## - Duty: three frames in a row longer than SLOW_FRAME x the display's frame lower it by DUTY_DOWN; each frame within FAST_FRAME of it
@@ -35,7 +40,9 @@ var steps_total := 0  ## the world steps run so far
 var step_ms_ema := T_ITER_MS  ## ms: the cost of a step, as the iterations measured it (starts at one step an iteration)
 var duty := 1.0
 var dropped := 0.0  ## s of owed time dropped by the cap, in all
+var display_ms := 0.0  ## the display's frame (ms), as `frame` was last told; 0: not known (no pacing)
 var _slow := 0
+var _pace_carry := 0.0  ## s: the real time the paced frames have left over (within half a display frame)
 
 
 ## The world step's length at `p_speed` (s).
@@ -54,12 +61,24 @@ func set_time(p_speed: float, p_paused: bool, real_dt: float) -> void:
 	paused = p_paused
 	if paused or speed <= 0.0:
 		target = clock
+		_pace_carry = 0.0
 		return
-	target += speed * clampf(real_dt, 0.0, MAX_FRAME_SECONDS)
+	target += speed * clampf(paced(real_dt), 0.0, MAX_FRAME_SECONDS)
 	var most := OWED_ITERATIONS * float(steps_by_time()) * delta()
 	if target - clock > most:
 		dropped += target - clock - most
 		target = clock + most
+
+
+## A frame's real length (s) as the time it owes (see Pacing in the header).
+func paced(real_dt: float) -> float:
+	var period := display_ms / 1000.0
+	if period <= 0.0:
+		return real_dt
+	var all := real_dt + _pace_carry
+	var out := maxf(ceilf(all / period - 0.5 - OWED_TOLERANCE), 0.0) * period
+	_pace_carry = all - out
+	return out
 
 
 ## The simulated time owed (s).
@@ -113,9 +132,10 @@ func skip(k: int) -> void:
 
 
 ## The interface drew a frame of `frame_ms` on a display whose frame is `display_ms`: the duty follows (see the header).
-func frame(frame_ms: float, display_ms: float) -> void:
-	if display_ms <= 0.0:
+func frame(frame_ms: float, p_display_ms: float) -> void:
+	if p_display_ms <= 0.0:
 		return
+	display_ms = p_display_ms
 	if frame_ms > SLOW_FRAME * display_ms:
 		_slow += 1
 		if _slow >= SLOW_FRAMES:
