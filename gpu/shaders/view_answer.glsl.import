@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://bvtsgnebugx3v"
+path="res://.godot/imported/view_answer.glsl-1f2391226d262ad00a6a3bd9cff53e8e.res"
+
+[deps]
+
+source_file="res://gpu/shaders/view_answer.glsl"
+dest_files=["res://.godot/imported/view_answer.glsl-1f2391226d262ad00a6a3bd9cff53e8e.res"]
+
+[params]
+

@@ -4,8 +4,11 @@ extends RefCounted
 ## the dish itself with the nutrient haze, the steering map, the sources and the plankton (`draw`, for Dish._draw), and the rings, the
 ## placement preview and the flash above the bups (`draw_overlay`, for the dish's DishOverlay). Nothing here changes the simulation.
 ## It is a part of its Dish, and holds the nodes it draws with and the bups' picture's flags between frames; the dish's edits set `stale`.
+## With a `view` (the pooled world's ViewRenderer) the bups, the haze and the steering map are drawn from what the simulation published:
+## the bups' MultiMesh is written by the view's kernels (never by `multimesh.buffer`), and the rings follow the bups' places in it.
 
 var dish: Dish
+var view: ViewRenderer = null  ## the pooled world's picture of this dish, when the dish is drawn from it
 var bups_mesh: MultiMeshInstance2D = null  ## all the bups, drawn in one go
 var husks_mesh: MultiMeshInstance2D = null  ## every husk, as one instance each
 var overlay: Node2D = null  ## the selection and hover rings, drawn above the bups
@@ -85,7 +88,7 @@ func refresh() -> void:
 ## The picture holds room for the bups there are (with some to spare, never past the limit), not for the
 ## most there could be: a buffer for 100,000 bups is rewritten every frame, which costs when only a few live.
 func fit_render_capacity(needed: int) -> void:
-	if dish.runs_on_gpu():
+	if view != null or dish.runs_on_gpu():
 		return  # (on the GPU path the picture is made once at the GPU's capacity: see draw_bups_gpu)
 	var multimesh := bups_mesh.multimesh
 	var wanted := mini(dish.bup_limit, maxi(Dish.RENDER_MIN_CAPACITY, nearest_po2(needed + needed / 2)))
@@ -110,7 +113,10 @@ func sync_render_capacity() -> void:
 ## or the GPU.
 func process() -> void:
 	refresh_husks()
-	if bups_mesh != null and dish.runs_on_gpu():
+	if bups_mesh != null and view != null:
+		draw_bups_view()
+		overlay.queue_redraw()
+	elif bups_mesh != null and dish.runs_on_gpu():
 		for id in [dish.selected.bup, dish.hovered.bup]:  # (the bups the overlay shows: their records come back every frame)
 			if id >= 0:
 				dish.gpu_world.track(id)
@@ -124,7 +130,7 @@ func process() -> void:
 
 ## Makes the bups' picture for the strip's small one of this dish, `scale` pixels to the µm, just before the strip has it drawn (the GPU's dishes are drawn every frame).
 func prepare_picture(scale: float) -> void:
-	if bups_mesh != null and not dish.runs_on_gpu():
+	if bups_mesh != null and view == null and not dish.runs_on_gpu():
 		build_cpu_picture(1.0 / scale)
 
 
@@ -175,6 +181,36 @@ func draw_bups_gpu() -> void:
 		stale = false
 		trails_may_show = changed  # (as on the CPU: a picture made as time moved may carry trails, the next still one clears them)
 		world.draw_bups(target, slots, dish.pixel())
+
+
+## Draws the bups from the view this frame: the MultiMesh holds the dish's limit and a twentieth more (more if the payload has more), and
+## the view's kernels write the instances of the bups the camera sees into its buffer.
+func draw_bups_view() -> void:
+	view.tick()
+	var multimesh := bups_mesh.multimesh
+	var capacity := maxi(ceili(dish.bup_limit * 1.05), view.payload().count)
+	if multimesh.instance_count < capacity:
+		multimesh.instance_count = capacity  # (a new RD buffer: the view binds it afresh)
+	view.follow([dish.selected.bup, dish.hovered.bup].filter(func(id: int) -> bool: return id >= 0))
+	if not bups_mesh.visible:
+		return
+	var camera := dish.get_global_transform_with_canvas().affine_inverse() * dish.get_viewport_rect()
+	view.draw_frame(camera, dish.pixel(), multimesh.get_rid())
+
+
+## Where a bup is drawn round (its place and half its drawn length) on the view's picture: from the last place looked up, or, until that
+## comes, from the pick that found it (so the hover ring shows as soon as the pick is answered); null when the view does not know it.
+func view_ring(id: int) -> Variant:
+	var at: Variant = view.place_of(id)
+	if at == null:
+		for hover in [true, false]:
+			var a: Dictionary = view.answer(hover)
+			if not a.is_empty() and a["id"] == id:
+				at = Vector3(a["pos"].x, a["pos"].y, a["length"])
+				break
+	if at == null:
+		return null
+	return Vector3(at.x, at.y, 0.5 * maxf(at.z, Cell.MIN_VISIBLE_LENGTH_PX * dish.pixel()))
 
 
 ## Builds the husks' picture again when time has moved, the husks are different or the zoom has changed (and not oftener than HUSK_REFRESH_MSEC while only time moves).
@@ -332,6 +368,11 @@ func _draw_plankton(cell: Plankton) -> void:
 ## growing colony) can be seen. The grid is drawn as one smoothed texture, so a big dish costs one
 ## draw, not thousands; the texture is rebuilt a few times a second, not every frame.
 func _draw_medium() -> void:
+	if view != null:
+		var haze := view.texture("haze")
+		if haze != null:
+			dish.draw_texture_rect(haze, Rect2(-dish.radius, -dish.radius, 2.0 * dish.radius, 2.0 * dish.radius), false)
+		return
 	var field := dish.field
 	var now := Time.get_ticks_msec()
 	if _haze == null or _haze.get_width() != field.size or now - _haze_built > Dish.HAZE_REFRESH_MSEC:
@@ -351,6 +392,11 @@ func _draw_medium() -> void:
 ## Rebuilt a few times a second, like the haze it is drawn over.
 func _draw_steering() -> void:
 	var selected := dish.selected.bup
+	if view != null:
+		var steer := view.texture("steer")
+		if selected >= 0 and steer != null and view_ring(selected) != null:
+			dish.draw_texture_rect(steer, Rect2(-dish.radius, -dish.radius, 2.0 * dish.radius, 2.0 * dish.radius), false)
+		return
 	if selected < 0 or not dish._bup_shown(selected):
 		return
 	var key := [selected, dish.field.size, Time.get_ticks_msec() / Dish.HAZE_REFRESH_MSEC]
@@ -409,11 +455,13 @@ func draw_overlay(canvas: CanvasItem) -> void:
 	var px := dish.pixel()
 	var selected_id := dish.selected.bup
 	var hovered_id := dish.hovered.bup
-	if selected_id >= 0 and dish._bup_shown(selected_id):
+	if view != null:
+		_draw_view_rings(canvas, selected_id, hovered_id)
+	elif selected_id >= 0 and dish._bup_shown(selected_id):
 		draw_ring(canvas, dish._bup_pos(selected_id), dish._bup_radius(selected_id, px), Color(1, 0.75, 0.3, 0.95))
 		if dish.layer_shown(Dish.Layer.STEERING):
 			_draw_steering_arc(canvas, selected_id)
-	if hovered_id >= 0 and hovered_id != selected_id and dish._bup_shown(hovered_id):
+	if view == null and hovered_id >= 0 and hovered_id != selected_id and dish._bup_shown(hovered_id):
 		draw_ring(canvas, dish._bup_pos(hovered_id), dish._bup_radius(hovered_id, px), Color(1, 1, 1, 0.9))
 	_draw_pick_rings(canvas, dish.selected.source, dish.hovered.source, dish.global_position, dish.source_draw_radius())
 	_draw_pick_rings(canvas, dish.selected.plankton, dish.hovered.plankton, Vector2.ZERO, dish.plankton_draw_radius())
@@ -430,3 +478,13 @@ func draw_overlay(canvas: CanvasItem) -> void:
 			canvas.draw_arc(at, maxf(dish.place_preview_radius, 3.0 * px), 0.0, TAU, 32, brush, px)
 	if dish.flash > 0.0:
 		canvas.draw_colored_polygon(disc_outline(dish.radius), Color(0.85, 0.95, 1.0, dish.flash))
+
+
+## The selection's and the hover's rings on the view's picture (the steering arc needs the steering answer, which the view does not hold).
+func _draw_view_rings(canvas: CanvasItem, selected_id: int, hovered_id: int) -> void:
+	var at: Variant = view_ring(selected_id) if selected_id >= 0 else null
+	if at != null:
+		draw_ring(canvas, Vector2(at.x, at.y), at.z, Color(1, 0.75, 0.3, 0.95))
+	at = view_ring(hovered_id) if hovered_id >= 0 and hovered_id != selected_id else null
+	if at != null:
+		draw_ring(canvas, Vector2(at.x, at.y), at.z, Color(1, 1, 1, 0.9))

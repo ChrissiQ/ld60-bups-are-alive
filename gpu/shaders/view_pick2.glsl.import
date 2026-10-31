@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://dtxoqr3mqbmqr"
+path="res://.godot/imported/view_pick2.glsl-87d1e99ea1c82206e07275944dea6488.res"
+
+[deps]
+
+source_file="res://gpu/shaders/view_pick2.glsl"
+dest_files=["res://.godot/imported/view_pick2.glsl-87d1e99ea1c82206e07275944dea6488.res"]
+
+[params]
+
