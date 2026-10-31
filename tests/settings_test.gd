@@ -92,8 +92,15 @@ func _init() -> void:
 	var shorter := StartConditions.new()
 	shorter.bups = 5
 	shorter.founders = [{"name": "A"}, {"color": "#00ff00"}]
+	var canned := CannedWorld.new()  # (the headless world runs nothing: this one takes the dish and serves its five bups back)
+	root.get_node("SimService").use_backend(canned)
 	var shorter_dish := TestUtil.dish_from(self, shorter)
-	TestUtil.check(shorter_dish.bup_name(1) == "A" and shorter_dish.bup_name(2).ends_with("#2") and shorter_dish.bup_name(5).ends_with("#5") and absf(shorter_dish.bup_info(2)["hue"] - Color.html("#00ff00").h) < 0.01 and absf(shorter_dish.bup_info(3)["hue"] - Genome.founder()["hue"]) < 0.001, "with fewer saved than founders the first ones get theirs and the rest the defaults")
+	canned.serve_dish(shorter_dish.number, 5)
+	await process_frame
+	var added: Array = canned.calls.filter(func(c: SimCommand) -> bool: return c.kind == SimCommand.KIND_ADD_DISH)
+	var sent: DishSpec = added[-1].args["spec"]
+	var hue := func(i: int) -> float: return sent.founders.decode_float(i * GpuLayout.RECORD_BYTES + (GpuLayout.R_HUE) * 4)
+	TestUtil.check(shorter_dish.bup_name(GpuLayout.make_id(shorter_dish.number, 1)) == "A" and shorter_dish.bup_name(GpuLayout.make_id(shorter_dish.number, 2)).contains("#") and shorter_dish.bup_name(GpuLayout.make_id(shorter_dish.number, 5)).contains("#") and absf(hue.call(1) - Color.html("#00ff00").h) < 0.01 and absf(hue.call(2) - Genome.founder()["hue"]) < 0.001, "with fewer saved than founders the first ones get theirs and the rest the defaults (hues %.3f, %.3f)" % [hue.call(1), hue.call(2)])
 	shorter_dish.free()
 	var squeezed := StartConditions.from_dict({"bups": 50, "bup_limit": 10})
 	TestUtil.check(squeezed.bup_limit == 50, "the limit is never below the founders (%d)" % squeezed.bup_limit)
@@ -143,18 +150,27 @@ func _init() -> void:
 	var preview: Control = load(Scenes.FREE_SETUP).instantiate()
 	root.add_child(preview)
 	await process_frame
-	TestUtil.check(preview.dish.plankton.is_empty(), "the preview has no plankton the moment it is made")
+	# (the plankton are the world's: the preview asks for them with place-plankton edits, counted here after the preview's latest dish)
+	var asked := func() -> int:
+		var n := 0
+		for cmd: SimCommand in canned.calls:
+			if cmd.kind == SimCommand.KIND_ADD_DISH:
+				n = 0
+			elif cmd.kind == SimCommand.KIND_EDIT_WORLD and (cmd.args["edit"] as WorldEdit).kind == WorldEdit.Kind.PLACE_PLANKTON:
+				n += 1
+		return n
+	TestUtil.check(asked.call() == 0, "the preview has asked for no plankton the moment it is made")
 	await create_timer(preview.PLANKTON_SETTLE_SECONDS + 0.3).timeout
-	var floating: int = preview.dish.plankton.size()
-	TestUtil.check(floating == roundi(preview.dish.bloom_per_day() / 24.0) and floating > 20, "once still, the preview shows the plankton a bloom keeps floating (%d, a day's %.0f over 24)" % [floating, preview.dish.bloom_per_day()])
+	var floating: int = asked.call()
+	TestUtil.check(floating == roundi(preview.dish.bloom_per_day() * Dish.PLANKTON_MEAN_LIFE / 86400.0) and floating > 20, "once still, the preview asks for the plankton a bloom keeps floating (%d, a day's %.0f over 24)" % [floating, preview.dish.bloom_per_day()])
 	preview.bloom_row.slider.value = 1.0
 	await process_frame
-	TestUtil.check(preview.dish.plankton.is_empty(), "moving a slider rebuilds the preview, without them until it is still again")
+	TestUtil.check(asked.call() == 0, "moving a slider rebuilds the preview, without them until it is still again")
 	await create_timer(preview.PLANKTON_SETTLE_SECONDS + 0.3).timeout
-	TestUtil.check(preview.dish.plankton.size() == roundi(preview.dish.bloom_per_day() / 24.0), "...and they come back for the new bloom (%d)" % preview.dish.plankton.size())
+	TestUtil.check(asked.call() == roundi(preview.dish.bloom_per_day() * Dish.PLANKTON_MEAN_LIFE / 86400.0), "...and they come back for the new bloom (%d)" % asked.call())
 	preview.bloom_row.slider.value = 0.0
 	await create_timer(preview.PLANKTON_SETTLE_SECONDS + 0.3).timeout
-	TestUtil.check(preview.dish.plankton.is_empty(), "no bloom, no plankton in the preview")
+	TestUtil.check(asked.call() == 0, "no bloom, no plankton in the preview")
 	preview.queue_free()
 	await process_frame
 

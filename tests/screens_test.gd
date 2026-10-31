@@ -4,16 +4,21 @@ extends SceneTree
 
 
 
-func _init() -> void:
+func _initialize() -> void:
 	for path in [Scenes.MENU, Scenes.INTRO, Scenes.FREE_SETUP, Scenes.GAME]:
 		TestUtil.check(ResourceLoader.exists(path), "Scenes constant points at a real scene: %s" % path)
 
+	var canned := CannedWorld.new()  # (the headless world runs nothing: this one logs the dish the title asks for)
+	root.get_node("SimService").use_backend(canned)
 	var menu: Control = load(Scenes.MENU).instantiate()
 	root.add_child(menu)
 	await process_frame
+	var added: Array = canned.calls.filter(func(c: SimCommand) -> bool: return c.kind == SimCommand.KIND_ADD_DISH)
 	var menu_hues := []
-	for id in menu.dish.bup_ids():
-		menu_hues.append(menu.dish.bup_info(id)["hue"])
+	if not added.is_empty():
+		var founders: PackedByteArray = added[-1].args["spec"].founders
+		for i in founders.size() / GpuLayout.RECORD_BYTES:
+			menu_hues.append(founders.decode_float(i * GpuLayout.RECORD_BYTES + GpuLayout.R_HUE * 4))
 	menu_hues.sort()
 	var menu_even: bool = menu_hues.size() == 4
 	for k in menu_hues.size():

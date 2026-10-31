@@ -7,12 +7,14 @@ func _logs() -> Array:
 	return Array(DirAccess.get_files_at(DebugLog.directory)).filter(func(f: String) -> bool: return f.ends_with(".log"))
 
 
-func _init() -> void:
+func _initialize() -> void:
 	DebugLog.directory = "user://test_logs"
 	DirAccess.make_dir_recursive_absolute(DebugLog.directory)
 	for f in DirAccess.get_files_at(DebugLog.directory):
 		DirAccess.remove_absolute(DebugLog.directory.path_join(f))
 
+	var canned := CannedWorld.new()  # (the world the headless run has runs nothing: this one serves three bups in dish 1)
+	root.get_node("SimService").use_backend(canned)
 	Session.mode = Session.Mode.FREE
 	Session.free_start = TestUtil.small_start()
 	Session.tutorial_wanted = true
@@ -21,6 +23,9 @@ func _init() -> void:
 	for i in 3:
 		await process_frame
 	var dish: Dish = m.dish
+	canned.serve_dish(dish.number, 3)
+	for i in 3:
+		await process_frame
 	var hotkey: Node = root.get_node("DebugHotkey")
 	current_scene = m
 	TestUtil.check(str(ProjectSettings.get_setting("autoload/DebugHotkey")) == "*res://ui/debug_hotkey.tscn", "DebugHotkey is registered as an autoload")
@@ -32,12 +37,12 @@ func _init() -> void:
 	if data is Dictionary:
 		for key in ["written", "godot", "dish", "nutrient", "selected", "constants", "screen"]:
 			TestUtil.check(data.has(key), "the report has %s" % key)
-		TestUtil.check(data.has("backend") and data["backend"]["setting"] == "auto" and data["backend"]["running"] == "cpu" and data["backend"]["gpu_available"] == GpuWorld.available(), "it says where the bups run: the setting, and that they run on the processor (headless has no GPU path)")
-		TestUtil.check(data["backend"].has("gpu_device") and data["backend"].has("gpu_overflows") and data["backend"]["gpu_overflows"] is Dictionary, "...the GPU's name and its overflow counters (none here)")
+		TestUtil.check(data.has("backend") and data["backend"]["setting"] == "auto" and data["backend"]["running"] == "gpu" and data["backend"]["gpu_available"] == GpuWorld.available(), "it says where the bups run: the setting, and that the world simulates (the canned backend can)")
+		TestUtil.check(data["backend"].get("gpu_device") == "test device" and data["backend"].has("gpu_overflows") and data["backend"]["gpu_overflows"] is Dictionary, "...the device's name from the backend and its overflow counters (none here)")
 		var be: Dictionary = data["backend"]
 		for key in ["steps_cap", "record_usec", "record_steps", "apply_usec", "applied_events", "time_process"]:
 			TestUtil.check(be.has(key) and (be[key] is float or be[key] is int), "backend has the number %s" % key)
-		TestUtil.check(be["steps_cap"] == 0 and be["record_usec"] == 0 and be["record_steps"] == 0 and be["apply_usec"] == 0 and be["applied_events"] == 0, "...the GPU's figures are 0 with no GPU world")
+		TestUtil.check(be["steps_cap"] == 0 and be["record_usec"] == 0 and be["record_steps"] == 0 and be["apply_usec"] == 0 and be["applied_events"] == 0, "...the figures the pooled world has no counterpart of are 0")
 		TestUtil.check(be.has("draw_slots") and be["draw_slots"] is Dictionary and be["draw_slots"].has("drawn") and be["draw_slots"].has("capacity") and be["draw_slots"].has("live"), "...draw_slots has drawn, capacity and live")
 		TestUtil.check(be.has("pick_latency_frames") and be["pick_latency_frames"] is Dictionary and be["pick_latency_frames"].has("last") and be["pick_latency_frames"].has("max"), "...pick_latency_frames has last and max")
 		TestUtil.check(data["dish"].has("layers_hidden") and data["dish"]["layers_hidden"] is Array, "layers_hidden is an Array")
