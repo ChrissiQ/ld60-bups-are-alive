@@ -29,7 +29,12 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define BUP_THREAD uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
 #define BUP_RECORD_THREAD BUP_THREAD uint b = i * RECORD_WORDS;
 #define CELL_THREAD uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
-const uint VO_WORDS = 22u;
+const uint DENSITY_WORDS = 4u;
+const uint DENSITY_SCALE = 128u;
+const uint DENSITY_BILINEAR = 2u;
+const uint DENSITY_NEAREST = 1u;
+const uint VO_WORDS = 23u;
+const uint VO_LARGE = 22u;
 const uint VO_PLACES = 12u;
 const uint VO_PLACE_WORDS = 5u;
 const uint VO_PICKED = 7u;
@@ -39,7 +44,10 @@ const uint VO_NEAREST = 3u;
 const uint VO_INDEX = 2u;
 const uint VO_D2 = 1u;
 const uint VO_VISIBLE = 0u;
-const uint VW_WORDS = 18u;
+const uint VW_WORDS = 21u;
+const uint VW_DEN_H = 20u;
+const uint VW_DEN_W = 19u;
+const uint VW_DENSITY = 18u;
 const uint FINDS = 2u;
 const uint VW_FIND = 14u;
 const uint VW_FINDS = 13u;
@@ -62,11 +70,13 @@ ivec2 texel_at(uint k) { return ivec2(int(k % PAYLOAD_TEX_WIDTH), int(k / PAYLOA
 uvec4 payload_at(uint k) { return uvec4(imageLoad(PAYTEX, texel_at(k))); }
 float vpf(uint w) { return uintBitsToFloat(VP[w]); }
 
+bool small_at(float length, float pixel) { return length < P[P_MIN_LENGTH_PX] * pixel; }
 uint visible_at(uint k) {
 	uvec4 px = payload_at(k);
 	vec2 shape = unpackHalf2x16(px[PL_SHAPE]);
 	if (!(shape.x > 0.0)) return 0u;
 	float pixel = vpf(VW_PIXEL);
+	if (VP[VW_DENSITY] != 0u && small_at(shape.x, pixel)) return 0u;
 	float half_reach = 0.5 * max(max(shape.x, P[P_MIN_LENGTH_PX] * pixel), max(P[P_WIDTH], P[P_MIN_WIDTH_PX] * pixel)) + pixel;
 	float x = uintBitsToFloat(px[PL_X]), y = uintBitsToFloat(px[PL_Y]);
 	return (x + half_reach >= vpf(VW_X0) && x - half_reach <= vpf(VW_X1) && y + half_reach >= vpf(VW_Y0) && y - half_reach <= vpf(VW_Y1)) ? 1u : 0u;

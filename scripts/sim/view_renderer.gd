@@ -40,7 +40,20 @@ var errors: Array[String] = []
 var profile := {}  ## on a local device with `profiling`: kernel name -> µs of its last dispatch (each its own submit, wall clock)
 var profiling := false
 
+## Density mode (off unless it is switched on): the bups under
+## their least footprint are not drawn as instances but added into per-pixel sums (GpuKernelsView.K_DENSITY_SPLAT), resolved into a
+## picture (`density_texture`) that a quad the size of the camera's rectangle shows over the dish; a bup at or over its least footprint is
+## drawn as today, so there is no jump where a bup crosses. Set with `set_density`.
+var density := false
+var density_taps := GpuKernelsView.DENSITY_BILINEAR  ## GpuKernelsView.DENSITY_NEAREST or DENSITY_BILINEAR (a footprint on one pixel or shared by four)
+
 var _local := false  ## a local device (tools): its work is submitted and waited for, not run with the frame
+var _den_made := {}  ## the density kernels, made the first time density mode is switched on
+var _den_buf := RID()  ## the per-pixel sums
+var _den_tex := RID()  ## the resolved picture (RGBA8, straight alpha)
+var _den_size := Vector2i.ZERO
+var _den_picture: Texture2DRD = null
+var _large := {}  ## density mode: the last count read back of the bups the capsule path must draw: {count, key}
 
 var _made := {}  ## kernel name -> ShaderSet.create's entry
 var _bufs := {}  ## P, VP, VCOUNT, VOFFS, VPD, VOUT -> RID
@@ -90,6 +103,46 @@ func _init(limits_frame_queue := 2, device: RenderingDevice = null) -> void:
 ## Whether the bups can be drawn here (a main device and every kernel made).
 func can_draw() -> bool:
 	return rd != null and _made.size() == KERNELS.size()
+
+
+## Density mode on or off (`taps`: GpuKernelsView.DENSITY_NEAREST or DENSITY_BILINEAR). The density kernels are made the first time it is
+## switched on; if they do not build, `density_ready` stays false and the single-dish path's drawing goes on whatever the switch says.
+func set_density(on: bool, taps := GpuKernelsView.DENSITY_BILINEAR) -> void:
+	density = on
+	density_taps = taps
+	if not on or rd == null or not _den_made.is_empty():
+		return
+	var defs := {}
+	var all := GpuKernels.all()
+	for kname: String in GpuKernelsView.DENSITY_KERNELS:
+		defs[kname] = all[kname]
+	var shaders := ShaderSet.imported(defs)
+	_on_device(func() -> void: _den_made = shaders.create(rd))
+	errors.append_array(shaders.errors)
+	if _den_made.size() != GpuKernelsView.DENSITY_KERNELS.size():
+		_on_device(_free_density_kernels)
+
+
+## Whether density mode is on and its kernels are made.
+func density_ready() -> bool:
+	return density and _den_made.size() == GpuKernelsView.DENSITY_KERNELS.size()
+
+
+## The density picture's size in pixels: the camera's rectangle over the pixel (zero before the first build in density mode).
+func density_size() -> Vector2i:
+	return _den_size
+
+
+## The density picture for the canvas (null before the first build in density mode): one texel a screen pixel, its (0, 0) at the camera
+## rectangle's top left, so a quad of `density_size()` texels scaled by the pixel at the rectangle's position shows it as drawn. Straight
+## alpha, over the dish and under the capsules.
+func density_texture() -> Texture2DRD:
+	if not _den_tex.is_valid():
+		return null
+	if _den_picture == null:
+		_den_picture = Texture2DRD.new()
+	_den_picture.texture_rd_rid = _den_tex
+	return _den_picture
 
 
 ## The native handles of a simulation's textures, for `offer`. Call it on the simulation device's own thread.
@@ -211,12 +264,17 @@ func draw_into(camera: Rect2, pixel_um: float, target: RID, capacity: int, multi
 	if capacity <= 0 or not target.is_valid():
 		return
 	var count := mini(_payload.count, _imports["payload"]["size"].x * _imports["payload"]["size"].y)
-	var view_key := [camera, pixel_um, _payload.row, _imports["payload"]["generation"]]
+	var dens := density_ready()
+	var mode := density_taps if dens else 0
+	var den_size := Vector2i(maxi(ceili(camera.size.x / pixel_um - 0.001), 1), maxi(ceili(camera.size.y / pixel_um - 0.001), 1)) if dens else Vector2i.ZERO
+	var view_key := [camera, pixel_um, _payload.row, _imports["payload"]["generation"], mode]
 	var slots := count
 	if not _visible.is_empty() and _visible["key"] == view_key:
 		slots = mini(count, maxi(MIN_SLOTS, nearest_po2(int(_visible["count"]) + int(_visible["count"]) / 2)))
 	slots = mini(maxi(slots, mini(MIN_SLOTS, capacity)), capacity)
 	var build := [view_key, _payload.seq, _shown["payload"], slots, target]
+	# (density mode: the capsule kernels need not run while the last build of this view found no bup to draw as a capsule)
+	var skip: bool = dens and not _large.is_empty() and _large["key"] == view_key and int(_large["count"]) == 0
 	var rebuild: bool = build != _last_build
 	var asking: bool = _pick_request != null or (not _follow.is_empty() and (rebuild or _follow_asked))
 	if not rebuild and not asking:
@@ -227,8 +285,8 @@ func draw_into(camera: Rect2, pixel_um: float, target: RID, capacity: int, multi
 	var pick: Variant = _pick_request
 	_pick_request = null
 	_follow_asked = false
-	_put_vp(count, camera, pixel_um, slots, capacity, pick)
-	_on_device(_build.bind(count, target, _shown["payload"], pick, view_key, rebuild))
+	_put_vp(count, camera, pixel_um, slots, capacity, pick, mode, den_size)
+	_on_device(_build.bind(count, target, _shown["payload"], pick, view_key, rebuild, den_size, skip))
 
 
 ## The next `draw_frame` builds the instances again even if nothing it knows of changed (the layer was hidden, a tool's timing).
@@ -359,7 +417,7 @@ func _ensure_texels(texels: int) -> void:
 	_texels = texels
 
 
-func _put_vp(count: int, camera: Rect2, pixel_um: float, slots: int, capacity: int, pick: Variant) -> void:
+func _put_vp(count: int, camera: Rect2, pixel_um: float, slots: int, capacity: int, pick: Variant, mode := 0, den_size := Vector2i.ZERO) -> void:
 	var put_u := func(w: int, v: int) -> void: _vp.encode_u32(w * 4, v)
 	var put_f := func(w: int, v: float) -> void: _vp.encode_float(w * 4, v)
 	put_u.call(GpuKernelsView.VW_COUNT, count)
@@ -376,6 +434,9 @@ func _put_vp(count: int, camera: Rect2, pixel_um: float, slots: int, capacity: i
 		put_f.call(GpuKernelsView.VW_PICK_Y, pick["local"].y)
 		put_f.call(GpuKernelsView.VW_SLACK, pick["slack"])
 		put_f.call(GpuKernelsView.VW_NEAR, pick["near"])
+	put_u.call(GpuKernelsView.VW_DENSITY, mode)
+	put_u.call(GpuKernelsView.VW_DEN_W, den_size.x)
+	put_u.call(GpuKernelsView.VW_DEN_H, den_size.y)
 	put_u.call(GpuKernelsView.VW_FINDS, 0 if _follow.is_empty() else 1)
 	for s in GpuKernelsView.FINDS:
 		var id: int = _follow[s] if s < _follow.size() and _follow[s] >= 0 else -1
@@ -383,10 +444,13 @@ func _put_vp(count: int, camera: Rect2, pixel_um: float, slots: int, capacity: i
 		put_u.call(GpuKernelsView.VW_FIND + 2 * s + GpuLayout.IDT_HI, (id >> 32) & NONE)
 
 
-func _build(count: int, target: RID, index: int, pick: Variant, view_key: Array, rebuild: bool) -> void:
+func _build(count: int, target: RID, index: int, pick: Variant, view_key: Array, rebuild: bool, den_size := Vector2i.ZERO, skip := false) -> void:
 	if target != _inst:
 		_free_sets()
 		_inst = target
+	var dens := den_size.x > 0
+	if dens:
+		_ensure_density(den_size)
 	rd.buffer_update(_bufs["VP"], 0, _vp.size(), _vp)
 	var asking: bool = pick != null or not _follow.is_empty()
 	if asking:
@@ -399,10 +463,17 @@ func _build(count: int, target: RID, index: int, pick: Variant, view_key: Array,
 	var runs := mini(GpuKernels.scan_groups(maxi(count, 1)), MAX_GROUPS)
 	var cl := -1 if profiling and _local else rd.compute_list_begin()
 	if rebuild:
-		_dispatch(cl, "view_count", index, runs)
-		_dispatch(cl, "view_sums", index, 1, float(runs))
-		_dispatch(cl, "view_scatter", index, runs)
-		_dispatch(cl, "view_tail", index, GpuKernels.bup_groups(_vp.decode_u32(GpuKernelsView.VW_SLOTS * 4)), float(runs))
+		if dens:
+			_dispatch(cl, "density_clear", index, GpuKernels.bup_groups(den_size.x * den_size.y * GpuKernelsView.DENSITY_WORDS))
+			_dispatch(cl, "density_splat", index, groups)
+			_dispatch(cl, "density_resolve", index, GpuKernels.bup_groups(den_size.x * den_size.y))
+		if skip:
+			_dispatch(cl, "view_tail", index, GpuKernels.bup_groups(_vp.decode_u32(GpuKernelsView.VW_SLOTS * 4)), 0.0)
+		else:
+			_dispatch(cl, "view_count", index, runs)
+			_dispatch(cl, "view_sums", index, 1, float(runs))
+			_dispatch(cl, "view_scatter", index, runs)
+			_dispatch(cl, "view_tail", index, GpuKernels.bup_groups(_vp.decode_u32(GpuKernelsView.VW_SLOTS * 4)), float(runs))
 	if asking:
 		_dispatch(cl, "view_pick", index, groups)
 		_dispatch(cl, "view_pick2", index, groups)
@@ -412,9 +483,9 @@ func _build(count: int, target: RID, index: int, pick: Variant, view_key: Array,
 	if _local:
 		rd.submit()
 		rd.sync()
-		_on_answer(rd.buffer_get_data(_bufs["VOUT"], 0, GpuKernelsView.VO_WORDS * 4), view_key if rebuild else [], pick, asking)
+		_on_answer(rd.buffer_get_data(_bufs["VOUT"], 0, GpuKernelsView.VO_WORDS * 4), view_key if rebuild else [], pick, asking, dens)
 	else:
-		rd.buffer_get_data_async(_bufs["VOUT"], _on_answer.bind(view_key if rebuild else [], pick, asking), 0, GpuKernelsView.VO_WORDS * 4)
+		rd.buffer_get_data_async(_bufs["VOUT"], _on_answer.bind(view_key if rebuild else [], pick, asking, dens), 0, GpuKernelsView.VO_WORDS * 4)
 
 
 ## `cl` -1: (profiling on a local device) the kernel in a list and a submit of its own, timed.
@@ -428,7 +499,7 @@ func _dispatch(cl: int, kname: String, index: int, groups: int, pa := 0.0) -> vo
 		rd.sync()
 		profile[kname] = Time.get_ticks_usec() - t0
 		return
-	var k: Dictionary = _made[kname]
+	var k: Dictionary = _kernel(kname)
 	rd.compute_list_bind_compute_pipeline(cl, k["pipeline"])
 	rd.compute_list_bind_uniform_set(cl, _set_of(kname, index), 0)
 	rd.compute_list_set_push_constant(cl, PackedFloat32Array([pa, 0.0, 0.0, 0.0]).to_byte_array(), 16)
@@ -436,30 +507,61 @@ func _dispatch(cl: int, kname: String, index: int, groups: int, pa := 0.0) -> vo
 	rd.compute_list_add_barrier(cl)
 
 
+func _kernel(kname: String) -> Dictionary:
+	return _made[kname] if _made.has(kname) else _den_made[kname]
+
+
 func _set_of(kname: String, index: int) -> RID:
 	var key := "%s|%d" % [kname, index]
 	var s: RID = _sets.get(key, RID())
 	if s.is_valid() and rd.uniform_set_is_valid(s):
 		return s
-	var k: Dictionary = _made[kname]
+	var k: Dictionary = _kernel(kname)
 	var uniforms: Array[RDUniform] = []
 	var names: Array = k["buffers"]
 	for b in names.size():
 		var u := RDUniform.new()
 		u.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
 		u.binding = b
-		u.add_id(_inst if names[b] == "INST" else _bufs[names[b]])
+		u.add_id(_inst if names[b] == "INST" else (_den_buf if names[b] == "DEN" else _bufs[names[b]]))
 		uniforms.append(u)
 	var images: Dictionary = GpuKernelsView.IMAGE_BINDINGS.get(kname, {})
 	for b: int in images:
 		var u := RDUniform.new()
 		u.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
 		u.binding = b
-		u.add_id(_imports[images[b]]["rids"][index])
+		u.add_id(_den_tex if images[b] == "density" else _imports[images[b]]["rids"][index])
 		uniforms.append(u)
 	s = rd.uniform_set_create(uniforms, k["shader"], 0)
 	_sets[key] = s
 	return s
+
+
+## The sums and the picture for a camera rectangle of `size` pixels (made afresh when it changes; the old picture is freed once no frame
+## in flight can use it).
+func _ensure_density(size: Vector2i) -> void:
+	if size == _den_size and _den_tex.is_valid():
+		return
+	_free_sets()
+	if _den_tex.is_valid():
+		_retired.append({"rids": [_den_tex], "last": Engine.get_frames_drawn()})
+	if _den_buf.is_valid():
+		rd.free_rid(_den_buf)
+	_den_buf = rd.storage_buffer_create(size.x * size.y * GpuKernelsView.DENSITY_WORDS * 4)
+	var format := RDTextureFormat.new()
+	format.format = RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM
+	format.width = size.x
+	format.height = size.y
+	format.usage_bits = RenderingDevice.TEXTURE_USAGE_STORAGE_BIT | RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
+	_den_tex = rd.texture_create(format, RDTextureView.new())
+	_den_size = size
+	if _den_picture != null:
+		_den_picture.texture_rd_rid = _den_tex
+
+
+func _free_density_kernels() -> void:
+	ShaderSet.free_all(rd, _den_made)
+	_den_made.clear()
 
 
 func _free_sets() -> void:
@@ -471,11 +573,13 @@ func _free_sets() -> void:
 
 
 ## `view_key` empty: the build drew nothing (it only answered), so its visible count is not one.
-func _on_answer(data: PackedByteArray, view_key: Array, pick: Variant, asked: bool) -> void:
+func _on_answer(data: PackedByteArray, view_key: Array, pick: Variant, asked: bool, dens := false) -> void:
 	var w := func(word: int) -> int: return data.decode_u32(word * 4)
 	var f := func(word: int) -> float: return data.decode_float(word * 4)
 	if not view_key.is_empty():
 		_visible = {"count": w.call(GpuKernelsView.VO_VISIBLE), "key": view_key}
+		if dens:
+			_large = {"count": w.call(GpuKernelsView.VO_LARGE), "key": view_key}
 	if not asked:
 		return
 	var places := {}
@@ -509,11 +613,19 @@ func release() -> void:
 	if rd == null:
 		return
 	_pictures.clear()
+	_den_picture = null
 	_on_device(_release_now)
 
 
 func _release_now() -> void:
 	_free_sets()
+	if _den_tex.is_valid():
+		_free_textures([_den_tex])
+	if _den_buf.is_valid():
+		rd.free_rid(_den_buf)
+	_den_tex = RID()
+	_den_buf = RID()
+	_free_density_kernels()
 	for r: Dictionary in _retired:
 		_free_textures(r["rids"])
 	_retired.clear()

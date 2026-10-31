@@ -36,7 +36,10 @@ const VW_NEAR := 12
 const VW_FINDS := 13  ## 1: find the bups VW_FIND (FINDS ids, the low word then the high; an unused one all ones)
 const VW_FIND := 14
 const FINDS := 2  ## the bups whose place is looked up a frame (the selected and the hovered: their rings)
-const VW_WORDS := VW_FIND + 2 * FINDS
+const VW_DENSITY := VW_FIND + 2 * FINDS  ## 0: the single-dish path's capsules for every bup; DENSITY_NEAREST or DENSITY_BILINEAR: the bups under their least footprint are splatted (below), not drawn
+const VW_DEN_W := VW_DENSITY + 1  ## the density picture's size in pixels (the camera's rectangle over the pixel)
+const VW_DEN_H := VW_DENSITY + 2
+const VW_WORDS := VW_DEN_H + 1
 
 ## VOUT: the build's answers, read back by the host a frame or two later.
 const VO_VISIBLE := 0  ## the visible bups (instances written)
@@ -48,9 +51,25 @@ const VO_FOUND := 5  ## FINDS texels of the bups looked up (all ones: not in the
 const VO_PICKED := VO_FOUND + FINDS  ## the picked bup: id low, id high, x, y, length (µm)
 const VO_PLACE_WORDS := 5
 const VO_PLACES := VO_PICKED + VO_PLACE_WORDS  ## each found bup: id low, id high, x, y, length
-const VO_WORDS := VO_PLACES + FINDS * VO_PLACE_WORDS
+const VO_LARGE := VO_PLACES + FINDS * VO_PLACE_WORDS  ## density mode: the bups that are not under their least footprint (the capsule path draws them; none: it need not run)
+const VO_WORDS := VO_LARGE + 1
 
-const TYPES := {"VP": "uint", "VCOUNT": "uint", "VOFFS": "uint", "VPD": "uint", "VOUT": "uint", "INST": "vec4"}
+## Density mode: a bup under its least footprint (its length below Cell.MIN_VISIBLE_LENGTH_PX
+## screen pixels: the single-dish path's capsule is then the least footprint, a rod of that length and width) adds its coverage to the pixels it lies on
+## instead of being drawn, four uint sums a pixel in DEN: its colour (bytes) times its footprint's area in pixels, three words, and the
+## area, in 1/DENSITY_SCALE of a pixel. density_resolve writes the picture the canvas draws over the dish: the mean colour with coverage
+## 1 - exp(-area), what the same footprints scattered at random would cover of the pixel (the single-dish path's blending leaves the product of what each
+## leaves uncovered). One bup adds at most 255 * 128 * 1.8 to a colour sum, so a pixel holds 4.29e9 / that = 73,000 of them before the
+## red sum wraps, about as many as fit side by side in a 375 µm pixel.
+const DENSITY_NEAREST := 1  ## the whole footprint on the pixel the bup's middle lies in
+const DENSITY_BILINEAR := 2  ## the footprint shared among the four pixels whose middles are nearest (the way a capsule of that size covers them)
+const DENSITY_SCALE := 128
+const DENSITY_WORDS := 4  ## the sums a pixel
+
+const TYPES := {"VP": "uint", "VCOUNT": "uint", "VOFFS": "uint", "VPD": "uint", "VOUT": "uint", "INST": "vec4", "DEN": "uint"}
+
+## The kernels density mode adds (made only when it is on: a density kernel that does not build must not stop the single-dish path's bups drawing).
+const DENSITY_KERNELS := ["density_clear", "density_splat", "density_resolve"]
 
 ## The image bindings of each kernel (binding -> the texture ViewRenderer binds there: "payload" or "ids"), past its storage buffers.
 const IMAGE_BINDINGS := {
@@ -58,10 +77,13 @@ const IMAGE_BINDINGS := {
 	"view_scatter": {4: "payload"},
 	"view_pick": {4: "payload", 5: "ids"},
 	"view_answer": {2: "payload", 3: "ids"},
+	"density_splat": {4: "payload"},
+	"density_resolve": {2: "density"},
 }
 
 const PAYLOAD_IMAGE := "uniform restrict readonly iimage2D PAYTEX;\n"
 const IDS_IMAGE := "uniform restrict readonly iimage2D IDTEX;\n"
+const DENSITY_IMAGE := "uniform restrict writeonly image2D DENTEX;\n"
 
 ## A texel's place in the textures, its words, and the parameters as floats.
 const VIEW_FUNCS := """
@@ -74,11 +96,13 @@ float vpf(uint w) { return uintBitsToFloat(VP[w]); }
 ## length (no less than the least footprint) and the pixel of margin round it, or half its drawn width and its margin if that is more.
 ## The run of texels group g of G takes (as the grid scan cuts them).
 const BUILD_FUNCS := """
+bool small_at(float length, float pixel) { return length < P[P_MIN_LENGTH_PX] * pixel; }
 uint visible_at(uint k) {
 	uvec4 px = payload_at(k);
 	vec2 shape = unpackHalf2x16(px[PL_SHAPE]);
 	if (!(shape.x > 0.0)) return 0u;
 	float pixel = vpf(VW_PIXEL);
+	if (VP[VW_DENSITY] != 0u && small_at(shape.x, pixel)) return 0u;
 	float half_reach = 0.5 * max(max(shape.x, P[P_MIN_LENGTH_PX] * pixel), max(P[P_WIDTH], P[P_MIN_WIDTH_PX] * pixel)) + pixel;
 	float x = uintBitsToFloat(px[PL_X]), y = uintBitsToFloat(px[PL_Y]);
 	return (x + half_reach >= vpf(VW_X0) && x - half_reach <= vpf(VW_X1) && y + half_reach >= vpf(VW_Y0) && y - half_reach <= vpf(VW_Y1)) ? 1u : 0u;
@@ -146,11 +170,11 @@ void main() {
 }
 """
 
-## pcs.pa: the groups view_count and view_scatter ran with.
+## pcs.pa: the groups view_count and view_scatter ran with (0: they did not run).
 const K_TAIL := """
 void f(uint j) {
-	uint g = uint(pcs.pa) - 1u;
-	uint total = VOFFS[g] + VCOUNT[g];
+	uint g = pcs.pa > 0.5 ? uint(pcs.pa) - 1u : 0u;
+	uint total = pcs.pa > 0.5 ? VOFFS[g] + VCOUNT[g] : 0u;  // (pa 0: the capsule build did not run: nothing is visible)
 	if (j == 0u) VOUT[VO_VISIBLE] = total;
 	if (j < total || j >= VP[VW_CAPACITY]) return;
 	INST[j * 4u] = vec4(0.0); INST[j * 4u + 1u] = vec4(0.0); INST[j * 4u + 2u] = vec4(0.0); INST[j * 4u + 3u] = vec4(0.0);
@@ -213,6 +237,76 @@ void main() {
 """
 
 
+## density_clear: the sums to zero and the count of bups the capsule path must draw (VO_LARGE).
+const K_DENSITY_CLEAR := """
+void f(uint k) {
+	DEN[k] = 0u;
+	if (k == 0u) VOUT[VO_LARGE] = 0u;
+}
+GRID_LOOP(f, VP[VW_DEN_W] * VP[VW_DEN_H] * DENSITY_WORDS)
+"""
+
+## density_splat: one thread a bup (bups off the picture return at once). The footprint is the least one's rod (the least length by the
+## width, no less than the least width, with round ends: Cell.MIN_VISIBLE_*_PX and the body's own width), its area in pixels.
+const K_DENSITY_SPLAT := """
+const float PI_QUARTER = 0.7853982;
+void put(ivec2 at, float weight, uvec3 rgb) {
+	if (at.x < 0 || at.y < 0 || at.x >= int(VP[VW_DEN_W]) || at.y >= int(VP[VW_DEN_H])) return;
+	uint w = uint(weight * float(DENSITY_SCALE) + 0.5);
+	if (w == 0u) return;
+	uint o = (uint(at.y) * VP[VW_DEN_W] + uint(at.x)) * DENSITY_WORDS;
+	atomicAdd(DEN[o], w * rgb.x);
+	atomicAdd(DEN[o + 1u], w * rgb.y);
+	atomicAdd(DEN[o + 2u], w * rgb.z);
+	atomicAdd(DEN[o + 3u], w);
+}
+void f(uint k) {
+	uvec4 px = payload_at(k);
+	vec2 shape = unpackHalf2x16(px[PL_SHAPE]);
+	if (!(shape.x > 0.0)) return;
+	float pixel = vpf(VW_PIXEL);
+	if (!small_at(shape.x, pixel)) {
+		atomicAdd(VOUT[VO_LARGE], 1u);
+		return;
+	}
+	vec2 u = (vec2(uintBitsToFloat(px[PL_X]), uintBitsToFloat(px[PL_Y])) - vec2(vpf(VW_X0), vpf(VW_Y0))) / pixel;
+	float length_px = P[P_MIN_LENGTH_PX];
+	float width_px = max(P[P_WIDTH] / pixel, P[P_MIN_WIDTH_PX]);
+	float area = max(length_px - width_px, 0.0) * width_px + PI_QUARTER * width_px * width_px;
+	uint c = px[PL_COLOR];
+	uvec3 rgb = uvec3((c >> PL_RED_SHIFT) & 255u, (c >> PL_GREEN_SHIFT) & 255u, (c >> PL_BLUE_SHIFT) & 255u);
+	if (VP[VW_DENSITY] == DENSITY_NEAREST) {
+		put(ivec2(floor(u)), area, rgb);
+		return;
+	}
+	vec2 v = u - 0.5;
+	ivec2 p0 = ivec2(floor(v));
+	vec2 t = v - vec2(p0);
+	put(p0, area * (1.0 - t.x) * (1.0 - t.y), rgb);
+	put(p0 + ivec2(1, 0), area * t.x * (1.0 - t.y), rgb);
+	put(p0 + ivec2(0, 1), area * (1.0 - t.x) * t.y, rgb);
+	put(p0 + ivec2(1, 1), area * t.x * t.y, rgb);
+}
+GRID_LOOP(f, VP[VW_COUNT])
+"""
+
+## density_resolve: the picture, one thread a pixel: the mean colour and the coverage (straight alpha, as the canvas blends it).
+const K_DENSITY_RESOLVE := """
+void f(uint k) {
+	uint w = VP[VW_DEN_W];
+	uint o = k * DENSITY_WORDS;
+	uint a = DEN[o + 3u];
+	vec4 colour = vec4(0.0);
+	if (a != 0u) {
+		float area = float(a) / float(DENSITY_SCALE);
+		colour = vec4(vec3(float(DEN[o]), float(DEN[o + 1u]), float(DEN[o + 2u])) / (255.0 * float(a)), 1.0 - exp(-area));
+	}
+	imageStore(DENTEX, ivec2(int(k % w), int(k / w)), colour);
+}
+GRID_LOOP(f, VP[VW_DEN_W] * VP[VW_DEN_H])
+"""
+
+
 ## The names the kernels share, as GLSL constants.
 static func declarations() -> String:
 	var text := ""
@@ -220,7 +314,7 @@ static func declarations() -> String:
 	var names: Array = constants.keys()
 	names.sort()
 	for name: String in names:
-		if (name.begins_with("VW_") or name.begins_with("VO_") or name == "FINDS") and constants[name] is int:
+		if (name.begins_with("VW_") or name.begins_with("VO_") or name == "FINDS" or name in ["DENSITY_NEAREST", "DENSITY_BILINEAR", "DENSITY_SCALE", "DENSITY_WORDS"]) and constants[name] is int:
 			text += "const uint %s = %du;\n" % [name, constants[name]]
 	return text
 
@@ -231,7 +325,13 @@ static func _images(kernel_name: String) -> String:
 	var bindings: Dictionary = IMAGE_BINDINGS.get(kernel_name, {})
 	for b: int in bindings:
 		var which: String = bindings[b]
-		text += "layout(set = 0, binding = %d, %s) %s" % [b, "rgba32i" if which == "payload" else "rg32i", PAYLOAD_IMAGE if which == "payload" else IDS_IMAGE]
+		match which:
+			"payload":
+				text += "layout(set = 0, binding = %d, rgba32i) %s" % [b, PAYLOAD_IMAGE]
+			"ids":
+				text += "layout(set = 0, binding = %d, rg32i) %s" % [b, IDS_IMAGE]
+			"density":
+				text += "layout(set = 0, binding = %d, rgba8) %s" % [b, DENSITY_IMAGE]
 	return text
 
 
@@ -248,3 +348,7 @@ static func register(out: Dictionary) -> void:
 	add.call("view_pick", K_PICK, ["P", "VP", "VPD", "VOUT"])
 	GpuKernels.add(out, "view_pick2", K_PICK2, ["VP", "VPD", "VOUT"], head, 64, TYPES)
 	add.call("view_answer", K_ANSWER, ["VP", "VOUT"])
+	var density := head + _images("density_splat") + VIEW_FUNCS + "bool small_at(float length, float pixel) { return length < P[P_MIN_LENGTH_PX] * pixel; }\n"
+	GpuKernels.add(out, "density_clear", K_DENSITY_CLEAR, ["VP", "DEN", "VOUT"], head, 64, TYPES)
+	GpuKernels.add(out, "density_splat", K_DENSITY_SPLAT, ["P", "VP", "DEN", "VOUT"], density, 64, TYPES)
+	GpuKernels.add(out, "density_resolve", K_DENSITY_RESOLVE, ["VP", "DEN"], head + _images("density_resolve"), 64, TYPES)
