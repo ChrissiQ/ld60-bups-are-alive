@@ -663,17 +663,18 @@ func pipette(world: Vector2, circle_radius: float) -> void:
 
 
 ## The pipette's answer has come: the new dish takes its place in the strip and the main view moves to it, and the player is asked about
-## the old one; a circle with no bups makes no dish. No answer while the dish is still there means the graphics memory had no room for
-## the new dish (the pipette is then undone in the simulation).
+## the old one; a circle with no bups makes no dish. A refusal while the dish is still there means the graphics memory had no room
+## for the new dish (the pipette is then undone in the simulation).
 func _finish_pipette() -> void:
 	if _pipette_pending.is_empty() or not (_pipette_pending["reply"] as SimReply).is_done():
 		return
 	var source: Dish = _pipette_pending["source"]
-	var got: Variant = (_pipette_pending["reply"] as SimReply).value()
+	var reply: SimReply = _pipette_pending["reply"]
+	var got: Variant = reply.value()
 	_pipette_pending = {}
 	_sync_reply_hold()
 	if got == null:
-		if dishes.has(source):
+		if dishes.has(source) and reply.error() != "":  # (the processor's stub answers with nothing and no error: nothing ran)
 			_show_banner(Strings.t("banner.memory_budget"), BANNER_SECONDS)
 		return
 	if int(got["moved"]) == 0 or not dishes.has(source):
