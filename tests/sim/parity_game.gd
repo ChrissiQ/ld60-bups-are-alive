@@ -5,7 +5,9 @@ extends RefCounted
 ## textures, a camera, and the frames the game's Main would give them. A test drives a Dish as the screen does (strike, edits, picks) and
 ## reads the pool behind it through `inspect` (a call on the sim thread between iterations).
 ##
-## - Every dish sits at PLACE, away from the world's origin (as Main's second slot), so every world-to-dish conversion is exercised.
+## - A dish sits at `place`: PLACE by default, away from the world's origin (as Main's second slot), so every world-to-dish conversion is
+##   exercised. A test comparing reads with a fixture to 1e-4 puts it at the origin (Main's first slot): a world coordinate is a float32,
+##   whose step at 4e5 µm is 0.03 µm, which moves a read on a cloud's flank by up to 0.2% (measured: point (1524, 247) of the fixture).
 ## - `frame` tells the world the speed and pause each frame (Main._advance_world's call) with a frame of 1/60 s.
 ## - `settle` waits until the sim thread has drained what was sent and the result worker has done what that queued (the LineageStore lags
 ##   the pool by the worker's queue): a check of the store against the pool is made paused and settled.
@@ -27,6 +29,7 @@ var world: WorldClient
 var camera: Camera2D
 var holder: Node2D  ## the nodes a test adds (added to the root while the test starts: the root takes no child later)
 var frames := 0
+var place := PLACE  ## where the next dish is put
 
 
 ## The gate (SimHarness.begin: headless prints SKIP and quits) and the world. Null when the test must stop.
@@ -106,12 +109,23 @@ func settle(speed := 1.0, paused := true) -> void:
 	await run_frames(3, speed, paused)
 
 
+## Paused, the answers to a dish's questions (WorldClient.ask: tracked bups, probes, husks) reach a snapshot only with the pass after the
+## one that made them (SimThread._results lists the answers before `_answer` makes new ones), and a paused world makes a pass only when a
+## command comes. A frame (Dish._process sends what it asks), then two passes of no steps (an `inspect` each): the snapshot then carries
+## the answers to what the dish asks now.
+func answer_now() -> void:
+	await frame()
+	for k in 2:
+		await reply_value(world.inspect(func(_core: SimCore, _rows: Dictionary) -> int: return 0))
+	await run_frames(2)
+
+
 ## A Dish node at PLACE, in the tree, struck from `start` with `seed_value` (paused), once a snapshot shows it.
 func strike(start: StartConditions, seed_value := 1, number := 1) -> Dish:
 	var d := Dish.new()
 	d.number = number
 	holder.add_child(d)
-	d.global_position = PLACE
+	d.global_position = place
 	d.set_seed(seed_value)
 	d.strike(start)
 	await wait_shown(d)
@@ -123,7 +137,7 @@ func add(spec: DishSpec) -> Dish:
 	var d := Dish.new()
 	d.number = spec.number
 	holder.add_child(d)
-	d.global_position = PLACE
+	d.global_position = place
 	d.radius = spec.radius
 	d.resolution = spec.resolution
 	d.bup_limit = spec.limit
