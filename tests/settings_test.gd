@@ -92,13 +92,12 @@ func _init() -> void:
 	var shorter := StartConditions.new()
 	shorter.bups = 5
 	shorter.founders = [{"name": "A"}, {"color": "#00ff00"}]
-	var canned := CannedWorld.new()  # (the headless world runs nothing: this one takes the dish and serves its five bups back)
-	root.get_node("SimService").use_backend(canned)
+	var canned := TestUtil.use_fake_world(self)  # (the headless world runs nothing: this one takes the dish and serves its five bups back)
 	var shorter_dish := TestUtil.dish_from(self, shorter)
 	canned.serve_dish(shorter_dish.number, 5)
 	await process_frame
-	var added: Array = canned.calls.filter(func(c: SimCommand) -> bool: return c.kind == SimCommand.KIND_ADD_DISH)
-	var sent: DishSpec = added[-1].args["spec"]
+	var added: Array = canned.calls_of(SimCommand.KIND_ADD_DISH)
+	var sent: DishSpec = added[-1]["args"]["spec"]
 	var hue := func(i: int) -> float: return sent.founders.decode_float(i * GpuLayout.RECORD_BYTES + (GpuLayout.R_HUE) * 4)
 	TestUtil.check(shorter_dish.bup_name(GpuLayout.make_id(shorter_dish.number, 1)) == "A" and shorter_dish.bup_name(GpuLayout.make_id(shorter_dish.number, 2)).contains("#") and shorter_dish.bup_name(GpuLayout.make_id(shorter_dish.number, 5)).contains("#") and absf(hue.call(1) - Color.html("#00ff00").h) < 0.01 and absf(hue.call(2) - Genome.founder()["hue"]) < 0.001, "with fewer saved than founders the first ones get theirs and the rest the defaults (hues %.3f, %.3f)" % [hue.call(1), hue.call(2)])
 	shorter_dish.free()
@@ -153,10 +152,10 @@ func _init() -> void:
 	# (the plankton are the world's: the preview asks for them with place-plankton edits, counted here after the preview's latest dish)
 	var asked := func() -> int:
 		var n := 0
-		for cmd: SimCommand in canned.calls:
-			if cmd.kind == SimCommand.KIND_ADD_DISH:
+		for cmd: Dictionary in canned.calls:
+			if cmd["kind"] == SimCommand.KIND_ADD_DISH:
 				n = 0
-			elif cmd.kind == SimCommand.KIND_EDIT_WORLD and (cmd.args["edit"] as WorldEdit).kind == WorldEdit.Kind.PLACE_PLANKTON:
+			elif cmd["kind"] == SimCommand.KIND_EDIT_WORLD and (cmd["args"]["edit"] as WorldEdit).kind == WorldEdit.Kind.PLACE_PLANKTON:
 				n += 1
 		return n
 	TestUtil.check(asked.call() == 0, "the preview has asked for no plankton the moment it is made")

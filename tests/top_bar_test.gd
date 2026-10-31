@@ -9,6 +9,7 @@ func _initialize() -> void:
 
 func _run() -> void:
 	SimConstants.apply()
+	TestUtil.use_fake_world(self)
 	for scale in [1.0, 1.2, 2.0, 2.5]:
 		for dishes in [1, 2, 8]:
 			UserSettings.native_override = 0.7407  # (a wide display at twice the system scale)

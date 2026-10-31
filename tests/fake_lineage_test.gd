@@ -15,7 +15,8 @@ func _init() -> void:
 	var store := LineageStore.new()
 	store.set_constants(Cell.RESERVE_PER_MASS, Cell.ADD_MASS_FACTOR)
 	var fake := FakeSimBackend.new()
-	fake.lineage = store
+	fake.lineage_store = store
+	TestUtil.check(fake.has_method("lineage") and fake.lineage() == store, "the store is reached through a method named lineage, as WorldClient looks for it")
 	var a1 := _id(1)
 	var a2 := _id(2)
 	var a3 := _id(3)

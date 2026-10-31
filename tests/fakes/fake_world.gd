@@ -4,8 +4,10 @@ extends SimBackend
 ## their bups (ids and places; nothing moves, divides or dies unless a test says so), a real LineageStore, a clock that runs at the speed it
 ## is told, and the answers to a freeze, an unfreeze, a pipette (a retarget), a trash and a save as the simulation gives them. A
 ## snapshot is published at each `set_time` (the screen sends one a frame), with the history samples of the multiples of
-## DishHistory.INTERVAL the clock crossed and the records of the bups each dish asks after. Plankton, sources, the field and the pictures
-## are left out.
+## DishHistory.INTERVAL the clock crossed and the records of the bups each dish asks after. Each dish keeps a real DishWorld, so the sources and
+## plankton the edits place come back in the snapshot's `worlds` as the simulation gives them; the field, the pictures and the probes are left
+## out (a nutrient drop or an erase is only logged in `calls`). The tests that read a dish's bups, the game screens' and the title's use it
+## as their one simulation double.
 ##
 ## A reply completes `reply_frames` set_times after its command (the simulation's come after its next iteration); a save's at once (the quit
 ## save waits for it). `refuse_next(kind)` refuses the next add, unfreeze or pipette as the memory budget does; `refusing_iteration` stands
@@ -23,8 +25,9 @@ var clock := START_CLOCK
 var speed := 1.0
 var paused := false
 var refusing_iteration := ""
+var device := "fake world"  ## what device_name() answers ("": a world with no device, which the record shows as CPU)
 
-var _dishes := {}  ## row -> {number, spec: DishSpec, bups: {id: Vector2 (dish-local)}, next: the next id counter, had_bups, asked: ids}
+var _dishes := {}  ## row -> {number, spec: DishSpec, bups: {id: Vector2 (dish-local)}, next: the next id counter, had_bups, asked: ids, over: {id: {word: value}}, world: DishWorld, world_version, world_sent}
 var _next_number := 1
 var _seq := 0
 var _snapshot := Snapshot.new()
@@ -44,7 +47,7 @@ func can_simulate() -> bool:
 
 
 func device_name() -> String:
-	return "fake world"
+	return device
 
 
 func latest() -> Snapshot:
@@ -123,6 +126,58 @@ func kill(row: int) -> void:
 	d["bups"] = {}
 
 
+## Dish `number` holds exactly `count` bups (made first if no dish has the number: in the lowest free row), each at a place of its own: what a
+## test that wants "a dish with n bups" asks for. Returns its row.
+func serve_dish(number: int, count: int) -> int:
+	var row := row_of(number)
+	if row < 0:
+		row = 0
+		while _dishes.has(row):
+			row += 1
+		var spec := DishSpec.new()
+		spec.number = number
+		_dishes[row] = _entry(spec, {}, 0)
+		_next_number = maxi(_next_number, number + 1)
+	var have := ids_in(row)
+	if have.size() > count:
+		kill_ids(row, have.slice(count))
+	elif have.size() < count:
+		var at := []
+		for i in count - have.size():
+			at.append(Vector2(10.0 * (have.size() + i), 0.0))
+		add_bups(row, at)
+	_publish(clock)
+	return row
+
+
+## The bups `ids` of dish `row` die.
+func kill_ids(row: int, ids: PackedInt64Array) -> void:
+	var d: Dictionary = _dishes[row]
+	var deaths := PackedByteArray()
+	deaths.resize(ids.size() * GpuLayout.DEATH_WORDS * 4)
+	for i in ids.size():
+		deaths.encode_u32((i * GpuLayout.DEATH_WORDS + GpuLayout.ED_ID_LO) * 4, ids[i] & 0xFFFFFFFF)
+		deaths.encode_u32((i * GpuLayout.DEATH_WORDS + GpuLayout.ED_ID_HI) * 4, (ids[i] >> 32) & 0xFFFFFFFF)
+		d["bups"].erase(ids[i])
+	store.apply_events(PackedByteArray(), deaths, clock, 0.0)
+
+
+## Bup `id` of dish `row` moves to the dish-local `at` (what a snapshot's answer says from the next one).
+func move_bup(row: int, id: int, at: Vector2) -> void:
+	_dishes[row]["bups"][id] = at
+
+
+## Words of bup `id`'s record are set (`words`: GpuLayout.R_* -> value: the energy, the mass, a gene), as a snapshot's answer says them.
+func edit_bup(row: int, id: int, words: Dictionary) -> void:
+	var over: Dictionary = _dishes[row]["over"].get_or_add(id, {})
+	over.merge(words, true)
+
+
+## The DishWorld of dish `row`, which the world edits reach.
+func world_of(row: int) -> DishWorld:
+	return _dishes[row]["world"]
+
+
 func submit(cmd: SimCommand) -> void:
 	calls.append({"kind": cmd.kind, "args": cmd.args})
 	var a := cmd.args
@@ -144,9 +199,50 @@ func submit(cmd: SimCommand) -> void:
 				_dishes[int(a["row"])]["asked"] = Array(a["questions"].get("tracked", []))
 		SimCommand.KIND_SAVE_ALL:
 			cmd.reply.complete(_save_all())
+		SimCommand.KIND_EDIT_WORLD:
+			_edit_world(int(a["row"]), a["edit"])
+		SimCommand.KIND_RESIZE:
+			_answer(cmd.reply, _resize(int(a["row"]), float(a["radius"])))
+		SimCommand.KIND_SET_PARAMS:
+			_set_params(int(a["row"]), a["params"])
 		_:
 			if cmd.reply != null:
 				cmd.reply.complete(null)
+
+
+func _edit_world(row: int, e: WorldEdit) -> void:
+	if not _dishes.has(row) or e.is_field_edit():
+		return
+	var d: Dictionary = _dishes[row]
+	(d["world"] as DishWorld).apply(e.as_world_op())
+	d["world_version"] += 1
+
+
+## The dish's new radius: the bups past a smaller dish's edge die. The reply as SimCore.resize gives it.
+func _resize(row: int, radius: float) -> Variant:
+	if not _dishes.has(row):
+		return null
+	var d: Dictionary = _dishes[row]
+	(d["spec"] as DishSpec).radius = radius
+	var out := PackedInt64Array()
+	for id: int in d["bups"]:
+		if (d["bups"][id] as Vector2).length() > radius:
+			out.append(id)
+	kill_ids(row, out)
+	(d["world"] as DishWorld).radius = radius
+	d["world_version"] += 1
+	return {"row": row, "removed": out.size()}
+
+
+func _set_params(row: int, params: Dictionary) -> void:
+	if not _dishes.has(row):
+		return
+	var spec: DishSpec = _dishes[row]["spec"]
+	for key: String in params:
+		if key in spec:
+			spec.set(key, params[key])
+	if params.has("bloom_density"):
+		(_dishes[row]["world"] as DishWorld).set_bloom(float(params["bloom_density"]))
 
 
 func _answer(reply: SimReply, value: Variant, error := "") -> void:
@@ -169,10 +265,16 @@ func _add(row: int, spec: DishSpec) -> void:
 		var o := i * GpuLayout.RECORD_BYTES
 		bups[id] = Vector2(spec.founders.decode_float(o + GpuLayout.R_X * 4), spec.founders.decode_float(o + GpuLayout.R_Y * 4))
 		top = maxi(top, GpuLayout.id_counter(id))
-	_dishes[row] = {"number": spec.number, "spec": spec.copy(), "bups": bups, "next": top + 1, "had_bups": not bups.is_empty(), "asked": []}
+	_dishes[row] = _entry(spec.copy(), bups, top)
 	_next_number = maxi(_next_number, spec.number + 1)
 	if spec.founders.size() > 0:
 		store.apply_events(SimCore.founder_births(spec.founders), PackedByteArray(), clock, 0.0)
+
+
+func _entry(spec: DishSpec, bups: Dictionary, top: int) -> Dictionary:
+	var world := DishWorld.new(spec.radius, maxi(spec.seed, 1))
+	world.set_bloom(spec.bloom_density)
+	return {"number": spec.number, "spec": spec, "bups": bups, "next": top + 1, "had_bups": not bups.is_empty(), "asked": [], "over": {}, "world": world, "world_version": 1, "world_sent": 0}
 
 
 func _live(row: int) -> PackedInt64Array:
@@ -194,7 +296,7 @@ func _blob(row: int) -> DishBlob:
 	var blob := DishBlob.new()
 	blob.spec = spec.to_dict()
 	for id: int in d["bups"]:
-		blob.records.append_array(_record(id, d["bups"][id]))
+		blob.records.append_array(_record(id, d["bups"][id], d["over"].get(id, {})))
 	blob.dstate.resize(GpuLayout.DS_WORDS * 4)
 	blob.dstate.encode_u32(GpuLayout.DS_COUNT * 4, d["bups"].size())
 	var cells := DishGrid.cells_across(spec.radius, spec.resolution)
@@ -233,7 +335,7 @@ func _thaw(row: int, blob: DishBlob) -> void:
 		var o := i * GpuLayout.RECORD_BYTES
 		bups[id] = Vector2(blob.records.decode_float(o + GpuLayout.R_X * 4), blob.records.decode_float(o + GpuLayout.R_Y * 4))
 		top = maxi(top, GpuLayout.id_counter(id))
-	_dishes[row] = {"number": spec.number, "spec": spec, "bups": bups, "next": top + 1, "had_bups": not bups.is_empty(), "asked": []}
+	_dishes[row] = _entry(spec, bups, top)
 	_next_number = maxi(_next_number, spec.number + 1)
 	var data: PackedByteArray = blob.host.get("lineage", PackedByteArray())
 	if data.size() > 0:
@@ -265,7 +367,7 @@ func _pipette(row: int, centre: Vector2, radius: float, dest: int, reply: SimRep
 			ids.append(id)
 			source["bups"].erase(id)
 			top = maxi(top, GpuLayout.id_counter(id))
-	_dishes[dest] = {"number": number, "spec": spec, "bups": moved, "next": top + 1, "had_bups": not moved.is_empty(), "asked": []}
+	_dishes[dest] = _entry(spec, moved, top)
 	store.retarget_ids(ids, number)
 	_answer(reply, {"new_row": dest, "number": number, "moved": ids.size(), "ids": ids})
 
@@ -313,17 +415,32 @@ func _publish(t0: float) -> void:
 		var tracked := {}
 		for id: int in d["asked"]:
 			if d["bups"].has(id):
-				tracked[id] = _record(id, d["bups"][id]).slice(0, GpuLayout.ANSWER_BYTES)
+				tracked[id] = _record(id, d["bups"][id], d["over"].get(id, {})).slice(0, GpuLayout.ANSWER_BYTES)
 		snap.answers[row] = {"tracked": tracked, "steer": {}, "probes": PackedFloat32Array()}
+		if d["world_version"] != d["world_sent"]:
+			d["world_sent"] = d["world_version"]
+			snap.worlds[row] = _copy_of(d["world"], d["world_version"])
 	snap.timing = {"refused": _refused, "refused_iteration": refusing_iteration}
 	_refused = {}
 	_snapshot = snap
 
 
 ## A bup's record at the dish-local `at`, with the founder's genes.
-static func _record(id: int, at: Vector2) -> PackedByteArray:
-	return FakeScenes.record(id, {
+static func _copy_of(w: DishWorld, version: int) -> DishWorldCopy:
+	var c := w.copy()
+	var out := DishWorldCopy.new()
+	out.version = version
+	out.plankton = c["plankton"]
+	for id: int in c["sources"]:
+		out.sources.append({"id": id, "pos": c["sources"][id]["pos"], "rate": c["sources"][id]["rate"]})
+	return out
+
+
+static func _record(id: int, at: Vector2, over := {}) -> PackedByteArray:
+	var words := {
 		GpuLayout.R_X: at.x, GpuLayout.R_Y: at.y, GpuLayout.R_DX: 1.0,
 		GpuLayout.R_SPEED: 10.0, GpuLayout.R_SENSE: 1.0, GpuLayout.R_METABOLISM: 1.0, GpuLayout.R_SIZE: 1.0,
 		GpuLayout.R_ENERGY: 5.0, GpuLayout.R_MASS: 1.0, GpuLayout.R_BIRTH_MASS: 1.0, GpuLayout.R_MUTATOR: 1.0,
-	})
+	}
+	words.merge(over, true)
+	return FakeScenes.record(id, words)

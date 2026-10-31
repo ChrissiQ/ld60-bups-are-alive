@@ -13,8 +13,8 @@ func _initialize() -> void:
 	for f in DirAccess.get_files_at(DebugLog.directory):
 		DirAccess.remove_absolute(DebugLog.directory.path_join(f))
 
-	var canned := CannedWorld.new()  # (the world the headless run has runs nothing: this one serves three bups in dish 1)
-	root.get_node("SimService").use_backend(canned)
+	var canned := TestUtil.use_fake_world(self)  # (the world the headless run has runs nothing: this one serves three bups in dish 1)
+	canned.device = "test device"
 	Session.mode = Session.Mode.FREE
 	Session.free_start = TestUtil.small_start()
 	Session.tutorial_wanted = true
@@ -32,6 +32,8 @@ func _initialize() -> void:
 
 	# What it holds.
 	dish.selected.bup = dish.bup_ids()[0]
+	for i in 3:
+		await process_frame  # (the world answers about a picked bup a frame later)
 	var data: Variant = JSON.parse_string(DebugLog.report(dish, m, m.debug_state()))
 	TestUtil.check(data is Dictionary, "the report is readable text")
 	if data is Dictionary:

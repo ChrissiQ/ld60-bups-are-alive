@@ -5,7 +5,7 @@ extends SceneTree
 ## state the tray can be in.
 
 
-func _init() -> void:
+func _initialize() -> void:
 	_run()
 
 
@@ -27,6 +27,7 @@ func _same_width(m: Node, what: String) -> void:
 
 func _run() -> void:
 	SimConstants.apply()
+	TestUtil.use_fake_world(self)
 	var chosen := TestUtil.small_start()
 	chosen.bups = 30
 	var m: Node = TestUtil.game_screen(self, chosen)

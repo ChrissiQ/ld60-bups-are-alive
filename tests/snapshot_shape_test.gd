@@ -138,7 +138,7 @@ func _lineage_seam() -> void:
 	fake.feed_lineage(PackedByteArray([1, 2]), PackedByteArray(), 1.5, 0.25)
 	TestUtil.check(fake.calls_of(&"lineage_pending").size() == 1, "no store: logged as pending")
 	var probe := StoreProbe.new()
-	fake.lineage = probe
+	fake.lineage_store = probe
 	fake.feed_lineage(PackedByteArray([1, 2]), PackedByteArray([3]), 1.5, 0.25)
 	TestUtil.check(probe.got == [2, 1, 1.5, 0.25], "a store gets the arguments")
 

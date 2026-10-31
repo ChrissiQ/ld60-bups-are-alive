@@ -39,6 +39,13 @@ static func files(dirs: Array, exts: Array) -> Array:
 	return out
 
 
+## A FakeWorld installed as the simulation the game screens and dishes talk to (SimService.use_backend); the tests that read a dish's bups start with it.
+static func use_fake_world(tree: SceneTree) -> FakeWorld:
+	var fake := FakeWorld.new()
+	tree.root.get_node("SimService").use_backend(fake)
+	return fake
+
+
 ## A dish of the old 300 µm size: tests that place things by hand count on a small, fine grid.
 static func small_start() -> StartConditions:
 	var start := StartConditions.new()

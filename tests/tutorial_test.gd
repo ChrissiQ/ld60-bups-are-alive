@@ -5,6 +5,7 @@ extends SceneTree
 
 
 func _screen(mode: Session.Mode, wanted: bool) -> Node:
+	TestUtil.use_fake_world(self)  # each screen is a new game, with a world of its own
 	Session.mode = mode
 	Session.free_start = TestUtil.small_start()
 	Session.tutorial_wanted = wanted
@@ -16,8 +17,7 @@ func _screen(mode: Session.Mode, wanted: bool) -> Node:
 	return m
 
 
-func _init() -> void:
-
+func _initialize() -> void:
 	# Not asked for: nothing happens.
 	var quiet: Node = await _screen(Session.Mode.FREE, false)
 	TestUtil.check(not quiet.tutorial.active and not quiet.tutorial.visible, "no tour unless it is asked for")
@@ -63,9 +63,8 @@ func _init() -> void:
 			tour.next()
 			TestUtil.check(tour.index == before, "Next does nothing while step %d is not done" % (before + 1))
 			if tour.index > 0 and "bup" in key and "Click" in key:
-				TestUtil.check(m.camera.zoom.x > was_zoom.x, "the step that asks for a click on a bup has the camera close to it")
-				var spot: Vector2 = m.dish.bup_world_pos(m._tutorial_bup)
-				m.dish.select_at(spot, 2.0)
+				TestUtil.check(m.camera.zoom.x > was_zoom.x, "the step that asks for a click on a bup has the camera close to it (%s, was %s, step %d)" % [m.camera.zoom, was_zoom, tour.index])
+				m.dish.selected.bup = m._tutorial_bup  # (a pointer pick needs the picture the GPU draws: a headless run has none)
 			elif "eye" in key:
 				m.inspector.toggle_watch()
 			elif "family tree" in key:
@@ -117,7 +116,7 @@ func _init() -> void:
 	full.meta_pressed = OS.get_name() == "macOS"
 	full.pressed = true
 	TestUtil.check(nt.lets_through(full) and not nt.lets_through(tool_key), "the full screen key passes through the tour to its own handler, a tool key does not")
-	n.dish.select_at(n.dish.bup_world_pos(n._tutorial_bup), 2.0)
+	n.dish.selected.bup = n._tutorial_bup
 	await process_frame
 	await process_frame
 	TestUtil.check(nt.index == 11, "making the click goes straight on")

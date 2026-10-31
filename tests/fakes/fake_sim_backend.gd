@@ -5,13 +5,13 @@ extends SimBackend
 ##
 ## Replies: `submit` completes a command's reply at once when its latency is 0, else after that many `tick()`s. A reply's value and
 ## latency come from the next `script_reply(kind, ...)` queued for that kind, else from `default_reply` and `reply_latency_frames`.
-## Lineage: a test sets `lineage` to a `LineageStore` (or any object with `apply_events`) and `feed_lineage` forwards to it; with none set
+## Lineage: a test sets `lineage_store` to a `LineageStore` (or any object with `apply_events`) and `feed_lineage` forwards to it; with none set
 ## it only logs a "lineage_pending" call.
 
 var simulates := true  ## what `can_simulate` answers (a UI test wants true; set false to see the CPU stub's face)
 var reply_latency_frames := 0  ## frames a reply waits when nothing scripted says otherwise
 var default_reply: Variant = {}  ## the value of an unscripted reply
-var lineage: Object = null  ## the lineage seam: where `feed_lineage` sends events
+var lineage_store: Object = null  ## the lineage seam: where `feed_lineage` sends events (and what `lineage()` answers, as WorldClient asks)
 var calls: Array[Dictionary] = []  ## {kind, args, frame, reply (SimReply or null)} in submit order
 var frame := 0
 var started := false
@@ -90,9 +90,13 @@ func calls_of(kind: StringName) -> Array[Dictionary]:
 	return calls.filter(func(c: Dictionary) -> bool: return c["kind"] == kind)
 
 
+func lineage() -> Object:
+	return lineage_store
+
+
 ## Where a test hands the lineage of an iteration to the lineage seam (`lineage.apply_events`).
 func feed_lineage(births: PackedByteArray, deaths: PackedByteArray, first_step_end: float, step_seconds: float) -> void:
-	if lineage != null:
-		lineage.apply_events(births, deaths, first_step_end, step_seconds)
+	if lineage_store != null:
+		lineage_store.apply_events(births, deaths, first_step_end, step_seconds)
 	else:
 		calls.append({"kind": &"lineage_pending", "args": {"births": births.size(), "deaths": deaths.size()}, "frame": frame, "reply": null})
