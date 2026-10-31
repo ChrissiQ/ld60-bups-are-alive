@@ -12,7 +12,7 @@ func can_simulate() -> bool:
 
 
 func device_name() -> String:
-	return "none"
+	return ""
 
 
 func submit(cmd: SimCommand) -> void:

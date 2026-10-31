@@ -7,7 +7,7 @@ extends SceneTree
 ##  - CommandQueue: three pushes drain as a, b, c, and the queue is empty after; two writer threads of 1,000 commands each arrive all
 ##    2,000, each writer's in its own order; a reader waiting in `wait` wakes on a push.
 ##  - SimReply: not done and null at first; `complete(v)` makes it done with v; a second complete changes nothing; an error comes back.
-##  - CpuSimBackend: cannot simulate; device "none"; a command's reply is done at once with null and no error; the snapshot is empty
+##  - CpuSimBackend: cannot simulate; no device name (""); a command's reply is done at once with null and no error; the snapshot is empty
 ##    (seq 0, no dishes); no view source.
 ##  - WorldClient on the stub: rows 0, 1 for two dishes; after removing 0 the next dish gets 0 again; a freeze's reply is done at once
 ##    (null); a pipette takes the next free row; set_time, ask and set_view send nothing back; `poll` emits nothing for the stub's empty
@@ -94,7 +94,7 @@ func _reply() -> void:
 
 func _stub() -> void:
 	var b := CpuSimBackend.new()
-	TestUtil.check(not b.can_simulate() and b.device_name() == "none", "the stub cannot simulate")
+	TestUtil.check(not b.can_simulate() and b.device_name() == "", "the stub cannot simulate and names no device")
 	var r := SimReply.new()
 	b.submit(SimCommand.new(SimCommand.KIND_FREEZE, {"row": 0}, r))
 	TestUtil.check(r.is_done() and r.value() == null and r.error() == "", "the stub completes a reply at once with nothing")
