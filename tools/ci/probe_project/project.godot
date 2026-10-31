@@ -1,0 +1,8 @@
+; Minimal project for the CI compute probe: no native library, so nothing but the renderer loads.
+config_version=5
+
+[application]
+config/name="ComputeProbe"
+
+[rendering]
+renderer/rendering_method="forward_plus"
