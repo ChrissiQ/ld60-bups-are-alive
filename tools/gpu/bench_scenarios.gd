@@ -341,15 +341,22 @@ func _shots(outdir: String) -> void:
 	var room := minf(view.x * 0.5 - 40.0, view.y * 0.5 - 120.0)
 	var fit := clampf(room / dish.radius, 0.002, 1.0)
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(outdir))
+	var waited := 0
+	while dish.drawing.bups_mesh == null and waited < 1200:  # the dish builds its bup mesh when it is ready, some frames in
+		await process_frame
+		waited += 1
+	dish.show_layer(Dish.Layer.MEDIUM, false)  # the haze is rebuilt in real time; the pictures are of the bups
 	var lines := []
 	for i in SHOT_ZOOMS.size():
 		camera.zoom = Vector2.ONE * fit * SHOT_ZOOMS[i]
 		camera.position = dish.global_position
 		for f in 10:
+			dish.flash = 0.0  # the strike's flash fades in real time and tints the rim
 			dish.refresh_drawing()
 			await process_frame
 		var image := sub.get_texture().get_image()
+		image.convert(Image.FORMAT_RGBA8)
 		var path := outdir.path_join(SHOT_NAMES[i] + ".png")
 		image.save_png(path)
 		lines.append({"file": SHOT_NAMES[i] + ".png", "zoom": camera.zoom.x, "size": str(image.get_size()), "hash": hash(image.get_data())})
-	print("BENCH_RESULT " + JSON.stringify({"scenario": "shots", "bups": dish.population(), "backend": dish.backend_running(), "viewport": str(view), "fit_zoom": fit, "shots": lines, "paused_time_s": dish.time}))
+	print("BENCH_RESULT " + JSON.stringify({"scenario": "shots", "bups": dish.population(), "backend": dish.backend_running(), "viewport": str(view), "fit_zoom": fit, "shots": lines, "waited_frames": waited, "paused_time_s": dish.time}))
