@@ -43,8 +43,10 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define BLOCK_LOOP(F) void main() { uint nb_ = (WORLD[WD_SLOTS] + BLK_SLOTS - 1u) >> BLK_SHIFT; for (uint k_ = gl_WorkGroupID.x; k_ < nb_; k_ += gl_NumWorkGroups.x) { F(k_, BLKDISH[k_]); barrier(); } }
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
 #define LEDGER(d, t, amount) { if (WORLD[WD_LEDGER] != 0u) { float rest_ = (amount); uint lo_ = (d) * DS_WORDS + DS_LEDGER + 2u * (t), hi_ = lo_ + 1u; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); uint old_ = atomicAdd(DSTATE[lo_], q_); if (old_ + q_ < old_) atomicAdd(DSTATE[hi_], 1u); } } }
-const uint DENSITY_WORDS = 4u;
-const uint DENSITY_SCALE = 128u;
+const uint DENSITY_WORDS = 5u;
+const uint DENSITY_ALPHA_SCALE = 1024u;
+const uint DENSITY_COLOUR_SCALE = 16u;
+const uint DENSITY_ROD = 3u;
 const uint DENSITY_BILINEAR = 2u;
 const uint DENSITY_NEAREST = 1u;
 const uint VO_WORDS = 23u;
@@ -83,11 +85,11 @@ layout(set = 0, binding = 2, rgba8) uniform restrict writeonly image2D DENTEX;
 void f(uint k) {
 	uint w = VP[VW_DEN_W];
 	uint o = k * DENSITY_WORDS;
-	uint a = DEN[o + 3u];
+	uint wc = DEN[o + 3u];
 	vec4 colour = vec4(0.0);
-	if (a != 0u) {
-		float area = float(a) / float(DENSITY_SCALE);
-		colour = vec4(vec3(float(DEN[o]), float(DEN[o + 1u]), float(DEN[o + 2u])) / (255.0 * float(a)), 1.0 - exp(-area));
+	if (wc != 0u) {
+		float l = float(DEN[o + 4u]) / float(DENSITY_ALPHA_SCALE);
+		colour = vec4(vec3(float(DEN[o]), float(DEN[o + 1u]), float(DEN[o + 2u])) / (255.0 * float(wc)), 1.0 - exp(-l));
 	}
 	imageStore(DENTEX, ivec2(int(k % w), int(k / w)), colour);
 }

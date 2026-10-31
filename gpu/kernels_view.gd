@@ -36,7 +36,7 @@ const VW_NEAR := 12
 const VW_FINDS := 13  ## 1: find the bups VW_FIND (FINDS ids, the low word then the high; an unused one all ones)
 const VW_FIND := 14
 const FINDS := 2  ## the bups whose place is looked up a frame (the selected and the hovered: their rings)
-const VW_DENSITY := VW_FIND + 2 * FINDS  ## 0: the single-dish path's capsules for every bup; DENSITY_NEAREST or DENSITY_BILINEAR: the bups under their least footprint are splatted (below), not drawn
+const VW_DENSITY := VW_FIND + 2 * FINDS  ## 0: the single-dish path's capsules for every bup; DENSITY_NEAREST, DENSITY_BILINEAR or DENSITY_ROD: the bups under their least footprint are splatted (below), not drawn
 const VW_DEN_W := VW_DENSITY + 1  ## the density picture's size in pixels (the camera's rectangle over the pixel)
 const VW_DEN_H := VW_DENSITY + 2
 const VW_WORDS := VW_DEN_H + 1
@@ -56,15 +56,19 @@ const VO_WORDS := VO_LARGE + 1
 
 ## Density mode: a bup under its least footprint (its length below Cell.MIN_VISIBLE_LENGTH_PX
 ## screen pixels: the single-dish path's capsule is then the least footprint, a rod of that length and width) adds its coverage to the pixels it lies on
-## instead of being drawn, four uint sums a pixel in DEN: its colour (bytes) times its footprint's area in pixels, three words, and the
-## area, in 1/DENSITY_SCALE of a pixel. density_resolve writes the picture the canvas draws over the dish: the mean colour with coverage
-## 1 - exp(-area), what the same footprints scattered at random would cover of the pixel (the single-dish path's blending leaves the product of what each
-## leaves uncovered). One bup adds at most 255 * 128 * 1.8 to a colour sum, so a pixel holds 4.29e9 / that = 73,000 of them before the
-## red sum wraps, about as many as fit side by side in a 375 µm pixel.
+## instead of being drawn. A pixel's coverage is what the single-dish path's blending leaves: 1 - the product of what each footprint leaves uncovered of
+## it, so each footprint adds L = -ln(1 - its share of the pixel) to a sum, and the pixel's coverage is 1 - exp(-sum L): one bup on a
+## pixel covers what its share is, and a crowd saturates. Five uint sums a pixel in DEN: the colour (bytes) times a weight, three words,
+## the weight (L in 1/DENSITY_COLOUR_SCALE, at least 1 so a faint footprint still has a colour) and the L sum in 1/DENSITY_ALPHA_SCALE.
+## One bup adds at most 255 * 85 to a colour sum (a share is held under 0.995, L under 5.3), so a pixel holds 4.29e9 / that = 198,000 of
+## them before the red sum wraps; the L sum wraps at 790,000. density_resolve writes the picture the canvas draws over the dish: the mean
+## colour with that coverage.
 const DENSITY_NEAREST := 1  ## the whole footprint on the pixel the bup's middle lies in
-const DENSITY_BILINEAR := 2  ## the footprint shared among the four pixels whose middles are nearest (the way a capsule of that size covers them)
-const DENSITY_SCALE := 128
-const DENSITY_WORDS := 4  ## the sums a pixel
+const DENSITY_BILINEAR := 2  ## the footprint shared among the four pixels whose middles are nearest (a square pixel's worth of it spread as it overlaps them)
+const DENSITY_ROD := 3  ## the footprint as two such squares along the bup's axis, each half its area (the rod a capsule of the least size is)
+const DENSITY_COLOUR_SCALE := 16
+const DENSITY_ALPHA_SCALE := 1024
+const DENSITY_WORDS := 5  ## the sums a pixel
 
 const TYPES := {"VP": "uint", "VCOUNT": "uint", "VOFFS": "uint", "VPD": "uint", "VOUT": "uint", "INST": "vec4", "DEN": "uint"}
 
@@ -250,15 +254,27 @@ GRID_LOOP(f, VP[VW_DEN_W] * VP[VW_DEN_H] * DENSITY_WORDS)
 ## width, no less than the least width, with round ends: Cell.MIN_VISIBLE_*_PX and the body's own width), its area in pixels.
 const K_DENSITY_SPLAT := """
 const float PI_QUARTER = 0.7853982;
-void put(ivec2 at, float weight, uvec3 rgb) {
+void put(ivec2 at, float share, uvec3 rgb) {
 	if (at.x < 0 || at.y < 0 || at.x >= int(VP[VW_DEN_W]) || at.y >= int(VP[VW_DEN_H])) return;
-	uint w = uint(weight * float(DENSITY_SCALE) + 0.5);
-	if (w == 0u) return;
+	float l = -log(1.0 - min(share, 0.995));
+	uint wa = uint(l * float(DENSITY_ALPHA_SCALE) + 0.5);
+	if (wa == 0u) return;
+	uint wc = max(uint(l * float(DENSITY_COLOUR_SCALE) + 0.5), 1u);
 	uint o = (uint(at.y) * VP[VW_DEN_W] + uint(at.x)) * DENSITY_WORDS;
-	atomicAdd(DEN[o], w * rgb.x);
-	atomicAdd(DEN[o + 1u], w * rgb.y);
-	atomicAdd(DEN[o + 2u], w * rgb.z);
-	atomicAdd(DEN[o + 3u], w);
+	atomicAdd(DEN[o], wc * rgb.x);
+	atomicAdd(DEN[o + 1u], wc * rgb.y);
+	atomicAdd(DEN[o + 2u], wc * rgb.z);
+	atomicAdd(DEN[o + 3u], wc);
+	atomicAdd(DEN[o + 4u], wa);
+}
+void tent(vec2 u, float area, uvec3 rgb) {
+	vec2 v = u - 0.5;
+	ivec2 p0 = ivec2(floor(v));
+	vec2 t = v - vec2(p0);
+	put(p0, area * (1.0 - t.x) * (1.0 - t.y), rgb);
+	put(p0 + ivec2(1, 0), area * t.x * (1.0 - t.y), rgb);
+	put(p0 + ivec2(0, 1), area * (1.0 - t.x) * t.y, rgb);
+	put(p0 + ivec2(1, 1), area * t.x * t.y, rgb);
 }
 void f(uint k) {
 	uvec4 px = payload_at(k);
@@ -275,17 +291,16 @@ void f(uint k) {
 	float area = max(length_px - width_px, 0.0) * width_px + PI_QUARTER * width_px * width_px;
 	uint c = px[PL_COLOR];
 	uvec3 rgb = uvec3((c >> PL_RED_SHIFT) & 255u, (c >> PL_GREEN_SHIFT) & 255u, (c >> PL_BLUE_SHIFT) & 255u);
-	if (VP[VW_DENSITY] == DENSITY_NEAREST) {
+	uint mode = VP[VW_DENSITY];
+	if (mode == DENSITY_NEAREST) {
 		put(ivec2(floor(u)), area, rgb);
-		return;
+	} else if (mode == DENSITY_BILINEAR) {
+		tent(u, area, rgb);
+	} else {
+		vec2 along = vec2(cos(shape.y), sin(shape.y)) * (0.25 * length_px);
+		tent(u - along, 0.5 * area, rgb);
+		tent(u + along, 0.5 * area, rgb);
 	}
-	vec2 v = u - 0.5;
-	ivec2 p0 = ivec2(floor(v));
-	vec2 t = v - vec2(p0);
-	put(p0, area * (1.0 - t.x) * (1.0 - t.y), rgb);
-	put(p0 + ivec2(1, 0), area * t.x * (1.0 - t.y), rgb);
-	put(p0 + ivec2(0, 1), area * (1.0 - t.x) * t.y, rgb);
-	put(p0 + ivec2(1, 1), area * t.x * t.y, rgb);
 }
 GRID_LOOP(f, VP[VW_COUNT])
 """
@@ -295,11 +310,11 @@ const K_DENSITY_RESOLVE := """
 void f(uint k) {
 	uint w = VP[VW_DEN_W];
 	uint o = k * DENSITY_WORDS;
-	uint a = DEN[o + 3u];
+	uint wc = DEN[o + 3u];
 	vec4 colour = vec4(0.0);
-	if (a != 0u) {
-		float area = float(a) / float(DENSITY_SCALE);
-		colour = vec4(vec3(float(DEN[o]), float(DEN[o + 1u]), float(DEN[o + 2u])) / (255.0 * float(a)), 1.0 - exp(-area));
+	if (wc != 0u) {
+		float l = float(DEN[o + 4u]) / float(DENSITY_ALPHA_SCALE);
+		colour = vec4(vec3(float(DEN[o]), float(DEN[o + 1u]), float(DEN[o + 2u])) / (255.0 * float(wc)), 1.0 - exp(-l));
 	}
 	imageStore(DENTEX, ivec2(int(k % w), int(k / w)), colour);
 }
@@ -314,7 +329,7 @@ static func declarations() -> String:
 	var names: Array = constants.keys()
 	names.sort()
 	for name: String in names:
-		if (name.begins_with("VW_") or name.begins_with("VO_") or name == "FINDS" or name in ["DENSITY_NEAREST", "DENSITY_BILINEAR", "DENSITY_SCALE", "DENSITY_WORDS"]) and constants[name] is int:
+		if (name.begins_with("VW_") or name.begins_with("VO_") or name == "FINDS" or name in ["DENSITY_NEAREST", "DENSITY_BILINEAR", "DENSITY_ROD", "DENSITY_COLOUR_SCALE", "DENSITY_ALPHA_SCALE", "DENSITY_WORDS"]) and constants[name] is int:
 			text += "const uint %s = %du;\n" % [name, constants[name]]
 	return text
 
