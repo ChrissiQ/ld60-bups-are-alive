@@ -16,6 +16,7 @@ const uint DP_CELLS = 1u;
 const uint DP_FIELD_BASE = 0u;
 const uint DP_WORDS = 32u;
 const uint DS_COUNT = 1u;
+const uint DS_DONORS = 11u;
 const uint DS_SEED = 7u;
 const uint DS_START = 0u;
 const uint DS_STEP = 8u;
@@ -69,6 +70,7 @@ uint conj_mask() { return CONJ_BUCKETS - 1u; }
 uint dbucket(uint d, int cx, int cy, uint mask) { return hash(uint(cx) * 73856093u ^ uint(cy) * 19349663u ^ d * 83492791u) & mask; }
 
 void conj_scatter(uint i, uint d, uint l) {
+	if (DS(d, DS_DONORS) == 0u) return;
 	uint h = CBKT[i];
 	if (h != NOT_DONOR) DLIST[atomicAdd(DOFF[h], 1u)] = i;
 }

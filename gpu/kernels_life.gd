@@ -498,6 +498,7 @@ BUP_LOOP(conj_count)
 
 const K_POOL_CONJ_SCATTER := """
 void conj_scatter(uint i, uint d, uint l) {
+	if (DS(d, DS_DONORS) == 0u) return;
 	uint h = CBKT[i];
 	if (h != NOT_DONOR) DLIST[atomicAdd(DOFF[h], 1u)] = i;
 }

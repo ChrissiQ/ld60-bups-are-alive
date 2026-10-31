@@ -836,14 +836,49 @@ func bench(w: World, state: Dictionary, rec: Callable, reps: int) -> float:
 	return median(t)
 
 
+## records_of for a big dish, faster: the same words, laid out from a template.
+func records_fast(s: Dictionary) -> PackedByteArray:
+	var r := RandomNumberGenerator.new()
+	r.seed = s["seed"]
+	var n: int = s["n"]
+	var add: float = consts["add_mass_factor"] * 16.0
+	var tmpl := records_of(spec(0, 1, 1, 1)).to_float32_array()
+	var f := PackedFloat32Array()
+	f.resize(n * W)
+	for k in n:
+		var o := k * W
+		for word in W:
+			f[o + word] = tmpl[word]
+		var a := r.randf() * TAU
+		var rad := sqrt(r.randf()) * float(s["pack"])
+		f[o + L.R_X] = cos(a) * rad
+		f[o + L.R_Y] = sin(a) * rad
+		f[o + L.R_MASS] = add * (2.05 if r.randf() < float(s["ready"]) else 1.0 + r.randf())
+		f[o + L.R_SPEED] = 20.0 + r.randf() * 10.0
+		f[o + L.R_DONOR] = 1.0 if r.randf() < float(s["donors"]) else 0.0
+	var out := f.to_byte_array()
+	for k in n:
+		L.set_id(out, k, k + 1)
+	return out
+
+
 func timing(n: int) -> void:
 	var reps := 7
 	var s := spec(0, n, 5, n, 0.02, false, 80000.0, -1, 0.05)
 	var phys := int(s["cap"])
 	print("C6 %d bups in one dish, capacity %d, bup_groups %d, scan_groups %d, conj buckets %d" % [n, phys, GpuKernels.bup_groups(n), GpuKernels.scan_groups(n), GpuKernelsLife.conj_buckets(n)])
-	var t := today_world(s, phys)
+	var recs := records_fast(s)
+	var t := make_world(phys, true, s["cap"])
+	put(t, "BUPS", recs)
+	var cnt := zeros(L.CNT_WORDS * 4)
+	cnt.encode_u32(L.CNT_BUPS * 4, n)
+	cnt.encode_u32(L.CNT_NEXT_ID_LO * 4, n + 1)
+	cnt.encode_u32(L.CNT_SEED * 4, s["seed"])
+	put(t, "CNT", cnt)
+	set_p(t, "capacity", s["cap"])
+	set_p(t, "limit", s["limit"])
 	var p := make_world(phys)
-	put(p, "BUPS", get_bytes(t, "BUPS"))
+	put(p, "BUPS", recs)
 	var dp := zeros(L.DP_WORDS * 4)
 	dp.encode_u32(L.DP_LIMIT * 4, s["limit"])
 	dp.encode_u32(L.DP_CAP * 4, s["cap"])
@@ -862,55 +897,68 @@ func timing(n: int) -> void:
 	put(p, "WORLD", wd, L.WD_SLOTS * 4)
 	var g := GpuKernels.bup_groups(n)
 	var gs := GpuKernels.scan_groups(n)
-	var pool_names := ["BUPS", "CHILD", "SURV", "KID", "EXCS", "EXCK", "DSTATE", "DNEXT", "WORLD", "BLKDISH", "DCNT", "DOFF"]
-	var today_names := ["BUPS", "CHILD", "SURV", "KID", "EXCS", "EXCK", "CNT"]
-	var p0 := snapshot(p, pool_names)
-	var t0 := snapshot(t, today_names)
+	var small_p := ["DSTATE", "DNEXT", "WORLD", "BLKDISH"]
+	var tsm0 := snapshot(t, ["CNT"])
+	var psm0 := snapshot(p, small_p)
 	var noop := bench(p, {}, func(cl: int) -> void: disp(cl, p, "noop", 1), reps)
-	var rows_out := []
+	print("noop list %.0f us" % noop)
+	var sums := [0.0, 0.0]
 	var row := func(name: String, today_us: float, pool_us: float) -> void:
 		var a := today_us - noop
 		var b := pool_us - noop
-		rows_out.append([name, a, b])
+		sums[0] += a
+		sums[1] += b
 		print("TIME %s: today %.0f us, pooled %.0f us%s" % [name, a, b, (", ratio %.3f" % (b / a)) if a > 0.0 else ""])
-	# the conjugation, then life, on the state as made
-	row.call("conj (2% donors)", bench(t, t0, func(cl: int) -> void:
+	var with_bups := func(st: Dictionary) -> Dictionary:
+		var d := st.duplicate()
+		d["BUPS"] = recs
+		return d
+	row.call("conj (2% donors)", bench(t, tsm0, func(cl: int) -> void:
 		disp(cl, t, "conj_clear", threads("conj_clear", 65536 * 4 + 2048))
 		disp(cl, t, "conj_insert", threads("conj_insert", t.cap))
-		disp(cl, t, "conj_apply", threads("conj_apply", t.cap)), reps), bench(p, p0, func(cl: int) -> void: pool_conj(cl, p, g), reps))
-	row.call("life", bench(t, t0, func(cl: int) -> void: disp(cl, t, "life", threads("life", t.cap)), reps), bench(p, p0, func(cl: int) -> void: disp(cl, p, "pool_life", g), reps))
-	# the state after life: the scans, finalize, events, the compaction
+		disp(cl, t, "conj_apply", threads("conj_apply", t.cap)), reps), bench(p, psm0, func(cl: int) -> void: pool_conj(cl, p, g), reps))
+	row.call("life", bench(t, with_bups.call(tsm0), func(cl: int) -> void: disp(cl, t, "life", threads("life", t.cap)), reps), bench(p, with_bups.call(psm0), func(cl: int) -> void: disp(cl, p, "pool_life", g), reps))
+	restore(t, with_bups.call(tsm0))
+	restore(p, with_bups.call(psm0))
 	run_list(func(cl: int) -> void: disp(cl, t, "life", threads("life", t.cap)))
 	run_list(func(cl: int) -> void: disp(cl, p, "pool_life", g))
-	var t1 := snapshot(t, today_names)
-	var p1 := snapshot(p, pool_names)
-	row.call("scans (2)", bench(t, t1, func(cl: int) -> void:
+	row.call("scans (2)", bench(t, {}, func(cl: int) -> void:
 		today_scan(cl, t, "s")
-		today_scan(cl, t, "k"), reps), bench(p, p1, func(cl: int) -> void:
+		today_scan(cl, t, "k"), reps), bench(p, {}, func(cl: int) -> void:
 		gscan(cl, p, "pool_scan_s", gs)
 		gscan(cl, p, "pool_scan_k", gs), reps))
-	run_list(func(cl: int) -> void:
-		today_scan(cl, t, "s")
-		today_scan(cl, t, "k"))
-	run_list(func(cl: int) -> void:
-		gscan(cl, p, "pool_scan_s", gs)
-		gscan(cl, p, "pool_scan_k", gs))
-	var t2 := snapshot(t, today_names)
-	var p2 := snapshot(p, pool_names)
-	row.call("finalize", bench(t, t2, func(cl: int) -> void: disp(cl, t, "finalize", 1), reps), bench(p, p2, func(cl: int) -> void: disp(cl, p, "pool_finalize", 1), reps))
+	var tsm1 := snapshot(t, ["CNT"])
+	var psm1 := snapshot(p, small_p)
+	row.call("finalize", bench(t, tsm1, func(cl: int) -> void: disp(cl, t, "finalize", 1), reps), bench(p, psm1, func(cl: int) -> void: disp(cl, p, "pool_finalize", 1), reps))
+	restore(t, tsm1)
+	restore(p, psm1)
 	run_list(func(cl: int) -> void: disp(cl, t, "finalize", 1))
 	run_list(func(cl: int) -> void: disp(cl, p, "pool_finalize", 1))
-	var t3 := snapshot(t, today_names)
-	var p3 := snapshot(p, pool_names)
-	row.call("events", bench(t, t3, func(cl: int) -> void: disp(cl, t, "events", threads("events", t.cap)), reps), bench(p, p3, func(cl: int) -> void: disp(cl, p, "pool_events", g), reps))
-	row.call("blk_fill", 0.0 + noop, bench(p, p3, func(cl: int) -> void: disp(cl, p, "pool_blk_fill", maxi(1, g / 64)), reps))
-	row.call("compact (+ copy today)", bench(t, t3, func(cl: int) -> void:
+	var tsm2 := snapshot(t, ["CNT"])
+	var psm2 := snapshot(p, small_p)
+	print("after life: %d kept, %d newborn" % [ds_word(p, 0, L.DS_SURVIVORS), ds_word(p, 0, L.DS_NEWBORN)])
+	row.call("events", bench(t, tsm2, func(cl: int) -> void: disp(cl, t, "events", threads("events", t.cap)), reps), bench(p, psm2, func(cl: int) -> void: disp(cl, p, "pool_events", g), reps))
+	row.call("blk_fill", noop, bench(p, psm2, func(cl: int) -> void: disp(cl, p, "pool_blk_fill", maxi(1, g / 64)), reps))
+	row.call("compact (+ copy today)", bench(t, tsm2, func(cl: int) -> void:
 		disp(cl, t, "compact", threads("compact", t.cap * 7))
-		disp(cl, t, "copy", threads("copy", t.cap * 7)), reps), bench(p, p3, func(cl: int) -> void: disp(cl, p, "pool_compact", g), reps))
-	row.call("setcount", bench(t, t3, func(cl: int) -> void: disp(cl, t, "setcount", 1), reps), bench(p, p3, func(cl: int) -> void: disp(cl, p, "pool_setcount", L.D_MAX / 64, 1.0), reps))
-	row.call("stats (1 + 2)", bench(t, t0, func(cl: int) -> void: today_stats(cl, t, 0), reps), bench(p, p0, func(cl: int) -> void: pool_stats(cl, p, g, 0), reps))
-	row.call("bup step (conj to setcount)", bench(t, t0, func(cl: int) -> void: today_step(cl, t, 0, false), reps), bench(p, p0, func(cl: int) -> void: pool_step(cl, p, 0, g, gs, "pool_conj_apply", false), reps))
-	# the pipette: a new empty dish in row 1, half of the dish moved
+		disp(cl, t, "copy", threads("copy", t.cap * 7)), reps), bench(p, psm2, func(cl: int) -> void: disp(cl, p, "pool_compact", g), reps))
+	row.call("setcount", bench(t, tsm2, func(cl: int) -> void: disp(cl, t, "setcount", 1), reps), bench(p, psm2, func(cl: int) -> void: disp(cl, p, "pool_setcount", L.D_MAX / 64, 1.0), reps))
+	row.call("stats (1 + 2)", bench(t, tsm2, func(cl: int) -> void: today_stats(cl, t, 0), reps), bench(p, psm2, func(cl: int) -> void: pool_stats(cl, p, g, 0), reps))
+	print("SUM of the parts: today %.0f us, pooled %.0f us" % [sums[0], sums[1]])
+	row.call("bup step (conj to setcount, one list)", bench(t, with_bups.call(tsm0), func(cl: int) -> void: today_step(cl, t, 0, false), reps), bench(p, with_bups.call(psm0), func(cl: int) -> void: pool_step(cl, p, 0, g, gs, "pool_conj_apply", false), reps))
+	# no donors: the conjugation's cost with nothing to transfer
+	var nod := recs.duplicate()
+	for k in n:
+		nod.encode_float(k * RB + L.R_DONOR * 4, 0.0)
+	put(t, "BUPS", nod)
+	put(p, "BUPS", nod)
+	row.call("conj (no donors)", bench(t, tsm0, func(cl: int) -> void:
+		disp(cl, t, "conj_clear", threads("conj_clear", 65536 * 4 + 2048))
+		disp(cl, t, "conj_insert", threads("conj_insert", t.cap))
+		disp(cl, t, "conj_apply", threads("conj_apply", t.cap)), reps), bench(p, psm0, func(cl: int) -> void: pool_conj(cl, p, g), reps))
+	# the pipette: a new empty dish in row 1, about half of the dish moved
+	put(p, "BUPS", recs)
+	restore(p, psm0)
 	var dp1 := zeros(L.DP_WORDS * 4)
 	dp1.encode_u32(L.DP_LIMIT * 4, s["limit"])
 	dp1.encode_u32(L.DP_CAP * 4, s["cap"])
@@ -920,9 +968,10 @@ func timing(n: int) -> void:
 	var ds1 := zeros(L.DS_WORDS * 4)
 	ds1.encode_u32(L.DS_START * 4, (n + 255) / 256 * 256)
 	put(p, "DSTATE", ds1, L.DS_WORDS * 4)
-	var p4 := snapshot(p, pool_names)
-	row.call("retarget pass (half moved)", 0.0 + noop, bench(p, p4, func(cl: int) -> void: pip_pass(cl, p, [0, 1, 0.0, 0.0, 80000.0 * 0.7071], g, gs), reps))
-	ok(true, "C6 timing done (%d rows)" % rows_out.size())
+	var psm4 := snapshot(p, small_p)
+	row.call("retarget pass (half moved)", noop, bench(p, psm4, func(cl: int) -> void: pip_pass(cl, p, [0, 1, 0.0, 0.0, 80000.0 * 0.7071], g, gs), reps))
+	print("moved %d" % ds_word(p, 1, L.DS_COUNT))
+	ok(true, "C6 timing done")
 	free_world(t)
 	free_world(p)
 
