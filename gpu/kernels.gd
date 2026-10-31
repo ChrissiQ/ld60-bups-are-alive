@@ -3,7 +3,8 @@ extends RefCounted
 ## How the GPU's compute kernels are made: each is GLSL text and the buffers it binds, written by concern in its own file with its
 ## registration (gpu/kernels_field.gd, kernels_life.gd, kernels_clouds.gd, kernels_game.gd, kernels_draw.gd: each has a `register(out)`
 ## that calls `add` for its kernels). `all()` gives every kernel's complete file text; tools/gen_gpu_shaders.gd writes those to
-## gpu/shaders/<name>.glsl, which the game imports (SPIR-V) and GpuSim loads. After editing a kernel run the generator and then
+## gpu/shaders/<name>.glsl, which the game imports (SPIR-V) and GpuSim or a ShaderSet (gpu/shader_set.gd) loads. Kernels over the pooled
+## world loop over it with POOL_FUNCS' macros. After editing a kernel run the generator and then
 ## `godot --headless --path . --import` (tests/gpu_shaders_test.gd checks both were done). Any change to the model must be made in the
 ## kernels and in the C++ simulation.
 
@@ -28,6 +29,23 @@ const TYPES := {
 	# the dish asks each frame (QIN) and the answers (OUT: counts, query answers, stats samples, as uint words; floats by their bits),
 	# the stats' partial sums (SPART), the eraser's discs (ERASE), the per-bup scratch of a pick (QD) and the field's copy (MIRROR).
 	"EVB": "uint", "EVD": "uint", "EVN": "uint", "QIN": "uint", "OUT": "uint", "OUTK": "uint", "SPART": "float", "ERASE": "vec4", "QD": "uint", "MIRROR": "float",
+	# The pooled world (gpu/gpu_layout.gd, "the pooled world"): the world's totals (WORLD, WD_*), the dish tables (DISHP: DP_* words, floats
+	# by their bits; DSTATE: DS_* words), the dish row of each block of BLK_SLOTS slots for the records in BUPS (BLKDISH) and in BUPS2
+	# (BLKDISH2), the dish row of each field cell (CELLDISH), and the pipette's scratch (PIPDST).
+	"WORLD": "uint", "DISHP": "uint", "DSTATE": "uint", "BLKDISH": "uint", "BLKDISH2": "uint", "CELLDISH": "uint", "PIPDST": "uint",
+}
+
+## Buffers that are another type's view of a buffer: a binding of the view's name binds the buffer named here.
+const VIEWS := {
+	"BUPS_U": "BUPS", "BUPS_V4U": "BUPS", "BUPS2_V4U": "BUPS2", "CHILD_U": "CHILD", "CHILD_V4U": "CHILD", "PUFF_V": "PUFF", "PUFF2_V": "PUFF2",
+}
+
+## The ping-pong pairs, by group: a kernel reads the first of a pair and a compaction writes the second, and the next pass reads the second
+## through the same kernels by binding it under the first's name (a uniform set with the group flipped), so nothing is copied back. The
+## records and their block table flip together at every compaction of the records; the clouds at every compaction of the clouds.
+const PING_PONG := {
+	"records": [["BUPS", "BUPS2"], ["BLKDISH", "BLKDISH2"]],
+	"clouds": [["PUFF", "PUFF2"]],
 }
 
 # The layouts of P, the bup records (BUPS, BUPS2, CHILD), CNT, PCNT, the family events (EVB, EVD), QIN and OUT are in gpu/gpu_layout.gd
@@ -56,6 +74,121 @@ const THREAD_FUNCS := """
 #define BUP_THREAD uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS]) return;
 #define BUP_RECORD_THREAD BUP_THREAD uint b = i * RECORD_WORDS;
 #define CELL_THREAD uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
+"""
+
+## The pooled world's kernels. A kernel over the pool is written as a function of one item and ends with the loop that calls it, which
+## is its `main`: every thread takes the items gid, gid + the grid's threads, ... up to a bound read on the device, so a kernel is
+## dispatched with a fixed number of groups whatever the counts (GpuKernels.bup_groups) and pays nothing for empty slots. A `return` in
+## the function goes on to the thread's next item. The loops, and the buffers they bind besides the kernel's own:
+## - GRID_LOOP(F, BOUND): F(k) for every k < BOUND (an expression; a kernel over pieces of records, say).
+## - SLOT_LOOP(F): F(i, d, l) for every slot i < WORLD[WD_SLOTS]: d the row of the slot's dish (NO_DISH for a block of no dish, l then
+##   NO_DISH too), l its place in the dish's segment (l >= DS(d, DS_COUNT): a slot past the dish's bups). WORLD, BLKDISH, DSTATE.
+## - BUP_LOOP(F): F(i, d, l) for every slot that holds a bup: i the slot (the record's place), d the dish's row, l the bup's place in its
+##   dish (its random streams and its ranks are keyed by l, so a dish's run does not depend on where its segment lies). WORLD, BLKDISH, DSTATE.
+## - BLOCK_LOOP(F): F(k, d) for every block k of BLK_SLOTS slots (a kernel of BLK_SLOTS threads, one a slot of the block, that shares
+##   memory across them): d the block's dish row or NO_DISH, the same for every thread of the group, so F may use barrier(). WORLD, BLKDISH.
+## - CELL_LOOP(F, BOUND): F(c, d, l) for every field cell c < BOUND that belongs to a dish: d its row, l its place in the dish's grid
+##   (l / DP_CELLS across). CELLDISH, DISHP.
+## The dish's own words: DS(d, word) (DSTATE, read or written), DPU(d, word) and DPF(d, word) (DISHP as uint or float), DISH_STREAM(d, l,
+## salt) the random stream of the dish's bup l this step (the single dish's formula with the dish's seed and step), DISH_KEY(d) the key
+## of the dish's step (its seed and step).
+const POOL_FUNCS := """
+#define DS(d, w) DSTATE[(d) * DS_WORDS + (w)]
+#define DPU(d, w) DISHP[(d) * DP_WORDS + (w)]
+#define DPF(d, w) uintBitsToFloat(DISHP[(d) * DP_WORDS + (w)])
+#define DISH_KEY(d) (DS(d, DS_SEED) ^ DS(d, DS_STEP))
+#define DISH_STREAM(d, l, salt) hash(hash(DS(d, DS_SEED) ^ (DS(d, DS_STEP) * 0x85EBCA6BU) ^ (salt)) + (l) * 0x9E3779B9U)
+#define GRID_STRIDE (gl_NumWorkGroups.x * gl_WorkGroupSize.x)
+#define GRID_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint k_ = gl_GlobalInvocationID.x; k_ < n_; k_ += GRID_STRIDE) F(k_); }
+#define SLOT_LOOP(F) void main() { uint n_ = WORLD[WD_SLOTS]; for (uint i_ = gl_GlobalInvocationID.x; i_ < n_; i_ += GRID_STRIDE) { uint d_ = BLKDISH[i_ >> BLK_SHIFT]; if (d_ == NO_DISH) F(i_, NO_DISH, NO_DISH); else F(i_, d_, i_ - DS(d_, DS_START)); } }
+#define BUP_LOOP(F) void main() { uint n_ = WORLD[WD_SLOTS]; for (uint i_ = gl_GlobalInvocationID.x; i_ < n_; i_ += GRID_STRIDE) { uint d_ = BLKDISH[i_ >> BLK_SHIFT]; if (d_ == NO_DISH) continue; uint l_ = i_ - DS(d_, DS_START); if (l_ < DS(d_, DS_COUNT)) F(i_, d_, l_); } }
+#define BLOCK_LOOP(F) void main() { uint nb_ = (WORLD[WD_SLOTS] + BLK_SLOTS - 1u) >> BLK_SHIFT; for (uint k_ = gl_WorkGroupID.x; k_ < nb_; k_ += gl_NumWorkGroups.x) { F(k_, BLKDISH[k_]); barrier(); } }
+#define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
+"""
+
+## The buffers each of POOL_FUNCS' macros reads (a kernel that uses the macro must bind them).
+const POOL_MACRO_BUFFERS := {
+	"GRID_LOOP": [], "SLOT_LOOP": ["WORLD", "BLKDISH", "DSTATE"], "BUP_LOOP": ["WORLD", "BLKDISH", "DSTATE"], "BLOCK_LOOP": ["WORLD", "BLKDISH"],
+	"CELL_LOOP": ["CELLDISH", "DISHP"], "DS": ["DSTATE"], "DPU": ["DISHP"], "DPF": ["DISHP"], "DISH_KEY": ["DSTATE"], "DISH_STREAM": ["DSTATE"],
+}
+
+## The groups of 64 a per-bup kernel of the pool is dispatched with, for `slots` slots in use (the host's last WORLD[WD_SLOTS]; only the
+## speed depends on it): about two slots a thread, from 64 groups up to 16,384 (M1 Pro, at 2M bups: 16,384 groups within 1.02
+## of a thread a slot for swim, life, compact and copy; 4,096 groups 1.19, with compact's and copy's memory traffic starved).
+static func bup_groups(slots: int) -> int:
+	return clampi(ceili(slots / 128.0), 64, 16384)
+
+
+## The groups of a grid scan of `elements` (GpuKernels.add_grid_scan): each group scans a chunk of elements / groups, then one group scans
+## the groups' sums, so the cost is least near sqrt(elements) / 2.8 groups (M1 Pro: best at about 512 at 2.1M elements and at
+## 100 to 200 at 100k).
+static func scan_groups(elements: int) -> int:
+	return clampi(int(sqrt(float(elements)) * 0.35), 1, 4096)
+
+
+## An exclusive prefix sum over a count read on the device (COUNT), in two levels on a fixed grid (GpuKernels.add_grid_scan): each of G
+## groups of 256 scans a chunk of ceil(S / G) elements in tiles, carrying the tiles' sums, and keeps the chunk's sum; one group scans the
+## G sums (pcs.pa = G); each group adds its chunk's offset. Integers, so the result does not depend on the order the threads run in.
+const K_GSCAN_CHUNKS := """
+shared uint tmp[256];
+void main() {
+	uint S = (COUNT), G = gl_NumWorkGroups.x, g = gl_WorkGroupID.x, lid = gl_LocalInvocationID.x;
+	uint C = (S + G - 1u) / G;
+	uint start = min(g * C, S), end = min(start + C, S);
+	uint carry = 0u;
+	for (uint base = start; base < end; base += 256u) {
+		uint idx = base + lid;
+		uint v = idx < end ? SRC[idx] : 0u;
+		tmp[lid] = v;
+		barrier();
+		for (uint off = 1u; off < 256u; off <<= 1u) {
+			uint t = lid >= off ? tmp[lid - off] : 0u;
+			barrier();
+			tmp[lid] += t;
+			barrier();
+		}
+		if (idx < end) DST[idx] = carry + tmp[lid] - v;
+		uint total = tmp[255];
+		barrier();
+		carry += total;
+	}
+	if (lid == 0u) SUMS[g] = carry;
+}
+"""
+
+const K_GSCAN_SUMS := """
+shared uint tmp[256];
+void main() {
+	if (gl_WorkGroupID.x != 0u) return;
+	uint G = uint(pcs.pa), lid = gl_LocalInvocationID.x;
+	uint carry = 0u;
+	for (uint base = 0u; base < G; base += 256u) {
+		uint idx = base + lid;
+		uint v = idx < G ? SUMS[idx] : 0u;
+		tmp[lid] = v;
+		barrier();
+		for (uint off = 1u; off < 256u; off <<= 1u) {
+			uint t = lid >= off ? tmp[lid - off] : 0u;
+			barrier();
+			tmp[lid] += t;
+			barrier();
+		}
+		if (idx < G) OFFS[idx] = carry + tmp[lid] - v;
+		uint total = tmp[255];
+		barrier();
+		carry += total;
+	}
+}
+"""
+
+const K_GSCAN_ADD := """
+void main() {
+	uint S = (COUNT), G = gl_NumWorkGroups.x, g = gl_WorkGroupID.x;
+	uint C = (S + G - 1u) / G;
+	uint start = min(g * C, S), end = min(start + C, S);
+	uint add = OFFS[g];
+	for (uint idx = start + gl_LocalInvocationID.x; idx < end; idx += 256u) DST[idx] += add;
+}
 """
 
 ## Sums that many threads add to at once, in fixed point: a 64-bit unsigned number in two words (`LO`, `HI` name the two buffers), so that the
@@ -116,7 +249,7 @@ static func all() -> Dictionary:
 
 ## One kernel: the header with its local size, a declaration for each buffer (binding = position in `buffer_names`; its element type
 ## from TYPES here, the simulation's buffers, or from `types` for buffers of the caller's own), the names of gpu/gpu_layout.gd the code
-## uses (`layout_names`), FUNCS, `extra`, then the code.
+## uses (`layout_names`), FUNCS, POOL_FUNCS when the kernel uses one of its macros, `extra`, then the code.
 static func add(out: Dictionary, kernel_name: String, body: String, buffer_names: Array, extra := "", local := 64, types := {}) -> void:
 	assert(not out.has(kernel_name), "kernel %s is defined twice" % kernel_name)
 	var src := HEAD.replace("local_size_x = 64", "local_size_x = " + str(local))
@@ -124,7 +257,12 @@ static func add(out: Dictionary, kernel_name: String, body: String, buffer_names
 		var b: String = buffer_names[k]
 		var type: String = TYPES[b] if TYPES.has(b) else types[b]
 		src += "layout(set = 0, binding = %d, std430) buffer B_%s { %s %s[]; };\n" % [k, b, type, b]
-	var code := FUNCS + THREAD_FUNCS + extra + body
+	var pool := pool_macros_used(extra + body)
+	for macro: String in pool:
+		for b: String in POOL_MACRO_BUFFERS[macro]:
+			assert(buffer_names.has(b), "kernel %s uses %s, which reads %s: bind it" % [kernel_name, macro, b])
+	assert(not pool.has("BLOCK_LOOP") or local == GpuLayout.BLK_SLOTS, "kernel %s uses BLOCK_LOOP: its groups must be %d threads" % [kernel_name, GpuLayout.BLK_SLOTS])
+	var code := FUNCS + THREAD_FUNCS + (POOL_FUNCS if not pool.is_empty() else "") + extra + body
 	var names := layout_names()
 	var used := {}
 	for m in _words().search_all(code):
@@ -161,6 +299,60 @@ static func _words() -> RegEx:
 	if _word_regex == null:
 		_word_regex = RegEx.create_from_string("\\b[A-Z][A-Z0-9_]*\\b")
 	return _word_regex
+
+
+static var _pool_regex: RegEx = null
+
+
+## The macros of POOL_FUNCS that `code` calls.
+static func pool_macros_used(code: String) -> Array:
+	if _pool_regex == null:
+		_pool_regex = RegEx.create_from_string("\\b(" + "|".join(POOL_MACRO_BUFFERS.keys()) + ")\\s*\\(")
+	var used := []
+	for m in _pool_regex.search_all(code):
+		if not used.has(m.get_string(1)):
+			used.append(m.get_string(1))
+	return used
+
+
+## The buffer that a binding named `binding` binds: the buffer it is a view of (VIEWS), and, when its pair's group of PING_PONG is in
+## `flipped`, the other half of the pair.
+static func physical(binding: String, flipped: Array = []) -> String:
+	var b: String = VIEWS.get(binding, binding)
+	for group: String in flipped:
+		assert(PING_PONG.has(group), "no ping-pong group %s" % group)
+		for pair: Array in PING_PONG[group]:
+			if b == pair[0]:
+				return pair[1]
+			if b == pair[1]:
+				return pair[0]
+	return b
+
+
+## The three kernels of a grid scan (K_GSCAN_*): `src` to `dst`, an exclusive prefix sum of the first S elements, S the GLSL expression
+## `count` read on the device (it may read only `count_buffers`, which the kernels bind before their own); the groups' sums in `sums` and
+## their offsets in `offs` (a word a group). <prefix>_chunks and <prefix>_add run G groups of 256 (G = scan_groups of the host's last S),
+## <prefix>_sums one group with pa = G.
+static func add_grid_scan(out: Dictionary, prefix: String, src: String, dst: String, sums: String, offs: String, count: String, count_buffers: Array) -> void:
+	var types := {}
+	for b: String in [src, dst, sums, offs]:
+		if not TYPES.has(b):
+			types[b] = "uint"
+	var names := {"SRC": src, "DST": dst, "SUMS": sums, "OFFS": offs, "COUNT": count}
+	add(out, prefix + "_chunks", _fill(K_GSCAN_CHUNKS, names), count_buffers + [src, dst, sums], "", 256, types)
+	add(out, prefix + "_sums", _fill(K_GSCAN_SUMS, names), [sums, offs], "", 256, types)
+	add(out, prefix + "_add", _fill(K_GSCAN_ADD, names), count_buffers + [dst, offs], "", 256, types)
+
+
+## `template` with each of the words that are keys of `words` replaced by its value, in one pass (a value may contain a key).
+static func _fill(template: String, words: Dictionary) -> String:
+	var re := RegEx.create_from_string("\\b(" + "|".join(words.keys()) + ")\\b")
+	var text := ""
+	var at := 0
+	for m in re.search_all(template):
+		text += template.substr(at, m.get_start() - at) + str(words[m.get_string()])
+		at = m.get_end()
+	return text + template.substr(at)
 
 
 ## The five kernels of an exclusive prefix sum in three levels: `src` to `exc`, with the block sums in s1 / s2 / s3 and their sums scanned.
