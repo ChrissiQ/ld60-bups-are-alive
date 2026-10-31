@@ -5,7 +5,9 @@ extends SceneTree
 ##
 ## Expected values, written before the first run [derived from the classes' contracts]:
 ##  - CommandQueue: three pushes drain as a, b, c, and the queue is empty after; two writer threads of 1,000 commands each arrive all
-##    2,000, each writer's in its own order; a reader waiting in `wait` wakes on a push.
+##    2,000, each writer's in its own order; a reader waiting in `wait` wakes on a push. After 10,000 pushes drained with no wait (a
+##    running sim thread drains between iterations without waiting), one `wait` returns at once and the next sleeps until a push 60 ms
+##    later (40 ms or more) [derived: a push posts only when no post is waiting; before, each push posted and 9,999 waits returned at once].
 ##  - SimReply: not done and null at first; `complete(v)` makes it done with v; a second complete changes nothing; an error comes back.
 ##  - CpuSimBackend: cannot simulate; no device name (""); a command's reply is done at once with null and no error; the snapshot is empty
 ##    (seq 0, no dishes); no view source.
@@ -14,7 +16,9 @@ extends SceneTree
 ##    snapshot.
 ##  - WorldClient on FakeSimBackend: the commands reach the backend in call order with their kinds and arguments (add_dish's row and a
 ##    copy of its spec; set_time's speed, pause and frame; ask's questions; set_view's row); a reply scripted at 2 frames is done after
-##    2 ticks; a served snapshot with seq 1 is emitted once by `poll`, and a refused row in it is freed and emitted.
+##    2 ticks; a served snapshot with seq 1 is emitted once by `poll`, and a refused row in it is freed and emitted. A refusal carried
+##    again by a later snapshot (timing["refused_seq"] the same: the worker carries one until a snapshot with it is acknowledged) is not
+##    emitted again, and the row given to a new dish meanwhile stays that dish's; a later refusal of that row (a newer refused_seq) is.
 ##  - SimService (the autoload): headless, its world runs on the stub (cannot simulate); `use_backend` swaps in the fake.
 
 
@@ -22,6 +26,7 @@ func _initialize() -> void:
 	_queue_order()
 	_queue_threads()
 	_queue_wait()
+	_queue_posts()
 	_reply()
 	_stub()
 	_client_on_stub()
@@ -78,6 +83,24 @@ func _queue_wait() -> void:
 	q.push(SimCommand.new(&"x"))
 	t.wait_to_finish()
 	TestUtil.check(not before and woke[0], "a waiting reader sleeps until a push wakes it")
+
+
+func _queue_posts() -> void:
+	var q := CommandQueue.new()
+	for i in 10000:
+		q.push(SimCommand.new(&"n"))
+	q.drain()
+	q.wait()  # (the one post the pushes left)
+	var late := Thread.new()
+	late.start(func() -> void:
+		OS.delay_msec(60)
+		q.push(SimCommand.new(&"late")))
+	var t0 := Time.get_ticks_usec()
+	q.wait()
+	var waited_ms := (Time.get_ticks_usec() - t0) / 1000.0
+	late.wait_to_finish()
+	var got := q.drain()
+	TestUtil.check(waited_ms >= 40.0 and got.size() == 1 and got[0].kind == &"late", "after 10,000 pushes drained without a wait, the second wait sleeps until the next push (%.1f ms)" % waited_ms)
 
 
 func _reply() -> void:
@@ -163,6 +186,25 @@ func _client_on_fake() -> void:
 	w.poll()
 	TestUtil.check(emitted == [1], "a new snapshot is emitted once (got %s)" % [emitted])
 	TestUtil.check(gone == [[again, "no room"]] and not w.rows().has(again), "a refused dish's row is freed and emitted")
+	var refused_row := w.add_dish(DishSpec.new())
+	snap = Snapshot.new()
+	snap.seq = 2
+	snap.timing = {"refused": {refused_row: "no room"}, "refused_seq": {refused_row: 2}}
+	fake.serve(snap)
+	w.poll()
+	var taken := w.add_dish(DishSpec.new())  # (the row is free again: a new dish takes it)
+	snap = Snapshot.new()
+	snap.seq = 3
+	snap.timing = {"refused": {refused_row: "no room"}, "refused_seq": {refused_row: 2}}  # (not yet acknowledged: carried again)
+	fake.serve(snap)
+	w.poll()
+	TestUtil.check(taken == refused_row and gone.size() == 2 and w.rows().has(taken), "a refusal carried again by the next snapshot is not taken twice: the new dish keeps row %d (refusals %s)" % [taken, gone])
+	snap = Snapshot.new()
+	snap.seq = 4
+	snap.timing = {"refused": {taken: "no room"}, "refused_seq": {taken: 4}}
+	fake.serve(snap)
+	w.poll()
+	TestUtil.check(gone.size() == 3 and not w.rows().has(taken), "a later refusal of the same row is taken")
 
 
 func _service() -> void:

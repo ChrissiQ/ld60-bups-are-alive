@@ -198,9 +198,12 @@ func _iteration(item: Dictionary) -> void:
 	timing["lineage_ms"] = lineage_us / 1000.0
 	timing["worker_queue"] = queued()
 	var refusals := {}
+	var refusal_seqs := {}
 	for row: int in _refused:
 		refusals[row] = _refused[row][0]
+		refusal_seqs[row] = _refused[row][1]
 	timing["refused"] = refusals
+	timing["refused_seq"] = refusal_seqs  # (the snapshot that first carried each: one refusal comes in every snapshot until acknowledged)
 	snap.timing = timing
 	_snap_mutex.lock()
 	_snapshot = snap

@@ -7,7 +7,8 @@ extends RefCounted
 ## Rows: a dish is named by a row this client hands out at once (the lowest free one); the dish appears in a later snapshot under it. A
 ## row is free again as soon as the dish is removed, frozen or refused, so a snapshot taken before that may still show the old dish under
 ## it: a DishState's `number` says which dish it is. A dish the simulation refuses (no room in the memory budget, no free row) is listed in
-## a snapshot's timing["refused"]: `poll` frees its row and emits `refused`.
+## a snapshot's timing["refused"], and in every later one until a snapshot that carried it is acknowledged: `poll` frees its row and emits
+## `refused` once for it, by the snapshot that first carried it (timing["refused_seq"]; a backend without that key carries each refusal once).
 ##
 ## The main view's picture is played out one publish a frame (`shown_payload`): each frame shows the oldest publish not yet shown, and at
 ## most one is kept waiting, so when two land in one frame (an iteration ended just after the last poll) the second is shown on the next,
@@ -24,6 +25,7 @@ var _display_ms := 0.0
 var _waiting: Array = []  ## publishes seen and not yet shown, oldest first (at most one after a frame)
 var _shown: PayloadInfo = null
 var _known_publish := -1  ## the newest publish seen
+var _refusals_taken := {}  ## row -> the snapshot that first carried the last refusal of it that was taken (timing["refused_seq"])
 
 
 ## The game's world: the SimService autoload's (null where it is not there). Reached through the tree, not the autoload's name, so the
@@ -196,7 +198,12 @@ func poll() -> void:
 	if backend.has_method("ack"):
 		backend.ack(snap.seq)
 	var gone: Dictionary = snap.timing.get("refused", {})
+	var first_carried: Dictionary = snap.timing.get("refused_seq", {})
 	for row: int in gone:
+		var at := int(first_carried.get(row, snap.seq))
+		if at <= int(_refusals_taken.get(row, -1)):
+			continue  # (taken from an earlier snapshot: the row may be another dish's by now)
+		_refusals_taken[row] = at
 		_used.erase(row)
 		refused.emit(row, String(gone[row]))
 	snapshot_changed.emit(snap)
