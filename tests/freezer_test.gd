@@ -77,6 +77,7 @@ func _run() -> void:
 
 	# Freeze: out of the world at once, the blob a frame later; the game waits quietly meanwhile.
 	var number: int = m._dish_numbers[second]
+	var world_number: int = second.number
 	var bups := second.population()
 	var second_row: int = second.row
 	var founders: PackedInt64Array = fake.ids_in(second_row)
@@ -85,7 +86,7 @@ func _run() -> void:
 	m.freeze_dish(second)
 	TestUtil.check(m.dishes.size() == 2 and not m.dishes.has(second) and m.freezer_shelf.entries.size() == 1, "a frozen dish leaves the running dishes and is in the freezer")
 	TestUtil.check(fake.calls_of(SimCommand.KIND_FREEZE).size() == 1 and fake.calls_of(SimCommand.KIND_FREEZE)[0]["args"]["row"] == second_row and not fake.rows().has(second_row), "one FREEZE for its row, and the world has it no longer")
-	TestUtil.check(m.freezer_shelf.entries[0]["number"] == number and m.freezer_shelf.entries[0]["bups"] == bups and bups == 40, "the freezer keeps its number and its count (%d)" % bups)
+	TestUtil.check(m.freezer_shelf.entries[0]["label"] == number and m.freezer_shelf.entries[0]["number"] == world_number and m.freezer_shelf.entries[0]["bups"] == bups and bups == 40, "the freezer keeps its number and its count (%d)" % bups)
 	TestUtil.check(m.holds.stills_world() and not m.paused and m.hud_layer.process_mode == Node.PROCESS_MODE_DISABLED, "until the answer comes the world waits and the tray takes no input, with nothing shown")
 	var clock_then := fake.clock
 	await process_frame
@@ -151,14 +152,14 @@ func _run() -> void:
 	# Trash and the limit.
 	var trashed_number: int = m._dish_numbers[third]
 	m.trash_dish(third)
-	TestUtil.check(m.dishes.size() == 2 and not m._dish_numbers.has(third) and not m.freezer_shelf.entries.any(func(e: Dictionary) -> bool: return e["number"] == trashed_number), "a trashed dish is gone, and not in the freezer")
+	TestUtil.check(m.dishes.size() == 2 and not m._dish_numbers.has(third) and not m.freezer_shelf.entries.any(func(e: Dictionary) -> bool: return e["label"] == trashed_number), "a trashed dish is gone, and not in the freezer")
 	m.freeze_dish(back)
 	m.freeze_dish(m.dish)
 	TestUtil.check(m.dishes.size() == 1 and m.freezer_shelf.entries.size() == 1, "dishes freeze down to one running dish")
 	await process_frame
 	await process_frame
 	var kept_count: int = m.freezer_shelf.entries.size()
-	m.freezer_shelf.add({"number": 99, "data": {"time": 0.0}, "bups": 5, "picture": null})
+	m.freezer_shelf.add({"number": 99, "label": 99, "data": {"time": 0.0}, "bups": 5, "picture": null})
 	m.freezer_shelf.row_for(m.freezer_shelf.entries[kept_count]).get_node("Row/Trash").pressed.emit()
 	TestUtil.check(m.trash_dialog.visible and m.freezer_shelf.entries.size() == kept_count + 1, "trashing a frozen dish asks first")
 	m.trash_dialog.canceled.emit()

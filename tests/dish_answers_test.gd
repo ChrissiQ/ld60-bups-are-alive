@@ -115,6 +115,7 @@ func _game_starts() -> void:
 	m._dish_numbers[m.dish] = 3  # (as though dishes 2 and 3 had come and gone, and dish 3 was the last)
 	m.dish.number = 3
 	m._next_dish_number = 4
+	m._labels_given = 3
 	var mark := fake.calls.size()
 	m._start_again()
 	kinds = fake.calls.slice(mark).map(func(c: Dictionary) -> StringName: return c["kind"])
@@ -123,7 +124,7 @@ func _game_starts() -> void:
 	var added := kinds.find(SimCommand.KIND_ADD_DISH)
 	var spec: DishSpec = fake.calls[mark + added]["args"]["spec"] if added >= 0 else null
 	TestUtil.check(removed >= 0 and int(fake.calls[mark + removed]["args"]["row"]) == old_row and removed < begin and begin < added, "starting again: the old dish leaves the world, then the game begins, then the new dish is asked for (%s)" % [kinds])
-	TestUtil.check(spec != null and spec.number == 1 and m._dish_numbers[m.dish] == 1 and m._next_dish_number == 2, "starting again numbers the dish 1 and the next 2 (%s, %d)" % [spec.number if spec != null else -1, m._next_dish_number])
+	TestUtil.check(spec != null and spec.number == 1 and m._dish_numbers[m.dish] == 1 and m._next_dish_number == 2 and m._labels_given == 1, "starting again numbers the dish 1 (in the world and on screen) and the next 2 (%s, %d)" % [spec.number if spec != null else -1, m._next_dish_number])
 	m.queue_free()
 	await process_frame
 

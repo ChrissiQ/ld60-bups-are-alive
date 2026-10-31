@@ -1,8 +1,8 @@
 class_name DishActions
 extends VBoxContainer
 ## The two things that take the dish in the main view out of play: freeze it (kept in the freezer) or trash it (gone for good). It is on the dish card and in the
-## Freezer section; the screen does the freezing and trashing, and asks before trashing. Neither is possible for the last running dish. While the most dishes
-## that can run are running, a warning under the buttons says so (a pipette or an unfrozen dish has no room until one goes).
+## Freezer section; the screen does the freezing and trashing, and asks before trashing. Neither is possible for the last running dish. While no dish can be
+## added (every dish number is held by a running or frozen dish), a warning under the buttons says so (a pipette or a new dish has no room until one is trashed).
 
 signal freeze_requested
 signal trash_requested
@@ -11,7 +11,7 @@ const WARNING_ICON_SHARE := 0.64  ## the warning icon's width as a share of a te
 
 @onready var freeze_button: Button = $Buttons/Freeze
 @onready var trash_button: Button = $Buttons/Trash
-@onready var limit_row: HBoxContainer = $Limit  ## the warning that the most dishes are running
+@onready var limit_row: HBoxContainer = $Limit  ## the warning that no dish can be added
 @onready var limit_icon: Button = $Limit/WarningIcon
 @onready var limit_note: Label = $Limit/Note
 
@@ -33,7 +33,7 @@ func set_available(available: bool) -> void:
 	trash_button.tooltip_text = Strings.t("hud.trash_tip" if available else "hud.trash_last_tip")
 
 
-## The warning shows while the most dishes are running.
+## The warning shows while no dish can be added.
 func set_at_limit(at_limit: bool) -> void:
 	limit_row.visible = at_limit
 

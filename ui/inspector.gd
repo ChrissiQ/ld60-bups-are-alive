@@ -16,7 +16,8 @@ const UNWATCH_ICON := preload("res://icons/unwatch.svg")
 const FLASH_MSEC := 1500  ## how long the divisions number stays in the flash colour after the bup divides
 
 var dish: Dish  ## the dish in the main view
-var number_of: Callable  ## a dish's number (Callable: Dish -> int)
+var number_of: Callable  ## the number a dish is shown by (Callable: Dish -> int)
+var label_of := func(world_number: int) -> int: return world_number  ## the number shown for a world number (Dish.number, as the family records keep it)
 var lineage: LineageView
 var readout: Readout
 
@@ -154,7 +155,7 @@ func _show_info(following: bool) -> void:
 		lineage.show(bup_id)
 	if bup_id >= 0:
 		var record := dish.lineage_info(bup_id) if dead else alive_info
-		var body := PanelText.deceased(record, number_of.call(dish)) if dead else PanelText.bup(alive_info, number_of.call(dish))
+		var body := _deceased_text(record) if dead else PanelText.bup(alive_info, number_of.call(dish))
 		info_genome.show_bup(record, true)
 		readout.set_text(info_tail, PanelText.tail(record), "tail %d" % bup_id)
 		var divided := note_divisions(bup_id, record) and not dead
@@ -204,7 +205,7 @@ func _show_hover(hover_point: Variant) -> void:
 	if bup_id >= 0:
 		_point_stamp = []
 		var record := dish.lineage_info(bup_id) if dead else alive_info
-		var body := PanelText.deceased(record, number_of.call(dish)) if dead else PanelText.bup(alive_info, number_of.call(dish))
+		var body := _deceased_text(record) if dead else PanelText.bup(alive_info, number_of.call(dish))
 		hover_genome.show_bup(record, false)
 		readout.set_text(hover_tail, PanelText.tail(record), "tail %d" % bup_id)
 		hover_gauges.show_bup(record, dish.stationary_phase, not dead)
@@ -224,6 +225,14 @@ func _show_hover(hover_point: Variant) -> void:
 		if point_stamp != _point_stamp:  # (the readout is worked out again only when the spot or the dish has changed)
 			_point_stamp = point_stamp
 			readout.set_text(hover_text, PanelText.point(dish.nutrient_at(hover_point)), "point")
+
+
+## A dead bup's lines, with the dish a pipette moved it to named by the number that dish is shown by.
+func _deceased_text(record: Dictionary) -> String:
+	if record.has("moved_to"):
+		record = record.duplicate()
+		record["moved_to"] = label_of.call(int(record["moved_to"]))
+	return PanelText.deceased(record, number_of.call(dish))
 
 
 ## A card's words under their title (the info panel has the title beside its close button instead).

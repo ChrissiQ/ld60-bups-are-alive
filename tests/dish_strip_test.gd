@@ -1,10 +1,11 @@
 extends SceneTree
 ## Run: godot --headless --path . -s tests/dish_strip_test.gd
-## The strip and the tray's sections at a thousand dishes, over FakeWorld.
+## The strip and the tray's sections at Main.MAX_DISHES (999) dishes, over FakeWorld.
 ##
 ## Expected values, written before the first run:
-##  - The strip is hidden with one dish and has k entries for k dishes; its count reads "k dishes".
-##  - At 1,000 dishes it makes at most 40 tabs at every scroll position [derived: a strip of at most 1,199 px of tabs about 64 px apart
+##  - The strip is hidden with one dish and has k entries for k dishes; its count reads "..k". Every tab has one width, at least what "999"
+##    and "888" need, already with three one-digit dishes.
+##  - At 999 dishes it makes at most 40 tabs at every scroll position [derived: a strip of at most 1,199 px of tabs about 64 px apart
 ##    is 19 in view, plus one cut at each end and OVERSCAN (4) each side: 19 + 1 + 8 = 28 here, 40 the bound]; each tab made shows the
 ##    dish its place stands for.
 ##  - Bringing dish 700 into view scrolls its tab into view, lit, and no other made tab is lit; a click on a made tab brings its dish in.
@@ -12,16 +13,30 @@ extends SceneTree
 ##    measured headless with the SubViewport strip at 20 dishes, so at most 3.75 us].
 ##  - The all-dishes section reads the snapshot's totals: its update at 1,000 dishes costs no more than 1.5 x the single-dish path's loop at 20 dishes
 ##    [measured baseline: 68.8 us, so at most 103 us].
+##  - The top bar's fit (Main._fit_top_bar, every frame) at 999 dishes costs at most 50 us [placeholder: it reads a few sizes and lays nothing
+##    out again while nothing changed].
 ##  - The freezer at 1,000 frozen entries makes at most its rows in view and OVERSCAN (3) each side [derived from its row height], at the
 ##    top and in the middle of its list.
 
 const STRIP_REFRESH_BOUND_US := 3.75
 const ALL_DETAILS_BOUND_US := 103.0
 const MOST_TABS := 40
+const FIT_BOUND_US := 50.0  ## [placeholder] the top bar's fit runs every frame: a few size reads and nothing laid out again when nothing changed
 
 
 func _initialize() -> void:
 	_run()
+
+
+## The width a tab like `tab` needs for the caption `text`.
+func _caption_width(tab: Button, text: String) -> float:
+	var probe := tab.duplicate() as Button
+	probe.custom_minimum_size = Vector2.ZERO
+	probe.text = text
+	tab.get_parent().add_child(probe)
+	var width := probe.get_combined_minimum_size().x
+	probe.free()
+	return width
 
 
 func _time(call: Callable, n: int) -> float:
@@ -43,12 +58,18 @@ func _run() -> void:
 	m.add_dish(chosen)
 	m.add_dish(chosen)
 	await process_frame
-	TestUtil.check(strip.visible and strip.count() == 3 and strip.count_label.text == Strings.t("dish_strip.count", ["3"]), "three dishes: three entries and their count (%s)" % strip.count_label.text)
-	while m.dishes.size() < 1000:
+	TestUtil.check(strip.visible and strip.count() == 3 and strip.count_label.text == "..3", "three dishes: three entries and their count, '..3' (%s)" % strip.count_label.text)
+	var three_digits: float = strip._tab_width
+	TestUtil.check(strip._tabs.all(func(t: Button) -> bool: return t.size.x == three_digits) and three_digits >= _caption_width(strip._tabs[0], "999") and three_digits >= _caption_width(strip._tabs[0], "888"), "with one-digit numbers every tab already has room for three digits (%.0f)" % three_digits)
+	while m.dishes.size() < m.MAX_DISHES:
 		m.add_dish(chosen)
 	for i in 3:
 		await process_frame
-	TestUtil.check(strip.count() == 1000 and strip.count_label.text == Strings.t("dish_strip.count", ["1,000"]), "a thousand entries (%s)" % strip.count_label.text)
+	TestUtil.check(strip.count() == 999 and strip.count_label.text == "..999", "999 entries, counted as '..999' (%s)" % strip.count_label.text)
+	var widths := {}
+	for tab: Button in strip._tabs:
+		widths[tab.size.x] = true
+	TestUtil.check(widths.size() == 1, "every tab is one width (%s)" % [widths.keys()])
 	var most := 0
 	var wrong := 0
 	var bar := strip.scroll.get_h_scroll_bar()
@@ -81,12 +102,14 @@ func _run() -> void:
 	m.all_details.open = true
 	var all_us := _time(func() -> void: m._update_all_details(), 2000)
 	TestUtil.check(all_us <= ALL_DETAILS_BOUND_US, "the all-dishes section's update at 1,000 dishes costs %.1f us (bound %.1f)" % [all_us, ALL_DETAILS_BOUND_US])
-	print("DISH STRIP figures: strip refresh %.2f us, all-dishes update %.1f us, tabs made at most %d" % [strip_us, all_us, most])
+	var fit_us := _time(func() -> void: m._fit_top_bar(), 2000)
+	TestUtil.check(fit_us <= FIT_BOUND_US, "the top bar's fit, every frame, costs %.1f us at 999 dishes (bound %.0f)" % [fit_us, FIT_BOUND_US])
+	print("DISH STRIP figures: strip refresh %.2f us, all-dishes update %.1f us, top bar fit %.1f us, tabs made at most %d" % [strip_us, all_us, fit_us, most])
 
 	var shelf: FreezerShelf = m.freezer_shelf
 	m.freezer_section.open = true
 	for i in 1000:
-		shelf.entries.append({"number": 2000 + i, "data": {"time": 60.0 * i}, "bups": i, "picture": null})
+		shelf.entries.append({"number": 2000 + i, "label": i % 999 + 1, "data": {"time": 60.0 * i}, "bups": i, "picture": null})
 	shelf.refresh()
 	await process_frame
 	await process_frame
@@ -97,7 +120,7 @@ func _run() -> void:
 	await process_frame
 	await process_frame
 	var middle := shelf.row_for(shelf.entries[500])
-	TestUtil.check(shelf.rows_made() <= bound and middle != null and (middle.get_node("Row/Caption") as Label).text == Strings.t("hud.frozen_row", [2500, "500"]), "...and in the middle, where the rows show the entries there (%d made)" % shelf.rows_made())
+	TestUtil.check(shelf.rows_made() <= bound and middle != null and (middle.get_node("Row/Caption") as Label).text == Strings.t("hud.frozen_row", [501, "500"]), "...and in the middle, where the rows show the entries there (%d made)" % shelf.rows_made())
 	m.queue_free()
 	await process_frame
 	TestUtil.finish(self, "DISH STRIP TESTS OK")

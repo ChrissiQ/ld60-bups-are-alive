@@ -53,6 +53,11 @@ func _screen(m: Node, world: Vector2) -> Vector2:
 	return m.get_viewport_rect().size * 0.5 + (world - m.camera.position) * m.camera.zoom.x
 
 
+## What the top bar's readouts say: the first row's, and the speed in the second row when the bar has one.
+func _top_text(m: Node) -> String:
+	return m.vitals.get_parsed_text() + (" · " + m.speed_readout.get_parsed_text() if m.top_bar_more_row.visible else "")
+
+
 func _world(m: Node, screen: Vector2) -> Vector2:
 	return m.camera.position + (screen - m.get_viewport_rect().size * 0.5) / m.camera.zoom.x
 
@@ -198,7 +203,7 @@ func _initialize() -> void:
 	TestUtil.check(m.paused and m.pause_ring.visible and m.toolbar.pause_button.button_pressed, "free mode starts paused with the ring")
 	await process_frame
 	TestUtil.check(m.pause_ring.visible and m.pause_ring.mouse_filter == Control.MOUSE_FILTER_IGNORE, "a ring shows while paused and does not swallow clicks")
-	TestUtil.check(m.vitals.get_parsed_text().contains("paused"), "the top bar says paused ('%s')" % m.vitals.get_parsed_text())
+	TestUtil.check(_top_text(m).contains("paused"), "the top bar says paused ('%s')" % _top_text(m))
 	TestUtil.check(_exclusive(m.toolbar) and not m.toolbar.speed_1_button.button_pressed, "free mode start: only Pause is lit")
 	var t0: float = m.dish.time
 	await create_timer(1.2).timeout
@@ -353,16 +358,16 @@ func _initialize() -> void:
 	m.toolbar.speed_1_button.button_pressed = true
 	await process_frame
 	await process_frame
-	var readout: String = m.vitals.get_parsed_text()
+	var readout: String = _top_text(m)
 	TestUtil.check(readout.contains("x1") and not readout.contains("paused"), "the top bar shows the speed ('%s')" % readout)
 	m.toolbar.speed_1000_button.button_pressed = true
 	await process_frame
 	await process_frame
-	TestUtil.check(m.vitals.get_parsed_text().contains("x1,000"), "speed 1000 reads 'x1,000'")
+	TestUtil.check(_top_text(m).contains("x1,000"), "speed 1000 reads 'x1,000' ('%s')" % _top_text(m))
 	m.toolbar.set_paused(true)
 	await process_frame
 	await process_frame
-	TestUtil.check(m.vitals.get_parsed_text().contains("paused"), "paused reads 'paused'")
+	TestUtil.check(_top_text(m).contains("paused"), "paused reads 'paused'")
 	m.toolbar.speed_1_button.button_pressed = true  # resume at normal speed
 
 	# --- Select tool: the panel follows the pointer until a bup or source is clicked.

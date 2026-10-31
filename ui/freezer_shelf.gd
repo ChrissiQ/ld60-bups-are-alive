@@ -2,7 +2,8 @@ class_name FreezerShelf
 extends VBoxContainer
 ## What is inside the tray's "Freezer" section: the buttons that freeze or trash the dish in view, a note while nothing is frozen, and a row for each frozen dish (its picture,
 ## its number and bups, and icon buttons to unfreeze it, show what is known of it or trash it). The section itself is a plain TraySection that holds this as its content. It keeps
-## the frozen dishes (`entries`, in the order they went in): {number, data ({time}: when it was frozen), picture (a texture of its tile, or null), bups}. The screen does the
+## the frozen dishes (`entries`, in the order they went in): {number (its world number), label (the number it is shown by), data ({time}: when it was frozen), picture (a
+## texture of its tile, or null), bups}. The screen does the
 ## freezing, thawing and trashing; this only holds and shows.
 ##
 ## The rows scroll inside a height of their own (up to SCROLL_MAX_HEIGHT), and only those in view and OVERSCAN either side are made: they are reused for other entries as
@@ -134,7 +135,7 @@ func _measure() -> void:
 	_measured_at = size_now
 	var probe := _make_row()
 	list.add_child(probe)  # (in the tree, so it has the theme's sizes)
-	_bind(probe, {"number": 1000, "data": {"time": 0.0}, "bups": 1000000, "picture": null})
+	_bind(probe, {"number": 1000, "label": 999, "data": {"time": 0.0}, "bups": 1000000, "picture": null})
 	_row_height = (probe.get_node("Row") as Control).get_combined_minimum_size().y
 	var details: Label = probe.get_node("Details")
 	_details_height = details.get_theme_font("font").get_height(details.get_theme_font_size("font_size")) + float(probe.get_theme_constant("separation"))  # (one line: an entry's details are short)
@@ -182,7 +183,7 @@ func _bind(box: Control, entry: Dictionary) -> void:
 	thumb.atlas = picture
 	thumb.region = Rect2(Vector2.ZERO, picture.get_size()) if picture != null else Rect2()
 	(box.get_node("Row/Picture") as TextureRect).queue_redraw()
-	(box.get_node("Row/Caption") as Label).text = Strings.t("hud.frozen_row", [entry["number"], UiText.thousands(entry["bups"])])
+	(box.get_node("Row/Caption") as Label).text = Strings.t("hud.frozen_row", [entry["label"], UiText.thousands(entry["bups"])])
 	var details: Label = box.get_node("Details")
 	details.text = Strings.t("hud.frozen_info", [SimClock.format(float(entry["data"].get("time", 0.0))), UiText.thousands(entry["bups"])])
 	details.visible = _shown_info.has(entry)

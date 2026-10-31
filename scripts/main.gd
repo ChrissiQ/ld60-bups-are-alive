@@ -7,8 +7,9 @@ const PIPETTE_PULSE_LOW := 0.35  ## the opacity it fades to
 const PIPETTE_STILL_ALPHA := 0.5  ## its opacity under reduced motion (lit, not pulsing)
 const TUTORIAL_ZOOM := 6.0  ## how close the tutorial brings the camera to a bup it asks the player to click
 const TUTORIAL_BUP_PIXELS := 18.0  ## the lit square round that bup is this far out on each side
-const MAX_DISHES := 1000  ## the most dishes running at once (the world has GpuLayout.D_MAX rows; a pipette's new dish takes one before its answer)
+const MAX_DISHES := 999  ## the most dishes running at once, and the highest number a dish is shown by: an interface choice (three digits), not the world's limit (GpuLayout.D_MAX rows)
 const RECORD_BUDGET_USEC := 1000  ## the most of a frame spent recording the parked dishes' history samples (about 10 us a dish)
+const LONGEST_CLOCK_HOURS := 999999  ## the top bar keeps room for the clock up to this many hours: about 114 years of simulated time, 100 hours of play at x10,000
 
 @onready var dish: Dish = $Dish
 @onready var camera: Camera2D = $Camera
@@ -63,8 +64,10 @@ var tracker := GoalTracker.new()
 var dishes: Array[Dish] = []  ## every dish that runs; `dish` is the one in the main view and the only one shown (the others are parked, Dish.park: see the strip). Every dish sits at the screen's origin, so what is drawn is in the main dish's own coordinates
 var _view_before_extinct: Dish = null  ## the dish that was in the main view when the first dish in `_extinct_queue` was brought into view: the view goes back to it afterwards
 var _extinct_queue: Array[Dish] = []  ## dishes that have died out and are not yet deleted (the first is the one the screen has said so about)
-var _dish_numbers := {}  ## Dish -> its number (a number is never reused: a bup's "line from dish 2" stays true)
-var _next_dish_number := 1  ## the number the next dish takes (a pipette's new dish takes the one the simulation gives it, and this moves past it)
+var _dish_numbers := {}  ## Dish -> the number it is shown by, 1 to MAX_DISHES (`_take_label`); its ids and the family tree use its world number, Dish.number
+var _next_dish_number := 1  ## the world number (Dish.number) the next dish takes: never reused in a game, so no two bups ever share an id (a pipette's new dish takes the one the simulation gives it, and this moves past it)
+var _labels_given := 0  ## the shown numbers handed out so far this game: one by one up to MAX_DISHES, then the lowest free one is taken again
+var _label_of := {}  ## world number -> the number it was shown by, for every dish of this game (a bup that moved to a dish since gone names it so)
 var game_began := 0.0  ## the world time this game began at: the world's clock runs from the start of the program, so what the screen shows is the time since
 var _world_last := -1.0  ## the world's time at the last frame (-1: none yet)
 var holds: PlayHolds  ## what holds the game besides the player: the pipette's timer (&"pipette"), the question about the old dish (&"old_dish"), the tour (&"tour"), the end of the game (&"end"), and quietly the wait for the simulation's answer (&"sim_reply")
@@ -89,10 +92,13 @@ var _by_row_count := -1  ## how many dishes ran when `_by_row` was made
 var _to_record: Array = []  ## parked dishes holding history samples not yet recorded, oldest first (`_record_parked_history`; untyped: one may be freed meanwhile)
 var _save_pending: SimReply = null  ## a save waiting for the simulation's dishes (the goal's: the quit save waits for them instead)
 var _left_empty: Dish = null  ## the last running dish, died out while dishes are frozen: the next unfrozen dish takes its place
-var _vitals_width := 0.0  ## the widest the top bar's readout has been (see _update_hud)
-var _vitals_full_width := 0.0  ## the same with the playback speed at its end, whether or not it is there (what the top bar's row has to hold)
-var _speed_width := 0.0  ## the width the speed readout keeps in the second row: its longest possible text (see _reserve_speed_width)
-var _speed_width_at := 0  ## the readout font size _speed_width (and the readout's widths) were measured at
+var _vitals_full_width := 0.0  ## the width the top bar's readout keeps in one row: its longest possible text with the playback speed at its end (see _measure_readouts)
+var _vitals_short_width := 0.0  ## and with the speed in the second row
+var _speed_width := 0.0  ## the width the speed readout keeps in the second row: its longest possible text
+var _readout_height := 0.0  ## a line of the readouts
+var _readouts_measured_for := []  ## what those widths were measured for: [the readout's font size, free mode, the digits of the bup limit]
+var _limit_digits_for := []  ## [running dishes, the main dish's bup limit] when `_limit_digits` was worked out
+var _limit_digits := 0  ## the most digits any running dish's bup limit has
 var menu_open: bool:  ## the Escape menu is up: the game is frozen behind it and takes no input
 	get:
 		return pause_menu.visible
@@ -129,6 +135,9 @@ func _ready() -> void:
 	inspector.close_pressed.connect(_clear_selection)
 	inspector.info_genome.entry_requested.connect(_open_encyclopedia)
 	lineage.info_opened.connect(stage_input.stop_following)
+	inspector.label_of = _label_for
+	dish.number = _next_dish_number
+	_next_dish_number += 1
 	_register_dish(dish)
 	dish_strip.dish_chosen.connect(set_main_dish)
 	_apply_tray_order()
@@ -209,6 +218,8 @@ func _ready() -> void:
 	else:
 		if dish.row >= 0:
 			_asked_rows[dish.row] = dish
+		_next_dish_number = maxi(_next_dish_number, dish.number + 1)  # (the saved dish keeps its world number, and so its bups' ids)
+		_label_of[dish.number] = _dish_numbers[dish]
 		tracker.from_dict(data["goals"])
 		stage_input.fit_camera()
 	_sync_tool_locks()
@@ -437,8 +448,8 @@ func debug_state() -> Dictionary:
 		"world_time": world_time(),
 		"game_time": world_time() - game_began,
 		"waiting_for_sim": holds.stills_world(),
-		"dishes": dishes.map(func(d: Dish) -> Dictionary: return {"number": _dish_numbers[d], "bups": d.population(), "time": d.time, "history_origin": d.history.origin, "row": d.row, "husks": d.husk_count()}),
-		"freezer": freezer_shelf.entries.map(func(entry: Dictionary) -> Dictionary: return {"number": entry["number"], "bups": entry["bups"], "frozen_at": entry["data"].get("time", 0.0)}),
+		"dishes": dishes.map(func(d: Dish) -> Dictionary: return {"number": _dish_numbers[d], "world_number": d.number, "bups": d.population(), "time": d.time, "history_origin": d.history.origin, "row": d.row, "husks": d.husk_count()}),
+		"freezer": freezer_shelf.entries.map(func(entry: Dictionary) -> Dictionary: return {"number": entry["label"], "world_number": entry["number"], "bups": entry["bups"], "frozen_at": entry["data"].get("time", 0.0)}),
 	}
 
 
@@ -739,7 +750,7 @@ func _finish_pipette() -> void:
 	receiver.adopt(int(got["new_row"]), number, source)
 	for layer: int in Dish.Layer.values():
 		receiver.show_layer(layer, dish.layer_shown(layer))
-	_register_dish(receiver, number)
+	_register_dish(receiver)
 	for id: int in got["ids"]:  # (the same bup in its new dish: a watched one stays on the watch list, now as one of that dish's)
 		if source.is_watched(id):
 			source.unwatch_bup(id)
@@ -749,51 +760,78 @@ func _finish_pipette() -> void:
 	_ask_about_old_dish(source, int(got["moved"]), receiver)  # (play, which the pipette's timer was holding, goes on once that is answered)
 
 
-## Takes a dish into the set: the screen hears when it dies out or its selection changes (when it is the one in the main view), and the strip gets its tab.
-## A dish that is not the one in the main view is parked (hidden, and doing nothing a frame).
-func _register_dish(d: Dish, number := -1) -> void:
-	var is_new := number < 0  # (a dish out of the freezer comes back under the number it had)
-	if is_new:
-		number = _next_dish_number
+## Takes a dish into the set under the number it is shown by (`label`; -1: a new one, `_take_label`; a dish out of the freezer comes back under the
+## one it had): the screen hears when it dies out or its selection changes (when it is the one in the main view), and the strip gets its tab. A dish
+## that is not the one in the main view is parked (hidden, and doing nothing a frame). Its world number (Dish.number) is set already.
+func _register_dish(d: Dish, label := -1) -> void:
+	if label < 0:
+		label = _take_label()
 	dishes.append(d)
 	_by_row_count = -1  # (the rows' table is made again)
-	_dish_numbers[d] = number
-	d.number = number
+	_dish_numbers[d] = label
+	_label_of[d.number] = label
 	if d != dish:
 		d.park()
 	d.extinct.connect(_on_dish_extinct.bind(d))
 	d.selection_changed.connect(func() -> void:
 		if d == dish:
 			lineage.on_selection_changed())
-	dish_strip.add(d, number)
-	if is_new:
-		_next_dish_number += 1
+	dish_strip.add(d, label)
 	dish_strip.light(dish)
 
 
-## Whether the most dishes are running: then nothing that would add one (a pipette, an unfrozen dish) is done, and the banner says why (the
-## tray's dish actions show a warning meanwhile, `_show_graph_choices`).
+## The number a new dish is shown by: 1, 2, 3... until MAX_DISHES have been handed out in this game, then the lowest that no running or frozen dish
+## holds (a frozen dish keeps its number for when it is unfrozen). `_at_dish_limit` makes sure there is one; 0 when there is not.
+func _take_label() -> int:
+	if _labels_given < MAX_DISHES:
+		_labels_given += 1
+		return _labels_given
+	var held := {}
+	for d: Dish in _dish_numbers:
+		held[_dish_numbers[d]] = true
+	for entry: Dictionary in freezer_shelf.entries:
+		held[entry["label"]] = true
+	for label in range(1, MAX_DISHES + 1):
+		if not held.has(label):
+			return label
+	return 0
+
+
+## The number a dish of this game was shown by, from its world number (as a bup's family record has it); the world number itself for one never shown.
+func _label_for(world_number: int) -> int:
+	return int(_label_of.get(world_number, world_number))
+
+
+## How many shown numbers are held: by the running dishes, the frozen ones (one on its way back out of the freezer is among the running already)
+## and a pipette's dish not made yet. Never more than MAX_DISHES: a freeze or a thaw only moves a number between the two, so at most MAX_DISHES run.
+func _labels_held() -> int:
+	return dishes.size() + freezer_shelf.entries.size() - _thawing.size() + (0 if _pipette_pending.is_empty() else 1)
+
+
+## Whether every number is held, by the running dishes and the frozen ones together: then nothing that would add a dish (a pipette, a new dish)
+## is done, and the banner says why (the tray's dish actions show a warning meanwhile, `_show_graph_choices`). An unfrozen dish has its own number.
 func _at_dish_limit() -> bool:
-	if dishes.size() < MAX_DISHES:
+	if _labels_held() < MAX_DISHES:
 		return false
 	_show_banner(Strings.t("banner.dish_limit"), BANNER_BRIEF_SECONDS)
 	return true
 
 
 ## Another dish, run beside the main one in the same world (parked: it shows in the strip). It is started as `start` says (null: the usual dish) at the
-## world's time; the main view stays where it is. Returns it, or null when the most dishes are running (nothing changes then); a dish the graphics memory
-## has no room for goes again (`_on_refused`).
-func add_dish(start: StartConditions, number := -1) -> Dish:
+## world's time; the main view stays where it is. Returns it, or null when no dish can be added (`_at_dish_limit`: nothing changes then); a dish the
+## graphics memory has no room for goes again (`_on_refused`).
+func add_dish(start: StartConditions) -> Dish:
 	if _at_dish_limit():
 		return null
 	var d := Dish.new()
-	d.number = number if number >= 0 else _next_dish_number
+	d.number = _next_dish_number
+	_next_dish_number += 1
 	d.visible = false  # (parked from the start: what it draws is made when it is first shown)
 	add_child(d)
 	d.strike(start)
 	for layer: int in Dish.Layer.values():
 		d.show_layer(layer, dish.layer_shown(layer))  # (what is shown is one choice for every dish)
-	_register_dish(d, number)
+	_register_dish(d)
 	if d.row >= 0:
 		_asked_rows[d.row] = d
 	return d
@@ -836,10 +874,11 @@ func freeze_dish(d: Dish) -> void:
 		return
 	if d == dish:
 		set_main_dish(_neighbour(d))
-	var number: int = _dish_numbers[d]
+	var label: int = _dish_numbers[d]
 	var picture := dish_strip.picture_of(d)
 	var entry := {
-		"number": number,
+		"number": d.number,  # (its world number: the family tree keeps what it holds for the dish under it)
+		"label": label,  # (the number it is shown by, held while it is frozen)
 		"data": {"time": world_time() - game_began},  # (when it was frozen, on the game's clock)
 		"host": d.host_part(),
 		"bups": d.population(),
@@ -849,13 +888,13 @@ func freeze_dish(d: Dish) -> void:
 	freezer_shelf.add(entry)
 	_remove_dish(d)
 	_sync_reply_hold()
-	_show_banner(Strings.t("hud.banner_frozen", [number]), BANNER_BRIEF_SECONDS)
+	_show_banner(Strings.t("hud.banner_frozen", [label]), BANNER_BRIEF_SECONDS)
 
 
 ## Asks before a frozen dish is trashed.
 func _ask_to_trash_frozen(entry: Dictionary) -> void:
 	_entry_to_trash = entry
-	trash_dialog.title = Strings.t("hud.trash_title", [entry["number"]])
+	trash_dialog.title = Strings.t("hud.trash_title", [entry["label"]])
 	trash_dialog.dialog_text = Strings.t("hud.trash_text_frozen", [UiText.thousands(entry["bups"])])
 	trash_dialog.popup_centered()
 
@@ -872,7 +911,7 @@ func _trash_frozen(entry: Dictionary) -> void:
 	var store := WorldClient.shared().lineage()
 	if store != null:
 		store.discard_frozen(int(entry["number"]))
-	_show_banner(Strings.t("hud.banner_trashed", [entry["number"]]), BANNER_BRIEF_SECONDS)
+	_show_banner(Strings.t("hud.banner_trashed", [entry["label"]]), BANNER_BRIEF_SECONDS)
 
 
 ## Asks before the dish in the main view is trashed (it cannot be got back).
@@ -901,8 +940,6 @@ func trash_dish(d: Dish) -> void:
 func thaw(entry: Dictionary) -> void:
 	if not freezer_shelf.entries.has(entry) or entry.get("thawing", false):
 		return
-	if _at_dish_limit():
-		return
 	if _waits(entry):
 		entry["then"] = "thaw"
 		return
@@ -925,7 +962,7 @@ func thaw(entry: Dictionary) -> void:
 		return
 	for layer: int in Dish.Layer.values():
 		d.show_layer(layer, dish.layer_shown(layer))
-	_register_dish(d, entry["number"])
+	_register_dish(d, entry["label"])
 	entry["thawing"] = true
 	_thawing[d.row] = {"entry": entry, "dish": d}
 	if not WorldClient.shared().backend.can_simulate():
@@ -989,7 +1026,7 @@ func _show_graph_choices() -> void:
 	all_details.visible = dishes.size() > 1  # (with one dish there is no "all")
 	freezer_shelf.actions.set_available(dishes.size() > 1)  # (the last running dish stays)
 	card_actions.set_available(dishes.size() > 1)
-	var full := dishes.size() >= MAX_DISHES
+	var full := _labels_held() >= MAX_DISHES
 	freezer_shelf.actions.set_at_limit(full)
 	card_actions.set_at_limit(full)
 
@@ -1133,7 +1170,7 @@ func _retire_extinct() -> void:
 
 
 ## The last dish died out and the player chose to begin again: the same beginning as the game screen's own, a new game, so the dish (the
-## only one left) leaves the world first and the numbers start again from 1 with it.
+## only one left) leaves the world first and the numbers (the world's and those shown) start again from 1 with it.
 func _start_again() -> void:
 	holds.release(&"end", PlayHolds.Then.STAY)
 	lineage.reset()
@@ -1144,6 +1181,8 @@ func _start_again() -> void:
 	_next_dish_number = 2
 	_dish_numbers[dish] = 1
 	dish.number = 1
+	_labels_given = 1
+	_label_of = {1: 1}
 	dish_strip.remove(dish)
 	dish_strip.add(dish, 1)
 	dish_strip.light(dish)
@@ -1165,24 +1204,17 @@ func _sync_bloom_panel() -> void:
 func _update_hud() -> void:
 	if not free_mode:
 		_update_goal_card()
+	_fit_top_bar()
 	if dish.population() == 0:
 		return
 	var about := "hud %s" % sim_speed
-	if not readout.due(vitals, about):
-		return  # (nothing below is worth working out: the text would not be shown yet)
-	var wrapped := top_bar_more_row.visible
-	if wrapped:
+	if not readout.due(vitals, about) and not (top_bar_more_row.visible and readout.due(speed_readout, about)):
+		return  # (nothing below is worth working out: the text would not be shown yet; the speed in the second row keeps its own time)
+	if top_bar_more_row.visible:
 		readout.set_text(vitals, Strings.t("hud.vitals_short", [_dish_lines(), SimClock.format(dish.time - game_began)]), about)
 		readout.set_text(speed_readout, _playback_text(), about)
-		speed_readout.custom_minimum_size = Vector2(_speed_width, speed_readout.get_content_height())
 	else:
 		readout.set_text(vitals, Strings.t("hud.vitals", [_dish_lines(), SimClock.format(dish.time - game_began), _playback_text()]), about)
-	# The readout takes the width its text needs (never less than it has needed, so it does not shrink and grow as the figures change), up to
-	# a share of the bar; the hint beside it gets all the rest.
-	_vitals_width = maxf(_vitals_width, vitals.get_content_width())
-	_vitals_full_width = maxf(_vitals_full_width, vitals.get_content_width() + (_speed_width + 12.0 if wrapped else 0.0))
-	vitals.custom_minimum_size = Vector2(minf(_vitals_width, _vitals_room()), vitals.get_content_height())  # (as tall as its text, which grows with the interface size)
-	_fit_top_bar()
 	placed_row.value_text = UiText.thousands(dish.nutrients_placed)
 	colony.show_stats(dish.population_stats())
 	_update_all_details()
@@ -1311,26 +1343,44 @@ func _adapt_layout() -> void:
 
 ## The most width the readout may take: what the playback and the menu leave in the bar's row (it is never cut short for any other reason).
 func _vitals_room() -> float:
-	var bar_width := top_bar_row.size.x if top_bar_row.size.x > 0.0 else get_viewport_rect().size.x - 64.0  # (before the first layout: the window less its margins)
-	return bar_width - playback_panel.get_combined_minimum_size().x - menu_button.get_combined_minimum_size().x - 12.0 * 4.0  # (four gaps: the readout, the two spacers, the playback and the menu)
+	return _bar_room() - playback_panel.get_combined_minimum_size().x - menu_button.get_combined_minimum_size().x - 4.0 * _bar_gap()  # (four gaps: the readout, the two spacers, the playback and the menu)
 
 
-## The top bar never needs more than the window has. The readout and the controls come first; the dish tabs take everything that is left (they scroll
-## when there are more than fit), and when not even two tabs and the strip's arrows fit beside the layer toggles, the playback speed (the readout's end),
-## the tabs and the toggles move to a second row (never away): the speed at its left, the tabs centred in what is between, the toggles at its right.
+## The width a row of the top bar has: the window less the screen's margins and the bar's padding.
+func _bar_room() -> float:
+	var frame: Control = $HUD/Frame
+	var panel := (%TopBar as Control).get_theme_stylebox("panel")
+	return get_viewport_rect().size.x - frame.get_theme_constant("margin_left") - frame.get_theme_constant("margin_right") - panel.get_minimum_size().x
+
+
+## The gap between the parts of a row of the top bar.
+func _bar_gap() -> float:
+	return float(top_bar_row.get_theme_constant("separation"))
+
+
+## The top bar never needs more than the window has, and never changes as the game runs. The readout keeps the width of its longest possible text
+## (`_measure_readouts`), and the controls come first; the dish tabs take everything that is left (they scroll when there are more than fit), and when
+## not even two tabs and the strip's arrows fit beside the layer toggles, the playback speed (the readout's end), the tabs and the toggles move to a
+## second row (never away): the speed at its left, the tabs centred in what is between, the toggles at its right. So which it is depends on the window,
+## the interface size, the bup limit's digits and whether the tabs are there (and how many digits their count has), never on the speed, a pause or
+## how many bups there are.
 func _fit_top_bar() -> void:
-	_reserve_speed_width()
-	var room := get_viewport_rect().size.x - 64.0  # (the screen's margin, the bar's padding and the frames of the tabs and toggles)
+	_measure_readouts()
+	var room := _bar_room()
+	var gap := _bar_gap()
 	var fixed := playback_panel.get_combined_minimum_size().x + menu_button.get_combined_minimum_size().x
-	var vitals_w := minf(_vitals_full_width, _vitals_room())
-	var tabs_full := dish_strip.full_width() if dish_strip.visible else 0.0
+	var tabs_shown := dish_strip.visible
+	var strip_frame := dish_strip.get_theme_stylebox("panel").get_minimum_size().x  # (max_width is what is inside it)
 	var views_w := views.get_combined_minimum_size().x
-	var gaps := 12.0 * (4.0 if tabs_full == 0.0 else 5.0)  # (between the readout, the tabs, the spacer, the toggles, the playback and the menu)
-	var left_with_views := room - vitals_w - fixed - views_w - gaps
-	var tabs_least := dish_strip.shortest_width() if tabs_full > 0.0 else 0.0
+	var husks := layers_panel.husks_button
+	if not husks.visible:  # (room is kept for the husks' button, which comes with a dish that has husks)
+		views_w += husks.get_combined_minimum_size().x + float(husks.get_parent().get_theme_constant("separation"))
+	var gaps := gap * (6.0 if tabs_shown else 5.0)  # (between the readout, the spacer, the tabs, the spacer, the toggles, the playback and the menu)
+	var left_with_views := room - _vitals_full_width - fixed - views_w - gaps - (strip_frame if tabs_shown else 0.0)
+	var tabs_least := dish_strip.shortest_width() if tabs_shown else 0.0
 	var beside := left_with_views >= tabs_least
-	if tabs_full > 0.0:
-		var second_row_room := room - _speed_width - views_w - 12.0 * 3.0
+	if tabs_shown:
+		var second_row_room := room - _speed_width - views_w - strip_frame - gap * 4.0  # (the speed, the spacer, the tabs, the spacer, the toggles)
 		dish_strip.max_width = maxf(left_with_views if beside else second_row_room, dish_strip.narrowest_width())
 	var centred := not beside and dish_strip.full_width() <= dish_strip.max_width  # (when the tabs fill the row they are against the toggles whatever)
 	top_bar_more_row.get_node("MoreSpacer").size_flags_horizontal = Control.SIZE_EXPAND_FILL if centred else Control.SIZE_FILL
@@ -1340,30 +1390,56 @@ func _fit_top_bar() -> void:
 	else:
 		_move_to(dish_strip, top_bar_more_row, top_bar_more_row.get_node("MoreLead").get_index() + 1)
 		_move_to(views, top_bar_more_row, -1)
-	if top_bar_more_row.visible == beside:  # (the readout's text changes with where the speed is: it is written afresh, and measured afresh)
+	if top_bar_more_row.visible == beside:  # (the readout's text changes with where the speed is: it is written afresh)
 		top_bar_more_row.visible = not beside
 		readout.forget(vitals)
 		readout.forget(speed_readout)
-		_vitals_width = 0.0
 	speed_readout.visible = not beside
+	vitals.custom_minimum_size = Vector2(minf(_vitals_full_width if beside else _vitals_short_width, _vitals_room()), _readout_height)
+	speed_readout.custom_minimum_size = Vector2(_speed_width, _readout_height)
 
 
-## The speed readout holds the width of its longest possible text (the speed at its highest, running slower, paused, or waiting for the pipette) so the
-## second row never moves as the speed changes: the tabs are placed from this, and only the number of dishes moves them. Measured again, with the readout's
-## widths, when the readout's font size changes (the label's own size, not the setting: the setting changes a moment before the theme does).
-func _reserve_speed_width() -> void:
-	var font_size := speed_readout.get_theme_font_size("normal_font_size")
-	if font_size == _speed_width_at:
+## The readouts keep the width of their longest possible text, so nothing in the top bar moves as the figures change: the speed at its highest,
+## running slower, paused (or waiting for the pipette); as many bups as the bup limit has digits (the most digits of any running dish's limit, and the
+## limit beside them in free mode); the clock at LONGEST_CLOCK_HOURS. Measured again when the readout's font size changes (the label's own size, not the
+## setting: the setting changes a moment before the theme does), or the limit's digits.
+func _measure_readouts() -> void:
+	var key := [speed_readout.get_theme_font_size("normal_font_size"), free_mode, _bup_limit_digits()]
+	if key == _readouts_measured_for:
 		return
-	_speed_width_at = font_size
-	_vitals_width = 0.0  # (the readout's widths were for the old size)
-	_vitals_full_width = 0.0
-	readout.forget(vitals)
+	_readouts_measured_for = key
+	var bups := int("9".repeat(_limit_digits))
+	var lines := Strings.t("hud.readout_bups_limit", [bups, bups]) if free_mode else Strings.t("hud.readout_bups", [bups])
+	var clock := SimClock.format(LONGEST_CLOCK_HOURS * 3600.0 + 3599.0)
 	_speed_width = 0.0
-	for text: String in [Strings.t("hud.playback_slow_paused", [10000, 10000]), Strings.t("hud.pipette_paused")]:
-		speed_readout.text = UiText.numbers(text, "")
-		_speed_width = maxf(_speed_width, speed_readout.get_content_width())
+	var speeds := [Strings.t("hud.playback_slow_paused", [10000, 10000]), Strings.t("hud.pipette_paused")]
+	for text: String in speeds:
+		_speed_width = maxf(_speed_width, _readout_width(text))
+	_vitals_short_width = _readout_width(Strings.t("hud.vitals_short", [lines, clock]))
+	_vitals_full_width = 0.0
+	for text: String in speeds:
+		_vitals_full_width = maxf(_vitals_full_width, _readout_width(Strings.t("hud.vitals", [lines, clock, text])))
+	_readout_height = speed_readout.get_content_height()
+	readout.forget(vitals)
 	readout.forget(speed_readout)
+
+
+## How wide `text` is in the readouts (measured on the speed readout: both are the one theme type).
+func _readout_width(text: String) -> float:
+	speed_readout.text = UiText.numbers(text, "")
+	return speed_readout.get_content_width()
+
+
+## The most digits a running dish's bup limit has (worked out again when a dish comes or goes, or the main dish's limit changes).
+func _bup_limit_digits() -> int:
+	var now := [dishes.size(), dish.bup_limit]
+	if now != _limit_digits_for:
+		_limit_digits_for = now
+		var most := 1
+		for d in dishes:
+			most = maxi(most, d.bup_limit)
+		_limit_digits = str(most).length()
+	return _limit_digits
 
 
 ## A top bar part sits in the bar's row or in the second row under it.

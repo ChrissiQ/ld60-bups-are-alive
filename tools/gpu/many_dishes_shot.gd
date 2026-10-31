@@ -1,16 +1,24 @@
 extends SceneTree
 ## The game screen with many dishes on the real pooled world, windowed, in a busy state (a picked bup, a full watch list, the pipette tool
-## open, frozen dishes, the all-dishes details open), saved at interface sizes 100%, 150% and 250% for a look; it also prints the strip's
-## and the freezer's made nodes and the screen's main-thread time a frame.
+## open, frozen dishes when there is room for them, the all-dishes details open), saved at interface sizes 100%, 150% and 250% for a look, with
+## the dish tabs scrolled to their end (game_<size>.png; game_<size>_tray.png with the tray scrolled to its bottom too); it also prints the
+## strip's and the freezer's made nodes and the screen's main-thread time a frame. `dishes` running (default Main.MAX_DISHES); running and
+## frozen dishes share the dish numbers, so with all of them running none is frozen.
 ## tools/run_windowed.sh <log> -- --path . --rendering-driver metal --resolution 1920x1080 --position 6000,6000 -s tools/gpu/many_dishes_shot.gd -- <out_dir> [dishes]
 
-const FROZEN := 6  ## dishes put in the freezer for the picture
+const FROZEN := 6  ## dishes put in the freezer for the picture, as far as the dish numbers leave room
 const WATCHED := 12  ## bups put on the watch list
 const WAIT_MSEC := 700000  ## the longest the world is waited for (every dish in it, the freezes answered)
 
 
 func _initialize() -> void:
 	_run()
+
+
+## The dish tabs scrolled to their end: the last dishes' tabs and the arrows in view.
+func _to_strip_end(m: Node) -> void:
+	var bar: HScrollBar = m.dish_strip.scroll.get_h_scroll_bar()
+	m.dish_strip.scroll.scroll_horizontal = int(bar.max_value)
 
 
 func _time(call: Callable, n: int) -> float:
@@ -24,7 +32,8 @@ func _run() -> void:
 	SimConstants.apply()
 	var args := OS.get_cmdline_user_args()
 	var out: String = args[0] if args.size() > 0 else "user://many_dishes"
-	var count := int(args[1]) if args.size() > 1 else 1000
+	var count := int(args[1]) if args.size() > 1 else 999
+	var frozen := clampi(999 - count, 0, FROZEN)  # (Main.MAX_DISHES numbers for the running and the frozen together)
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(out))
 	var start := StartConditions.new()
 	start.dish_radius = 600.0  # (a 48-cell grid: gate C's small dishes)
@@ -40,7 +49,7 @@ func _run() -> void:
 	m.toolbar.set_paused(false)
 	m.sim_speed = 100.0
 	var t0 := Time.get_ticks_msec()
-	while m.dishes.size() < count + FROZEN:
+	while m.dishes.size() < count + frozen:
 		if m.add_dish(start) == null:
 			break
 		if m.dishes.size() % 50 == 0:
@@ -59,7 +68,7 @@ func _run() -> void:
 	print("SHOT every dish in the world after %d ms (%d of %d)" % [Time.get_ticks_msec() - t0, shown, m.dishes.size()])
 	for i in 300:  # (an atlas with every dish's tile, so the frozen ones keep a picture)
 		await process_frame
-	for i in FROZEN:
+	for i in frozen:
 		m.freeze_dish(m.dishes[m.dishes.size() - 1 - i * 7])
 	while m.holds.stills_world() and Time.get_ticks_msec() - t0 < WAIT_MSEC:
 		await process_frame
@@ -119,11 +128,17 @@ func _run() -> void:
 		UserSettings.apply()
 		for i in 60:
 			await process_frame
+		_to_strip_end(m)
+		for i in 10:
+			await process_frame
+		_to_strip_end(m)  # (once more: the row has its width for this size now)
+		for i in 5:
+			await process_frame
 		var image := m.get_viewport().get_texture().get_image()
 		var path := ProjectSettings.globalize_path(out.path_join("game_%d.png" % pct))
 		image.save_png(path)
-		print("SHOT %d%%: %s %s" % [pct, str(image.get_size()), path])
-		m.side.ensure_control_visible(m.freezer_section)  # (the tray scrolled down to the watch list and the freezer)
+		print("SHOT %d%%: %s %s, two rows %s, last tab made '%s', count '%s'" % [pct, str(image.get_size()), path, m.top_bar_more_row.visible, m.dish_strip._tabs.back().text if m.dish_strip.tabs_made() > 0 else "", m.dish_strip.count_label.text])
+		m.side.scroll_vertical = int(m.side.get_v_scroll_bar().max_value)  # (the tray scrolled to its bottom)
 		for i in 10:
 			await process_frame
 		path = ProjectSettings.globalize_path(out.path_join("game_%d_tray.png" % pct))

@@ -7,7 +7,7 @@ extends PanelContainer
 ##
 ## The tabs scroll sideways inside a width the top bar can afford (`max_width`), and only those in view and OVERSCAN either side are made:
 ## they are reused for other dishes as the strip scrolls, and a spacer at each end stands for the tabs that are not made, so a thousand
-## dishes cost what a screenful does. Every tab is as wide as the widest number needs, so where a tab lies is arithmetic.
+## dishes cost what a screenful does. Every tab is as wide as a three-digit number needs, so where a tab lies is arithmetic.
 
 signal dish_chosen(dish: Dish)
 
@@ -17,9 +17,12 @@ const OVERSCAN := 4  ## tabs made past each end of what is in view
 const REPEAT_DELAY := 0.4  ## seconds an arrow is held before it goes on by itself
 const REPEAT_EVERY := 0.12  ## and then one tab every so many seconds
 const PAGE_AFTER := 1.5  ## seconds an arrow is held after which it moves a whole view at a time (a thousand tabs are crossed in seconds)
+const MIN_DIGITS := 3  ## every tab has room for a number this long (dishes are shown by 1 to 999: Main.MAX_DISHES), so the tabs keep one width
 
 var max_width := 240.0:  ## the most width the strip takes (its tabs, arrows and count); with more tabs than fit, they scroll
 	set(value):
+		if value == max_width:
+			return  # (the top bar sets it every frame: the tabs are laid out again only when it changes)
 		max_width = value
 		_fit()
 
@@ -33,7 +36,7 @@ var max_width := 240.0:  ## the most width the strip takes (its tabs, arrows and
 
 var _entries: Array[Dictionary] = []  ## {dish, number} in the order of the tabs
 var _index := {}  ## Dish -> its place in _entries
-var _top := 0  ## the biggest number a tab has had (numbers only grow: the tabs' width follows it)
+var _top := 0  ## the biggest number a tab has had (a number of more than MIN_DIGITS would widen every tab)
 var _tabs: Array[Button] = []  ## the tabs made, in order: tab k shows entry _first + k
 var _first := 0
 var _lit: Dish = null  ## the dish in the main view
@@ -261,18 +264,21 @@ func _on_tab(tab: Button) -> void:
 		dish_chosen.emit(_entries[i]["dish"])
 
 
-## Every tab is as wide as a tab with the widest number needs: measured again when the numbers gain a digit or the text size changes.
+## Every tab is as wide as a tab with a number of MIN_DIGITS (or the most digits a number has had, were there more) in the widest digit needs:
+## measured again when the text size changes.
 func _measure() -> void:
-	var top := _top
+	var digits := maxi(MIN_DIGITS, str(_top).length())
 	var probe := _tabs[0] if not _tabs.is_empty() else _new_tab()
-	var key := [str(top).length(), probe.get_theme_font_size("font_size")]
+	var key := [digits, probe.get_theme_font_size("font_size")]
 	if key == _measured_for and _tab_width > 0.0:
 		return
 	_measured_for = key
 	var text := probe.text
 	probe.custom_minimum_size.x = 0.0
-	probe.text = Strings.t("dishes.caption", [int("8".repeat(str(top).length()))])
-	_tab_width = probe.get_combined_minimum_size().x
+	_tab_width = 0.0
+	for digit in 10:
+		probe.text = Strings.t("dishes.caption", [1]).replace("1", str(digit).repeat(digits))
+		_tab_width = maxf(_tab_width, probe.get_combined_minimum_size().x)
 	probe.text = text
 	probe.custom_minimum_size.x = _tab_width
 	if _tabs.is_empty():

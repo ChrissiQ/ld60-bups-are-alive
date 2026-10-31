@@ -4,7 +4,7 @@ extends RefCounted
 
 const STATS_KEYS: Array[String] = ["count", "speed", "sense", "metabolism", "size", "harm", "mutations", "mutator", "donor", "key", "generation"]
 
-var number := 0  ## the dish's number as the player sees it (never reused)
+var number := 0  ## the dish's world number (DishSpec.number, never reused in a game; the screen shows the dish by a number of its own, Main._dish_numbers)
 var count := 0  ## the bups alive in it
 var stats: Dictionary = {}  ## STATS_KEYS to means (count is the count)
 var fractions: Dictionary = {}  ## the answers to the asked "share with a gene at least" questions

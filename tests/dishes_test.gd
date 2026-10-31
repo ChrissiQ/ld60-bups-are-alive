@@ -11,18 +11,22 @@ extends SceneTree
 ##  - dishes of 100 bups (every mean 10) and 300 bups (every mean 20) show a speed of (100 x 10 + 300 x 20) / 400 = 17.5 in the
 ##    all-dishes section, with 2 dishes and 400 bups [derived].
 ##  - The source tool: a click selects nothing at once (the world's copy has not come), and the source placed once it has (1-2 frames).
-##  - At Main.MAX_DISHES (1,000) running: add, pipette and unfreeze are refused with banner.dish_limit, the dish actions show the warning,
-##    and nothing changes (dish count, next number, no ADD_DISH, THAW or PIPETTE sent); a trash frees a row and both work again.
+##  - Dishes are shown by 1 to Main.MAX_DISHES (999) in turn. With 998 running and one frozen every number is held: add and pipette are refused
+##    with banner.dish_limit, the dish actions show the warning, and nothing changes (dish count, next world number, no ADD_DISH or PIPETTE
+##    sent). Trashing dish 8 (after the frozen 7) frees 8: the next dish is shown by 8, not 7, its founders' ids are none of the ids alive
+##    before, its world number is its own, and no number is above 999. The frozen dish unfreezes with every number in use (999 running).
+##    Trashing the 501st dish of the strip frees its number for a pipette: while its answer is awaited no dish can be added, and its new
+##    dish is shown by that number.
 ##  - the dishes have one clock: their times are equal after any frame, and both move while the game runs.
 ##  - a dish that dies out (FakeWorld.kill) out of view: the game pauses on it with banner "DISH 2 WENT EXTINCT", one `extinct`
 ##    signal however many snapshots say so; resuming sends one REMOVE_DISH for its row and deletes it; the view goes to the dish before it
-##    (or back to the one being looked at); number 2 is not reused.
+##    (or back to the one being looked at); number 2 is not reused (not all 999 have been handed out).
 ##  - the last dish dying out ends the game: the end dialog, and neither the pause button nor Space resumes; starting again strikes
 ##    a dish afresh (bups once a snapshot shows it).
 ##  - The pipette at (18, 0) with radius 30 over 10 bups at (4i, 0), 5 at (200 + i, 100), a parent at (300, 0) and its child
 ##    "Zed" at (12, 0) (watched) moves the 10 and the child: 11 in the new dish, 6 left of 17. Until its answer (one frame) the world waits
-##    quietly (paused set_time, no input). Then the new dish is in view, numbered by the answer (the world's next number, past every dish
-##    the world has had: the family tree's home of the moved bups), at the world's time, its history from
+##    quietly (paused set_time, no input). Then the new dish is in view, of the world number the answer gives (past every dish the world
+##    has had: the family tree's home of the moved bups) and shown by a number of its own, at the world's time, its history from
 ##    then; the child keeps its id, its name and its line [parent, child] and its place on the watch list (now the new dish's); the old
 ##    dish's question is up; the panel's line names the new dish; the old dish's lineage says 1 bup of the parent's line lives in dish 2.
 ##    A circle with no bups makes no dish: one REMOVE_DISH for the empty new row and "No bups there". A pipette the memory budget refuses
@@ -109,7 +113,7 @@ func _run() -> void:
 	TestUtil.check(m.dishes.size() == 2 and not is_instance_valid(other), "resuming deletes the dish")
 	TestUtil.check(removed.size() == 1 and removed[0]["args"]["row"] == other_row and not fake.rows().has(other_row), "...and takes it out of the world: one REMOVE_DISH for its row")
 	TestUtil.check(m.dish == first and m.banner.text == "" and not m.paused, "the view goes to the dish before it, the banner clears and play goes on")
-	TestUtil.check(m.dish_strip.count() == 2 and m._dish_numbers.values().has(3) and not m._dish_numbers.values().has(2), "its number is not reused or shown")
+	TestUtil.check(m.dish_strip.count() == 2 and m._dish_numbers.values().has(3) and not m._dish_numbers.values().has(2), "its number is not shown, nor reused before every number has been handed out")
 	fake.kill(first.row)
 	for i in 5:
 		await process_frame
@@ -208,58 +212,74 @@ func _all_dishes_and_source(fake: FakeWorld) -> void:
 	await process_frame
 
 
-## At the limit (Main.MAX_DISHES running): adding a dish, a pipette and an unfreeze are refused with the banner and a warning under the dish
-## actions, and change nothing (no dish, no number used, no command to the world); after a dish is trashed they work again.
+## Dish numbers and the limit (Main.MAX_DISHES numbers, held by the running and the frozen dishes together): with every number held, adding a dish
+## and a pipette are refused with the banner and a warning under the dish actions, and change nothing (no dish, no world number used, no command
+## to the world); an unfreeze is not (its dish has its number). Once all have been handed out a new dish takes the lowest free number (never a
+## frozen dish's), a pipette's new dish too, and no bup of it has an id another bup has had.
 func _limit(fake: FakeWorld, chosen: StartConditions) -> void:
 	var m: Node = TestUtil.game_screen(self, chosen)
 	await process_frame
-	var spare: Dish = m.add_dish(chosen)
 	while m.dishes.size() < m.MAX_DISHES:
 		m.add_dish(chosen)
 	await process_frame
-	m.freeze_dish(spare)
+	var labels: Array = m._dish_numbers.values()
+	labels.sort()
+	TestUtil.check(labels == range(1, m.MAX_DISHES + 1), "%d dishes run, shown by the numbers 1 to %d in turn" % [m.dishes.size(), m.MAX_DISHES])
+	var frozen_label: int = m._dish_numbers[m.dishes[6]]
+	m.freeze_dish(m.dishes[6])
 	for i in 3:
 		await process_frame
-	m.add_dish(chosen)
-	await process_frame
 	m.toolbar.set_paused(false)
 	await process_frame
-	TestUtil.check(m.dishes.size() == m.MAX_DISHES and m.freezer_shelf.entries.size() == 1, "%d dishes run and one is frozen" % m.dishes.size())
-	TestUtil.check(m.card_actions.limit_row.visible and m.freezer_shelf.actions.limit_row.visible, "the dish actions warn that the most dishes are running")
+	TestUtil.check(m.dishes.size() == m.MAX_DISHES - 1 and m.freezer_shelf.entries.size() == 1 and m.freezer_shelf.entries[0]["label"] == frozen_label, "%d dishes run and dish %d is frozen, keeping its number" % [m.dishes.size(), frozen_label])
+	TestUtil.check(m.card_actions.limit_row.visible and m.freezer_shelf.actions.limit_row.visible, "the dish actions warn that every number is in use")
 	var number_before: int = m._next_dish_number
 	var adds := fake.calls_of(SimCommand.KIND_ADD_DISH).size()
-	var thaws := fake.calls_of(SimCommand.KIND_THAW).size()
 	var pipettes := fake.calls_of(SimCommand.KIND_PIPETTE).size()
 	m.banner.text = ""
 	TestUtil.check(m.add_dish(chosen) == null and m.banner.text == Strings.t("banner.dish_limit"), "adding a dish is refused with the banner (%s)" % m.banner.text)
 	m.banner.text = ""
 	m.pipette(Vector2.ZERO, 50.0)
 	TestUtil.check(m._pipette_pending.is_empty() and m.banner.text == Strings.t("banner.dish_limit"), "a pipette is refused with the banner")
-	m.banner.text = ""
-	m.thaw(m.freezer_shelf.entries[0])
-	TestUtil.check(m.freezer_shelf.entries.size() == 1 and not m.freezer_shelf.entries[0].has("thawing") and m.banner.text == Strings.t("banner.dish_limit"), "an unfreeze is refused with the banner, and the dish stays frozen")
 	for i in 2:
 		await process_frame
-	TestUtil.check(m.dishes.size() == m.MAX_DISHES and m._next_dish_number == number_before and fake.calls_of(SimCommand.KIND_ADD_DISH).size() == adds and fake.calls_of(SimCommand.KIND_THAW).size() == thaws and fake.calls_of(SimCommand.KIND_PIPETTE).size() == pipettes, "...and none of them changed anything")
-	m.trash_dish(m.dishes[5])
+	TestUtil.check(m.dishes.size() == m.MAX_DISHES - 1 and m._next_dish_number == number_before and fake.calls_of(SimCommand.KIND_ADD_DISH).size() == adds and fake.calls_of(SimCommand.KIND_PIPETTE).size() == pipettes, "...and neither changed anything")
+	# A middle dish trashed: the next dish takes its number (the frozen dish's lower one stays held), and none of its bups has an id another has had.
+	var gone: Dish = m.dishes[6]
+	var freed: int = m._dish_numbers[gone]
+	TestUtil.check(freed == frozen_label + 1, "(the dish after the frozen one is dish %d)" % freed)
+	var ids_before := {}
+	for row: int in fake.rows():
+		for id in fake.ids_in(row):
+			ids_before[id] = true
+	m.trash_dish(gone)
 	await process_frame
-	TestUtil.check(not m.card_actions.limit_row.visible, "with a dish fewer the warning goes")
+	TestUtil.check(not m.card_actions.limit_row.visible, "with a number free the warning goes")
 	var again: Dish = m.add_dish(chosen)
-	TestUtil.check(again != null and m.dishes.size() == m.MAX_DISHES, "and a dish can be added again")
-	m.trash_dish(again)
+	await process_frame
+	TestUtil.check(again != null and m._dish_numbers[again] == freed, "a dish added then takes the freed number %d, not the frozen dish's %d (%d)" % [freed, frozen_label, m._dish_numbers.get(again, -1)])
+	var clashes := 0
+	for id in fake.ids_in(again.row):
+		if ids_before.has(id):
+			clashes += 1
+	TestUtil.check(clashes == 0 and not fake.ids_in(again.row).is_empty(), "no bup of it has an id a bup of the trashed dish (or any other) had (%d of %d)" % [clashes, fake.ids_in(again.row).size()])
+	TestUtil.check(m.dishes.all(func(d: Dish) -> bool: return d == again or d.number != again.number), "its world number is its own (%d)" % again.number)
+	TestUtil.check(m._dish_numbers.values().all(func(n: int) -> bool: return n >= 1 and n <= m.MAX_DISHES), "no dish is shown by a number above %d" % m.MAX_DISHES)
+	m.thaw(m.freezer_shelf.entries[0])
+	for i in 3:
+		await process_frame
+	TestUtil.check(m.freezer_shelf.entries.is_empty() and m.dishes.size() == m.MAX_DISHES and m._dish_numbers.values().count(frozen_label) == 1, "with every number in use a frozen dish still unfreezes, under its number")
+	# A pipette's new dish takes a freed number too; while its answer is awaited, its number is held.
+	var freed_too: int = m._dish_numbers[m.dishes[500]]
+	m.trash_dish(m.dishes[500])
 	await process_frame
 	var bups_at: Vector2 = fake.place_of(m.dish.row, fake.ids_in(m.dish.row)[0])
 	m.pipette(bups_at, 30.0)
-	TestUtil.check(fake.calls_of(SimCommand.KIND_PIPETTE).size() == pipettes + 1, "and a pipette is sent again")
+	TestUtil.check(fake.calls_of(SimCommand.KIND_PIPETTE).size() == pipettes + 1 and m.add_dish(chosen) == null, "a pipette is sent, and while it is awaited no dish can take its number")
 	for i in 3:
 		await process_frame
-	TestUtil.check(m.dishes.size() == m.MAX_DISHES and m._old_dish != null, "...and makes its dish (%d running)" % m.dishes.size())
+	TestUtil.check(m.dishes.size() == m.MAX_DISHES and m._old_dish != null and m._dish_numbers[m.dish] == freed_too, "...and its dish is shown by the freed number %d (%d)" % [freed_too, m._dish_numbers.get(m.dish, -1)])
 	m._answer_old_dish("keep")
-	m.trash_dish(m.dishes[7])
-	m.thaw(m.freezer_shelf.entries[0])
-	for i in 3:
-		await process_frame
-	TestUtil.check(m.freezer_shelf.entries.is_empty() and m.dishes.size() == m.MAX_DISHES, "and a frozen dish unfrozen")
 	m.queue_free()
 	await process_frame
 
@@ -316,7 +336,7 @@ func _pipette(m: Node, fake: FakeWorld, chosen: StartConditions) -> void:
 	TestUtil.check(fake.calls_of(SimCommand.KIND_SET_TIME)[-1]["args"]["paused"], "the world stands still while the pipette's answer is awaited")
 	await process_frame
 	var made: Dish = m.dish
-	TestUtil.check(made != first and made != early and m.dishes.size() == 3 and m._dish_numbers[made] == fake.store.info(child)["home"] and m._dish_numbers[early] != m._dish_numbers[made], "the pipette makes a dish numbered by the simulation's answer, and the dish added meanwhile another (%d, %d)" % [m._dish_numbers.get(made, -1), m._dish_numbers.get(early, -1)])
+	TestUtil.check(made != first and made != early and m.dishes.size() == 3 and made.number == fake.store.info(child)["home"] and early.number != made.number and m._dish_numbers[early] != m._dish_numbers[made], "the pipette makes a dish of the world number the simulation answers, and the dish added meanwhile another, each shown by its own number (%d, %d)" % [m._dish_numbers.get(made, -1), m._dish_numbers.get(early, -1)])
 	m.trash_dish(early)
 	TestUtil.check(made.has_bup(child) and made.bup_name(child) == "Zed" and made.lineage_chain(child) == PackedInt64Array([parent, child]), "a moved bup is the same bup: its id, its name and its family line come with it")
 	TestUtil.check(made.is_watched(child) and not first.is_watched(child) and m.watch_list.dishes.has(made), "...and so does its place on the watch list")
@@ -376,7 +396,7 @@ func _pipette(m: Node, fake: FakeWorld, chosen: StartConditions) -> void:
 	m.sim_speed = 100.0
 	for i in 20:
 		await process_frame
-	TestUtil.check(m.holds.has(&"pipette") and m.paused and m.toolbar.resume_locked and m.vitals.get_parsed_text().contains(Strings.t("hud.pipette_paused")), "after the hours the game pauses and says so in the top bar")
+	TestUtil.check(m.holds.has(&"pipette") and m.paused and m.toolbar.resume_locked and (m.vitals.get_parsed_text() + m.speed_readout.get_parsed_text()).contains(Strings.t("hud.pipette_paused")), "after the hours the game pauses and says so in the top bar (its first row or its second)")
 	m.toolbar._shortcut_input(TestUtil.key_event(KEY_SPACE))
 	m.toolbar.speed_1000_button.button_pressed = true
 	TestUtil.check(m.paused, "neither Space nor a speed button resumes while it waits")
