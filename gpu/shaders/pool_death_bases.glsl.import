@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://3d6rf5xge12h"
+path="res://.godot/imported/pool_death_bases.glsl-4899d7a6013aa8bc96d175d02f1f9f67.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_death_bases.glsl"
+dest_files=["res://.godot/imported/pool_death_bases.glsl-4899d7a6013aa8bc96d175d02f1f9f67.res"]
+
+[params]
+

@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://cc1kw7u1yerc4"
+path="res://.godot/imported/pool_cells.glsl-15e0d5a718838c4b7673972b44a066a1.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_cells.glsl"
+dest_files=["res://.godot/imported/pool_cells.glsl-15e0d5a718838c4b7673972b44a066a1.res"]
+
+[params]
+

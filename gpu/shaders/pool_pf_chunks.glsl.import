@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://bg2eg2exqnjc8"
+path="res://.godot/imported/pool_pf_chunks.glsl-a28678d4706417e1ea8e1322aba7c5d8.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_pf_chunks.glsl"
+dest_files=["res://.godot/imported/pool_pf_chunks.glsl-a28678d4706417e1ea8e1322aba7c5d8.res"]
+
+[params]
+

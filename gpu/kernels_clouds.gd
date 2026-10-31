@@ -321,6 +321,456 @@ void main() {
 """
 
 
+## ---- The pooled world's cloud kernels ----
+## The pool's clouds are one PUFF array of every dish's: a cloud's word 5 is the float with the bits PUFF_ROW_BASE + its dish's row (0.0:
+## no cloud), so `alive` stays `>= 0.5`, the row travels with the cloud through every copy and compaction, and no second array is read
+## by the kernels that already read the record. (A separate PDISH array would cost 4 B a slot, a binding in every kernel that finds a cloud
+## and a copy in the compaction, for the same information.) Slots are taken in the order (step, dish, rank), the dish's lone order, and a
+## dish's own slot counter DS_CLOUD_SLOTS is virtual: raised by every append, and set to the dish's live clouds at its cadence, so
+## whether a cloud finds room never depends on another dish. A dish's cells, bins and entries are in the pool's arrays at its own bases.
+## In the pool P_PUFF_CAPACITY and P_ENTRY_CAPACITY are the pool's physical slots and entries, P_BINS its bins (see kernels_field.gd).
+## WORLD[WD_CLOUD_SLOTS] is the physical top of PUFF. The events a step brings (EVR, EVP, EVCC, EVCA) are ordered by dish row; a cloud's
+## EVP word 5 is its row word, and a cloud event whose word 4 (cut) is negative is a plankton husk (mass: its energy).
+const ENTRIES_PER_SLOT := 12
+
+const POOL_CLOUD_FUNCS := """
+// the list of entries (a range of ENTD) of the square of dish d that holds a point
+void bin_list(uint d, float x, float y, out uint e0, out uint e1) {
+	int nb = int(DPU(d, DP_BINS_ACROSS)); float bs = DPF(d, DP_BIN_SIZE), org = DPF(d, DP_RADIUS);
+	int bx = clamp(int((x + org) / bs), 0, nb - 1), by = clamp(int((y + org) / bs), 0, nb - 1);
+	uint b = DPU(d, DP_BIN_BASE) + uint(by * nb + bx);
+	e0 = BINS[b]; e1 = e0 + BINC[b];
+}
+// the clouds' concentration and gradient where a bup of dish d is, and the smallest sigma among the clouds that reach it
+void puffs_at_d(uint d, float x, float y, out float c, out float gx, out float gy, out float sigma) {
+	c = 0.0; gx = 0.0; gy = 0.0; sigma = 1e18;
+	uint e0, e1; bin_list(d, x, y, e0, e1);
+	for (uint e = e0; e < e1; e++) {
+		vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];  // x, y, mass, variance | reach^2, sigma, cloud index, 0
+		float dx = x - r0.x, dy = y - r0.y, r2 = fma(dy, dy, dx * dx);
+		if (r2 <= r1.x) {
+			float v = r0.w;
+			float ci = r0.z / (6.2831853 * v) * exp(-r2 * 0.5 / v);
+			c += ci; gx -= ci * dx / v; gy -= ci * dy / v;
+			sigma = min(sigma, r1.y);
+		}
+	}
+}
+"""
+
+## What puts nutrient on the pool's grid from many threads at once (the clouds that have spread to a cell, the deaths' that find no slot).
+const POOL_DEP_FUNCS := """
+void add_dep(uint cell, float amount) { ADD_FIXED20(DPLO, DPHI, cell, amount) }
+void deposit_xy_d(uint d, float x, float y, float mass) {
+	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS); uint base = DPU(d, DP_FIELD_BASE);
+	float fx = (x + org) / sp - 0.5, fy = (y + org) / sp - 0.5;
+	int x0 = int(floor(fx)), y0 = int(floor(fy));
+	float tx = fx - float(x0), ty = fy - float(y0);
+	int cells[4]; float weights[4]; float kept = 0.0; int count = 0;
+	for (int k = 0; k < 4; k++) {
+		int cx = x0 + (k & 1), cy = y0 + (k >> 1);
+		if (cx < 0 || cy < 0 || cx >= n || cy >= n || INSIDE[base + uint(cy * n + cx)] == 0) continue;
+		float w = ((k & 1) != 0 ? tx : 1.0 - tx) * ((k >> 1) != 0 ? ty : 1.0 - ty);
+		cells[count] = cy * n + cx; weights[count] = w; kept += w; count++;
+	}
+	if (count == 0) return;
+	if (kept <= 1e-9) { add_dep(base + uint(cells[0]), mass); return; }
+	for (int k = 0; k < count; k++) add_dep(base + uint(cells[k]), mass * weights[k] / kept);
+}
+"""
+
+## The events of step pcs.pa, one thread so that the slots are taken in the events' order (dish by dish). A cloud takes the next slot of the
+## pool and of its dish's counter; one past its dish's quota goes onto the grid (as the single dish's past its capacity), and one that the
+## pool's physical slots cannot hold raises the overflow flag (the host grows the pool and redoes the iteration). A plankton husk takes the
+## next husk slot; past the dish's husk quota its energy is given back at once as a cloud.
+const K_POOL_EV_PUFFS := """
+uint slots_g, cap_g;
+void to_grid_d(uint d, float x, float y, float mass, float v) {
+	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS); uint base = DPU(d, DP_FIELD_BASE); float area = sp * sp; float reach = 4.0 * sqrt(v);
+	int x0 = max(0, int(floor((x - reach + org) / sp - 0.5))), x1 = min(n - 1, int(ceil((x + reach + org) / sp - 0.5)));
+	int y0 = max(0, int(floor((y - reach + org) / sp - 0.5))), y1 = min(n - 1, int(ceil((y + reach + org) / sp - 0.5)));
+	float sum = 0.0;
+	for (int cy = y0; cy <= y1; cy++) for (int cx = x0; cx <= x1; cx++) {
+		if (INSIDE[base + uint(cy * n + cx)] == 0) continue;
+		float dx = (float(cx) + 0.5) * sp - org - x, dy = (float(cy) + 0.5) * sp - org - y;
+		sum += exp(-(dx * dx + dy * dy) / (2.0 * v));
+	}
+	if (sum > 1e-12) {
+		for (int cy = y0; cy <= y1; cy++) for (int cx = x0; cx <= x1; cx++) {
+			if (INSIDE[base + uint(cy * n + cx)] == 0) continue;
+			float dx = (float(cx) + 0.5) * sp - org - x, dy = (float(cy) + 0.5) * sp - org - y;
+			CONC[base + uint(cy * n + cx)] += mass * exp(-(dx * dx + dy * dy) / (2.0 * v)) / sum / area;
+		}
+		return;
+	}
+	float fx = (x + org) / sp - 0.5, fy = (y + org) / sp - 0.5;
+	int bx = int(floor(fx)), by = int(floor(fy));
+	float tx = fx - float(bx), ty = fy - float(by);
+	uint cells[4]; float weights[4]; float kept = 0.0; int count = 0;
+	for (int k = 0; k < 4; k++) {
+		int cx = bx + (k & 1), cy = by + (k >> 1);
+		if (cx < 0 || cy < 0 || cx >= n || cy >= n || INSIDE[base + uint(cy * n + cx)] == 0) continue;
+		float w = ((k & 1) != 0 ? tx : 1.0 - tx) * ((k >> 1) != 0 ? ty : 1.0 - ty);
+		cells[count] = base + uint(cy * n + cx); weights[count] = w; kept += w; count++;
+	}
+	if (count == 0) return;
+	if (kept <= 1e-9) { CONC[cells[0]] += mass / area; return; }
+	for (int k = 0; k < count; k++) CONC[cells[k]] += mass * weights[k] / kept / area;
+}
+void put_cloud(uint d, float x, float y, float mass, float v, float cut) {
+	uint q = DS(d, DS_CLOUD_SLOTS);
+	if (q >= DPU(d, DP_CLOUD_QUOTA)) { to_grid_d(d, x, y, mass, v); DS(d, DS_CLOUDS_TO_GRID) += 1u; return; }
+	if (slots_g >= cap_g) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; return; }
+	uint o = slots_g * 8u;
+	PUFF[o] = x; PUFF[o + 1] = y; PUFF[o + 2] = mass; PUFF[o + 3] = v; PUFF[o + 4] = cut;
+	PUFF[o + 5] = uintBitsToFloat(PUFF_ROW_BASE + d); PUFF[o + 6] = 0.0; PUFF[o + 7] = 0.0;
+	slots_g++; DS(d, DS_CLOUD_SLOTS) = q + 1u;
+}
+void main() {
+	if (gl_GlobalInvocationID.x != 0u) return;  // (one thread: a dispatch of 1 runs a whole group of 64)
+	int st = int(pcs.pa);
+	int start = EVR[st * 4], cnt = EVR[st * 4 + 1];
+	slots_g = WORLD[WD_CLOUD_SLOTS]; cap_g = uint(P[P_PUFF_CAPACITY]);
+	uint husk_cap = uint(HUSK.length()) / 8u;
+	for (int e = 0; e < cnt; e++) {
+		uint q = uint(start + e) * EV_PUFF_FLOATS;
+		uint d = floatBitsToUint(EVP[q + 5]) - PUFF_ROW_BASE;
+		if (EVP[q + 4] < 0.0) {  // a plankton husk
+			uint hv = DS(d, DS_HUSKS), hs = WORLD[WD_HUSK_SLOTS];
+			if (hv >= DPU(d, DP_HUSK_QUOTA)) { put_cloud(d, EVP[q], EVP[q + 1], EVP[q + 2], 100.0, 1.0); continue; }
+			if (hs >= husk_cap) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; continue; }
+			uint o = hs * 8u;
+			HUSK[o] = EVP[q]; HUSK[o + 1] = EVP[q + 1]; HUSK[o + 2] = EVP[q + 2]; HUSK[o + 3] = 0.0; HUSK[o + 4] = 0.0;
+			HUSK[o + 5] = uintBitsToFloat(PUFF_ROW_BASE + d); HUSK[o + 6] = 1.0; HUSK[o + 7] = 0.0;
+			WORLD[WD_HUSK_SLOTS] = hs + 1u; DS(d, DS_HUSKS) = hv + 1u;
+			continue;
+		}
+		put_cloud(d, EVP[q], EVP[q + 1], EVP[q + 2], EVP[q + 3], EVP[q + 4]);
+	}
+	WORLD[WD_CLOUD_SLOTS] = slots_g;
+}
+"""
+
+const K_POOL_PUFF_ADVANCE := """
+void f(uint k) {
+	uint o = k * 8u;
+	if (PUFF[o + 5] < 0.5) return;
+	uint d = floatBitsToUint(PUFF[o + 5]) - PUFF_ROW_BASE;
+	float v = PUFF[o + 3] + P[P_CLOUD_SPREAD];
+	PUFF[o + 3] = v;
+	float mass = PUFF[o + 2];
+	if (mass <= 1e-9) { PUFF[o + 5] = 0.0; return; }
+	if (sqrt(v) >= DPF(d, DP_HANDOVER)) {
+		float x = PUFF[o], y = PUFF[o + 1];
+		int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS); uint base = DPU(d, DP_FIELD_BASE); float reach = 4.0 * sqrt(v);
+		int x0 = max(0, int(floor((x - reach + org) / sp - 0.5))), x1 = min(n - 1, int(ceil((x + reach + org) / sp - 0.5)));
+		int y0 = max(0, int(floor((y - reach + org) / sp - 0.5))), y1 = min(n - 1, int(ceil((y + reach + org) / sp - 0.5)));
+		float sum = 0.0;
+		for (int cy = y0; cy <= y1; cy++) for (int cx = x0; cx <= x1; cx++) {
+			if (INSIDE[base + uint(cy * n + cx)] == 0) continue;
+			float dx = (float(cx) + 0.5) * sp - org - x, dy = (float(cy) + 0.5) * sp - org - y;
+			sum += exp(-(dx * dx + dy * dy) / (2.0 * v));
+		}
+		if (sum <= 1e-12) deposit_xy_d(d, x, y, mass);
+		else {
+			for (int cy = y0; cy <= y1; cy++) for (int cx = x0; cx <= x1; cx++) {
+				if (INSIDE[base + uint(cy * n + cx)] == 0) continue;
+				float dx = (float(cx) + 0.5) * sp - org - x, dy = (float(cy) + 0.5) * sp - org - y;
+				add_dep(base + uint(cy * n + cx), mass * exp(-(dx * dx + dy * dy) / (2.0 * v)) / sum);
+			}
+		}
+		PUFF[o + 5] = 0.0;
+	}
+}
+GRID_LOOP(f, WORLD[WD_CLOUD_SLOTS])
+"""
+
+const K_POOL_DEP_APPLY := """
+void f(uint c, uint d, uint l) {
+	float m = FIX20(DPHI[c], DPLO[c]);
+	float sp = DPF(d, DP_SPACING);
+	if (m > 0.0) CONC[c] += m / (sp * sp);
+	DPLO[c] = 0u; DPHI[c] = 0u;
+}
+CELL_LOOP(f, uint(P[P_CELLS]))
+"""
+
+const K_POOL_PUFF_CLEAR := """
+void f(uint k) { PDLO[k] = 0u; PDHI[k] = 0u; PSCALE[k] = 0.0; }
+GRID_LOOP(f, WORLD[WD_CLOUD_SLOTS])
+"""
+
+const K_POOL_PUFF_SCALE := """
+void f(uint k) {
+	float d = FIX20(PDHI[k], PDLO[k]);
+	float mass = PUFF[k * 8u + 2u];
+	PSCALE[k] = d > 0.0 ? min(1.0, mass / d) : 0.0;
+}
+GRID_LOOP(f, WORLD[WD_CLOUD_SLOTS])
+"""
+
+const K_POOL_PUFF_COMMIT := """
+void f(uint k) {
+	float d = FIX20(PDHI[k], PDLO[k]);
+	if (d > 0.0) PUFF[k * 8u + 2u] = max(PUFF[k * 8u + 2u] - d * PSCALE[k], 0.0);
+}
+GRID_LOOP(f, WORLD[WD_CLOUD_SLOTS])
+"""
+
+const K_POOL_BIN_CLEAR := """
+void f(uint b) { BINC[b] = 0u; }
+GRID_LOOP(f, uint(P[P_BINS]))
+"""
+
+const K_POOL_BIN_COUNT := """
+void f(uint k) {
+	uint o = k * 8u;
+	if (PUFF[o + 5] < 0.5) return;
+	uint d = floatBitsToUint(PUFF[o + 5]) - PUFF_ROW_BASE;
+	float mass = PUFF[o + 2], v = PUFF[o + 3], x = PUFF[o], y = PUFF[o + 1];
+	float peak = mass / (6.2831853 * v);
+	float cut = max(P[P_CLOUD_CUT] * PUFF[o + 4] * P[P_DETECTION_FLOOR], 1e-30);
+	float reach = peak > cut ? sqrt(2.0 * v * log(peak / cut)) : 0.0;
+	PUFF[o + 6] = reach * reach; PUFF[o + 7] = sqrt(v);
+	int nb = int(DPU(d, DP_BINS_ACROSS)); float bs = DPF(d, DP_BIN_SIZE), org = DPF(d, DP_RADIUS); uint base = DPU(d, DP_BIN_BASE);
+	int lx = clamp(int((x - reach + org) / bs), 0, nb - 1), hx = clamp(int((x + reach + org) / bs), 0, nb - 1);
+	int ly = clamp(int((y - reach + org) / bs), 0, nb - 1), hy = clamp(int((y + reach + org) / bs), 0, nb - 1);
+	for (int by = ly; by <= hy; by++) for (int bx = lx; bx <= hx; bx++) atomicAdd(BINC[base + uint(by * nb + bx)], 1u);
+}
+GRID_LOOP(f, WORLD[WD_CLOUD_SLOTS])
+"""
+
+## After the scan of the bins' counts: each dish keeps its lists whole, bin by bin, up to its entry quota (ENTRIES_PER_SLOT a cloud slot of
+## its own quota) and the pool's physical entries. The bins are in order and their ends only grow, so the first bin that does not fit and
+## every bin after it are cut: a thread a dish finds that first bin by bisection (none: nothing more to do) and empties the rest, counting
+## the entries dropped in DS_ENTRIES_CUT. A bin whose count is zeroed gets no entries in the scatter and reads as empty.
+const K_POOL_BIN_CUT := """
+void f(uint k) {
+	uint d = k;
+	if (((DPU(d, DP_FLAGS) >> DPF_RUNNING) & 1u) == 0u) return;
+	uint base = DPU(d, DP_BIN_BASE), nbins = DPU(d, DP_BINS_ACROSS) * DPU(d, DP_BINS_ACROSS);
+	uint first = BINS[base], quota = ENTRIES_PER_SLOT * DPU(d, DP_CLOUD_QUOTA), phys = uint(P[P_ENTRY_CAPACITY]);
+	uint last = base + nbins - 1u;
+	if (BINS[last] + BINC[last] - first <= quota && BINS[last] + BINC[last] <= phys) return;
+	uint lo = 0u, hi = nbins - 1u;  // the first bin that does not fit
+	while (lo < hi) {
+		uint mid = (lo + hi) >> 1u;
+		uint end = BINS[base + mid] + BINC[base + mid];
+		if (end - first > quota || end > phys) hi = mid; else lo = mid + 1u;
+	}
+	uint dropped = 0u;
+	for (uint b = base + lo; b <= last; b++) { dropped += BINC[b]; BINC[b] = 0u; }
+	DS(d, DS_ENTRIES_CUT) += dropped;
+	if (BINS[last] > phys) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; }
+}
+GRID_LOOP(f, D_MAX)
+"""
+
+const K_POOL_BIN_CURSOR := """
+void f(uint b) { BCUR[b] = BINS[b]; }
+GRID_LOOP(f, uint(P[P_BINS]))
+"""
+
+const K_POOL_BIN_SCATTER := """
+void f(uint k) {
+	uint o = k * 8u;
+	if (PUFF[o + 5] < 0.5) return;
+	uint d = floatBitsToUint(PUFF[o + 5]) - PUFF_ROW_BASE;
+	float x = PUFF[o], y = PUFF[o + 1], reach = sqrt(PUFF[o + 6]);
+	int nb = int(DPU(d, DP_BINS_ACROSS)); float bs = DPF(d, DP_BIN_SIZE), org = DPF(d, DP_RADIUS); uint base = DPU(d, DP_BIN_BASE);
+	int lx = clamp(int((x - reach + org) / bs), 0, nb - 1), hx = clamp(int((x + reach + org) / bs), 0, nb - 1);
+	int ly = clamp(int((y - reach + org) / bs), 0, nb - 1), hy = clamp(int((y + reach + org) / bs), 0, nb - 1);
+	for (int by = ly; by <= hy; by++) for (int bx = lx; bx <= hx; bx++) {
+		uint b = base + uint(by * nb + bx);
+		uint pos = atomicAdd(BCUR[b], 1u);
+		if (pos < BINS[b] + BINC[b]) ENT[pos] = k;  // (a cut bin has a count of 0: no entry)
+	}
+}
+GRID_LOOP(f, WORLD[WD_CLOUD_SLOTS])
+"""
+
+const K_POOL_BIN_SORT := """
+void f(uint b) {
+	uint e0 = BINS[b], e1 = e0 + BINC[b];
+	for (uint a = e0 + 1u; a < e1; a++) {
+		uint v = ENT[a]; uint j = a;
+		while (j > e0 && ENT[j - 1u] > v) { ENT[j] = ENT[j - 1u]; j--; }
+		ENT[j] = v;
+	}
+	for (uint e = e0; e < e1; e++) {
+		uint k = ENT[e]; uint o = k * 8u;
+		ENTD[e * 2u] = vec4(PUFF[o], PUFF[o + 1u], PUFF[o + 2u], PUFF[o + 3u]);
+		ENTD[e * 2u + 1u] = vec4(PUFF[o + 6u], PUFF[o + 7u], float(k), 0.0);
+	}
+}
+GRID_LOOP(f, uint(P[P_BINS]))
+"""
+
+## The compaction of the pool's clouds, a stable one (every dish's order is kept): mark, scan (pf), copy the kept to PUFF2, copy back, set
+## the top. The host runs it every 16 world steps. Before it, `pool_cloud_live` counts each dish's live clouds and `pool_cloud_cadence`
+## gives a dish whose own step is at its cadence (step % 16 == 15, as the single dish's compaction) that count as its virtual counter.
+const K_POOL_PMARK := """
+void f(uint k) { PAL[k] = PUFF[k * 8u + 5u] > 0.5 ? 1u : 0u; }
+GRID_LOOP(f, WORLD[WD_CLOUD_SLOTS])
+"""
+
+const K_POOL_PCOMPACT := """
+void f(uint t) {
+	uint k = t / 2u, part = t % 2u;
+	if (PAL[k] == 1u) PUFF2_V[PEXC[k] * 2u + part] = PUFF_V[k * 2u + part];
+}
+GRID_LOOP(f, WORLD[WD_CLOUD_SLOTS] * 2u)
+"""
+
+const K_POOL_PCOPY := """
+void f(uint t) { PUFF_V[t] = PUFF2_V[t]; }
+GRID_LOOP(f, kept_pieces())
+"""
+
+const K_POOL_PSETCOUNT := """
+void main() {
+	if (gl_GlobalInvocationID.x != 0u) return;  // (one thread: a dispatch of 1 runs a whole group of 64)
+	uint n = WORLD[WD_CLOUD_SLOTS];
+	WORLD[WD_CLOUD_SLOTS] = n > 0u ? PEXC[n - 1u] + PAL[n - 1u] : 0u;
+}
+"""
+
+const K_POOL_CLOUD_LIVE := """
+void f(uint k) {
+	if (PUFF[k * 8u + 5u] < 0.5) return;
+	uint d = floatBitsToUint(PUFF[k * 8u + 5u]) - PUFF_ROW_BASE;
+	if (DS(d, DS_STEP) % 16u == 15u) atomicAdd(CBASE[d], 1u);
+}
+GRID_LOOP(f, WORLD[WD_CLOUD_SLOTS])
+"""
+
+## One thread, a loop over the dish rows (D_MAX of them, most not running).
+const K_POOL_CLOUD_CADENCE := """
+void main() {
+	if (gl_GlobalInvocationID.x != 0u) return;
+	for (uint d = 0u; d < D_MAX; d++) {
+		if (((DPU(d, DP_FLAGS) >> DPF_RUNNING) & 1u) == 0u) continue;
+		if (DS(d, DS_STEP) % 16u == 15u) { DS(d, DS_CLOUD_SLOTS) = CBASE[d]; CBASE[d] = 0u; }
+	}
+}
+"""
+
+const K_POOL_PROBE := """
+void f(uint i) {
+	float c, gx, gy, sg;
+	puffs_at_d(uint(pcs.pb), PQ[i * 2u], PQ[i * 2u + 1u], c, gx, gy, sg);
+	PR[i * 4u] = c; PR[i * 4u + 1u] = gx; PR[i * 4u + 2u] = gy; PR[i * 4u + 3u] = sg;
+}
+GRID_LOOP(f, uint(pcs.pa))
+"""
+
+## What a death gives back (the single dish's death_clouds, per dish). The dishes' death slots follow the step's other appends in the dish
+## order: `pool_death_bases` (one thread over the rows) gives each dish the first of the deaths' slots, in CBASE (the clouds') and CBASE
+## from D_MAX + 1 (the husks'). A dish with death husks makes husks of its first deaths up to the room its quota leaves (`husk_room`) and
+## clouds of the rest; a dish without gives every death back as a cloud. A death's rank is its place among its dish's deaths, trimmed ones
+## counted (a trimmed one's slot stays empty, as the single dish's).
+const DEATH_FUNCS := """
+uint deaths_of(uint d) { return DS(d, DS_COUNT) - DS(d, DS_SURVIVORS); }
+uint husk_room(uint d) {
+	if (((DPU(d, DP_FLAGS) >> DPF_DEATH_HUSKS) & 1u) == 0u) return 0u;
+	uint hv = DS(d, DS_HUSKS), q = DPU(d, DP_HUSK_QUOTA);
+	return hv < q ? min(q - hv, deaths_of(d)) : 0u;
+}
+"""
+
+const K_POOL_DEATH_BASES := """
+void main() {
+	if (gl_GlobalInvocationID.x != 0u) return;
+	uint cloud_at = 0u, husk_at = 0u;
+	for (uint d = 0u; d < D_MAX; d++) {
+		if (((DPU(d, DP_FLAGS) >> DPF_RUNNING) & 1u) == 0u) continue;
+		uint room = husk_room(d);
+		CBASE[d] = cloud_at; CBASE[D_MAX + 1u + d] = husk_at;
+		husk_at += room;
+		if (P[P_DEATH_GIVE] > 0.0) cloud_at += deaths_of(d) - room;
+	}
+	CBASE[D_MAX] = cloud_at; CBASE[2u * D_MAX + 1u] = husk_at;
+}
+"""
+
+const K_POOL_DEATH_CLOUDS := """
+void f(uint i, uint d, uint l) {
+	if (SURV[i] != 0u || P[P_DEATH_GIVE] <= 0.0) return;
+	uint rank = l - (EXCS[i] - EXCS[DS(d, DS_START)]);
+	uint room = husk_room(d);
+	if (rank < room) return;
+	uint cr = rank - room;
+	uint b = i * RECORD_WORDS;
+	uint quota = DPU(d, DP_CLOUD_QUOTA);
+	uint vslot = DS(d, DS_CLOUD_SLOTS) + cr;
+	uint pslot = WORLD[WD_CLOUD_SLOTS] + CBASE[d] + cr;
+	bool phys = pslot < uint(P[P_PUFF_CAPACITY]);
+	if (phys) PUFF[pslot * 8u + 5u] = 0.0;  // (empty unless this one is a cloud below)
+	if (BUPS[b + R_PY] != -2.0) return;
+	float mass = P[P_DEATH_GIVE] * BUPS[b + R_MASS], x = BUPS[b + R_X], y = BUPS[b + R_Y];
+	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS);
+	int cx = clamp(int((x + org) / sp), 0, n - 1), cy = clamp(int((y + org) / sp), 0, n - 1);
+	bool accepted = INSIDE[DPU(d, DP_FIELD_BASE) + uint(cy * n + cx)] != 0 && x * x + y * y <= org * org;
+	if (vslot < quota && phys && 10.0 < DPF(d, DP_HANDOVER) && accepted) {
+		uint o = pslot * 8u;
+		PUFF[o] = x; PUFF[o + 1] = y; PUFF[o + 2] = mass; PUFF[o + 3] = 100.0; PUFF[o + 4] = 1.0;
+		PUFF[o + 6] = 0.0; PUFF[o + 7] = 0.0; PUFF[o + 5] = uintBitsToFloat(PUFF_ROW_BASE + d);
+	} else {
+		deposit_xy_d(d, x, y, mass);
+		if (vslot >= quota) atomicAdd(DS(d, DS_CLOUDS_TO_GRID), 1u);
+		if (!phys) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; }
+	}
+}
+BUP_LOOP(f)
+"""
+
+## After the deaths' clouds and husks: the dishes' counters take them in, and the pool's tops.
+const K_POOL_DEATH_COUNT := """
+void main() {
+	if (gl_GlobalInvocationID.x != 0u) return;
+	bool give = P[P_DEATH_GIVE] > 0.0;
+	for (uint d = 0u; d < D_MAX; d++) {
+		if (((DPU(d, DP_FLAGS) >> DPF_RUNNING) & 1u) == 0u) continue;
+		uint room = husk_room(d);
+		if (give) DS(d, DS_CLOUD_SLOTS) = min(DS(d, DS_CLOUD_SLOTS) + deaths_of(d) - room, DPU(d, DP_CLOUD_QUOTA));
+		DS(d, DS_HUSKS) += room;
+	}
+	if (give) WORLD[WD_CLOUD_SLOTS] += CBASE[D_MAX];
+	WORLD[WD_HUSK_SLOTS] += CBASE[2u * D_MAX + 1u];
+}
+"""
+
+static func _register_pool(out: Dictionary) -> void:
+	var types := {"CBASE": "uint", "HUSK": "float"}
+	var fixed := GpuKernels.FIXED_FUNCS
+	var world := ["WORLD", "DSTATE", "DISHP"]
+	var cells := ["P", "CELLDISH", "DISHP"]
+	GpuKernels.add(out, "pool_ev_puffs", K_POOL_EV_PUFFS, ["P"] + world + ["PUFF", "EVR", "EVP", "CONC", "INSIDE", "HUSK"], "", 64, types)
+	GpuKernels.add(out, "pool_puff_advance", K_POOL_PUFF_ADVANCE, ["P", "WORLD", "DISHP", "PUFF", "INSIDE", "DPLO", "DPHI"], fixed + POOL_DEP_FUNCS)
+	GpuKernels.add(out, "pool_dep_apply", K_POOL_DEP_APPLY, cells + ["CONC", "DPLO", "DPHI"], fixed)
+	GpuKernels.add(out, "pool_puff_clear", K_POOL_PUFF_CLEAR, ["WORLD", "PDLO", "PDHI", "PSCALE"])
+	GpuKernels.add(out, "pool_puff_scale", K_POOL_PUFF_SCALE, ["WORLD", "PUFF", "PDLO", "PDHI", "PSCALE"], fixed)
+	GpuKernels.add(out, "pool_puff_commit", K_POOL_PUFF_COMMIT, ["WORLD", "PUFF", "PDLO", "PDHI", "PSCALE"], fixed)
+	GpuKernels.add(out, "pool_bin_clear", K_POOL_BIN_CLEAR, ["P", "BINC"])
+	GpuKernels.add(out, "pool_bin_count", K_POOL_BIN_COUNT, ["P", "WORLD", "DISHP", "PUFF", "BINC"])
+	GpuKernels.add_grid_scan(out, "pool_bn", "BINC", "BINS", "BSUM", "BOFF", "uint(P[P_BINS])", ["P"])
+	GpuKernels.add(out, "pool_bin_cut", K_POOL_BIN_CUT, ["P", "WORLD", "DSTATE", "DISHP", "BINS", "BINC"], "const uint ENTRIES_PER_SLOT = %du;\n" % ENTRIES_PER_SLOT)
+	GpuKernels.add(out, "pool_bin_cursor", K_POOL_BIN_CURSOR, ["P", "BINS", "BCUR"])
+	GpuKernels.add(out, "pool_bin_scatter", K_POOL_BIN_SCATTER, ["WORLD", "DISHP", "PUFF", "BINS", "BINC", "BCUR", "ENT"])
+	GpuKernels.add(out, "pool_bin_sort", K_POOL_BIN_SORT, ["P", "PUFF", "BINS", "BINC", "ENT", "ENTD"])
+	GpuKernels.add(out, "pool_pmark", K_POOL_PMARK, ["WORLD", "PUFF", "PAL"])
+	GpuKernels.add_grid_scan(out, "pool_pf", "PAL", "PEXC", "PSUM", "POFF", "WORLD[WD_CLOUD_SLOTS]", ["WORLD"])
+	GpuKernels.add(out, "pool_pcompact", K_POOL_PCOMPACT, ["WORLD", "PAL", "PEXC", "PUFF_V", "PUFF2_V"])
+	GpuKernels.add(out, "pool_pcopy", K_POOL_PCOPY.replace("kept_pieces()", "(WORLD[WD_CLOUD_SLOTS] > 0u ? (PEXC[WORLD[WD_CLOUD_SLOTS] - 1u] + PAL[WORLD[WD_CLOUD_SLOTS] - 1u]) * 2u : 0u)"), ["WORLD", "PAL", "PEXC", "PUFF_V", "PUFF2_V"])
+	GpuKernels.add(out, "pool_psetcount", K_POOL_PSETCOUNT, ["WORLD", "PAL", "PEXC"])
+	GpuKernels.add(out, "pool_cloud_live", K_POOL_CLOUD_LIVE, ["WORLD", "DSTATE", "PUFF", "CBASE"], "", 64, types)
+	GpuKernels.add(out, "pool_cloud_cadence", K_POOL_CLOUD_CADENCE, ["DSTATE", "DISHP", "CBASE"], "", 64, types)
+	GpuKernels.add(out, "pool_probe", K_POOL_PROBE, ["DISHP", "ENTD", "BINS", "BINC", "PQ", "PR"], POOL_CLOUD_FUNCS)
+	GpuKernels.add(out, "pool_death_bases", K_POOL_DEATH_BASES, ["P", "DSTATE", "DISHP", "CBASE"], DEATH_FUNCS, 64, types)
+	GpuKernels.add(out, "pool_death_clouds", K_POOL_DEATH_CLOUDS, ["P", "WORLD", "BLKDISH", "DSTATE", "DISHP", "BUPS", "SURV", "EXCS", "PUFF", "INSIDE", "DPLO", "DPHI", "CBASE"], fixed + POOL_DEP_FUNCS + DEATH_FUNCS, 64, types)
+	GpuKernels.add(out, "pool_death_count", K_POOL_DEATH_COUNT, ["P", "WORLD", "DSTATE", "DISHP", "CBASE"], DEATH_FUNCS, 64, types)
+
+
 ## Adds these kernels to `out` (see GpuKernels.all()).
 static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "ev_puffs", K_EV_PUFFS, ["P", "PCNT", "PUFF", "EVR", "EVP", "CONC", "INSIDE"])
@@ -345,3 +795,4 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "probe", K_PROBE, ["P", "ENTD", "BINS", "BINC", "PQ", "PR"], CLOUD_FUNCS)
 	GpuKernels.add(out, "death_clouds", K_DEATH_CLOUDS, ["P", "CNT", "PCNT", "BUPS", "SURV", "EXCS", "PUFF", "INSIDE", "DPLO", "DPHI"], GpuKernels.FIXED_FUNCS + DEP_FUNCS)
 	GpuKernels.add(out, "death_count", K_DEATH_COUNT, ["P", "CNT", "PCNT"])
+	_register_pool(out)

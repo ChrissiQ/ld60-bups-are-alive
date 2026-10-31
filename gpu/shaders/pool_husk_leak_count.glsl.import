@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://i08yyuxsbpb"
+path="res://.godot/imported/pool_husk_leak_count.glsl-fede3040c3942b80fc03ab47164b5b87.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_husk_leak_count.glsl"
+dest_files=["res://.godot/imported/pool_husk_leak_count.glsl-fede3040c3942b80fc03ab47164b5b87.res"]
+
+[params]
+

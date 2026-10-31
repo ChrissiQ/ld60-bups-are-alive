@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://djqicvbd0epyl"
+path="res://.godot/imported/pool_cloud_cadence.glsl-aa99e7ea9c88de8b8674922811009033.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_cloud_cadence.glsl"
+dest_files=["res://.godot/imported/pool_cloud_cadence.glsl-aa99e7ea9c88de8b8674922811009033.res"]
+
+[params]
+

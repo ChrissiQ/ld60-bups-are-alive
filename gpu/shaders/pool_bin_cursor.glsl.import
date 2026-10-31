@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://bfahx3m7mflku"
+path="res://.godot/imported/pool_bin_cursor.glsl-945aba99f9eb2855b94de344510aefc5.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_bin_cursor.glsl"
+dest_files=["res://.godot/imported/pool_bin_cursor.glsl-945aba99f9eb2855b94de344510aefc5.res"]
+
+[params]
+

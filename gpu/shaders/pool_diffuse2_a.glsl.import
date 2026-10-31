@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://c7gly2a1iofut"
+path="res://.godot/imported/pool_diffuse2_a.glsl-298f878efbb70535db442c660a77e8b2.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_diffuse2_a.glsl"
+dest_files=["res://.godot/imported/pool_diffuse2_a.glsl-298f878efbb70535db442c660a77e8b2.res"]
+
+[params]
+

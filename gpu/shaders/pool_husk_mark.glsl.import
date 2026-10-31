@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://c57xmhp83w3o2"
+path="res://.godot/imported/pool_husk_mark.glsl-06e77c0edeae954e2f290c185734aea5.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_husk_mark.glsl"
+dest_files=["res://.godot/imported/pool_husk_mark.glsl-06e77c0edeae954e2f290c185734aea5.res"]
+
+[params]
+

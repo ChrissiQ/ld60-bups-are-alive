@@ -242,6 +242,7 @@ static func all() -> Dictionary:
 	GpuKernelsField.register(out)
 	GpuKernelsLife.register(out)
 	GpuKernelsClouds.register(out)
+	GpuKernelsHusks.register(out)
 	GpuKernelsGame.register(out)
 	GpuKernelsDraw.register(out)
 	return out

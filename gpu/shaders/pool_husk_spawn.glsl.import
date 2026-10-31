@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://cl28l3kgg8052"
+path="res://.godot/imported/pool_husk_spawn.glsl-660b83f3f090aa81557a857c8a57e6f5.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_husk_spawn.glsl"
+dest_files=["res://.godot/imported/pool_husk_spawn.glsl-660b83f3f090aa81557a857c8a57e6f5.res"]
+
+[params]
+

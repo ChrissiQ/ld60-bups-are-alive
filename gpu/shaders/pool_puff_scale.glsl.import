@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://fmrnm7xqg7cp"
+path="res://.godot/imported/pool_puff_scale.glsl-e78bbb31136b9792ed41b8f3dd4c2dbd.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_puff_scale.glsl"
+dest_files=["res://.godot/imported/pool_puff_scale.glsl-e78bbb31136b9792ed41b8f3dd4c2dbd.res"]
+
+[params]
+

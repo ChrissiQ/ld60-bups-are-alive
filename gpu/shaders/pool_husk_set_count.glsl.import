@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://c7uarm8s6tlu0"
+path="res://.godot/imported/pool_husk_set_count.glsl-ad9983402bb6012d88bafcf8f23688d0.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_husk_set_count.glsl"
+dest_files=["res://.godot/imported/pool_husk_set_count.glsl-ad9983402bb6012d88bafcf8f23688d0.res"]
+
+[params]
+

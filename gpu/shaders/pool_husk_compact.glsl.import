@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://c8d4do5v7mpih"
+path="res://.godot/imported/pool_husk_compact.glsl-d415408b382439b4fb6e69ee85651e05.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_husk_compact.glsl"
+dest_files=["res://.godot/imported/pool_husk_compact.glsl-d415408b382439b4fb6e69ee85651e05.res"]
+
+[params]
+

@@ -188,6 +188,8 @@ const EV_DISH_SHIFT := 13
 const EV_DISH_BITS := 19
 const EV_DISH_MASK := 0x7FFFF
 
+const PUFF_ROW_BASE := 0x3F800000  ## a cloud's word 5 (and its event's) is the float whose bits are this plus its dish's row: 1.0 and up, so "alive" stays `>= 0.5` and 0.0 is a free slot (no denormals, which a copy through a float register could flush)
+
 ## DISHP[d]: host to device, uploaded when changed. Floats and uints by their bits; words 22-31 are spare.
 const DP_WORDS := 32
 const DP_FIELD_BASE := 0  ## uint: the 256-aligned base of the dish's cells in each field buffer

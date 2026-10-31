@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://oy7gfh0gxy7n"
+path="res://.godot/imported/pool_husk_age.glsl-ce507bb169a0274f330da5fb9d2b086e.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_husk_age.glsl"
+dest_files=["res://.godot/imported/pool_husk_age.glsl-ce507bb169a0274f330da5fb9d2b086e.res"]
+
+[params]
+

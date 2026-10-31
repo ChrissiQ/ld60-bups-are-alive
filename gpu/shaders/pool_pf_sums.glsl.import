@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://dhvtoidg33kmd"
+path="res://.godot/imported/pool_pf_sums.glsl-9eb252d6ed820d0205b58ba8bd2426e0.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_pf_sums.glsl"
+dest_files=["res://.godot/imported/pool_pf_sums.glsl-9eb252d6ed820d0205b58ba8bd2426e0.res"]
+
+[params]
+

@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://qql5wodgy412"
+path="res://.godot/imported/pool_clear.glsl-1e0fc7093a3f696af15c5b7e33d047aa.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_clear.glsl"
+dest_files=["res://.godot/imported/pool_clear.glsl-1e0fc7093a3f696af15c5b7e33d047aa.res"]
+
+[params]
+

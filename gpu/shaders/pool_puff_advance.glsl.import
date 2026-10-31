@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://cchdmutwsc6l4"
+path="res://.godot/imported/pool_puff_advance.glsl-fc08cf6f29828643e2283edc44d4cdd5.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_puff_advance.glsl"
+dest_files=["res://.godot/imported/pool_puff_advance.glsl-fc08cf6f29828643e2283edc44d4cdd5.res"]
+
+[params]
+

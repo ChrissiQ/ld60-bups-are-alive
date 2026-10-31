@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://dari1q7yr1vtv"
+path="res://.godot/imported/pool_puff_commit.glsl-15867dd3c6585ee217aed58cfb2bea98.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_puff_commit.glsl"
+dest_files=["res://.godot/imported/pool_puff_commit.glsl-15867dd3c6585ee217aed58cfb2bea98.res"]
+
+[params]
+

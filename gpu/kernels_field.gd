@@ -420,6 +420,272 @@ void main() {
 """
 
 
+## ---- The pooled world's field kernels: the same arithmetic as the single dish's above, per dish row `d`. ----
+## A dish's cells are one run of the pool's field buffers: its cell `l` (row-major in its grid) is the cell `DP_FIELD_BASE + l`, and OWNER,
+## CELLOF, CELL2 and the cloud lists hold pool cells, never a dish's own index. In the pool P_CELLS is the pool's cells in use (the bound of
+## the cell kernels), P_BINS the pool's bins, P_PUFF_CAPACITY and P_ENTRY_CAPACITY the physical slots and entries; a dish's own geometry is
+## in DISHP. The motion table, and every constant of the model, stay in P.
+const POOL_READF := """
+// the field's concentration (and its gradient) at a point of dish d, bilinear in the snapshot
+void readf_d(uint d, float x, float y, out float c, out float gx, out float gy) {
+	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS);
+	float fx = clamp((x + org) / sp - 0.5, 0.0, float(n) - 1.001);
+	float fy = clamp((y + org) / sp - 0.5, 0.0, float(n) - 1.001);
+	int x0 = int(fx), y0 = int(fy);
+	float tx = fx - float(x0), ty = fy - float(y0);
+	int i0 = int(DPU(d, DP_FIELD_BASE)) + y0 * n + x0;
+	float c00 = EFF[i0], c10 = EFF[i0 + 1], c01 = EFF[i0 + n], c11 = EFF[i0 + n + 1];
+	float top = c00 + (c10 - c00) * tx;
+	float bottom = c01 + (c11 - c01) * tx;
+	c = top + (bottom - top) * ty;
+	gx = ((c10 - c00) + ((c11 - c01) - (c10 - c00)) * ty) / sp;
+	gy = (bottom - top) / sp;
+}
+// the pool cell of dish d that holds a point
+uint cell_at(uint d, float x, float y) {
+	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS);
+	int ix = clamp(int((x + org) / sp), 0, n - 1), iy = clamp(int((y + org) / sp), 0, n - 1);
+	return DPU(d, DP_FIELD_BASE) + uint(iy * n + ix);
+}
+"""
+
+const POOL_READC := """
+// the grid's concentration a bup at the point reads (bilinear in the snapshot), and how much of it is its own cell's (`own`, a pool cell)
+void readc_d(uint d, float x, float y, int own, out float c, out float own_share) {
+	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS);
+	float fx = clamp((x + org) / sp - 0.5, 0.0, float(n) - 1.001);
+	float fy = clamp((y + org) / sp - 0.5, 0.0, float(n) - 1.001);
+	int x0 = int(fx), y0 = int(fy);
+	float tx = fx - float(x0), ty = fy - float(y0);
+	int i0 = int(DPU(d, DP_FIELD_BASE)) + y0 * n + x0;
+	float c00 = EFF[i0], c10 = EFF[i0 + 1], c01 = EFF[i0 + n], c11 = EFF[i0 + n + 1];
+	float top = c00 + (c10 - c00) * tx;
+	float bottom = c01 + (c11 - c01) * tx;
+	c = top + (bottom - top) * ty;
+	own_share = 0.0;
+	if (OWNER[i0] == own) own_share += (1.0 - tx) * (1.0 - ty);
+	if (OWNER[i0 + 1] == own) own_share += tx * (1.0 - ty);
+	if (OWNER[i0 + n] == own) own_share += (1.0 - tx) * ty;
+	if (OWNER[i0 + n + 1] == own) own_share += tx * ty;
+}
+"""
+
+const K_POOL_CLEAR := """
+void f(uint c, uint d, uint l) { DLO[c] = 0u; DHI[c] = 0u; RLO[c] = 0u; RHI[c] = 0u; ALO[c] = 0u; AHI[c] = 0u; }
+CELL_LOOP(f, uint(P[P_CELLS]))
+"""
+
+const K_POOL_SNAPSHOT := """
+void f(uint c, uint d, uint l) { int o = OWNER[c]; EFF[c] = o >= 0 ? CONC[o] : 0.0; }
+CELL_LOOP(f, uint(P[P_CELLS]))
+"""
+
+const K_POOL_FEED := """
+void f(uint c, uint d, uint l) { CONC[c] += (DPF(d, DP_FEED) * P[P_DELTA]) * WGT[c]; }
+CELL_LOOP(f, uint(P[P_CELLS]))
+"""
+
+## Diffusion: one kernel per direction of the ping-pong, dispatched for pass p = pcs.pa over the first pcs.pb cells of the
+## pool, which the host orders by iteration count (most first) so that the cells that still need pass p are a prefix. A dish whose own
+## (even) count is done returns at once: its field is already in CONC where its lone run would leave it. The acetate's passes are
+## skipped for a dish without the second food (its field is all zeros, which diffuse to zeros exactly).
+const K_POOL_DIFFUSE := """
+void f(uint c, uint d, uint l) {
+	if (uint(pcs.pa) >= DPU(d, DP_ITERATIONS)) return;
+	ACETATE_SKIP
+	if (INSIDE[c] == 0) { DST[c] = SRC[c]; return; }
+	int n = int(DPU(d, DP_CELLS));
+	int x = int(l) % n, y = int(l) / n;
+	float v = SRC[c], acc = 0.0, k = DPF(d, DP_K);
+	if (x > 0 && INSIDE[c - 1u] != 0) acc += SRC[c - 1u] - v;
+	if (x < n - 1 && INSIDE[c + 1u] != 0) acc += SRC[c + 1u] - v;
+	if (y > 0 && INSIDE[c - uint(n)] != 0) acc += SRC[c - uint(n)] - v;
+	if (y < n - 1 && INSIDE[c + uint(n)] != 0) acc += SRC[c + uint(n)] - v;
+	DST[c] = v + k * acc;
+}
+CELL_LOOP(f, uint(pcs.pb))
+"""
+
+const K_POOL_DEMAND := """
+void add_fixed(uint cell, float w, int which) { // what is wanted (0), what is read (1) and the own cell's share of it (2), summed per cell
+	if (which == 0) ADD_FIXED30(DLO, DHI, cell, w)
+	else if (which == 1) ADD_FIXED30(RLO, RHI, cell, w)
+	else ADD_FIXED30(ALO, AHI, cell, w)
+}
+void add_puff_demand(uint k, float mass) { ADD_FIXED20(PDLO, PDHI, k, mass) }
+void f(uint i, uint d, uint l) {
+	uint b = i * RECORD_WORDS;
+	float x = BUPS[b + R_X], y = BUPS[b + R_Y], energy = BUPS[b + R_ENERGY], mass = BUPS[b + R_MASS], metab = BUPS[b + R_METABOLISM], yld = exp(-BUPS[b + R_HARM]) / sqrt(BUPS[b + R_METABOLISM]);
+	float max_e = P[P_RESERVE_PER_MASS] * mass;
+	WANT[i] = -1.0; WANTC[i] = 0.0; CELLOF[i] = -1;
+	if (energy < max_e) {
+		int o = OWNER[cell_at(d, x, y)];
+		float cg = 0.0, own_share = 0.0;
+		if (o >= 0) readc_d(d, x, y, o, cg, own_share);
+		float cc, pgx, pgy, psig; puffs_at_d(d, x, y, cc, pgx, pgy, psig);
+		float ct = cg + cc;
+		if (ct > 0.0) {
+			float rate = P[P_UPTAKE_PER_SIZE] * sqrt(mass) * metab;
+			float room = max(max_e - energy, 0.0) / yld;
+			float w = min(rate * ct / (P[P_HALF_SATURATION] + ct) * P[P_DELTA], room);
+			if (w > 0.0) {
+				float wg = cc > 0.0 ? w * cg / ct : w;
+				float wc = w - wg;
+				if (o >= 0 && CONC[o] > 0.0 && wg > 0.0) {
+					WANT[i] = wg; CELLOF[i] = o;
+					add_fixed(uint(o), wg, 0);
+					add_fixed(uint(o), wg * min(cg / CONC[o], 8.0), 1);
+					add_fixed(uint(o), wg * own_share, 2);
+				}
+				if (wc > 0.0 && cc > 0.0) {
+					WANTC[i] = wc;
+					uint e0, e1; bin_list(d, x, y, e0, e1);
+					for (uint e = e0; e < e1; e++) {
+						vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];
+						float ddx = x - r0.x, ddy = y - r0.y, r2 = fma(ddy, ddy, ddx * ddx);
+						if (r2 <= r1.x) {
+							uint k = uint(r1.z);
+							float ci = r0.z / (6.2831853 * r0.w) * exp(-r2 * 0.5 / r0.w);
+							add_puff_demand(k, wc * ci / cc);
+						}
+					}
+				}
+			}
+		}
+	}
+}
+BUP_LOOP(f)
+"""
+
+const K_POOL_CELLS := """
+float neglog1m(float x) { // -ln(1 - x)
+	if (x < 0.01) return x * (1.0 + x * (0.5 + x * (0.33333333 + x * 0.25)));
+	return -log(1.0 - x);
+}
+void f(uint i, uint d, uint l) {
+	if (OWNER[i] != int(i)) return;
+	float dm = FIX30(DHI[i], DLO[i]); // what the bups there wanted
+	SCALE[i] = 0.0;
+	float c0 = CONC[i];
+	if (dm <= 0.0 || c0 <= 0.0) return;
+	float rho = FIX30(RHI[i], RLO[i]) / dm; // the concentration they read, as a share of this cell's
+	float al = max(FIX30(AHI[i], ALO[i]) / dm, 0.02); // and how much of what they read is this cell's
+	float ct = max(rho * c0, 1e-12);
+	float sp = DPF(d, DP_SPACING);
+	float area = sp * sp;
+	float k = P[P_HALF_SATURATION];
+	float y = dm * (k + ct) / (area * ct);
+	float lo = 0.0, hi = min(min(dm / area, c0 * 0.999999), ct * 0.999999 / al);
+	if (hi + (k / al) * neglog1m(al * hi / ct) <= y) {
+		lo = hi;
+	} else {
+		for (int it = 0; it < 32; it++) {
+			float mid = 0.5 * (lo + hi);
+			if (mid + (k / al) * neglog1m(al * mid / ct) < y) lo = mid; else hi = mid;
+		}
+		lo = 0.5 * (lo + hi);
+	}
+	SCALE[i] = lo * area / dm;
+	CONC[i] = c0 - lo;
+}
+CELL_LOOP(f, uint(P[P_CELLS]))
+"""
+
+const K_POOL_APPLY := """
+void add_fixed2(uint cell, float w, int which) { // the acetate wanted (0) and let go (1), summed per cell
+	if (which == 0) ADD_FIXED30(AWLO, AWHI, cell, w)
+	else ADD_FIXED30(ADLO, ADHI, cell, w)
+}
+void f(uint i, uint d, uint l) {
+	uint b = i * RECORD_WORDS;
+	float wg = WANT[i], wc = WANTC[i];
+	float mass = BUPS[b + R_MASS], yld = exp(-BUPS[b + R_HARM]) / sqrt(BUPS[b + R_METABOLISM]);
+	float max_e = P[P_RESERVE_PER_MASS] * mass;
+	float energy = BUPS[b + R_ENERGY];
+	float x = BUPS[b + R_X], y = BUPS[b + R_Y];
+	int o = OWNER[cell_at(d, x, y)];
+	WANT2[i] = 0.0;
+	if (wg > 0.0 || wc > 0.0) {
+		float got = wg > 0.0 ? wg * SCALE[CELLOF[i]] : 0.0;
+		if (wc > 0.0) {
+			float cc, pgx, pgy, psig; puffs_at_d(d, x, y, cc, pgx, pgy, psig);
+			uint e0, e1; bin_list(d, x, y, e0, e1);
+			for (uint e = e0; e < e1; e++) {
+				vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];
+				float ddx = x - r0.x, ddy = y - r0.y, r2 = fma(ddy, ddy, ddx * ddx);
+				if (r2 <= r1.x) {
+					uint k = uint(r1.z);
+					float ci = r0.z / (6.2831853 * r0.w) * exp(-r2 * 0.5 / r0.w);
+					got += wc * ci / cc * PSCALE[k];
+				}
+			}
+		}
+		float let_go = 0.0;
+		if (got > 0.0 && mass > 0.0 && o >= 0) {
+			float per_hour = got * yld / (P[P_COST_PER_MASS] * mass * P[P_DELTA]) * 3600.0;
+			let_go = got * min(0.5, P[P_ACETATE_SLOPE] * max(0.0, per_hour - P[P_ACETATE_THRESHOLD]));
+			if (let_go > 0.0) add_fixed2(uint(o), let_go, 1);
+		}
+		energy = min(energy + got * yld, max_e);
+	}
+	float room = max_e - energy;
+	if (o >= 0 && room > 0.0 && CONC2[o] > 0.0) {
+		float ca = CONC2[o], cg = max(CONC[o], 0.0);
+		float rate = P[P_ACETATE_UPTAKE] * (((int(BUPS[b + R_REACH] + 0.5) >> 8) & 3) == 2 ? P[P_KEY_FACTOR] : 1.0) * P[P_UPTAKE_PER_SIZE] * sqrt(mass) * BUPS[b + R_METABOLISM];
+		float w2 = min(rate * ca / (P[P_HALF_SATURATION] + ca) * (P[P_HALF_SATURATION] / (P[P_HALF_SATURATION] + cg)) * P[P_DELTA], room / yld);
+		if (w2 > 0.0) {
+			WANT2[i] = w2; CELL2[i] = o;
+			add_fixed2(uint(o), w2, 0);
+		}
+	}
+	BUPS[b + R_ENERGY] = energy;
+}
+BUP_LOOP(f)
+"""
+
+const K_POOL_AC_CELLS := """
+void f(uint i, uint d, uint l) {
+	float dm = FIX30(AWHI[i], AWLO[i]);
+	float dep = FIX30(ADHI[i], ADLO[i]);
+	float sp = DPF(d, DP_SPACING);
+	float area = sp * sp;
+	float c = CONC2[i];
+	float s = 0.0;
+	if (dm > 0.0 && c > 0.0) {
+		s = min(1.0, c * area / dm);
+		c = max(c - dm * s / area, 0.0);
+	}
+	SCALE2[i] = s;
+	CONC2[i] = c + dep / area;
+	AWLO[i] = 0u; AWHI[i] = 0u; ADLO[i] = 0u; ADHI[i] = 0u;
+}
+CELL_LOOP(f, uint(P[P_CELLS]))
+"""
+
+const K_POOL_AC_APPLY := """
+void f(uint i, uint d, uint l) {
+	float w = WANT2[i];
+	if (w <= 0.0) return;
+	uint b = i * RECORD_WORDS;
+	BUPS[b + R_ENERGY] = min(BUPS[b + R_ENERGY] + w * SCALE2[CELL2[i]] * exp(-BUPS[b + R_HARM]) / sqrt(BUPS[b + R_METABOLISM]), P[P_RESERVE_PER_MASS] * BUPS[b + R_MASS]);
+}
+BUP_LOOP(f)
+"""
+
+## Swimming is the single dish's kernel with the dish's own words in place of P's dish slots, its stream from DISH_STREAM, and the dish's
+## fields and clouds read through `readf_d` and `puffs_at_d`.
+static func _pooled_swim() -> String:
+	var body := K_SWIM
+	body = body.replace("void main() {\n\tBUP_RECORD_THREAD", "void f(uint i, uint d, uint l) {\n\tuint b = i * RECORD_WORDS;")
+	body = body.replace("uint s = hash(hash(CNT[CNT_SEED] ^ (CNT[CNT_STEP] * 0x85EBCA6BU) ^ 12345U) + i * 0x9E3779B9U);", "uint s = DISH_STREAM(d, l, 12345U);")
+	body = body.replace("readf(", "readf_d(d, ").replace("puffs_at(", "puffs_at_d(d, ")
+	body = body.replace("P[P_RADIUS]", "DPF(d, DP_RADIUS)").replace("P[P_SPACING]", "DPF(d, DP_SPACING)")
+	body = body.replace("P[P_UPKEEP_SCALE]", "DPF(d, DP_UPKEEP_SCALE)").replace("P[P_NOISE_REFERENCE]", "DPF(d, DP_NOISE_REFERENCE)")
+	body = body.replace("P[P_STATIONARY] > 0.5", "((DPU(d, DP_FLAGS) >> DPF_STATIONARY) & 1u) != 0u")
+	assert(body.ends_with("}\n") and not body.contains("BUP_RECORD_THREAD") and not body.contains("CNT["), "swim: the body no longer ends as expected")
+	return body + "BUP_LOOP(f)\n"
+
+
 ## Adds these kernels to `out` (see GpuKernels.all()).
 static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "feed", K_FEED, ["P", "CONC", "WGT"])
@@ -435,3 +701,21 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "diffuse2_b", K_DIFFUSE.replace("SRC", "CONC2B").replace("DST", "CONC2"), ["P", "INSIDE", "CONC2B", "CONC2"])
 	GpuKernels.add(out, "diffuse_a", K_DIFFUSE.replace("SRC", "CONC").replace("DST", "EFF"), ["P", "INSIDE", "CONC", "EFF"])
 	GpuKernels.add(out, "diffuse_b", K_DIFFUSE.replace("SRC", "EFF").replace("DST", "CONC"), ["P", "INSIDE", "EFF", "CONC"])
+
+	var cell_b := ["P", "CELLDISH", "DISHP"]
+	var bup_b := ["P", "WORLD", "BLKDISH", "DSTATE", "DISHP"]
+	var fixed := GpuKernels.FIXED_FUNCS
+	GpuKernels.add(out, "pool_feed", K_POOL_FEED, cell_b + ["CONC", "WGT"])
+	GpuKernels.add(out, "pool_clear", K_POOL_CLEAR, cell_b + ["DLO", "DHI", "RLO", "RHI", "ALO", "AHI"])
+	GpuKernels.add(out, "pool_snapshot", K_POOL_SNAPSHOT, cell_b + ["CONC", "OWNER", "EFF"])
+	GpuKernels.add(out, "pool_swim", _pooled_swim(), bup_b + ["BUPS", "EFF", "TABLE", "ENTD", "BINS", "BINC"], POOL_READF + LOOKUP_FUNCS + GpuKernelsClouds.POOL_CLOUD_FUNCS)
+	GpuKernels.add(out, "pool_demand", K_POOL_DEMAND, bup_b + ["BUPS", "EFF", "OWNER", "CONC", "WANT", "WANTC", "CELLOF", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "ENTD", "BINS", "BINC", "PDLO", "PDHI"], fixed + POOL_READF + POOL_READC + GpuKernelsClouds.POOL_CLOUD_FUNCS)
+	GpuKernels.add(out, "pool_cells", K_POOL_CELLS, cell_b + ["CONC", "OWNER", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "SCALE"], fixed)
+	GpuKernels.add(out, "pool_apply", K_POOL_APPLY, bup_b + ["BUPS", "EFF", "WANT", "WANTC", "CELLOF", "SCALE", "ENTD", "BINS", "BINC", "PSCALE", "OWNER", "CONC", "CONC2", "WANT2", "CELL2", "AWLO", "AWHI", "ADLO", "ADHI"], fixed + POOL_READF + GpuKernelsClouds.POOL_CLOUD_FUNCS)
+	GpuKernels.add(out, "pool_ac_cells", K_POOL_AC_CELLS, cell_b + ["CONC2", "AWLO", "AWHI", "ADLO", "ADHI", "SCALE2"], fixed)
+	GpuKernels.add(out, "pool_ac_apply", K_POOL_AC_APPLY, bup_b + ["BUPS", "WANT2", "CELL2", "SCALE2"])
+	var no_skip := ""
+	var ac_skip := "if (((DPU(d, DP_FLAGS) >> DPF_ACETATE) & 1u) == 0u) return;"
+	for pass_kind in [["pool_diffuse_a", "CONC", "EFF", no_skip], ["pool_diffuse_b", "EFF", "CONC", no_skip], ["pool_diffuse2_a", "CONC2", "CONC2B", ac_skip], ["pool_diffuse2_b", "CONC2B", "CONC2", ac_skip]]:
+		var text := K_POOL_DIFFUSE.replace("SRC", pass_kind[1]).replace("DST", pass_kind[2]).replace("ACETATE_SKIP", pass_kind[3])
+		GpuKernels.add(out, pass_kind[0], text, ["CELLDISH", "DISHP", "INSIDE", pass_kind[1], pass_kind[2]])
