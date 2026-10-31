@@ -47,7 +47,7 @@ var _bufs := {}  ## P, VP, VCOUNT, VOFFS, VPD, VOUT -> RID
 var _texels := 0  ## the per-texel buffers' size
 var _sets := {}  ## "kernel|index" -> uniform set
 var _inst := RID()  ## the MultiMesh buffer the sets bind
-var _imports := {}  ## kind -> {generation, size, rids: Array[RID] (imported), bound: Array[int] (the frame each was last used on)}
+var _imports := {}  ## kind -> {generation, size, rids: Array[RID] (imported), bound: Array[int] (the frame each was last used on), seqs: Array[int] (the publish each holds)}
 var _retired: Array = []  ## {rids: Array[RID], last: frame last used}
 var _shown := {}  ## kind -> the texture index published last
 var _pictures := {}  ## kind -> Texture2DRD (for the canvas)
@@ -100,9 +100,10 @@ static func driver_handles(sim_rd: RenderingDevice, rids: Array) -> PackedInt64A
 	return out
 
 
-## The simulation published texture `index` of `kind` (`handles`: all TEXTURES of the kind, of `generation`, each `size`). A new generation
-## is imported here and the old one freed once it is no longer in use.
-func offer(kind: String, index: int, generation: int, handles: PackedInt64Array, size: Vector2i) -> void:
+## The simulation published texture `index` of `kind` (`handles`: all TEXTURES of the kind, of `generation`, each `size`; `seq` the
+## publish's number, which `take_bound` gives back with each use). A new generation is imported here and the old one freed once it is no
+## longer in use.
+func offer(kind: String, index: int, generation: int, handles: PackedInt64Array, size: Vector2i, seq := -1) -> void:
 	if rd == null or index < 0:
 		return
 	var cur: Dictionary = _imports.get(kind, {})
@@ -118,6 +119,7 @@ func offer(kind: String, index: int, generation: int, handles: PackedInt64Array,
 	if was >= 0 and was != index:
 		_note_bound(kind, was)  # (used until this frame)
 	_shown[kind] = index
+	_imports[kind]["seqs"][index] = seq
 	if _pictures.has(kind):
 		(_pictures[kind] as Texture2DRD).texture_rd_rid = _imports[kind]["rids"][index]
 
@@ -126,8 +128,8 @@ func offer(kind: String, index: int, generation: int, handles: PackedInt64Array,
 func set_payload(info: PayloadInfo) -> void:
 	if info == null or info.texture_index < 0:
 		return
-	offer("payload", info.texture_index, info.generation, info.handles, info.size)
-	offer("ids", info.texture_index, info.generation, info.id_handles, info.size)
+	offer("payload", info.texture_index, info.generation, info.handles, info.size, info.seq)
+	offer("ids", info.texture_index, info.generation, info.id_handles, info.size, info.seq)
 	_payload = info
 
 
@@ -151,8 +153,9 @@ func tick() -> void:
 	_retired = keep
 
 
-## The textures used and the frame each was used on since the last call: [kind, index, frame] each, for SimCore.texture_bound (the ids'
-## are the payload's index: the simulation reuses them together).
+## The textures used and the frame each was used on since the last call: [kind, index, frame, seq] each (seq: the number of the publish
+## that texture held, as `offer` was told; -1 unknown), for SimCore.texture_bound (the ids' are the payload's index: the simulation reuses
+## them together).
 func take_bound() -> Array:
 	_bound_mutex.lock()
 	var out := _bound
@@ -304,7 +307,10 @@ func _import(kind: String, generation: int, handles: PackedInt64Array, size: Vec
 	var bound: Array[int] = []
 	bound.resize(TEXTURES)
 	bound.fill(-1000)
-	_imports[kind] = {"generation": generation, "size": size, "rids": rids, "bound": bound}
+	var seqs: Array[int] = []
+	seqs.resize(TEXTURES)
+	seqs.fill(-1)
+	_imports[kind] = {"generation": generation, "size": size, "rids": rids, "bound": bound, "seqs": seqs}
 	if kind == "payload" or kind == "ids":
 		_free_sets()
 	if kind == "payload":
@@ -331,12 +337,14 @@ func _free_textures(rids: Array) -> void:
 
 func _note_bound(kind: String, index: int) -> void:
 	var frame := Engine.get_frames_drawn()
+	var seq := -1
 	if _imports.has(kind):
 		_imports[kind]["bound"][index] = frame
+		seq = _imports[kind]["seqs"][index]
 	if kind == "ids":
 		return
 	_bound_mutex.lock()
-	_bound.append([kind, index, frame])
+	_bound.append([kind, index, frame, seq])
 	_bound_mutex.unlock()
 
 

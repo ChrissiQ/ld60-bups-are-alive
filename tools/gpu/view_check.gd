@@ -597,7 +597,7 @@ func _soak(seconds: float, bups: int, zoom: float, fitcost: bool) -> void:
 			renderer.set_payload(info)
 		for kind in ["haze", "steer", "thumbs"]:
 			if ann.has(kind):
-				renderer.offer(kind, ann[kind]["index"], ann[kind]["generation"], ann[kind]["handles"], ann[kind]["size"])
+				renderer.offer(kind, ann[kind]["index"], ann[kind]["generation"], ann[kind]["handles"], ann[kind]["size"], int(ann[kind].get("seq", -1)))
 		if bare or skip.has("nodraw"):
 			renderer.tick()
 		if bare:
