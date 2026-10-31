@@ -208,6 +208,8 @@ var _world_time := 0.0  ## the world time of the newest copy of the dish's world
 var _pending_names := {}  ## id -> a name given before the bup's family record came (a founder's, right after `strike`)
 var _extinct_signalled := false
 var _parked := false  ## out of the main view (`park`): what the snapshots say of it is read when asked, not taken from each one
+var _resizes: Array = []  ## [reply, radius asked] of each resize not yet answered, oldest first (`resize_to`)
+var _resize_agreed := 0.0  ## µm: the size the world last agreed to, while resizes are waiting for their answers
 var _source_to_select := Vector2.INF  ## where a source was just placed with `select`: it is selected when the copy of the world that has it comes
 var _seed := 0  ## the dish's seed for the world (0: the world draws one from its own and the number)
 var _rng := RandomNumberGenerator.new()  ## where the founders lie and the patches' landscape
@@ -334,6 +336,7 @@ func _process(delta: float) -> void:
 		if _hover_is_at(_click_at):
 			selected.set_to(hovered)
 		_click_at = Vector2.INF
+	_take_resizes()
 	_ask()
 	drawing.process()
 
@@ -366,6 +369,7 @@ func _reset_runtime_state() -> void:
 	_husks_seen = {}
 	_sources_by_id = {}
 	_plankton_by_key = {}
+	_resizes = []
 	sources.clear()
 	plankton.clear()
 	history.reset()
@@ -687,10 +691,27 @@ func resize_to(new_radius: float) -> void:
 	new_radius = clampf(new_radius, StartConditions.MIN_DISH_RADIUS, StartConditions.MAX_DISH_RADIUS)
 	if is_equal_approx(new_radius, radius) or row < 0:
 		return
-	_world().resize(row, new_radius)
+	if _resizes.is_empty():
+		_resize_agreed = radius
+	_resizes.append([_world().resize(row, new_radius), new_radius])
 	radius = new_radius
 	_edited()
 	queue_redraw()
+
+
+## The answers to the resizes asked (`resize_to`), in the order asked: the size the world agreed to last is the dish's once all have
+## answered (a resize the memory budget refused leaves the world's dish as it was, so this one goes back too).
+func _take_resizes() -> void:
+	var answered := false
+	while not _resizes.is_empty() and (_resizes[0][0] as SimReply).is_done():
+		var asked: Array = _resizes.pop_front()
+		if (asked[0] as SimReply).error() == "":
+			_resize_agreed = asked[1]
+		answered = true
+	if answered and _resizes.is_empty() and not is_equal_approx(radius, _resize_agreed):
+		radius = _resize_agreed
+		_edited()
+		queue_redraw()
 
 
 ## Changes how many bups the dish holds, without ever going below how many there are now.

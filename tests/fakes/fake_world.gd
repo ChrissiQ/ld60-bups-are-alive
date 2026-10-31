@@ -10,9 +10,9 @@ extends SimBackend
 ## as their one simulation double.
 ##
 ## A reply completes `reply_frames` set_times after its command (the simulation's come after its next iteration); a save's at once (the quit
-## save waits for it). `refuse_next(kind)` refuses the next add, unfreeze or pipette as the memory budget does; `refusing_iteration` stands
-## the world still with a reason, as a refused iteration does. It extends SimBackend, not FakeSimBackend: WorldClient finds the family tree
-## through a method named `lineage`, which FakeSimBackend's variable of that name rules out.
+## save waits for it). `refuse_next(kind)` refuses the next add, unfreeze, pipette or resize as the memory budget does;
+## `refusing_iteration` stands the world still with a reason, as a refused iteration does. It extends SimBackend, not FakeSimBackend:
+## WorldClient finds the family tree through a method named `lineage`, which FakeSimBackend's variable of that name rules out.
 
 const START_CLOCK := 3661.0  ## s: the world's clock when the fake is made (the program has run a while before the game: not a multiple of INTERVAL)
 const MAX_FRAME_SECONDS := 0.1  ## the longest frame the clock owes (Governor's)
@@ -65,7 +65,8 @@ func shutdown() -> void:
 	_pending.clear()
 
 
-## The next command of `kind` (SimCommand.KIND_ADD_DISH, KIND_THAW or KIND_PIPETTE) is refused, as the memory budget refuses one.
+## The next command of `kind` (SimCommand.KIND_ADD_DISH, KIND_THAW, KIND_PIPETTE or KIND_RESIZE) is refused, as the memory budget refuses
+## one (a refused resize leaves the dish as it was).
 func refuse_next(kind: StringName) -> void:
 	_refuse[kind] = true
 
@@ -213,7 +214,10 @@ func submit(cmd: SimCommand) -> void:
 		SimCommand.KIND_EDIT_WORLD:
 			_edit_world(int(a["row"]), a["edit"])
 		SimCommand.KIND_RESIZE:
-			_answer(cmd.reply, _resize(int(a["row"]), float(a["radius"])))
+			if _refuse.erase(SimCommand.KIND_RESIZE):
+				_answer(cmd.reply, null, "past the memory budget")
+			else:
+				_answer(cmd.reply, _resize(int(a["row"]), float(a["radius"])))
 		SimCommand.KIND_SET_PARAMS:
 			_set_params(int(a["row"]), a["params"])
 		_:
