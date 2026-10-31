@@ -461,6 +461,11 @@ func adopt(new_row: int, new_number: int, like: Dish) -> void:
 	_edited()
 
 
+## The dish leaves the world (a trash: its pins go with it) and stays on the screen out of it until it is struck or loaded again.
+func leave_world() -> void:
+	_leave_world()
+
+
 ## The dish leaves the world for good (a trash): its pins go with it.
 func _leave_world() -> void:
 	if row >= 0 and world != null:

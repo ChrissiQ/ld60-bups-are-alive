@@ -8,6 +8,7 @@ extends SceneTree
 ##    husks' multimesh draws 300 instances, and instance k's transform has a unit basis and an origin among the 300 husks' places; with the
 ##    Medium layer hidden and a founder selected, the steering map is still asked for and the view's "steer" texture, which the dish draws
 ##    the map from, exists (a valid RID); the Husks layer hidden, none is drawn.
+##    The main thread's time to take a new list of 200,000 husks into the multimesh [measured].
 ## P  The select tool over a husk (the hover at its place) finds it within 3 s, and its details say 50 / 16 = 3.125 units held.
 
 
@@ -78,6 +79,16 @@ func _run() -> void:
 		await process_frame
 	var details := d.husk_details(d.hovered.husk) if d.hovered.husk != Dish.NO_HUSK else {}
 	TestUtil.show(d.hovered.husk.distance_to(husk) < 0.01 and absf(float(details.get("units", -1.0)) - 50.0 / 16.0) < 1e-4, "P the pointer over a husk finds it, holding %s units (want 3.125)" % [details.get("units", "none")])
+	var many := PackedFloat32Array()
+	many.resize(200000 * 8)
+	var spent: Array = []
+	for k in 5:
+		var t1 := Time.get_ticks_usec()
+		d.drawing.refresh_husks({"row": d.row, "version": 1000000 + k, "transforms": many})
+		spent.append((Time.get_ticks_usec() - t1) / 1000.0)
+		await process_frame
+	spent.sort()
+	print("V [measured] the main thread's part of a new list of 200,000 husks (refresh_husks: the buffer's copy and upload): median %.2f ms (min %.2f, max %.2f)" % [spent[2], spent[0], spent[4]])
 	d.show_layer(Dish.Layer.HUSKS, false)
 	await process_frame
 	TestUtil.show(d.drawing.husks_drawn() == 0, "V with the Husks layer hidden none is drawn")

@@ -1102,13 +1102,21 @@ func _retire_extinct() -> void:
 		_announce_extinct()
 
 
-## The last dish died out and the player chose to begin again: the same beginning as the game screen's own.
+## The last dish died out and the player chose to begin again: the same beginning as the game screen's own, a new game, so the dish (the
+## only one left) leaves the world first and the numbers start again from 1 with it.
 func _start_again() -> void:
 	holds.release(&"end", PlayHolds.Then.STAY)
 	lineage.reset()
 	_end_pipette_wait(false)
 	_pipette_clock = 0.0
 	dish.selected.bup = -1
+	dish.leave_world()
+	_next_dish_number = 2
+	_dish_numbers[dish] = 1
+	dish.number = 1
+	dish_strip.remove(dish)
+	dish_strip.add(dish, 1, get_world_2d(), _view_bit(dish))
+	dish_strip.light(dish)
 	_begin_dish()
 	toolbar.set_paused(free_mode)
 

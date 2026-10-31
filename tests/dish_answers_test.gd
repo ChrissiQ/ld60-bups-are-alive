@@ -23,6 +23,8 @@ extends SceneTree
 ##  - A dose of 9 units is one DROP of 9 x 16 = 144 energy over a disc of 5 x sqrt(9) = 15 µm (scatter_radius, the preview's circle); one
 ##    unit's disc is 0.
 ##  - WorldClient.begin_game(123) sends one begin_game command with game_began 123.
+##  - The game screen (over FakeWorld) sends begin_game, with its game_began, before its first add_dish. Starting again after the last dish
+##    (dish 3) died out: a remove_dish of its row, then begin_game, then an add_dish of number 1; Main's next number is 2.
 
 
 class Backend:
@@ -93,7 +95,37 @@ func _run() -> void:
 	TestUtil.check(began.get("game_began") == 123.0, "begin_game tells the world when the game began (%s)" % [began])
 	d.queue_free()
 	await process_frame
+	await _game_starts()
 	TestUtil.finish(self, "DISH ANSWERS TEST OK")
+
+
+## The game screen over FakeWorld (which keeps no numbering or clock of its own for a game: only the order of what Main sends is read).
+func _game_starts() -> void:
+	var fake := FakeWorld.new()
+	root.get_node("SimService").use_backend(fake)
+	var m: Node = TestUtil.game_screen(self, TestUtil.small_start())
+	await process_frame
+	await process_frame
+	var kinds: Array = fake.calls.map(func(c: Dictionary) -> StringName: return c["kind"])
+	var begin := kinds.find(SimThread.KIND_BEGIN_GAME)
+	var first_add := kinds.find(SimCommand.KIND_ADD_DISH)
+	var began: Dictionary = fake.calls[begin]["args"] if begin >= 0 else {}
+	TestUtil.check(begin >= 0 and begin < first_add and is_equal_approx(float(began.get("game_began", -1.0)), m.game_began), "the game screen tells the world when the game began (%s) before it asks for its dish (begin %d, add %d)" % [began, begin, first_add])
+	var old_row: int = m.dish.row
+	m._dish_numbers[m.dish] = 3  # (as though dishes 2 and 3 had come and gone, and dish 3 was the last)
+	m.dish.number = 3
+	m._next_dish_number = 4
+	var mark := fake.calls.size()
+	m._start_again()
+	kinds = fake.calls.slice(mark).map(func(c: Dictionary) -> StringName: return c["kind"])
+	var removed := kinds.find(SimCommand.KIND_REMOVE_DISH)
+	begin = kinds.find(SimThread.KIND_BEGIN_GAME)
+	var added := kinds.find(SimCommand.KIND_ADD_DISH)
+	var spec: DishSpec = fake.calls[mark + added]["args"]["spec"] if added >= 0 else null
+	TestUtil.check(removed >= 0 and int(fake.calls[mark + removed]["args"]["row"]) == old_row and removed < begin and begin < added, "starting again: the old dish leaves the world, then the game begins, then the new dish is asked for (%s)" % [kinds])
+	TestUtil.check(spec != null and spec.number == 1 and m._dish_numbers[m.dish] == 1 and m._next_dish_number == 2, "starting again numbers the dish 1 and the next 2 (%s, %d)" % [spec.number if spec != null else -1, m._next_dish_number])
+	m.queue_free()
+	await process_frame
 
 
 func _husks(d: Dish) -> void:
