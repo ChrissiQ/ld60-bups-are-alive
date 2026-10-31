@@ -178,6 +178,16 @@ func world_of(row: int) -> DishWorld:
 	return _dishes[row]["world"]
 
 
+## The world of dish `row` was changed through `world_of` (as a burst or a thousand sources placed at once): the next snapshot carries a new copy.
+func touch_world(row: int) -> void:
+	_dishes[row]["world_version"] += 1
+
+
+## Where bup `id` of dish `row` is (dish-local).
+func place_of(row: int, id: int) -> Vector2:
+	return _dishes[row]["bups"][id]
+
+
 func submit(cmd: SimCommand) -> void:
 	calls.append({"kind": cmd.kind, "args": cmd.args})
 	var a := cmd.args
