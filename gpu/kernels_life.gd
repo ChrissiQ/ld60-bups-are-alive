@@ -564,6 +564,13 @@ static func pool_ac_conj() -> String:
 		+ "void ac_conj(uint i, uint d, uint l) { ac_apply(i, d, l); conj_apply(i, d, l); }\nBUP_LOOP(ac_conj)\n"
 
 
+## `pool_apply` and `pool_conj_count` in one pass over the bups (what the step runs, after `pool_conj_clear`): the donors' index needs only
+## their places, masses and flags, which nothing after swimming changes, so it is counted while `pool_apply` has the record.
+static func pool_apply_count() -> String:
+	return loop_function(GpuKernelsField.K_POOL_APPLY, "f", "apply_bup") + loop_function(K_POOL_CONJ_COUNT, "conj_count", "conj_count") \
+		+ "void apply_count(uint i, uint d, uint l) { apply_bup(i, d, l); conj_count(i, d, l); }\nBUP_LOOP(apply_count)\n"
+
+
 ## A pooled kernel's text that ends `BUP_LOOP(fn)` without that loop, its function `fn` renamed `to`: a part of a kernel that runs
 ## several parts for each bup.
 static func loop_function(text: String, fn: String, to: String) -> String:
@@ -710,6 +717,8 @@ static func _register_pool(out: Dictionary) -> void:
 	GpuKernels.add_grid_scan(out, "pool_conj_scan", "DCNT", "DOFF", "GSUM", "GOFF", CONJ_BUCKETS_EXPR.replace("CONJ_MIN_BUCKETS", "%du" % CONJ_MIN_BUCKETS), ["WORLD"])
 	GpuKernels.add(out, "pool_conj_scatter", K_POOL_CONJ_SCATTER, ["WORLD", "BLKDISH", "DSTATE", "CBKT", "DOFF", "DLIST"], conj, 64, t)
 	GpuKernels.add(out, "pool_conj_apply", K_POOL_CONJ_APPLY, ["P", "BUPS", "WORLD", "BLKDISH", "DSTATE", "DCNT", "DOFF", "DLIST", "DBIT"], conj, 64, t)
+	GpuKernels.add(out, "pool_apply_count", pool_apply_count(), ["P", "WORLD", "BLKDISH", "DSTATE", "DISHP", "BUPS", "EFF", "WANT", "WANTC", "CELLOF", "SCALE", "ENTD", "BINS", "BINC", "PSCALE", "OWNER", "CONC", "CONC2", "WANT2", "CELL2", "AWLO", "AWHI", "ADLO", "ADHI", "CBKT", "DCNT", "DBIT"],
+		GpuKernels.FIXED_FUNCS + GpuKernelsField.POOL_READF + GpuKernelsClouds.POOL_CLOUD_FUNCS + conj, 64, t)
 	GpuKernels.add(out, "pool_ac_conj", pool_ac_conj(), ["P", "BUPS", "WORLD", "BLKDISH", "DSTATE", "DISHP", "WANT2", "CELL2", "SCALE2", "DCNT", "DOFF", "DLIST", "DBIT"], conj, 64, t)
 	GpuKernels.add(out, "pool_life", pool_life(), ["P", "BUPS", "CHILD", "SURV", "KID", "WORLD", "BLKDISH", "DSTATE", "DISHP"], FLAG_FUNC)
 	GpuKernels.add_grid_scan(out, "pool_scan_s", "SURV", "EXCS", "GSUM", "GOFF", "WORLD[WD_SLOTS]", ["WORLD"])
