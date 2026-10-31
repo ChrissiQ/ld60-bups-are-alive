@@ -195,11 +195,11 @@ static func span_seconds(mode: Span, sim_time: float) -> float:
 	return SPAN_SECONDS[mode]
 
 
-## The gap between time ticks: the smallest of TICK_HOURS (from `min_hours` up) with room for its labels (at most six or
-## so across).
-static func tick_step(window: float, min_hours := 1.0) -> float:
+## The gap between time ticks: the smallest of TICK_HOURS (from `min_hours` up) with room for its labels (at most `max_ticks`
+## across: six, or fewer when the labels are wide).
+static func tick_step(window: float, min_hours := 1.0, max_ticks := 6.0) -> float:
 	for hours: float in TICK_HOURS:
-		if hours >= min_hours and window / (hours * 3600.0) <= 6.0:
+		if hours >= min_hours and window / (hours * 3600.0) <= max_ticks:
 			return hours * 3600.0
 	return TICK_HOURS[-1] * 3600.0
 
@@ -265,9 +265,14 @@ func _draw() -> void:
 		limit += d.bup_limit
 	var pop_max := pop_axis_max(peak, limit)
 	var margin_left := maxf(MARGIN_LEFT, font.get_string_size(UiText.thousands(pop_max), HORIZONTAL_ALIGNMENT_LEFT, -1, tick_size).x + 10.0)  # (room for the widest population label)
-	var plot := Rect2(margin_left, MARGIN_TOP, size.x - margin_left - MARGIN_RIGHT, size.y - MARGIN_TOP - MARGIN_BOTTOM)
+	var margin_right := maxf(MARGIN_RIGHT, font.get_string_size(tick_text(hi, hi), HORIZONTAL_ALIGNMENT_LEFT, -1, tick_size).x + 10.0)
+	var margin_top := maxf(MARGIN_TOP, legend_size + tick_size * 0.5 + 6.0)  # (the title sits above the top tick's label, whatever the text size)
+	var margin_bottom := maxf(MARGIN_BOTTOM, tick_size * 1.5 + 6.0)  # (the time labels sit below the lowest tick's label)
+	var plot := Rect2(margin_left, margin_top, size.x - margin_left - margin_right, size.y - margin_top - margin_bottom)
 	var in_days := ticks_in_days(mode, window)
-	var tick := tick_step(window, 24.0 if in_days else 1.0)  # (days are whole days apart)
+	var label_width := font.get_string_size(format_time(x_max, in_days), HORIZONTAL_ALIGNMENT_LEFT, -1, tick_size).x
+	var max_ticks := clampf(floorf(plot.size.x / (label_width * 1.4 + 6.0)), 2.0, 6.0)  # (the time labels are as wide as the text is: only as many as fit side by side)
+	var tick := tick_step(window, 24.0 if in_days else 1.0, max_ticks)  # (days are whole days apart)
 
 	# Gridlines first, so the data lines sit on top.
 	for k in 3:
@@ -296,7 +301,7 @@ func _draw() -> void:
 	for t: float in time_ticks(x_min, x_max, tick):
 		var x := plot.position.x + plot.size.x * (t - x_min) / window
 		draw_line(Vector2(x, plot.end.y), Vector2(x, plot.end.y + 3.0), muted, 1.0)
-		draw_string(font, Vector2(x - 20.0, plot.end.y + 15.0), format_time(t, in_days), HORIZONTAL_ALIGNMENT_CENTER, 40.0, tick_size, muted)
+		draw_string(font, Vector2(x - label_width * 0.7, plot.end.y + tick_size * 1.5 + 2.0), format_time(t, in_days), HORIZONTAL_ALIGNMENT_CENTER, label_width * 1.4, tick_size, muted)
 
 	# Legend doubles as the axis titles, coloured to match the axis each belongs to.
 	_plot = plot
@@ -306,7 +311,7 @@ func _draw() -> void:
 	_vals = vals
 	var reading := _reading()
 	if reading.is_empty():
-		draw_string(font, Vector2(6.0, 14.0), Strings.t("graph.bups"), HORIZONTAL_ALIGNMENT_LEFT, -1, legend_size, population_color)
+		draw_string(font, Vector2(6.0, font.get_ascent(legend_size) + 2.0), Strings.t("graph.bups"), HORIZONTAL_ALIGNMENT_LEFT, -1, legend_size, population_color)
 
 	_plot_line(vals, plot, lo, hi, x_min, window, trait_color)
 	_plot_line(pops, plot, 0.0, pop_max, x_min, window, population_color)  # (last: at the cap the population sits on the top edge and must not be hidden by the trait)
@@ -359,7 +364,7 @@ func _draw_reading(reading: Dictionary, plot: Rect2, lo: float, hi: float, pop_m
 	]
 	var at := 6.0
 	for part: Array in parts:
-		draw_string(font, Vector2(at, 14.0), part[0], HORIZONTAL_ALIGNMENT_LEFT, -1, size_, part[1])
+		draw_string(font, Vector2(at, font.get_ascent(size_) + 2.0), part[0], HORIZONTAL_ALIGNMENT_LEFT, -1, size_, part[1])
 		at += font.get_string_size(part[0], HORIZONTAL_ALIGNMENT_LEFT, -1, size_).x + 12.0
 
 

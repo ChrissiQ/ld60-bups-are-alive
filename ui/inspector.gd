@@ -22,6 +22,7 @@ var readout: Readout
 
 var dish_card: TraySection  ## the dish's section of the side column (it stays when something is picked)
 var info_panel: PanelContainer  ## what is picked (a bup, a source, a plankton)
+var top_bar: Control  ## the top bar, which the hover card keeps clear of
 var hover_card: PanelContainer  ## what the pointer rests on, next to the pointer (it never moves the side column)
 var hover_text: RichTextLabel
 var info_genome: GenomeRibbon  ## the picked bup's genome as a chromosome map, and the lines that come after it
@@ -56,6 +57,7 @@ func bind(root: Node, lineage_view: LineageView, readouts: Readout) -> void:
 	dish_card = root.get_node("%DishCard")
 	info_panel = root.get_node("%InfoPanel")
 	hover_card = root.get_node("%HoverCard")
+	top_bar = root.get_node("%TopBar")
 	hover_text = root.get_node("%HoverText")
 	info_genome = root.get_node("%InfoGenome")
 	info_tail = root.get_node("%InfoTail")
@@ -242,7 +244,8 @@ func place_hover_card() -> void:
 		at.x = mouse.x - 20.0 - hover_card.size.x
 	if at.y + hover_card.size.y > view.y - 8.0:
 		at.y = mouse.y - 20.0 - hover_card.size.y
-	hover_card.position = at.clamp(Vector2(8.0, 8.0), (view - hover_card.size - Vector2(8.0, 8.0)).max(Vector2(8.0, 8.0)))
+	var top := 8.0 if top_bar == null else maxf(8.0, top_bar.get_global_rect().end.y + 8.0)  # (below the top bar: a tall card at a big text size would cover it)
+	hover_card.position = at.clamp(Vector2(8.0, top), (view - hover_card.size - Vector2(8.0, 8.0)).max(Vector2(8.0, top)))
 
 
 ## Whether the bup's divisions count went up just now: the number after "divisions" in the panel then shows in the flash colour for FLASH_MSEC, so that the drop in its mass and reserve

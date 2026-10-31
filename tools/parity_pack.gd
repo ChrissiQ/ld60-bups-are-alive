@@ -53,6 +53,8 @@ func _run() -> void:
 		await _game_views(out)
 	if "busy" in only:
 		await _busy(out, count, frozen)
+	if "fix" in only:
+		await _fix_views(out)
 	quit(0)
 
 
@@ -179,3 +181,48 @@ func _busy(out: String, count: int, frozen: int) -> void:
 		m.side.scroll_vertical = 0
 		print("PACK busy %d%% saved" % pct)
 	await _leave(m)
+
+
+## The states the interface fixes are looked at in: a picked bup with the pipette open, the Dish card, the graph, the watch list, and the hover card over the dish.
+func _fix_views(out: String) -> void:
+	var start := StartConditions.new()
+	start.dish_radius = 600.0
+	start.bups = 60
+	start.bup_limit = 300
+	start.nutrient_density = 32.0
+	start.spread_founders()
+	var m: Node = TestUtil.game_screen(self, start)
+	for i in 600:
+		await process_frame
+		if m.is_node_ready() and m.dish != null and i > 5:
+			break
+	m.toolbar.set_paused(false)
+	m.sim_speed = 1000.0
+	await _frames(900)
+	m.toolbar.set_paused(true)
+	await _frames(30)
+	var ids: PackedInt64Array = m.dish.bup_ids()
+	for i in mini(WATCHED, ids.size()):
+		m.dish.watch_bup(ids[i])
+	m.toolbar.select_tool(Toolbar.Tool.PIPETTE)
+	m.graph_section.open = true
+	m.dish.selected.bup = ids[0] if not ids.is_empty() else -1
+	print("PACK fix: bup id %d, name '%s'" % [ids[0], m.dish.bup_name(ids[0])])
+	await _frames(120)
+	await _shot(out, "fix_game")
+	await _shot(out, "fix_dish", func() -> void: m.side.ensure_control_visible(m.inspector.dish_card))
+	await _shot(out, "fix_graph", func() -> void: m.side.ensure_control_visible(m.graph_section))
+	await _shot(out, "fix_watch", func() -> void: m.side.ensure_control_visible(m.watch_section))
+	m.side.scroll_vertical = 0
+	await _shot(out, "fix_hover", func() -> void:
+		m.toolbar.select_tool(Toolbar.Tool.SELECT)
+		get_root().warp_mouse(Vector2(700, 640))
+		Input.parse_input_event(_motion(Vector2(700, 640))))
+	await _leave(m)
+
+
+func _motion(at: Vector2) -> InputEventMouseMotion:
+	var e := InputEventMouseMotion.new()
+	e.position = at
+	e.global_position = at
+	return e

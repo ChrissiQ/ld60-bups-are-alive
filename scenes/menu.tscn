@@ -54,6 +54,7 @@ size_flags_horizontal = 4
 horizontal_scroll_mode = 0
 
 [node name="Buttons" type="VBoxContainer" parent="Center/Column/Scroll"]
+theme_type_variation = &"TightStack"
 layout_mode = 2
 size_flags_horizontal = 4
 
