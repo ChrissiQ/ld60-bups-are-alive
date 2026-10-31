@@ -3,14 +3,14 @@ extends SceneTree
 ## The Governor with a fake clock: the step length from the speed alone, the time owed,
 ## the steps of an iteration within T_ITER and the caller's bounds, the duty, the history samples.
 ##
-## Expected values, written before the first run [derived from the Governor's constants: MAX_STEP 20 s, 60 steps a simulated
+## Expected values, written before the first run [derived from the Governor's constants: MAX_STEP 20 s, 120 steps a simulated
 ## second, T_ITER 25 ms (placeholder), frames capped at 0.1 s, owed time at most 2 iterations, duty -10% after 3 frames over 1.15 x the
 ## display frame and +5% for a frame within 1.05 x, EMA weight 0.25]:
-##  - step_length: x1 = 1/60 s, x600 = 10 s, x10,000 = 20 s, x1,200 = 20 s, x0 = 0; and the governor's delta() after a frame of 1/60 s
+##  - step_length: x1 = 1/120 s, x600 = 5 s, x2,400 = 20 s, x10,000 = 20 s, x0 = 0; and the governor's delta() after a frame of 1/60 s
 ##    and after one of 1/120 s is the same value at x1, x600 and x10,000.
-##  - owed: at x1, one frame of 1/60 s owes 1 step; one of 1/120 s owes 0, two owe 1. Fed (N + 0.5) steps' time (N = 240) as N frames of
-##    1/60 s and a half frame, or as 2N + 1 frames of 1/120 s, stepping whatever is owed after each frame with a fast step (0.5 ms), both
-##    run exactly N steps. A frame of 1 s counts as 0.1 s (with a 0.5 ms step, so the cap of 2 x 50 steps of 1/60 s is above it). Paused, nothing is owed.
+##  - owed: at x1, one frame of 1/120 s owes 1 step; one of 1/240 s owes 0, two owe 1. Fed (N + 0.5) steps' time (N = 240) as N frames of
+##    1/120 s and a half frame, or as 2N + 1 frames of 1/240 s, stepping whatever is owed after each frame with a fast step (0.5 ms), both
+##    run exactly N steps. A frame of 1 s counts as 0.1 s (with a 0.5 ms step, so the cap of 2 x 50 steps of 1/120 s is above it). Paused, nothing is owed.
 ##  - steps: a step of 5 ms gives 5 steps an iteration (5 x 5 = 25 ms = T_ITER) with 100 owed; 30 ms gives 1; 0.001 ms gives 1,024
 ##    (MAX_STEPS); with room 3 it is 3, with samples 2 it is 2; nothing owed gives 0.
 ##  - the cap: at x10,000 with a 5 ms step (5 steps an iteration of 20 s), frames of 0.1 s (1,000 s each) owe at most 2 x 5 x 20 = 200 s;
@@ -37,10 +37,10 @@ func _init() -> void:
 
 
 func _step_length() -> void:
-	TestUtil.check(is_equal_approx(Governor.step_length(1.0), 1.0 / 60.0), "x1: 1/60 s (got %f)" % Governor.step_length(1.0))
-	TestUtil.check(is_equal_approx(Governor.step_length(600.0), 10.0), "x600: 10 s")
+	TestUtil.check(is_equal_approx(Governor.step_length(1.0), 1.0 / 120.0), "x1: 1/120 s (got %f)" % Governor.step_length(1.0))
+	TestUtil.check(is_equal_approx(Governor.step_length(600.0), 5.0), "x600: 5 s")
 	TestUtil.check(is_equal_approx(Governor.step_length(10000.0), 20.0), "x10,000: 20 s")
-	TestUtil.check(is_equal_approx(Governor.step_length(1200.0), 20.0), "x1,200: 20 s")
+	TestUtil.check(is_equal_approx(Governor.step_length(2400.0), 20.0), "x2,400: 20 s")
 	TestUtil.check(Governor.step_length(0.0) == 0.0, "x0: 0")
 	for speed in [1.0, 600.0, 10000.0]:
 		var a := Governor.new()
@@ -52,22 +52,22 @@ func _step_length() -> void:
 
 func _owed() -> void:
 	var g := Governor.new()
-	g.set_time(1.0, false, 1.0 / 60.0)
-	TestUtil.check(g.owed_steps() == 1, "x1: a frame of 1/60 s owes a step (got %d)" % g.owed_steps())
+	g.set_time(1.0, false, 1.0 / 120.0)
+	TestUtil.check(g.owed_steps() == 1, "x1: a frame of 1/120 s owes a step (got %d)" % g.owed_steps())
 	g = Governor.new()
-	g.set_time(1.0, false, 1.0 / 120.0)
-	TestUtil.check(g.owed_steps() == 0, "x1: a frame of 1/120 s owes no whole step")
-	g.set_time(1.0, false, 1.0 / 120.0)
-	TestUtil.check(g.owed_steps() == 1, "x1: two frames of 1/120 s owe a step")
+	g.set_time(1.0, false, 1.0 / 240.0)
+	TestUtil.check(g.owed_steps() == 0, "x1: a frame of 1/240 s owes no whole step")
+	g.set_time(1.0, false, 1.0 / 240.0)
+	TestUtil.check(g.owed_steps() == 1, "x1: two frames of 1/240 s owe a step")
 	const N := 240
-	var at60 := _run_frames(1.0 / 60.0, N, 0.5)
-	var at120 := _run_frames(1.0 / 120.0, 2 * N, 1.0)
-	TestUtil.check(at60 == N and at120 == N, "(N + 0.5) steps' time in frames of 1/60 and of 1/120 s run N = %d steps (got %d, %d)" % [N, at60, at120])
+	var at120 := _run_frames(1.0 / 120.0, N, 0.5)
+	var at240 := _run_frames(1.0 / 240.0, 2 * N, 1.0)
+	TestUtil.check(at120 == N and at240 == N, "(N + 0.5) steps' time in frames of 1/120 and of 1/240 s run N = %d steps (got %d, %d)" % [N, at120, at240])
 	g = Governor.new()
 	g.step_ms_ema = 0.5
 	g.set_time(1.0, false, 1.0)
 	TestUtil.check(is_equal_approx(g.owed(), 0.1), "a frame of 1 s counts as 0.1 s (owed %f)" % g.owed())
-	g.set_time(1.0, true, 1.0 / 60.0)
+	g.set_time(1.0, true, 1.0 / 120.0)
 	TestUtil.check(g.owed() == 0.0 and g.owed_steps() == 0, "paused: nothing owed")
 
 

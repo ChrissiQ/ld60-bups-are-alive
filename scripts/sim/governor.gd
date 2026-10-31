@@ -13,7 +13,7 @@ extends RefCounted
 ##   raises it by DUTY_UP; after an iteration that kept the thread busy `busy` ms it rests `busy x (1 / duty - 1)` ms.
 
 const MAX_STEP := Dish.MAX_STEP  ## s: the longest world step
-const STEPS_PER_SECOND := 60.0  ## steps per simulated second at x1 (a step of 1/60 s)
+const STEPS_PER_SECOND := 120.0  ## steps per simulated second at x1 (a step of 1/120 s)
 const MAX_FRAME_SECONDS := 0.1  ## the longest frame the sim catches up on (Main.MAX_FRAME_SECONDS)
 const T_ITER_MS := 25.0  ## [placeholder, fixed by a soak on the real sim] the longest an iteration's steps should take
 const MAX_STEPS := GpuLayout.MAX_STEPS_PER_BATCH

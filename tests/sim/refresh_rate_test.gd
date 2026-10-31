@@ -1,19 +1,19 @@
 extends SceneTree
 ## The step length follows the speed, never the frame. The same dish is run
-## twice through the real sim thread (GpuSimBackend, WorldClient) at x1, once fed by frames of 1/60 s and once by frames of 1/120 s,
+## twice through the real sim thread (GpuSimBackend, WorldClient) at x1, once fed by frames of 1/120 s and once by frames of 1/240 s,
 ## for the same simulated time, and the two end states are compared word for word.
 ## Windowed, through the lock:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/refresh_rate_test.gd
 ##
 ## Expected values, written before the first run:
-## - both runs take steps of 1/60 s (x1: Governor.step_length(1) [derived]) and run exactly N = 240 steps from (N + 0.5) steps'
-##   time (N frames of 1/60 s and half a frame, or 2N + 1 frames of 1/120 s), then one more step alone (a frame of 1/60 s, or of 1/120 s
+## - both runs take steps of 1/120 s (x1: Governor.step_length(1) [derived]) and run exactly N = 240 steps from (N + 0.5) steps'
+##   time (N frames of 1/120 s and half a frame, or 2N + 1 frames of 1/240 s), then one more step alone (a frame of 1/120 s, or of 1/240 s
 ##   on the half step left), so the last iteration is a single step in both [derived from the Governor's owed time]; no time is dropped
 ##   (each frame waits until the sim has caught up, so what is owed never passes the cap).
 ## - the canonical dumps of the dish (records, field, clouds, husks, DSTATE, the last iteration's events, stats) after N + 1 steps differ
 ##   in 0 words [derived: the same step length, the same steps and the same world events, and a step's result does not depend on how
 ##   steps are grouped into iterations].
-## - the dish: 200 founders in a 1.5 mm dish, every flag on, a bloom of 2 a mm² a day and a source, seed 21 (the fine path: 1/60 s is under
+## - the dish: 200 founders in a 1.5 mm dish, every flag on, a bloom of 2 a mm² a day and a source, seed 21 (the fine path: 1/120 s is under
 ##   FINE_STEP).
 
 const N := 240
@@ -24,12 +24,12 @@ func _initialize() -> void:
 	if not SimHarness.device_available():
 		SimHarness.skip(self, "refresh_rate_test", "needs a local GPU (not available headless)", "a later change")
 		return
-	var a: Dictionary = await _run(1.0 / 60.0)
-	var b: Dictionary = await _run(1.0 / 120.0)
-	print("run at 1/60 s frames: %s" % [a.get("note", "")])
-	print("run at 1/120 s frames: %s" % [b.get("note", "")])
-	TestUtil.show(a.get("ok", false), "frames of 1/60 s: %d steps of 1/60 s, nothing dropped" % (N + 1))
-	TestUtil.show(b.get("ok", false), "frames of 1/120 s: %d steps of 1/60 s, nothing dropped" % (N + 1))
+	var a: Dictionary = await _run(1.0 / 120.0)
+	var b: Dictionary = await _run(1.0 / 240.0)
+	print("run at 1/120 s frames: %s" % [a.get("note", "")])
+	print("run at 1/240 s frames: %s" % [b.get("note", "")])
+	TestUtil.show(a.get("ok", false), "frames of 1/120 s: %d steps of 1/120 s, nothing dropped" % (N + 1))
+	TestUtil.show(b.get("ok", false), "frames of 1/240 s: %d steps of 1/120 s, nothing dropped" % (N + 1))
 	if a.has("dump") and b.has("dump"):
 		var recs: PackedByteArray = (a["dump"] as Dictionary).get("records", PackedByteArray())
 		TestUtil.show(recs.size() >= GpuLayout.RECORD_BYTES, "the dish holds bups at the end (%d)" % (recs.size() / GpuLayout.RECORD_BYTES))
