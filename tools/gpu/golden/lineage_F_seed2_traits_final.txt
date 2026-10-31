@@ -1,0 +1,12 @@
+records=1856
+alive=1761
+next_id=2044
+pinned=1 2 547 561
+ops=134
+batches=129
+births=1593
+deaths=282
+sim_seconds=21600.0
+scenario=F
+seed=2
+traits=1

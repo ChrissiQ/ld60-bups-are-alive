@@ -1,0 +1,12 @@
+records=1043
+alive=931
+next_id=1454
+pinned=1 2 335 355
+ops=295
+batches=290
+births=1203
+deaths=522
+sim_seconds=21600.0
+scenario=E
+seed=1
+traits=0
