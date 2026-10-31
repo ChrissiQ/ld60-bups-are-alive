@@ -115,22 +115,20 @@ void LineageStore::record_death(int64_t id, const Record &f, int dish) {
 	r.mass = f.mass;
 	r.energy = f.energy;
 	r.birth_mass = f.birth_mass;
-	free_if_unused(id, true);
+	free_if_unused(id);
 }
 
-// Frees a dead record nothing holds, and then the parents that leaves with nothing holding them. A record a frozen dish lists leaves
-// its death time in the tombstones (`tombstone`: false for the release of a dish's own records, which its blob carries).
-void LineageStore::free_if_unused(int64_t id, bool tombstone) {
+// Frees a dead record nothing holds, and then the parents that leaves with nothing holding them. A record a frozen dish claims leaves
+// its death time in the tombstones.
+void LineageStore::free_if_unused(int64_t id) {
 	while (id > 0) {
 		auto it = records.find(id);
 		if (it == records.end() || it->second.alive || it->second.holds > 0) {
 			return;
 		}
-		if (tombstone) {
-			auto c = frozen_claims.find(id);
-			if (c != frozen_claims.end() && !c->second.empty()) {
-				tombstones[id] = it->second.died;
-			}
+		auto c = frozen_claims.find(id);
+		if (c != frozen_claims.end() && !c->second.empty()) {
+			tombstones[id] = it->second.died;
 		}
 		int64_t parent = it->second.parent;
 		records.erase(it);
@@ -290,7 +288,7 @@ void LineageStore::unpin(int64_t id, int holder) {
 	auto it = records.find(id);
 	if (it != records.end() && it->second.holds > 0) {
 		it->second.holds--;
-		free_if_unused(id, true);
+		free_if_unused(id);
 	}
 }
 
@@ -521,8 +519,8 @@ void LineageStore::release_dish(int number, const PackedInt64Array &live, int mi
 		}
 		touched.push_back(live[i]);
 	}
-	for (int64_t id : touched) {
-		free_if_unused(id, false);
+	for (int64_t id : touched) { // (before the dish's own claims are added: a record another frozen dish claims is tombstoned, this one's not)
+		free_if_unused(id);
 	}
 	for (int64_t i = 0; i < claimed_ids.size(); i++) {
 		frozen_claims[claimed_ids[i]].insert(number);
@@ -649,7 +647,7 @@ void LineageStore::import_bytes(const PackedByteArray &data, const PackedInt64Ar
 		}
 	}
 	for (int64_t id : inserted) { // (6) only what it inserted and nothing holds
-		free_if_unused(id, true);
+		free_if_unused(id);
 	}
 	release_claims_of(number); // (7)
 }

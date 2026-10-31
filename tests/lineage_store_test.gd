@@ -5,7 +5,8 @@ extends SceneTree
 ##    initial records, give the final records of the capture, compared by id (the order of an export's records is not stable);
 ##  - a pre-pool export (golden/parity/lineage_export.bin.gz) imported into an empty store exports the same records;
 ##  - the cases of a pipette, freeze, thaw and trash on a store holding two or three dishes:
-##    export_dish, release_dish, discard_frozen, the idempotent import_bytes, the tombstones.
+##    the running dish that holds a frozen dish's shared bup leaves): export_dish, release_dish, discard_frozen, the idempotent
+##    import_bytes, the tombstones.
 ## Expected values are derived in each function's comment from the rules of the store: a replay applies the very events the capture
 ## applied, so every record equals the capture's field for field; the dish cases are worked out from the family trees built here.
 
@@ -31,6 +32,7 @@ func _init() -> void:
 	_case_e_closure()
 	_case_f_pruned_while_frozen()
 	_case_g_discard_frozen()
+	_case_h_holder_leaves_while_frozen()
 	_pins_and_retarget()
 	TestUtil.finish(self, "LINEAGE STORE TEST OK")
 
@@ -423,6 +425,37 @@ func _case_g_discard_frozen() -> void:
 			TestUtil.check(store.tombstone(_id(A, 2)) == 700 and store.tombstone(_id(A, 1)) == 50 and store.claim_count() > 0, "(g) discarding A leaves the tombstones A2 claims")
 			store.discard_frozen(A2)
 			TestUtil.check(store.tombstone_count() == 0 and store.claim_count() == 0 and store.record_count() == records, "(g) discarding A2 deletes them, empties the claims and writes no record")
+
+
+## (h) the dish holding a shared bup leaves while A is frozen. A is frozen at 500 claiming a1, a2, a3, a5; a2 is alive in C with its child
+## c1. Then C leaves at 800, trashed or frozen. Expected [derived: the release frees a2 (C's live bup, dead from 800, nothing holding it
+## once c1 goes) and a1 (dead at 50, held by a2 only), and A claims both, so each is tombstoned at its `died`: a2 at 800, a1 at 50; c1,
+## which A does not claim, leaves none, also when C's own freeze claims it, since C's claims come after the freeing]. The thaw of A at 900
+## brings a2 back dead at 800 and a1 at 50, never at 900. A trash leaves no claim and no tombstone after A's thaw; a freeze leaves C's
+## claims and the tombstones of a1 and a2, which C also claims, until C is thawed or discarded.
+func _case_h_holder_leaves_while_frozen() -> void:
+	for freeze_c in [false, true]:
+		var how := "frozen" if freeze_c else "trashed"
+		var store := _pipetted_store(false)
+		var blob_a := store.export_dish(A, _a_live())
+		store.release_dish(A, _a_live(), 500, blob_a["ids"])
+		var c_live := PackedInt64Array([_id(A, 2), _id(C, 1)])
+		if freeze_c:
+			var blob_c := store.export_dish(C, c_live)
+			store.release_dish(C, c_live, 800, blob_c["ids"])
+		else:
+			store.release_dish(C, c_live, 800)
+		TestUtil.check(not store.has_record(_id(A, 2)) and not store.has_record(_id(A, 1)) and not store.has_record(_id(C, 1)), "(h, C %s) a2, a1 and c1 leave the store" % how)
+		TestUtil.check(store.tombstone(_id(A, 2)) == 800 and store.tombstone(_id(A, 1)) == 50 and store.tombstone(_id(C, 1)) == -1 and store.tombstone_count() == 2, "(h, C %s) a2 is tombstoned at C's release (800), a1 at its death (50), c1 not (a2 %d, a1 %d, c1 %d)" % [how, store.tombstone(_id(A, 2)), store.tombstone(_id(A, 1)), store.tombstone(_id(C, 1))])
+		store.set_time(900 * 60.0)
+		store.import_bytes(blob_a["bytes"], PackedInt64Array(), _a_live(), A)
+		var r2 := store.info(_id(A, 2))
+		TestUtil.check(store.has_record(_id(A, 2)) and not r2["alive"] and r2["died"] == 800 and store.info(_id(A, 1))["died"] == 50, "(h, C %s) A's thaw brings a2 back dead at 800 (not the thaw's 900) and a1 at 50 (a2 died %s)" % [how, r2.get("died", "none")])
+		TestUtil.check(store.chain(_id(A, 3)) == PackedInt64Array([_id(A, 1), _id(A, 2), _id(A, 3)]), "(h, C %s) a3's chain is whole after the thaw" % how)
+		if freeze_c:
+			TestUtil.check(store.claim_count() == 3 and store.tombstone_count() == 2, "(h, C frozen) C's claims (a1, a2, c1) and the tombstones C claims stay (claims %d, tombstones %d)" % [store.claim_count(), store.tombstone_count()])
+			store.discard_frozen(C)
+		TestUtil.check(store.claim_count() == 0 and store.tombstone_count() == 0, "(h, C %s) no claim or tombstone is left in the end" % how)
 
 
 ## Pins by holder. Expected [derived]: each pin raises the record's holds by one and its dish's release drops exactly its own; an unpin by a

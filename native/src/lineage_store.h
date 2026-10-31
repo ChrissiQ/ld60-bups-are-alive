@@ -63,7 +63,7 @@ private:
 	int now_minutes() const { return (int)(now_seconds / 60.0); }
 	void make_record(int64_t id, int64_t parent, const Record &fields);
 	void record_death(int64_t id, const Record &fields, int dish);
-	void free_if_unused(int64_t id, bool tombstone);
+	void free_if_unused(int64_t id);
 	void drop_pins_of(int holder, std::vector<int64_t> &touched);
 	void release_claims_of(int number);
 	godot::Dictionary record_info(int64_t id, const Record &r) const;
@@ -97,8 +97,9 @@ public:
 	// {bytes, ids}: the records of the dish's living bups and of what its pins hold, with every ancestor of each (whichever dish also
 	// references them), in the format of export_bytes, and the ids written.
 	godot::Dictionary export_dish(int number, const godot::PackedInt64Array &live) const;
-	// The dish leaves (frozen or trashed): its pins go, its living bups are not alive from `minutes`, and what nothing holds is freed
-	// (not tombstoned). A freeze passes the ids its blob lists, which become the dish's claims.
+	// The dish leaves (frozen or trashed): its pins go, its living bups are not alive from `minutes`, and what nothing holds is freed;
+	// a freed record another frozen dish claims is tombstoned at its `died` (`minutes` for a bup alive here). A freeze passes the ids
+	// its blob lists, which become the dish's claims (after the freeing, so its own records leave no tombstone).
 	void release_dish(int number, const godot::PackedInt64Array &live, int minutes, const godot::PackedInt64Array &claimed_ids = godot::PackedInt64Array());
 	void discard_frozen(int number); // a frozen dish is trashed: its claims go, and the tombstones nothing claims
 	// An idempotent merge of an export: only ids the store lacks are inserted; `live` become alive in dish `number`; `watched` are pinned
