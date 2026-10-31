@@ -17,8 +17,12 @@ extends SceneTree
 ## D  A dish of 3 mm, 100 cells (60 µm, a cloud goes to the grid at 30 µm) with 32 units/mm²: a dose of 144 energy over 15 µm (variance
 ##    max(15² / 4, 100) = 100, sigma 10 < 30) becomes one more cloud of the dish at its point with mass 144 and variance 100, the grid's
 ##    total unchanged (1e-6 relative); a dose of 6,400 over 100 µm (sigma 50 >= 30) raises the grid's total by 6,400 (1e-5 relative) and
-##    makes no cloud. Before a step the probe at the cloud reads the medium as it was (the cloud is in the lists from the next step on);
-##    after a step it reads more [both measured and reported].
+##    makes no cloud. With no step run (a paused world), the probe at the dose reads more than before it: the lists are made again with
+##    the cloud (the medium's 5.12e-4 plus the cloud's peak 144 / (2 pi 100) = 0.229, the probe reading at the cloud's centre).
+##    A dose as an edit changes nothing a dish does but its arrival: a dish of 200 founders run 5 steps, then given the dose as an edit,
+##    then 20 steps, is word for word the same dish given it as a disc event of its world in the first of those 20 steps (0 differing
+##    words: the edit's cloud takes the slot the event's would, and the lists the edit makes are made afresh by the step before it reads
+##    them).
 ## G  A dish whose glucose is a ramp c = 5.12e-4 + 5e-8 x (µm), no bups, no feed, after one 20 s step: the probe at its middle gives the
 ##    way (1, 0) (to 1e-4), and a gradient's size of 5e-8 /µm to 1e-3 relative (diffusion keeps a ramp a ramp; the rim's bend reaches
 ##    sqrt(D t) ~ 25 µm, not the middle).
@@ -45,6 +49,7 @@ func _init() -> void:
 	_husks()
 	_many_husks()
 	_drop()
+	_drop_as_event()
 	_gradient()
 	_through_thread()
 	_husks_at_speed()
@@ -226,10 +231,9 @@ func _drop() -> void:
 	var after := _grid_total(core, row)
 	TestUtil.show(found and clouds.size() / 8 == clouds_before + 1 and absf(after - before) <= 1e-6 * before, "D a dose of 9 over 15 µm is one more cloud at its point (144, variance 100), the grid's total unchanged (%d -> %d clouds; %.4f -> %.4f)" % [clouds_before, clouds.size() / 8, before, after])
 	var read_now := core.probe(row, probe_q)
+	var want := read_before[3] + 144.0 / (TAU * 100.0)
+	TestUtil.show(absf(read_now[3] - want) <= 1e-4 * want, "D with no step run the probe at the dose reads it: %s before, %s after (want %s)" % [String.num_scientific(read_before[3]), String.num_scientific(read_now[3]), String.num_scientific(want)])
 	core.run(1, 20.0)
-	var read_after := core.probe(row, probe_q)
-	print("D [measured] the probe at the dose: %s before it, %s before a step, %s after one" % [String.num_scientific(read_before[3]), String.num_scientific(read_now[3]), String.num_scientific(read_after[3])])
-	TestUtil.show(read_after[3] > read_now[3], "D after a step the dose is in the probe's reading")
 	before = _grid_total(core, row)
 	clouds_before = (core._slots_of(row)[0] as PackedFloat32Array).size() / 8
 	core.queue_edit(row, WorldEdit.drop(Vector2(-900.0, 400.0), 6400.0, 100.0))
@@ -238,6 +242,28 @@ func _drop() -> void:
 	var clouds_now: int = (core._slots_of(row)[0] as PackedFloat32Array).size() / 8
 	TestUtil.show(absf(after - before - 6400.0) <= 1e-5 * after and clouds_now == clouds_before, "D a dose over 100 µm goes onto the cells (total %.3f -> %.3f, clouds %d -> %d)" % [before, after, clouds_before, clouds_now])
 	core.release()
+
+
+func _drop_as_event() -> void:
+	var dumps: Array = []
+	for as_edit in [true, false]:
+		var core := SimCore.new()
+		var spec := _spec(1, 3000.0)
+		spec.limit = 4000
+		spec.founders = Scenario.small(200, 3000.0).seed(9).founder_records(1)
+		var row := core.add_dish(spec)
+		core.run(5, 20.0)
+		var plan := IterationPlan.new()
+		if as_edit:
+			core.queue_edit(row, WorldEdit.drop(Vector2(310.0, -220.0), 144.0, 15.0))
+		else:
+			plan.events = {row: {"discs": PackedFloat64Array([1.0, 310.0, -220.0, 144.0, 15.0]), "husks": PackedFloat64Array(), "puffs": PackedFloat64Array(), "deposits": PackedFloat64Array()}}
+		core.run(20, 20.0, plan)
+		dumps.append(CanonicalDump.coerce(core.canonical_dump(row)))
+		print("D the dish after the dose (%s): %d bups, %d clouds" % ["edit" if as_edit else "event", core.count(row), (core._slots_of(row)[0] as PackedFloat32Array).size() / 8])
+		core.release()
+	var line := SimHarness.diff(dumps[0], dumps[1])
+	TestUtil.show(line == "", "D a dose as an edit is the dish a disc event makes, word for word, 20 steps on%s" % (": " + line if line != "" else ""))
 
 
 func _gradient() -> void:

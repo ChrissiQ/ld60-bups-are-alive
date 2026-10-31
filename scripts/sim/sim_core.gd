@@ -709,16 +709,7 @@ func _record_step(cl: int, s: int) -> void:
 	_disp(cl, "pool_puff_advance", hg)
 	_disp(cl, "pool_dep_apply", cg)
 	_disp(cl, "pool_snapshot", cg)
-	var bins := maxi(arena.bin_top, 1)
-	_disp(cl, "pool_bin_clear", _groups(bins))
-	_disp(cl, "pool_bin_count", hg)
-	_scan(cl, "pool_bn", bins)
-	_disp(cl, "pool_bin_cut", D_MAX / 64)
-	_scan(cl, "pool_bn", bins)
-	_disp(cl, "pool_bin_room", D_MAX / 64)
-	_disp(cl, "pool_bin_cursor", _groups(bins))
-	_disp(cl, "pool_bin_scatter", hg)
-	_disp(cl, "pool_bin_sort", _groups(bins))
+	_record_lists(cl, hg)
 	_disp(cl, "pool_clear", cg)
 	_disp(cl, "pool_puff_clear", hg)
 	for kname: String in (["pool_swim", "pool_demand"] if lone_passes else ["pool_swim_demand"]):
@@ -774,6 +765,21 @@ func _record_step(cl: int, s: int) -> void:
 		_disp(cl, "pool_husk_copy", _groups(hint * 8))
 		_disp(cl, "pool_husk_set_count", 1)
 	_world_step += 1
+
+
+## The clouds' lookup lists made afresh from the clouds as they are (every step makes them before anything reads them; the words a cloud
+## keeps for them, its reach and sigma, are worked out from its mass and spread alone).
+func _record_lists(cl: int, hg: int) -> void:
+	var bins := maxi(arena.bin_top, 1)
+	_disp(cl, "pool_bin_clear", _groups(bins))
+	_disp(cl, "pool_bin_count", hg)
+	_scan(cl, "pool_bn", bins)
+	_disp(cl, "pool_bin_cut", D_MAX / 64)
+	_scan(cl, "pool_bn", bins)
+	_disp(cl, "pool_bin_room", D_MAX / 64)
+	_disp(cl, "pool_bin_cursor", _groups(bins))
+	_disp(cl, "pool_bin_scatter", hg)
+	_disp(cl, "pool_bin_sort", _groups(bins))
 
 
 ## The per-dish stats over the layout now into sample `sample` of each running dish's STATS row, taken after step `step` of the batch.
@@ -1090,8 +1096,10 @@ func _apply_edits() -> void:
 
 ## A dropped dose as a cloud of dish `row` (variance `v`, cut 1, as a plankton's burst: `_world_events`' discs), taken as the world's
 ## events are, by `pool_ev_puffs` (its dish's next cloud slot, or the grid past the dish's quota), from a one-row EVR and EVP of its own:
-## the batch writes its own after. It is in the clouds' lists, so in the pictures and the probes, from the next step on. False, with nothing
-## done, when the memory budget has no room for another cloud slot (the dose then goes onto the grid).
+## the batch writes its own after. The clouds' lists are made again with it, so the pictures and the probes show it at once, while the
+## world is paused too; the next step makes them afresh before it reads them, so this changes nothing a dish does (the count of entries a
+## list cut, which the remake would count twice, is put back). False, with nothing done, when the memory budget has no room for another
+## cloud slot (the dose then goes onto the grid).
 func _drop_cloud(row: int, x: float, y: float, energy: float, v: float) -> bool:
 	if not arena.ensure_clouds(_wd(GpuLayout.WD_CLOUD_SLOTS) + 1):
 		return false
@@ -1100,7 +1108,17 @@ func _drop_cloud(row: int, x: float, y: float, energy: float, v: float) -> bool:
 	var cloud := PackedFloat32Array([x, y, energy, v, 1.0, _row_word(row)]).to_byte_array()
 	rd.buffer_update(arena.buf("EVR"), 0, ranges.size(), ranges)
 	rd.buffer_update(arena.buf("EVP"), 0, cloud.size(), cloud)
-	_run_list(func(cl: int) -> void: _disp(cl, "pool_ev_puffs", 1, 0.0))
+	var cut := {}
+	for r: int in _dishes:
+		cut[r] = _ds(r, GpuLayout.DS_ENTRIES_CUT)
+	_run_list(func(cl: int) -> void:
+		_disp(cl, "pool_ev_puffs", 1, 0.0)
+		_record_lists(cl, _groups(maxi(_wd(GpuLayout.WD_CLOUD_SLOTS) + 1, 64))))
+	for r: int in cut:
+		if _ds(r, GpuLayout.DS_ENTRIES_CUT) != cut[r]:
+			var ds := dstate_row(r)
+			ds.encode_u32(GpuLayout.DS_ENTRIES_CUT * 4, cut[r])
+			_set_ds_row(r, ds)
 	return true
 
 
