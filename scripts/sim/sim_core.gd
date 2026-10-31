@@ -71,6 +71,7 @@ var _seen_seq := {}  ## kind -> the newest publish of the kind the main side has
 var _next_texture := {}  ## kind -> where the search for a free texture starts (the one after the last written)
 var _frame := 0  ## the main side's frame count as last told
 var _retired_textures: Array = []  ## {kind, rids, last_seq, last_use, made, moved_on} of each set of textures made afresh, freed once unused (`_free_retired`)
+var textures_remade := {}  ## kind -> sets of textures made afresh so far, each kept until unused (for checks)
 var publish_seq := 0  ## the number of the last publish that wrote a texture
 var _temp_sets: Array[RID] = []  ## the copy kernels' sets of one publish
 var _profile: Variant = null  ## while `profile_steps` runs: kernel name -> Array of µs, each dispatch its own submit
@@ -1542,6 +1543,8 @@ func texture_bound(kind: String, index: int, frame: int, seq: int) -> void:
 			r["last_use"] = maxi(int(r["last_use"]), frame)
 		elif int(r["moved_on"]) < 0:
 			r["moved_on"] = frame
+	if not _retired_textures.is_empty():
+		_free_retired()  # (a paused world publishes nothing for a while: the main side's frames still let them go)
 	if not _texture_seqs.has(kind) or index < 0 or index >= TEXTURES:
 		return
 	var seqs: Array = _texture_seqs[kind]
@@ -1606,25 +1609,22 @@ func _make_textures(kind: String, size: Vector2i) -> void:
 
 
 ## Textures made afresh (`_make_textures`) may still be imported on the main side (a view of them, which on some drivers does not keep them
-## alive), so they are freed only once it no longer uses them (`_free_retired`). A kind the main side has never told a use of was never
-## imported: its old textures go at once.
+## alive), so they are freed only once it no longer uses them (`_free_retired`), even those it never told a use of (it may have imported
+## them and drawn from them on a frame it has not told of yet).
 func _retire_textures(kind: String, rids: Array) -> void:
 	var last_seq := -1
 	var last_use := -1
 	for i in TEXTURES:
 		last_seq = maxi(last_seq, int(_texture_seqs[kind][i]))
 		last_use = maxi(last_use, int(_texture_used[kind][i]))
-	if last_use < 0 and not _seen_seq.has(kind):
-		for t: RID in rids:
-			if t.is_valid():
-				rd.free_rid(t)
-		return
 	_retired_textures.append({"kind": kind, "rids": rids, "last_seq": last_seq, "last_use": last_use, "made": _frame, "moved_on": -1})
+	textures_remade[kind] = int(textures_remade.get(kind, 0)) + 1
 
 
 ## Frees the textures made afresh that the main side is done with: it told of a newer publish of the kind in use (its uses never go back to
 ## an older one) and of no use of these for twice frame_queue_size + 1 frames (its view frees an import frame_queue_size + 1 frames after
-## its last use, and its device lets go of it once the frames in flight are done); or it has told of frames since without ever using them.
+## its last use, and its device lets go of it once the frames in flight are done); or it has told of as many frames since without ever
+## using them. A world whose main side tells of no frame (a tool that does not) keeps them until `release`.
 func _free_retired() -> void:
 	var wait := 2 * (limits.frame_queue_size + 1)
 	var keep: Array = []
