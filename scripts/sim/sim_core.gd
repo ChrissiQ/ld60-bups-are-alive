@@ -64,7 +64,7 @@ var _deaths_per_step := 0.0  ## the most deaths a step of the last iterations ha
 var _births_per_step := 0.0
 var _textures := {}  ## kind -> Array of TEXTURES texture RIDs (publish)
 var _texture_seqs := {}  ## kind -> Array: the publish each texture holds (-1: never written)
-var _texture_used := {}  ## kind -> Array: the last frame the main side told it used each texture on, holding what it holds now
+var _texture_used := {}  ## kind -> Array: the last frame the main side told it used each texture on since it was last written
 var _superseded := {}  ## kind -> Array: the frame on which the main side first told of a newer publish of the kind than each texture holds (-1: not yet)
 var _seen_seq := {}  ## kind -> the newest publish of the kind the main side has told of
 var _next_texture := {}  ## kind -> where the search for a free texture starts (the one after the last written)
@@ -1412,14 +1412,14 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 
 
 ## The main side used texture `index` of `kind`, holding publish `seq`, on its frame `frame` (see the header: every use is told, with the
-## number of the publish it held; a use told without one, seq < 0, counts as a use of the texture but never as a newer publish in use).
+## number of the publish it held). A use always counts as a use of texture `index`, whatever the number says (a texture still told of is
+## never free); the number counts only as the newest publish in use (none when seq < 0).
 func texture_bound(kind: String, index: int, frame: int, seq: int) -> void:
 	_frame = maxi(_frame, frame)
 	if not _texture_seqs.has(kind) or index < 0 or index >= TEXTURES:
 		return
 	var seqs: Array = _texture_seqs[kind]
-	if seq < 0 or seqs[index] == seq:
-		_texture_used[kind][index] = maxi(int(_texture_used[kind][index]), frame)
+	_texture_used[kind][index] = maxi(int(_texture_used[kind][index]), frame)
 	if seq <= int(_seen_seq.get(kind, -1)):
 		return
 	_seen_seq[kind] = seq
