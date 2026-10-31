@@ -218,7 +218,7 @@ func refresh_husks(husk_view: Dictionary) -> void:
 
 ## The husks drawn now (the newest list's).
 func husks_drawn() -> int:
-	return husks_mesh.multimesh.visible_instance_count if husks_mesh.visible else 0
+	return husks_mesh.multimesh.visible_instance_count if husks_mesh != null and husks_mesh.visible else 0
 
 
 ## A dish out of the main view is shown only in the strip, whose pictures are the world's thumbnails: nothing to make here.
