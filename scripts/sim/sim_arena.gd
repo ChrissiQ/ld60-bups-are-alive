@@ -44,7 +44,7 @@ const BUFFERS := {
 	"HSUM": ["fixed", SCAN_SCRATCH * 4, false, 0], "HOFF": ["fixed", SCAN_SCRATCH * 4, false, 0],
 	"EVR": ["fixed", GpuLayout.MAX_STEPS_PER_BATCH * 16, false, 0], "EVP": ["fixed", GpuLayout.EV_PUFFS_CAPACITY * GpuLayout.EV_PUFF_FLOATS * 4, false, 0],
 	"EVCC": ["fixed", GpuLayout.EV_CELLS_CAPACITY * 4, false, 0], "EVCA": ["fixed", GpuLayout.EV_CELLS_CAPACITY * 4, false, 0],
-	"EDC": ["fixed", 16, false, 0], "EDA": ["fixed", 16, false, 0],
+	"EDC": ["fixed", 16, false, 0], "EDA": ["fixed", 16, false, 0], "FRQ": ["fixed", 16, false, 0],
 }
 
 ## The pictures' buffers, made when something is first published: name -> [class, bytes a unit] (classes "texel": the main dish's payload
@@ -185,27 +185,47 @@ func ensure_slots(slots: int) -> bool:
 	return true
 
 
-func ensure_clouds(clouds: int) -> void:
+## Room for `clouds` cloud slots; false when that would pass the budget.
+func ensure_clouds(clouds: int) -> bool:
 	if clouds <= int(FILL * cloud_cap):
-		return
-	cloud_cap = maxi(ceili(clouds / FILL), int(cloud_cap * GROW))
+		return true
+	var want := maxi(ceili(clouds / FILL), int(cloud_cap * GROW))
+	if not fits(0, 0, 0, want, 0):
+		want = clouds
+		if not fits(0, 0, 0, want, 0):
+			return false
+	cloud_cap = want
 	_remake(["cloud"])
-
-
-func ensure_husks(husks: int) -> void:
-	if husks <= int(FILL * husk_cap):
-		return
-	husk_cap = maxi(ceili(husks / FILL), int(husk_cap * GROW))
-	_remake(["husk"])
-
-
-## Room for `events` births (and deaths) in an iteration; true when the ring was made again.
-func ensure_events(events: int) -> bool:
-	if events <= event_cap:
-		return false
-	event_cap = maxi(events, int(event_cap * GROW))
-	_remake(["event"])
 	return true
+
+
+## Room for `husks` husk slots; false when that would pass the budget.
+func ensure_husks(husks: int) -> bool:
+	if husks <= int(FILL * husk_cap):
+		return true
+	var want := maxi(ceili(husks / FILL), int(husk_cap * GROW))
+	if not fits(0, 0, 0, 0, want):
+		want = husks
+		if not fits(0, 0, 0, 0, want):
+			return false
+	husk_cap = want
+	_remake(["husk"])
+	return true
+
+
+## Room for `events` births (and deaths) in an iteration: 1 when the ring was made again, 0 when it was big enough, -1 when it would
+## pass the budget.
+func ensure_events(events: int) -> int:
+	if events <= event_cap:
+		return 0
+	var want := maxi(events, int(event_cap * GROW))
+	if not fits(0, 0, 0, 0, 0, want):
+		want = events
+		if not fits(0, 0, 0, 0, 0, want):
+			return -1
+	event_cap = want
+	_remake(["event"])
+	return 1
 
 
 ## The pictures' buffers for a payload of `texels` and a field of `pixels` cells.
@@ -304,13 +324,16 @@ static func _trim(free: Array, top: int) -> int:
 	return top
 
 
-## Whether the pool with these capacities stays within the memory budget.
-func fits(slots: int, cells: int, bins: int, clouds: int, husks: int) -> bool:
-	return estimate_bytes(maxi(slots, slot_cap), cell_cap + cells, bin_cap + bins, maxi(clouds, cloud_cap), maxi(husks, husk_cap)) <= limits.memory_budget_bytes
+## Whether the pool with these capacities (slots, clouds, husks and events: the most of these and the single-dish path's; cells and bins: more than
+## the single-dish path's) stays within the memory budget.
+func fits(slots: int, cells: int, bins: int, clouds: int, husks: int, events := 0) -> bool:
+	return estimate_bytes(maxi(slots, slot_cap), cell_cap + cells, bin_cap + bins, maxi(clouds, cloud_cap), maxi(husks, husk_cap), maxi(events, event_cap)) <= limits.memory_budget_bytes
 
 
 ## The bytes the buffers take at these capacities.
-func estimate_bytes(slots: int, cells: int, bins: int, clouds: int, husks: int) -> int:
+func estimate_bytes(slots: int, cells: int, bins: int, clouds: int, husks: int, events := -1) -> int:
+	if events < 0:
+		events = event_cap
 	var total := 0
 	for nm: String in BUFFERS:
 		var e: Array = BUFFERS[nm]
@@ -324,7 +347,7 @@ func estimate_bytes(slots: int, cells: int, bins: int, clouds: int, husks: int) 
 			"bin": total += bins * unit
 			"cloud": total += clouds * unit
 			"husk": total += husks * unit
-			"event": total += event_cap * unit
+			"event": total += events * unit
 			_: total += sizes.get(nm, unit)
 	return total
 

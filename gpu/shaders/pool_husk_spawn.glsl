@@ -13,6 +13,9 @@ layout(set = 0, binding = 6, std430) buffer B_SURV { uint SURV[]; };
 layout(set = 0, binding = 7, std430) buffer B_EXCS { uint EXCS[]; };
 layout(set = 0, binding = 8, std430) buffer B_HUSK { float HUSK[]; };
 layout(set = 0, binding = 9, std430) buffer B_CBASE { uint CBASE[]; };
+layout(set = 0, binding = 10, std430) buffer B_INSIDE { int INSIDE[]; };
+layout(set = 0, binding = 11, std430) buffer B_DPLO { uint DPLO[]; };
+layout(set = 0, binding = 12, std430) buffer B_DPHI { uint DPHI[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -21,9 +24,12 @@ const uint DP_CELLS = 1u;
 const uint DP_FIELD_BASE = 0u;
 const uint DP_FLAGS = 12u;
 const uint DP_HUSK_QUOTA = 17u;
+const uint DP_RADIUS = 3u;
+const uint DP_SPACING = 2u;
 const uint DP_WORDS = 32u;
 const uint DS_COUNT = 1u;
 const uint DS_HUSKS = 22u;
+const uint DS_LEDGER = 24u;
 const uint DS_OVERFLOW = 23u;
 const uint DS_SEED = 7u;
 const uint DS_START = 0u;
@@ -42,6 +48,7 @@ const uint R_X = 1u;
 const uint R_Y = 2u;
 const uint WD_HUSK_CAPACITY = 8u;
 const uint WD_HUSK_SLOTS = 2u;
+const uint WD_LEDGER = 10u;
 const uint WD_OVERFLOW = 4u;
 const uint WD_SLOTS = 0u;
 
@@ -64,6 +71,37 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define BUP_LOOP(F) void main() { uint n_ = WORLD[WD_SLOTS]; for (uint i_ = gl_GlobalInvocationID.x; i_ < n_; i_ += GRID_STRIDE) { uint d_ = BLKDISH[i_ >> BLK_SHIFT]; if (d_ == NO_DISH) continue; uint l_ = i_ - DS(d_, DS_START); if (l_ < DS(d_, DS_COUNT)) F(i_, d_, l_); } }
 #define BLOCK_LOOP(F) void main() { uint nb_ = (WORLD[WD_SLOTS] + BLK_SLOTS - 1u) >> BLK_SHIFT; for (uint k_ = gl_WorkGroupID.x; k_ < nb_; k_ += gl_NumWorkGroups.x) { F(k_, BLKDISH[k_]); barrier(); } }
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
+#define LEDGER(d, t, amount) { if (WORLD[WD_LEDGER] != 0u) { float rest_ = (amount); uint lo_ = (d) * DS_WORDS + DS_LEDGER + 2u * (t), hi_ = lo_ + 1u; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); uint old_ = atomicAdd(DSTATE[lo_], q_); if (old_ + q_ < old_) atomicAdd(DSTATE[hi_], 1u); } } }
+
+#define ADD64(LO, HI, cell, q_) { uint old_ = atomicAdd(LO[cell], q_); if (old_ + q_ < old_) atomicAdd(HI[cell], 1u); }
+#define ADD_FIXED30(LO, HI, cell, amount) { float rest_ = amount; while (rest_ > 0.0) { float part_ = min(rest_, 3.9); rest_ -= part_; uint q_ = uint(part_ * 1073741824.0 + 0.5); ADD64(LO, HI, cell, q_) } }
+#define ADD_FIXED20(LO, HI, cell, amount) { float rest_ = amount; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); ADD64(LO, HI, cell, q_) } }
+#define FIX30(HI, LO) (float(HI) * 4.0 + float(LO) * 9.313225746154785e-10)
+#define FIX20(HI, LO) (float(HI) * 4096.0 + float(LO) * 9.5367431640625e-7)
+
+bool accepts_d(uint d, float x, float y) {
+	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS);
+	int cx = clamp(int((x + org) / sp), 0, n - 1), cy = clamp(int((y + org) / sp), 0, n - 1);
+	return INSIDE[DPU(d, DP_FIELD_BASE) + uint(cy * n + cx)] != 0 && x * x + y * y <= org * org;
+}
+
+void add_dep(uint cell, float amount) { ADD_FIXED20(DPLO, DPHI, cell, amount) }
+void deposit_xy_d(uint d, float x, float y, float mass) {
+	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS); uint base = DPU(d, DP_FIELD_BASE);
+	float fx = (x + org) / sp - 0.5, fy = (y + org) / sp - 0.5;
+	int x0 = int(floor(fx)), y0 = int(floor(fy));
+	float tx = fx - float(x0), ty = fy - float(y0);
+	int cells[4]; float weights[4]; float kept = 0.0; int count = 0;
+	for (int k = 0; k < 4; k++) {
+		int cx = x0 + (k & 1), cy = y0 + (k >> 1);
+		if (cx < 0 || cy < 0 || cx >= n || cy >= n || INSIDE[base + uint(cy * n + cx)] == 0) continue;
+		float w = ((k & 1) != 0 ? tx : 1.0 - tx) * ((k >> 1) != 0 ? ty : 1.0 - ty);
+		cells[count] = cy * n + cx; weights[count] = w; kept += w; count++;
+	}
+	if (count == 0) return;
+	if (kept <= 1e-9) { add_dep(base + uint(cells[0]), mass); return; }
+	for (int k = 0; k < count; k++) add_dep(base + uint(cells[k]), mass * weights[k] / kept);
+}
 
 uint deaths_of(uint d) { return DS(d, DS_COUNT) - DS(d, DS_SURVIVORS); }
 uint husk_room(uint d) {
@@ -77,10 +115,14 @@ void f(uint i, uint d, uint l) {
 	uint rank = l - (EXCS[i] - EXCS[DS(d, DS_START)]);
 	if (rank >= husk_room(d)) return;
 	uint slot = WORLD[WD_HUSK_SLOTS] + CBASE[D_MAX + 1u + d] + rank;
-	if (slot >= WORLD[WD_HUSK_CAPACITY]) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; return; }
 	uint b = i * RECORD_WORDS, o = slot * 8u;
 	float energy = P[P_DEATH_GIVE] * BUPS[b + R_MASS];
 	bool real = BUPS[b + R_PY] == -2.0 && energy > 0.0;
+	if (slot >= WORLD[WD_HUSK_CAPACITY]) {
+		WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u;
+		if (real) deposit_xy_d(d, BUPS[b + R_X], BUPS[b + R_Y], energy);
+		return;
+	}
 	HUSK[o] = BUPS[b + R_X]; HUSK[o + 1u] = BUPS[b + R_Y]; HUSK[o + 2u] = energy; HUSK[o + 3u] = 0.0; HUSK[o + 4u] = 0.0;
 	HUSK[o + 5u] = uintBitsToFloat(PUFF_ROW_BASE + d); HUSK[o + 6u] = real ? 1.0 : 0.0; HUSK[o + 7u] = 0.0;
 }

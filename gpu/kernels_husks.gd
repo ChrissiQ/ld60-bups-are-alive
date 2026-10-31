@@ -74,23 +74,27 @@ const K_LEAK_COUNT := """
 void main() {
 	if (gl_GlobalInvocationID.x != 0u) return;  // (one thread: a dispatch of 1 runs a whole group of 64)
 	uint n = WORLD[WD_HUSK_SLOTS];
-	if (n > 0u) WORLD[WD_CLOUD_SLOTS] += HEXC[n - 1u] + HDUE[n - 1u];
+	if (n > 0u) WORLD[WD_CLOUD_SLOTS] = min(WORLD[WD_CLOUD_SLOTS] + HEXC[n - 1u] + HDUE[n - 1u], WORLD[WD_PUFF_CAPACITY]);  // (a piece past the slots went onto the grid)
 }
 """
 
 ## The husks of this step's deaths: a dish's first `husk_room` deaths (by rank, as in `pool_death_clouds`) take the slots its base gives. A
 ## husk holds what the death gives back (P_DEATH_GIVE x its mass, as the CPU's release_deaths); a trimmed bup (its record's y is not -2)
-## leaves an empty slot.
+## leaves an empty slot. A death whose slot lies past the pool's husk slots raises the overflow flag and gives its nutrient to the grid.
 const K_SPAWN := """
 void f(uint i, uint d, uint l) {
 	if (SURV[i] != 0u) return;
 	uint rank = l - (EXCS[i] - EXCS[DS(d, DS_START)]);
 	if (rank >= husk_room(d)) return;
 	uint slot = WORLD[WD_HUSK_SLOTS] + CBASE[D_MAX + 1u + d] + rank;
-	if (slot >= WORLD[WD_HUSK_CAPACITY]) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; return; }
 	uint b = i * RECORD_WORDS, o = slot * 8u;
 	float energy = P[P_DEATH_GIVE] * BUPS[b + R_MASS];
 	bool real = BUPS[b + R_PY] == -2.0 && energy > 0.0;
+	if (slot >= WORLD[WD_HUSK_CAPACITY]) {
+		WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u;
+		if (real) deposit_xy_d(d, BUPS[b + R_X], BUPS[b + R_Y], energy);
+		return;
+	}
 	HUSK[o] = BUPS[b + R_X]; HUSK[o + 1u] = BUPS[b + R_Y]; HUSK[o + 2u] = energy; HUSK[o + 3u] = 0.0; HUSK[o + 4u] = 0.0;
 	HUSK[o + 5u] = uintBitsToFloat(PUFF_ROW_BASE + d); HUSK[o + 6u] = real ? 1.0 : 0.0; HUSK[o + 7u] = 0.0;
 }
@@ -153,7 +157,7 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add_grid_scan(out, "pool_hl", "HDUE", "HEXC", "HSUM", "HOFF", "WORLD[WD_HUSK_SLOTS]", ["WORLD"])
 	GpuKernels.add(out, "pool_husk_leak", K_LEAK, world + ["HUSK", "HDUE", "HEXC", "PUFF", "INSIDE", "DPLO", "DPHI"], funcs + fixed + dep, 64, types)
 	GpuKernels.add(out, "pool_husk_leak_count", K_LEAK_COUNT, ["WORLD", "HDUE", "HEXC"], "", 64, types)
-	GpuKernels.add(out, "pool_husk_spawn", K_SPAWN, world + ["BLKDISH", "BUPS", "SURV", "EXCS", "HUSK", "CBASE"], GpuKernelsClouds.DEATH_FUNCS, 64, types)
+	GpuKernels.add(out, "pool_husk_spawn", K_SPAWN, world + ["BLKDISH", "BUPS", "SURV", "EXCS", "HUSK", "CBASE", "INSIDE", "DPLO", "DPHI"], fixed + dep + GpuKernelsClouds.DEATH_FUNCS, 64, types)
 	GpuKernels.add(out, "pool_husk_mark", K_MARK, ["P", "WORLD", "HUSK", "HAL"], funcs, 64, types)
 	GpuKernels.add_grid_scan(out, "pool_hc", "HAL", "HKEEP", "HSUM", "HOFF", "WORLD[WD_HUSK_SLOTS]", ["WORLD"])
 	GpuKernels.add(out, "pool_husk_compact", K_COMPACT, ["WORLD", "HUSK", "HUSK2", "HAL", "HKEEP"], "", 64, types)

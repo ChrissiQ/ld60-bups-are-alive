@@ -21,8 +21,12 @@ extends SceneTree
 ##    by then, so its own cut, which binds all through the run, is checked by I1's lists and counters), the first bin whose end (from the dish's first entry) passes 12 x quota
 ##    and every bin after it have no entries, every bin before it keeps all its entries in ascending cloud order, DS_ENTRIES_CUT grows by
 ##    the entries dropped, alone and in a pool alike [derived: the kernel's rule]. With the pool's entries made to end inside the last
-##    dish's last listed bin (and its quota not binding), that bin and those after it are cut and the overflow flag is raised (the host
-##    then grows the entries); the dishes before it are not cut.
+##    dish's last listed bin (and its quota not binding), that bin and those after it are cut and the overflow flag is raised (it stays:
+##    the host cannot do the iteration again); the dishes before it are not cut.
+## I5 A dish's cut does not take another's room: dish A (2,000 clouds, then 600) with a cloud quota of 20 cut to 240 entries, before dish
+##    B (200 clouds, quota not binding), with the pool's entries (12 x WD_PUFF_CAPACITY) set to the fewest that hold A's cut lists and
+##    B's, fewer than A's uncut lists and B's: B's lists equal B alone bit for bit, at both A counts, and no overflow is raised
+##    [derived: the room is checked after the quota cut, against offsets scanned from the cut counts].
 ## I3 puffs_at_d (pool_probe) at 400 points of each dish (inside, on bin edges, beyond the rim) equals the dish alone bit for bit, and a
 ##    sum over the dish's live clouds in double precision within 2e-5 of the sum of the terms' sizes, plus the terms of clouds whose
 ##    reach the point is within 1e-5 of (which float rounding may take or leave) [derived: float32 sums of exp() terms of relative error
@@ -263,6 +267,7 @@ func _initialize() -> void:
 		if pool["name"] == "in order":
 			room_cut_check(rig)
 		rig.release()
+	quota_room_check()
 	husk_check()
 	print("POOL ISOLATION CHECK %s (%.1f s)" % ["OK" if fails == 0 else "FAILED (%d)" % fails, (Time.get_ticks_msec() - t0) / 1000.0])
 	quit(0 if fails == 0 else 1)
@@ -380,6 +385,7 @@ func cut_check(rig: Rig, name: String, pool_name: String) -> PackedInt32Array:
 	d["cloud_quota"] = saved_quota
 	rig.upload_dishp()
 	var after := rig.read("BINC", d["bin_base"] * 4, nb * 4).to_int32_array()
+	var bnow := rig.read("BINS", d["bin_base"] * 4, nb * 4).to_int32_array()  # (scanned again after the cut: where the entries are now)
 	var ent := rig.read("ENT").to_int32_array() if total > 0 else PackedInt32Array()
 	var kept_ok := true
 	var sorted_ok := true
@@ -387,7 +393,7 @@ func cut_check(rig: Rig, name: String, pool_name: String) -> PackedInt32Array:
 		var want := binc[b] if b < first_cut else 0
 		if after[b] != want:
 			kept_ok = false
-		for e in range(bstart[b] + 1, bstart[b] + after[b]):
+		for e in range(bnow[b] + 1, bnow[b] + after[b]):
 			if ent[e - 1] >= ent[e]:
 				sorted_ok = false
 	var grew := rig.ds(d["row"], GpuLayout.DS_ENTRIES_CUT) - cut_before
@@ -406,15 +412,15 @@ func cut_check(rig: Rig, name: String, pool_name: String) -> PackedInt32Array:
 			rank[k] = rank.size()
 	var out := PackedInt32Array(after)
 	for b in nb:
-		for e in range(bstart[b], bstart[b] + after[b]):
+		for e in range(bnow[b], bnow[b] + after[b]):
 			out.append(rank.get(ent[e], -1))
 	return out
 
 
-## I2's physical case: the pool's entries end inside the last dish's last listed bin.
+## I2's physical case: the pool's entries end inside the last dish's last listed bin (where the lists lie after the quotas' cuts).
 func room_cut_check(rig: Rig) -> void:
 	var cl := rig.rd.compute_list_begin()
-	rig.record_index(cl, false)
+	rig.record_index(cl)
 	rig.rd.compute_list_end()
 	rig.rd.submit()
 	rig.rd.sync()
@@ -449,7 +455,7 @@ func room_cut_check(rig: Rig) -> void:
 	w.encode_u32(0, cap)
 	rig.rd.buffer_update(rig.bufs["WORLD"], GpuLayout.WD_PUFF_CAPACITY * 4, 4, w)
 	cl = rig.rd.compute_list_begin()
-	rig.record_index_rest(cl)
+	rig.record_index(cl)
 	rig.rd.compute_list_end()
 	rig.rd.submit()
 	rig.rd.sync()
@@ -471,6 +477,60 @@ func room_cut_check(rig: Rig) -> void:
 	rig.rd.buffer_update(rig.bufs["WORLD"], GpuLayout.WD_PUFF_CAPACITY * 4, 4, w)
 	w.encode_u32(0, 0)
 	rig.rd.buffer_update(rig.bufs["WORLD"], GpuLayout.WD_OVERFLOW * 4, 4, w)
+
+
+## I5: the entries A's quota cuts leave no gap that pushes B past the pool's room.
+func quota_room_check() -> void:
+	var sc := StartConditions.new()
+	sc.bups = 8; sc.dish_radius = 3000.0; sc.nutrient_density = 4.0
+	var b_state := Rig.make_state(self, sc, 61, 50, 0.0, 200)
+	var lone := new_rig([{"state": b_state, "row": 0, "flags": 1 << GpuLayout.DPF_ACETATE}], false)
+	var cl := lone.rd.compute_list_begin()
+	lone.record_index(cl)
+	lone.rd.compute_list_end()
+	lone.rd.submit()
+	lone.rd.sync()
+	var b_alone: PackedFloat32Array = lone.dump(0)["lists"]
+	lone.release()
+	for a_clouds: int in [2000, 600]:
+		var a_state := Rig.make_state(self, sc, 62, 50, 0.0, a_clouds)
+		var rig := new_rig([{"state": a_state, "row": 3, "flags": 1 << GpuLayout.DPF_ACETATE, "cloud_quota": 20}, {"state": b_state, "row": 7, "flags": 1 << GpuLayout.DPF_ACETATE}], true)
+		cl = rig.rd.compute_list_begin()
+		rig.record_index(cl, false)
+		rig.rd.compute_list_end()
+		rig.rd.submit()
+		rig.rd.sync()
+		var na: int = rig.dishes[0]["bins_across"] * rig.dishes[0]["bins_across"]
+		var nb: int = rig.dishes[1]["bins_across"] * rig.dishes[1]["bins_across"]
+		var binc_a := rig.read("BINC", rig.dishes[0]["bin_base"] * 4, na * 4).to_int32_array()
+		var binc_b := rig.read("BINC", rig.dishes[1]["bin_base"] * 4, nb * 4).to_int32_array()
+		var e_a := 0
+		var e_a_cut := 0
+		var cut := false
+		for k in na:
+			e_a += binc_a[k]
+			if not cut and e_a <= 20 * GpuKernelsClouds.ENTRIES_PER_SLOT:
+				e_a_cut = e_a
+			else:
+				cut = true
+		var e_b := 0
+		for k in nb:
+			e_b += binc_b[k]
+		var cap := (e_a_cut + e_b + GpuKernelsClouds.ENTRIES_PER_SLOT - 1) / GpuKernelsClouds.ENTRIES_PER_SLOT
+		ok(cap * GpuKernelsClouds.ENTRIES_PER_SLOT < e_a + e_b, "I5 (A %d clouds) the room %d entries holds A's cut %d and B's %d, not A's uncut %d and B's" % [a_clouds, cap * GpuKernelsClouds.ENTRIES_PER_SLOT, e_a_cut, e_b, e_a])
+		var w := PackedByteArray()
+		w.resize(4)
+		w.encode_u32(0, cap)
+		rig.rd.buffer_update(rig.bufs["WORLD"], GpuLayout.WD_PUFF_CAPACITY * 4, 4, w)
+		cl = rig.rd.compute_list_begin()
+		rig.record_index(cl)
+		rig.rd.compute_list_end()
+		rig.rd.submit()
+		rig.rd.sync()
+		var line := Rig.diff({"lists": b_alone}, {"lists": rig.dump(1)["lists"]})
+		ok(line == "", "I5 (A %d clouds) B's lists equal B alone%s" % [a_clouds, ": " + line if line != "" else ""])
+		ok(rig.word("WORLD", GpuLayout.WD_OVERFLOW) == 0, "I5 (A %d clouds) no overflow" % a_clouds)
+		rig.release()
 
 
 static func husk_share(k: int) -> float:

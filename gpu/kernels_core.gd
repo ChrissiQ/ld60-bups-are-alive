@@ -2,7 +2,7 @@ class_name GpuKernelsCore
 extends RefCounted
 ## The pooled world's host operations as kernels (SimCore, scripts/sim/sim_core.gd; see gpu/kernels.gd for how a kernel is made): a
 ## dish's clouds and husks leaving with it, the field edits (a drop of nutrient, the eraser), the check that a step's next layout fits the
-## record slots, and the copies of the published pictures into the shared textures.
+## record slots, the goals' question, and the copies of the published pictures into the shared textures.
 
 ## The clouds and husks of dish row `pcs.pa` leave the pool (its row is about to be another dish's): their slots become empty, and the
 ## next compaction or cull drops them.
@@ -49,13 +49,33 @@ void f(uint k) {
 GRID_LOOP(f, WORLD[WD_CLOUD_SLOTS])
 """
 
-## After pool_finalize or pool_pip_final: the next layout must fit the record slots (WD_SLOT_CAPACITY); the host's bound keeps it so, and
-## this raises the overflow flag if it ever does not.
+## After pool_finalize or pool_pip_final: the next layout must fit the record slots (WD_SLOT_CAPACITY). The host's bound keeps it so; if
+## it ever does not, this raises the overflow flag and cuts every segment that passes the capacity down to what is left of it (a dish
+## past it keeps none), so that the block table, the compaction or the retarget and every later loop stay inside the buffers (they place
+## a dish's bups only below its DS_NEXT_COUNT). The bups cut are lost, without events: the flag stays, the run is not the dishes' own.
 const K_SLOT_CHECK := """
 void main() {
 	if (gl_GlobalInvocationID.x != 0u) return;
-	if (DNEXT[DN_TOTAL_WORD] > WORLD[WD_SLOT_CAPACITY]) WORLD[WD_OVERFLOW] = 1u;
+	uint total = DNEXT[DN_TOTAL_WORD], cap = WORLD[WD_SLOT_CAPACITY] & ~(BLK_SLOTS - 1u);
+	if (total <= cap) return;
+	WORLD[WD_OVERFLOW] = 1u;
+	for (uint d = 0u; d < D_MAX; d++) {
+		uint at = DN(d, DN_START), size = DN(d, DN_SIZE), room = at < cap ? cap - at : 0u;
+		if (size <= room) continue;
+		DN(d, DN_SIZE) = room; DS(d, DS_NEXT_COUNT) = min(DS(d, DS_NEXT_COUNT), room); DS(d, DS_OVERFLOW) = 1u;
+	}
+	DNEXT[DN_TOTAL_WORD] = cap;
 }
+"""
+
+## The goals' question (BupSim::fraction_with_gene_at_least) for dish row `pcs.pb`: how many of its bups hold record word `pcs.pa` (a gene,
+## R_SPEED + g) at or above `pcs.pc` (the threshold as the host rounds it up to a float), counted into FRQ[0]. An integer count, so the
+## share the host works out from it does not depend on the order the threads run in.
+const K_FRACTION := """
+void f(uint i, uint d, uint l) {
+	if (d == uint(pcs.pb) && BUPS[i * RECORD_WORDS + uint(pcs.pa)] >= pcs.pc) atomicAdd(FRQ[0], 1u);
+}
+BUP_LOOP(f)
 """
 
 ## The published pictures into the shared textures (after the sync; the storage buffers are laid out as the textures): a thread a texel.
@@ -95,6 +115,7 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "pool_edit_cells", K_EDIT_CELLS, ["CONC", "EDC", "EDA"], "", 64, t)
 	GpuKernels.add(out, "pool_erase_cells", K_ERASE_CELLS, ["WORLD", "CELLDISH", "DISHP", "INSIDE", "CONC", "EDA"], "", 64, t)
 	GpuKernels.add(out, "pool_erase_puffs", K_ERASE_PUFFS, ["WORLD", "PUFF", "EDA"], "", 64, t)
-	GpuKernels.add(out, "pool_slot_check", K_SLOT_CHECK, ["WORLD", "DNEXT"], dn, 64, GpuKernelsLife.POOL_TYPES)
+	GpuKernels.add(out, "pool_fraction", K_FRACTION, ["WORLD", "BLKDISH", "DSTATE", "BUPS", "FRQ"], "", 64, {"FRQ": "uint"})
+	GpuKernels.add(out, "pool_slot_check", K_SLOT_CHECK, ["WORLD", "DNEXT", "DSTATE"], dn, 64, GpuKernelsLife.POOL_TYPES)
 	GpuKernels.add(out, "pool_copy_payload", K_COPY_PAYLOAD, ["PAYLOAD", "IDTEX"], "", 64, GpuKernelsDraw.POOL_DRAW_TYPES)
 	GpuKernels.add(out, "pool_copy_rgba8", K_COPY_RGBA8, ["PIX"], "", 64, t)

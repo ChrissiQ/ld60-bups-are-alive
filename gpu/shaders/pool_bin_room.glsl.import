@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://clq5roylie142"
+path="res://.godot/imported/pool_bin_room.glsl-7c4358f7eefc8eb8fd6e4b78a69dd197.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_bin_room.glsl"
+dest_files=["res://.godot/imported/pool_bin_room.glsl-7c4358f7eefc8eb8fd6e4b78a69dd197.res"]
+
+[params]
+

@@ -627,7 +627,12 @@ void f(uint i, uint d, uint l) {
 			let_go = got * min(0.5, P[P_ACETATE_SLOPE] * max(0.0, per_hour - P[P_ACETATE_THRESHOLD]));
 			if (let_go > 0.0) add_fixed2(uint(o), let_go, 1);
 		}
+		float before = energy;
 		energy = min(energy + got * yld, max_e);
+		float lost = got - (energy - before);
+		LEDGER(d, LG_UPTAKE, lost)
+		LEDGER(d, LG_MADE, -lost)
+		LEDGER(d, LG_MADE, let_go)
 	}
 	float room = max_e - energy;
 	if (o >= 0 && room > 0.0 && CONC2[o] > 0.0) {
@@ -668,7 +673,30 @@ void f(uint i, uint d, uint l) {
 	float w = WANT2[i];
 	if (w <= 0.0) return;
 	uint b = i * RECORD_WORDS;
+	float before = BUPS[b + R_ENERGY];
 	BUPS[b + R_ENERGY] = min(BUPS[b + R_ENERGY] + w * SCALE2[CELL2[i]] * exp(-BUPS[b + R_HARM]) / sqrt(BUPS[b + R_METABOLISM]), P[P_RESERVE_PER_MASS] * BUPS[b + R_MASS]);
+	float lost = w * SCALE2[CELL2[i]] - (BUPS[b + R_ENERGY] - before);
+	LEDGER(d, LG_UPTAKE, lost)
+	LEDGER(d, LG_MADE, -lost)
+}
+BUP_LOOP(f)
+"""
+
+## The energy ledger's upkeep (LG_UPKEEP), which the host records around `pool_swim` only while the ledger is on, so that swimming stays
+## the single dish's arithmetic: `pool_ledger_mark` keeps each bup's reserve and mass in WANT2 and WANTC (free until `pool_demand` and
+## `pool_apply` write them), and `pool_ledger_swim` adds what its reserve and body (at COST_PER_MASS) lost in the swim: the upkeep, or a
+## starving bup's maintenance (its growth only moves reserve into body).
+const K_POOL_LEDGER_MARK := """
+void f(uint i, uint d, uint l) { WANT2[i] = BUPS[i * RECORD_WORDS + R_ENERGY]; WANTC[i] = BUPS[i * RECORD_WORDS + R_MASS]; }
+BUP_LOOP(f)
+"""
+
+const K_POOL_LEDGER_SWIM := """
+void f(uint i, uint d, uint l) {
+	uint b = i * RECORD_WORDS;
+	float lost = (WANT2[i] - BUPS[b + R_ENERGY]) + P[P_COST_PER_MASS] * (WANTC[i] - BUPS[b + R_MASS]);
+	LEDGER(d, LG_UPKEEP, lost)
+	LEDGER(d, LG_MADE, -lost)
 }
 BUP_LOOP(f)
 """
@@ -709,6 +737,8 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "pool_feed", K_POOL_FEED, cell_b + ["CONC", "WGT"])
 	GpuKernels.add(out, "pool_clear", K_POOL_CLEAR, cell_b + ["DLO", "DHI", "RLO", "RHI", "ALO", "AHI"])
 	GpuKernels.add(out, "pool_snapshot", K_POOL_SNAPSHOT, cell_b + ["CONC", "OWNER", "EFF"])
+	GpuKernels.add(out, "pool_ledger_mark", K_POOL_LEDGER_MARK, bup_b + ["BUPS", "WANT2", "WANTC"])
+	GpuKernels.add(out, "pool_ledger_swim", K_POOL_LEDGER_SWIM, bup_b + ["BUPS", "WANT2", "WANTC"])
 	GpuKernels.add(out, "pool_swim", _pooled_swim(), bup_b + ["BUPS", "EFF", "TABLE", "ENTD", "BINS", "BINC"], POOL_READF + LOOKUP_FUNCS + GpuKernelsClouds.POOL_CLOUD_FUNCS)
 	GpuKernels.add(out, "pool_demand", K_POOL_DEMAND, bup_b + ["BUPS", "EFF", "OWNER", "CONC", "WANT", "WANTC", "CELLOF", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "ENTD", "BINS", "BINC", "PDLO", "PDHI"], fixed + POOL_READF + POOL_READC + GpuKernelsClouds.POOL_CLOUD_FUNCS)
 	GpuKernels.add(out, "pool_cells", K_POOL_CELLS, cell_b + ["CONC", "OWNER", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "SCALE"], fixed)

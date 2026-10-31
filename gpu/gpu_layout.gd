@@ -217,13 +217,12 @@ const DP_NOISE_REFERENCE := 21  ## float: the dish's receptor-noise scale for ch
 const DPF_STATIONARY := 0  ## the bits of DP_FLAGS (the bit's place, not its mask)
 const DPF_DEATH_HUSKS := 1
 const DPF_PLANKTON_HUSKS := 2
-const DPF_RUNNING := 3
-const DPF_REMOVED := 4
+const DPF_RUNNING := 3  ## (bit 4 is spare: a dish leaves at once, `SimCore.remove_dish`, its blocks padding and its row cleared)
 const DPF_MAIN_VIEW := 5
 const DPF_ACETATE := 6
-const DPF_COUNT := 7
+const DPF_COUNT := 6
 
-## DSTATE[d]: device-owned, read back each iteration (the single-dish path's CNT and PCNT, per dish). Uints; words 24-31 are spare.
+## DSTATE[d]: device-owned, read back each iteration (the single-dish path's CNT and PCNT, per dish). Uints; words 24-31 are the energy ledger.
 const DS_WORDS := 32
 const DS_START := 0  ## the first slot of the dish's segment
 const DS_COUNT := 1
@@ -249,8 +248,14 @@ const DS_CLOUDS_TO_GRID := 20
 const DS_ENTRIES_CUT := 21
 const DS_HUSKS := 22
 const DS_OVERFLOW := 23  ## the physical-overflow flag
+const DS_LEDGER := 24  ## the energy ledger, while WORLD[WD_LEDGER] is on: term LG_* in words DS_LEDGER + 2 x term (low) and + 1 (high), a sum in 2^-20 units
+const LG_UPKEEP := 0  ## the ledger's terms: the upkeep paid (and a starving bup's maintenance)
+const LG_UPTAKE := 1  ## food taken (glucose and acetate) less what the reserves gained, where that is more (a yield below 1, a full reserve)
+const LG_MADE := 2  ## energy made: the acetate let go (besides the gain, not taken from it), and a reserve's gain past the food taken (a yield above 1)
+const LG_LIFE := 3  ## a death's reserve and body less what it gives back; a lethal daughter's share; a daughter's reserve past what she can hold
+const LG_TERMS := 4
 
-## WORLD: one row of the world's totals (uints; words 10-15 are spare).
+## WORLD: one row of the world's totals (uints; words 11-15 are spare).
 const WD_WORDS := 16
 const WD_SLOTS := 0  ## the slots in use (the sum of the aligned segment lengths)
 const WD_CLOUD_SLOTS := 1
@@ -262,6 +267,7 @@ const WD_BINS := 6  ## the cloud-list squares in use
 const WD_PUFF_CAPACITY := 7  ## the physical cloud slots (PUFF holds 8 floats a slot; the list entries are ENTRIES_PER_SLOT a slot)
 const WD_HUSK_CAPACITY := 8  ## the physical husk slots (HUSK holds 8 floats a slot; a kernel does not read a buffer's length, which Metal's translation of the SPIR-V cannot bind)
 const WD_SLOT_CAPACITY := 9  ## the physical record slots (BUPS, BUPS2 and CHILD hold this many records)
+const WD_LEDGER := 10  ## 1: the kernels keep the energy ledger (DS_LEDGER), for tests; 0: they do not (the game)
 
 ## The payload textures (a bup's picture, written sim-side after `finalize`): PAYLOAD (RGBA32UI, PAYLOAD_TEX_WIDTH wide) and the ids (RG32UI).
 const PL_WORDS := 4

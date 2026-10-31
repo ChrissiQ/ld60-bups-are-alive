@@ -21,6 +21,18 @@ extends SceneTree
 ##    of 10 and every flag but plankton husks, alone and among seven random others: equal after every 20 of 300 steps (a plankton floats
 ##    an hour first, so bursts begin after about 170 steps), with clouds there at the end: about 73 [derived: 2.9 bursts a step x 25
 ##    steps], so more than 30.
+## C6 numbers: dishes 1 and 2; 2 is frozen; a pipette from 1 with no destination makes dish 3 (not 2 again: numbers are never reused);
+##    after 2 is thawed and the three run 40 steps, no id is in two dishes [derived: the new dish's ids carry its own number].
+## C7 edits and rows: a drop queued on a dish that is then trashed does not reach the dish that takes its row next (its grid total is
+##    its start's within 1e-5); a drop queued on a dish that is then frozen is in the blob (the blob's grid total is the total before
+##    plus the drop within 1e-5) [derived: the drop adds 1,000 units to the total].
+## C8 the budget, set to what the pool holds plus a new dish's field and squares and 1 MB: a pipette of all of a dish of 20,000 bups (its move
+##    needs about 40,000 record slots, past the budget) moves nothing and leaves no new dish (the rows are those before); an iteration
+##    whose room would pass it runs no step, sets OVERFLOW_BUDGET for good and says why in `errors` [derived].
+## C9 overflow inside the buffers: with WORLD's capacities made smaller than what the next steps need (the records' to the first dish's
+##    segment, the clouds' and husks' to their tops), the steps raise the overflow flag and nothing is written past the capacities: the
+##    slots in use, the clouds' and husks' tops are within them, every dish's segment ends within the records' capacity, and the slots and
+##    block-table words past it (both halves, filled beforehand with a mark) keep the mark [derived: the kernels' guards].
 
 var fails := 0
 
@@ -38,6 +50,10 @@ func _initialize() -> void:
 	c3_edits()
 	c4_publish()
 	c5_lasting_clouds()
+	c6_numbers()
+	c7_edits_and_rows()
+	c8_budget()
+	c9_overflow_inside()
 	print("CORE CHECK %s (%.1f s)" % ["OK" if fails == 0 else "FAILED (%d)" % fails, (Time.get_ticks_msec() - t0) / 1000.0])
 	quit(0 if fails == 0 else 1)
 
@@ -216,3 +232,166 @@ func c5_lasting_clouds() -> void:
 			return
 	ok(lone.dump(0)["clouds"].size() / 32 > 30, "C5 the dish has clouds that last")
 	ok(pool.invariants().is_empty(), "C5 the pool's invariants hold")
+
+
+func c6_numbers() -> void:
+	var a := Scenario.small(60, 600.0).seed(31)
+	a.number = 1
+	var b := Scenario.small(60, 600.0).seed(32)
+	b.number = 2
+	var h := SimHarness.make([a, b])
+	var core: SimCore = h.core
+	h.step(40)
+	var blob: Variant = h.freeze(1)
+	var moved := h.pipette(0, Vector2.ZERO, 300.0)
+	var dst := h.last_pipette_row
+	ok(moved > 0 and dst >= 0 and core.spec_of(dst).number == 3, "C6 the pipette's new dish is number 3 with dish 2 frozen (moved %d, number %d)" % [moved, core.spec_of(dst).number if dst >= 0 else -1])
+	var thawed := h.thaw(blob)
+	h.step(40)
+	var seen := {}
+	var twice := 0
+	for row: int in core.running_rows():
+		for id: int in core.live_ids(row):
+			if seen.has(id):
+				twice += 1
+			seen[id] = true
+	ok(thawed >= 0 and twice == 0 and seen.size() > 0, "C6 after the thaw and 40 steps no id is in two dishes (%d ids, %d twice)" % [seen.size(), twice])
+
+
+func c7_edits_and_rows() -> void:
+	var core := SimCore.new()
+	var h := SimHarness.new()
+	h.core = core
+	var keep := Scenario.small(0, 600.0)
+	keep.nutrient_density = 4.0
+	h.add(keep)
+	var gone := Scenario.small(0, 600.0)
+	gone.nutrient_density = 4.0
+	var row := h.add(gone)
+	core.queue_edit(row, WorldEdit.drop(Vector2.ZERO, 1000.0))
+	h.remove(row)
+	var next := Scenario.small(0, 600.0)
+	next.nutrient_density = 4.0
+	var again := h.add(next)
+	var start := _grid_total(core, again)
+	core.run(0, 20.0)
+	var now := _grid_total(core, again)
+	ok(again == row and absf(now - start) <= 1e-5 * start, "C7 a drop queued on a trashed dish does not reach the dish in its row next (row %d, %.3f -> %.3f)" % [again, start, now])
+	var before := _grid_total(core, again)
+	core.queue_edit(again, WorldEdit.drop(Vector2.ZERO, 1000.0))
+	var blob: Variant = core.freeze(again)
+	var n := DishGrid.cells_across(600.0, 100)
+	var sp := 1200.0 / n
+	var total := 0.0
+	for v: float in blob.conc:
+		total += v
+	total *= sp * sp
+	ok(absf(total - before - 1000.0) <= 1e-5 * total, "C7 a drop queued before a freeze is in the blob (%.3f, before it %.3f)" % [total, before])
+
+
+func c8_budget() -> void:
+	var limits := PoolLimits.new()
+	limits.world_slots = 256
+	var core := SimCore.new(limits)
+	var h := SimHarness.new()
+	h.core = core
+	var src := Scenario.small(20000, 3000.0).seed(41)
+	src.limit = 40000
+	h.add(src)
+	var a := core.arena
+	var n := DishGrid.cells_across(3000.0, 100)
+	var bins_across := maxi(1, ceili(2.0 * 3000.0 / (0.5 * 6000.0 / n)) + 1)
+	limits.memory_budget_bytes = a.estimate_bytes(a.slot_cap, a.cell_cap + ((n * n + 255) / 256) * 256, a.bin_cap + bins_across * bins_across, a.cloud_cap, a.husk_cap) + (1 << 20)  # (1 MB to spare for the new dish; the move needs about 8 MB)
+	var rows_before := core.running_rows()
+	var reply := core.pipette(0, Vector2.ZERO, 3000.0)
+	ok(reply.is_empty() and core.running_rows() == rows_before, "C8 a pipette past the budget moves nothing and leaves no new dish (reply %s, rows %s)" % [reply, core.running_rows()])
+	var plan := IterationPlan.new()
+	plan.delta = 20.0
+	plan.events = {}
+	var got := core.run(20, 20.0, plan)
+	ok(int(got["steps"]) == 0 and (core.overflow() & SimCore.OVERFLOW_BUDGET) != 0 and not core.errors.is_empty(), "C8 an iteration past the budget runs no step and says so (steps %d, overflow %d, %s)" % [int(got["steps"]), core.overflow(), core.errors])
+	limits.memory_budget_bytes = PoolLimits.new().memory_budget_bytes
+	core.run(1, 20.0, plan)
+	ok((core.overflow() & SimCore.OVERFLOW_BUDGET) != 0, "C8 the refusal stays in overflow() (%d)" % core.overflow())
+
+
+## Fills buffer `nm` from byte `from` to its end with the byte `mark`.
+func _mark(core: SimCore, nm: String, from: int, mark: int) -> void:
+	var size: int = core.arena.sizes[nm]
+	if from >= size:
+		return
+	var b := PackedByteArray()
+	b.resize(size - from)
+	b.fill(mark)
+	core.rd.buffer_update(core.arena.buf(nm), from, b.size(), b)
+
+
+func _marked(core: SimCore, nm: String, from: int, mark: int) -> bool:
+	var size: int = core.arena.sizes[nm]
+	if from >= size:
+		return true
+	var b := core.rd.buffer_get_data(core.arena.buf(nm), from, size - from)
+	for k in b.size():
+		if b[k] != mark:
+			return false
+	return true
+
+
+## The first `n` bups of dish `row` with an empty reserve (they die at the next step: the dish has no food).
+func _starve(core: SimCore, row: int, n: int) -> void:
+	var start := core.dstate_row(row).decode_u32(GpuLayout.DS_START * 4)
+	var buf := core.arena.buf(core._cur("BUPS"))
+	var zero := PackedByteArray()
+	zero.resize(4)
+	for i in n:
+		core.rd.buffer_update(buf, (start + i) * GpuLayout.RECORD_BYTES + GpuLayout.R_ENERGY * 4, 4, zero)
+
+
+## Dish 0 (death husks) loses 150 of its 300 bups and dish 1 (deaths give clouds) 40 of its 300 in one step; the next layout (1 block and
+## 2) passes the records' capacity, set to dish 0's segment of 2 blocks; the husks' and clouds' capacities are their tops.
+func c9_overflow_inside() -> void:
+	var first := Scenario.small(300, 900.0).seed(51).with_flags({"death_husks": true})
+	var second := Scenario.small(300, 900.0).seed(52)
+	for sc: Scenario in [first, second]:
+		sc.nutrient_density = 0.0
+		sc.limit = 1000
+	var h := SimHarness.make([first, second])
+	var core: SimCore = h.core
+	var plan := IterationPlan.new()
+	plan.delta = 20.0
+	plan.events = {}
+	core.run(4, 20.0, plan)
+	core.run(4, 20.0, plan)
+	var used := core.world_word(GpuLayout.WD_SLOTS)
+	var cap := core.dstate_row(0).decode_u32(GpuLayout.DS_START * 4) + ((core.count(0) + 255) / 256) * 256
+	ok(cap < used and core.dstate_row(1).decode_u32(GpuLayout.DS_START * 4) == cap, "C9 the records' capacity %d is dish 0's segment, below the slots in use %d" % [cap, used])
+	var clouds := core.world_word(GpuLayout.WD_CLOUD_SLOTS)
+	var husks := core.world_word(GpuLayout.WD_HUSK_SLOTS)
+	_starve(core, 0, 150)
+	_starve(core, 1, 40)
+	core._set_wd(GpuLayout.WD_SLOT_CAPACITY, cap)
+	core._set_wd(GpuLayout.WD_PUFF_CAPACITY, clouds)
+	core._set_wd(GpuLayout.WD_HUSK_CAPACITY, husks)
+	var cur := core._cur("BUPS")
+	var other := "BUPS2" if cur == "BUPS" else "BUPS"
+	var cur_blk := core._cur("BLKDISH")
+	var other_blk := "BLKDISH2" if cur_blk == "BLKDISH" else "BLKDISH"
+	var marks := [[other, cap * GpuLayout.RECORD_BYTES, 0xAB], [cur, used * GpuLayout.RECORD_BYTES, 0xAB], [other_blk, (cap / 256) * 4, 0xAC], [cur_blk, (used / 256) * 4, 0xAC]]
+	for m: Array in marks:
+		_mark(core, m[0], m[1], m[2])
+	var caps_before := [core.arena.slot_cap, core.arena.cloud_cap, core.arena.husk_cap]
+	core.run(2, 20.0, plan)
+	ok([core.arena.slot_cap, core.arena.cloud_cap, core.arena.husk_cap] == caps_before, "C9 the arena did not grow (the smaller capacities held)")
+	ok((core.overflow() & SimCore.OVERFLOW_DEVICE) != 0, "C9 the steps raised the overflow flag (%d)" % core.overflow())
+	var slots := core.world_word(GpuLayout.WD_SLOTS)
+	ok(slots <= cap, "C9 the slots in use %d are within the capacity %d" % [slots, cap])
+	ok(core.world_word(GpuLayout.WD_CLOUD_SLOTS) <= clouds and core.world_word(GpuLayout.WD_HUSK_SLOTS) <= husks, "C9 the clouds' top %d and the husks' %d are within their capacities %d, %d" % [core.world_word(GpuLayout.WD_CLOUD_SLOTS), core.world_word(GpuLayout.WD_HUSK_SLOTS), clouds, husks])
+	var ends_ok := true
+	for row: int in core.running_rows():
+		if core.dstate_row(row).decode_u32(GpuLayout.DS_START * 4) + core.count(row) > cap:
+			ends_ok = false
+	ok(ends_ok, "C9 every dish's segment ends within the records' capacity")
+	var kept := true
+	for m: Array in marks:
+		kept = kept and _marked(core, m[0], m[1], m[2])
+	ok(kept, "C9 nothing was written past the records' capacity (records and block table, both halves)")

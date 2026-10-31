@@ -11,6 +11,7 @@ const int P_CELLS = 1;
 const uint RECORD_WORDS = 28u;
 const uint WD_CLOUD_SLOTS = 1u;
 const uint WD_HUSK_SLOTS = 2u;
+const uint WD_PUFF_CAPACITY = 7u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
 float u01(inout uint s) { s = hash(s + 0x9e3779b9U); return (float(s >> 8) + 0.5) / 16777216.0; }
@@ -23,5 +24,5 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 void main() {
 	if (gl_GlobalInvocationID.x != 0u) return;  // (one thread: a dispatch of 1 runs a whole group of 64)
 	uint n = WORLD[WD_HUSK_SLOTS];
-	if (n > 0u) WORLD[WD_CLOUD_SLOTS] += HEXC[n - 1u] + HDUE[n - 1u];
+	if (n > 0u) WORLD[WD_CLOUD_SLOTS] = min(WORLD[WD_CLOUD_SLOTS] + HEXC[n - 1u] + HDUE[n - 1u], WORLD[WD_PUFF_CAPACITY]);  // (a piece past the slots went onto the grid)
 }

@@ -13,7 +13,6 @@ layout(set = 0, binding = 6, std430) buffer B_DNEXT { uint DNEXT[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
-const uint DPF_REMOVED = 4u;
 const uint DPF_RUNNING = 3u;
 const uint DP_CAP = 11u;
 const uint DP_CELLS = 1u;
@@ -24,6 +23,7 @@ const uint DS_BIRTHS = 13u;
 const uint DS_COUNT = 1u;
 const uint DS_DEATHS = 14u;
 const uint DS_GROWTH = 9u;
+const uint DS_LEDGER = 24u;
 const uint DS_NEWBORN = 3u;
 const uint DS_NEXT_COUNT = 4u;
 const uint DS_SEED = 7u;
@@ -35,6 +35,7 @@ const uint DS_WORDS = 32u;
 const uint NO_DISH = 4294967295u;
 const int P_CELLS = 1;
 const uint RECORD_WORDS = 28u;
+const uint WD_LEDGER = 10u;
 const uint WD_SLOTS = 0u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
@@ -56,6 +57,7 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define BUP_LOOP(F) void main() { uint n_ = WORLD[WD_SLOTS]; for (uint i_ = gl_GlobalInvocationID.x; i_ < n_; i_ += GRID_STRIDE) { uint d_ = BLKDISH[i_ >> BLK_SHIFT]; if (d_ == NO_DISH) continue; uint l_ = i_ - DS(d_, DS_START); if (l_ < DS(d_, DS_COUNT)) F(i_, d_, l_); } }
 #define BLOCK_LOOP(F) void main() { uint nb_ = (WORLD[WD_SLOTS] + BLK_SLOTS - 1u) >> BLK_SHIFT; for (uint k_ = gl_WorkGroupID.x; k_ < nb_; k_ += gl_NumWorkGroups.x) { F(k_, BLKDISH[k_]); barrier(); } }
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
+#define LEDGER(d, t, amount) { if (WORLD[WD_LEDGER] != 0u) { float rest_ = (amount); uint lo_ = (d) * DS_WORDS + DS_LEDGER + 2u * (t), hi_ = lo_ + 1u; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); uint old_ = atomicAdd(DSTATE[lo_], q_); if (old_ + q_ < old_) atomicAdd(DSTATE[hi_], 1u); } } }
 const uint DN_WORDS = 8u;
 const uint DN_START = 0u;
 const uint DN_SIZE = 1u;
@@ -93,15 +95,11 @@ void main() {
 		}
 		uint next = min(surv + kids, DPU(d, DP_CAP));
 		DS(d, DS_SURVIVORS) = surv; DS(d, DS_NEWBORN) = kids; DS(d, DS_NEXT_COUNT) = next;
-		if (FLAG(d, DPF_REMOVED)) {
-			DS(d, DS_GROWTH) = 0u;
-		} else {
-			int natural = int(n - surv) - int(DS(d, DS_TRIMMED));
-			int growth = int(kids) - natural;
-			float margin = CAP_SIGMAS * sqrt(2.0 * float(kids + uint(max(natural, 0))));
-			DS(d, DS_GROWTH) = uint(max(float(growth), 0.0) + ceil(margin));
-			births[r] = next - surv; deaths[r] = n - surv;
-		}
+		int natural = int(n - surv) - int(DS(d, DS_TRIMMED));
+		int growth = int(kids) - natural;
+		float margin = CAP_SIGMAS * sqrt(2.0 * float(kids + uint(max(natural, 0))));
+		DS(d, DS_GROWTH) = uint(max(float(growth), 0.0) + ceil(margin));
+		births[r] = next - surv; deaths[r] = n - surv;
 		DS(d, DS_TRIMMED) = 0u;
 		size[r] = (next + BLK_SLOTS - 1u) & ~(BLK_SLOTS - 1u);
 		my_size += size[r]; my_births += births[r]; my_deaths += deaths[r];

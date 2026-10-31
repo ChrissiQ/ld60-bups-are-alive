@@ -22,12 +22,16 @@ const EVENT_FLOOR := 32768  ## the event ring's least size (births, and as many 
 const EVENT_EXACT_MOST := 1 << 21  ## past this bound of an iteration's births the ring is sized from what the last iterations had
 const MAX_STEPS := GpuLayout.MAX_STEPS_PER_BATCH
 const TEXTURES := 4  ## shared textures of each kind
+const HARD_BOUND_MOST := 1 << 18  ## the cloud (and husk) slots past which an iteration's room is estimated instead of bounded [placeholder: about 135 MB of cloud buffers at 516 B a slot]
+const OVERFLOW_DEVICE := 1  ## `overflow()` bits: a kernel found a buffer full (WORLD's flag)
+const OVERFLOW_BUDGET := 2  ## the room an iteration needed would pass the memory budget: it was refused, nothing ran
 
 var rd: RenderingDevice
 var limits: PoolLimits
 var arena: SimArena
 var world_seed := 1  ## a new dish's seed is drawn from this and its number when its spec has none
-var errors: Array[String] = []  ## kernels that did not load or build
+var next_number := 1  ## the number a pipette's new dish takes: past every number a dish of this world has had (numbers are never reused); the host saves it with the game, as world_seed
+var errors: Array[String] = []  ## kernels that did not load or build, and the room the memory budget refused
 
 var _own_device := false
 var _made := {}  ## kernel name -> ShaderSet.create's entry
@@ -41,7 +45,7 @@ var _dishes := {}  ## row -> CoreDish
 var _world := PackedByteArray()  ## WORLD as read after the last sync (and as the host has written it since)
 var _dstate := PackedByteArray()  ## DSTATE likewise
 var _world_step := 0
-var _overflow := 0  ## WORLD's overflow flag, kept once seen
+var _overflow := 0  ## OVERFLOW_* bits, kept once seen (an overflow is never undone: a dish's run after one may depend on the others)
 var _edits: Array = []  ## [row, WorldEdit] for the next batch
 var _event_rows := {}  ## rows whose family events of the last iteration are in the ring
 var _stats_fresh := false  ## STATS sample 0 is every running dish's current state
@@ -52,6 +56,7 @@ var _texture_frames := {}  ## kind -> Array of the frame each texture was last b
 var _published := {}  ## kind -> index of the texture published last
 var _frame := 0  ## the main side's frame count as last told
 var _temp_sets: Array[RID] = []  ## the copy kernels' sets of one publish
+var _ledger := false  ## the energy ledger is on (`keep_ledger`)
 var _profile: Variant = null  ## while `profile_steps` runs: kernel name -> Array of µs, each dispatch its own submit
 
 
@@ -149,6 +154,7 @@ func add_dish(spec: DishSpec) -> int:
 	var count := s.founders.size() / RB
 	if not _make_room(row, s, grid, count):
 		return -1
+	next_number = maxi(next_number, s.number + 1)
 	var cd: CoreDish = _dishes[row]
 	var conc := grid.filled(clampf(s.nutrient_density, 0.0, StartConditions.MAX_NUTRIENT_DENSITY) * Dish.CONCENTRATION_PER_DENSITY)
 	var none := PackedFloat32Array()
@@ -177,6 +183,7 @@ func load_dish(blob: DishBlob) -> int:
 	var grid := DishGrid.make(s.radius, s.resolution, s.patchiness, s.patch_seed)
 	if not _make_room(row, s, grid, blob.count(), blob.clouds.size() / 8, blob.husks.size() / 8):
 		return -1
+	next_number = maxi(next_number, s.number + 1)
 	var cd: CoreDish = _dishes[row]
 	_put_field(cd, blob.conc, blob.conc2, blob.dplo, blob.dphi)
 	_put_segment(row, blob.records, blob.dstate)
@@ -187,12 +194,14 @@ func load_dish(blob: DishBlob) -> int:
 
 
 ## Takes a dish out of the world at once: its blocks become padding (the next step's compaction closes the gap), its clouds and husks
-## empty slots, its field block and squares free. Returns the ids of its live bups (for LineageStore.release_dish).
+## empty slots, its field block and squares free, its queued edits dropped (its row may be another dish's before the next batch).
+## Returns the ids of its live bups (for LineageStore.release_dish).
 func remove_dish(row: int) -> PackedInt64Array:
 	var ids := live_ids(row)
 	var cd: CoreDish = _dishes.get(row)
 	if cd == null:
 		return ids
+	_edits = _edits.filter(func(pair: Array) -> bool: return pair[0] != row)
 	var start := _ds(row, GpuLayout.DS_START)
 	var count := _ds(row, GpuLayout.DS_COUNT)
 	var blocks := (count + BLK - 1) / BLK
@@ -220,8 +229,13 @@ func remove_dish(row: int) -> PackedInt64Array:
 	return ids
 
 
-## What a dish is now, as a DishBlob (a blocking read): see DishBlob.
+## What a dish is now, as a DishBlob (a blocking read): see DishBlob. The queued edits are made first, so a drop just before a freeze
+## stays with the dish. Its clouds and husks are its live slots only, in pool order: every
+## kernel passes a dead slot by, a dish's counters are virtual (DS_CLOUD_SLOTS and DS_HUSKS, recounted from the live slots at its own
+## cadence) and the cloud lists keep the live clouds' order, so a dead slot carries nothing the dish's run reads (round_trip_test's
+## continuation, checks it bit for bit).
 func gather(row: int) -> DishBlob:
+	_apply_edits()
 	var cd: CoreDish = _dishes[row]
 	var blob := DishBlob.new()
 	blob.spec = cd.spec.to_dict()
@@ -250,21 +264,34 @@ func thaw(blob: DishBlob) -> int:
 
 ## The pipette's retarget: the bups of dish `row` within `radius` of `centre` (dish-local) move, with their ids and every
 ## word but their place (shifted by -centre), to `dest`: a row, a DishSpec for a new dish, or null for a new dish like the source (its
-## size, grid, limit and settings, fresh medium, the next number). A pass of its own: no step, no draw, no event; the stats after it
-## count the moved bups in the destination. Returns {new_row, moved, ids} ({} when the destination could not be made).
+## size, grid, limit and settings, fresh medium, `next_number`). A pass of its own: no step, no draw, no event; the stats after it
+## count the moved bups in the destination. Returns {new_row, moved, ids} ({} when the destination could not be made or the room for
+## the move would pass the memory budget: then nothing moved, a destination made for it is gone again, and `errors` says so; nothing
+## ran, so OVERFLOW_BUDGET is not set).
 func pipette(row: int, centre: Vector2, radius: float, dest: Variant = null) -> Dictionary:
 	var dst := -1
+	var made := false
 	if dest is int:
 		dst = dest
+		if not _dishes.has(dst):
+			return {}
 	else:
 		var spec: DishSpec = dest if dest is DishSpec else _receiver_spec(row)
 		spec.founders = PackedByteArray()
 		dst = add_dish(spec)
-	if dst < 0 or dst == row:
+		made = dst >= 0
+	if dst < 0 or dst == row or not _dishes.has(row):
+		if made:
+			remove_dish(dst)
 		return {}
 	_apply_edits()
 	var need := _wd(GpuLayout.WD_SLOTS) + _align(_ds(row, GpuLayout.DS_COUNT)) + BLK
 	if not arena.ensure_slots(need):
+		_after_growth()
+		if made:
+			remove_dish(dst)
+		errors.append("SimCore: a pipette of %d bups needs %d record slots, past the memory budget: refused" % [_ds(row, GpuLayout.DS_COUNT), need])
+		push_warning(errors[-1])
 		return {}
 	_after_growth()
 	var before := _ds(dst, GpuLayout.DS_COUNT)
@@ -314,7 +341,10 @@ func set_field(row: int, values: PackedFloat32Array) -> void:
 # ---- the iteration ------------------------------------------------------------------------------------------------------------------
 
 ## `steps` steps of `delta` seconds of every running dish, in one submit: record, submit, sync, read back DSTATE and WORLD. `plan`
-## (IterationPlan) carries each dish's world events and the history samples. Returns {steps, overflow, record_usec, gpu_usec}.
+## (IterationPlan) carries each dish's world events and the history samples. Returns {steps, overflow, record_usec, gpu_usec}; steps 0
+## when the room the iteration needs would pass the memory budget (OVERFLOW_BUDGET is set, `errors` says so, nothing ran). An overflow a
+## kernel finds (WORLD's flag) is not undone: the iteration cannot be done again from what the host holds (the records and fields change
+## in place on the device), so `overflow()` keeps it and the kernels keep every read and write inside the buffers.
 func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 	_apply_edits()
 	if steps <= 0:
@@ -326,7 +356,8 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 	var events: Dictionary = plan.events if plan != null and plan.get("events") != null else {}
 	var history: PackedByteArray = plan.history_flags if plan != null and plan.get("history_flags") != null else PackedByteArray()
 	var ev := _world_events(steps, events)
-	_ensure_room(steps, ev)
+	if not _ensure_room(steps, ev):
+		return {"steps": 0, "overflow": _overflow}
 	_upload_events(ev)
 	var t0 := Time.get_ticks_usec()
 	var cl := rd.compute_list_begin()
@@ -368,7 +399,8 @@ func profile_steps(steps: int, delta: float, plan: Variant = null) -> Dictionary
 	_set_step(delta)
 	var events: Dictionary = plan.events if plan != null and plan.get("events") != null else {}
 	var ev := _world_events(steps, events)
-	_ensure_room(steps, ev)
+	if not _ensure_room(steps, ev):
+		return {}
 	_upload_events(ev)
 	_profile = {}
 	for k in 20:
@@ -419,12 +451,18 @@ func _record_step(cl: int, s: int) -> void:
 	_disp(cl, "pool_bin_count", hg)
 	_scan(cl, "pool_bn", bins)
 	_disp(cl, "pool_bin_cut", D_MAX / 64)
+	_scan(cl, "pool_bn", bins)
+	_disp(cl, "pool_bin_room", D_MAX / 64)
 	_disp(cl, "pool_bin_cursor", _groups(bins))
 	_disp(cl, "pool_bin_scatter", hg)
 	_disp(cl, "pool_bin_sort", _groups(bins))
 	_disp(cl, "pool_clear", cg)
 	_disp(cl, "pool_puff_clear", hg)
+	if _ledger:
+		_disp(cl, "pool_ledger_mark", bg)
 	_disp(cl, "pool_swim", bg)
+	if _ledger:
+		_disp(cl, "pool_ledger_swim", bg)
 	_disp(cl, "pool_demand", bg)
 	_disp(cl, "pool_cells", cg)
 	_disp(cl, "pool_puff_scale", hg)
@@ -567,9 +605,13 @@ func _upload_events(ev: Dictionary) -> void:
 # ---- room ---------------------------------------------------------------------------------------------------------------------------
 
 ## Grows what an iteration of `steps` steps could pass: the record slots to the bound of every dish's segment after
-## `steps` doublings (a bup divides at most once a step, and never past its dish's cap), the event ring to the bound of its births, the
-## clouds and husks to their tops and what the steps until their next compaction can append.
-func _ensure_room(steps: int, ev: Dictionary) -> void:
+## `steps` doublings (a bup divides at most once a step, and never past its dish's cap); the event ring to the bound of its births; the
+## clouds and husks, while that bound is small (under EVENT_EXACT_MOST, and the slots under HARD_BOUND_MOST), to a hard bound: each
+## step's deaths are at most its bups (the same bound), each death and plankton husk makes at most a cloud or a husk, and each husk lets go
+## at most min(12, steps x (delta / a quarter of its life + 1)) pieces; past it, to an estimate of what the steps until the next
+## compaction append (a kernel that finds a buffer full raises the overflow flag and keeps inside it). False, with OVERFLOW_BUDGET set and
+## the reason in `errors`, when the room would pass the memory budget.
+func _ensure_room(steps: int, ev: Dictionary) -> bool:
 	var need := 0
 	var bound := 0
 	var counted := 0
@@ -584,18 +626,44 @@ func _ensure_room(steps: int, ev: Dictionary) -> void:
 			if b >= EVENT_EXACT_MOST:
 				break
 		bound += b
-	arena.ensure_slots(maxi(need, _wd(GpuLayout.WD_SLOTS)))
-	var events := bound if bound < EVENT_EXACT_MOST else maxi(EVENT_EXACT_MOST, int(4.0 * maxf(_births_per_step, _deaths_per_step) * steps))
-	if arena.ensure_events(maxi(events, EVENT_FLOOR)):
+	var refused: Array[String] = []
+	if not arena.ensure_slots(maxi(need, _wd(GpuLayout.WD_SLOTS))):
+		refused.append("record slots %d" % maxi(need, _wd(GpuLayout.WD_SLOTS)))
+	var exact := bound < EVENT_EXACT_MOST
+	var events := bound if exact else maxi(EVENT_EXACT_MOST, int(4.0 * maxf(_births_per_step, _deaths_per_step) * steps))
+	var grown := arena.ensure_events(maxi(events, EVENT_FLOOR))
+	if grown < 0:
+		refused.append("events %d" % events)
+	elif grown > 0:
 		_p[GpuLayout.p_slot("event_capacity")] = arena.event_cap
 		_upload_p()
-	var per_step := maxf(_deaths_per_step * 2.0, float(counted) / 50.0) + 1024.0
-	var window := mini(steps, CLOUD_COMPACT_EVERY) + 1
 	var world_clouds: int = (ev["puffs"] as PackedFloat32Array).size() / GpuLayout.EV_PUFF_FLOATS
-	var appends := int(per_step * window) + world_clouds + _wd(GpuLayout.WD_HUSK_SLOTS) * window
-	arena.ensure_clouds(_wd(GpuLayout.WD_CLOUD_SLOTS) + appends)
-	arena.ensure_husks(_wd(GpuLayout.WD_HUSK_SLOTS) + int(per_step * (mini(steps, HUSK_CULL_EVERY) + 1)) + world_clouds)
+	var husks_most := _wd(GpuLayout.WD_HUSK_SLOTS) + bound + world_clouds
+	var pieces_a_step := mini(GpuKernelsHusks.HUSK_PIECES, int(maxf(_delta, 0.0) / (Biology.HUSK_SECONDS / 4.0)) + 1)
+	var clouds_most := _wd(GpuLayout.WD_CLOUD_SLOTS) + bound + world_clouds + husks_most * mini(GpuKernelsHusks.HUSK_PIECES, steps * pieces_a_step)
+	var clouds := clouds_most
+	var husks := husks_most
+	if not exact or clouds_most > HARD_BOUND_MOST:
+		var per_step := maxf(_deaths_per_step * 2.0, float(counted) / 50.0) + 1024.0
+		var window := mini(steps, CLOUD_COMPACT_EVERY) + 1
+		clouds = _wd(GpuLayout.WD_CLOUD_SLOTS) + int(per_step * window) + world_clouds + _wd(GpuLayout.WD_HUSK_SLOTS) * window
+		husks = _wd(GpuLayout.WD_HUSK_SLOTS) + int(per_step * (mini(steps, HUSK_CULL_EVERY) + 1)) + world_clouds
+	if not arena.ensure_clouds(clouds):
+		refused.append("cloud slots %d" % clouds)
+	if not arena.ensure_husks(husks):
+		refused.append("husk slots %d" % husks)
 	_after_growth()
+	if refused.is_empty():
+		return true
+	_refuse("an iteration of %d steps needs %s, past the memory budget of %d bytes" % [steps, ", ".join(refused), limits.memory_budget_bytes])
+	return false
+
+
+## The budget refused the room something needs: OVERFLOW_BUDGET is set for good and the reason kept in `errors` (and pushed as an error).
+func _refuse(why: String) -> void:
+	_overflow |= OVERFLOW_BUDGET
+	errors.append("SimCore: " + why)
+	push_error("SimCore: " + why)
 
 
 ## After the arena made new buffers: the uniform sets are made again, and WORLD learns the capacities.
@@ -620,10 +688,10 @@ func _make_room(row: int, s: DishSpec, grid: DishGrid, count: int, clouds := 0, 
 	var bins := bins_across * bins_across
 	if not arena.fits(_wd(GpuLayout.WD_SLOTS) + _align(count) + (_align(s.limit) if count > 0 else 0), cells, bins, _wd(GpuLayout.WD_CLOUD_SLOTS) + clouds, _wd(GpuLayout.WD_HUSK_SLOTS) + husks):
 		return false
-	if not arena.ensure_slots(_wd(GpuLayout.WD_SLOTS) + _align(count)):
+	if not arena.ensure_slots(_wd(GpuLayout.WD_SLOTS) + _align(count)) or not arena.ensure_clouds(_wd(GpuLayout.WD_CLOUD_SLOTS) + clouds + 1024) \
+			or not arena.ensure_husks(_wd(GpuLayout.WD_HUSK_SLOTS) + husks + 1024):
+		_after_growth()
 		return false
-	arena.ensure_clouds(_wd(GpuLayout.WD_CLOUD_SLOTS) + clouds + 1024)
-	arena.ensure_husks(_wd(GpuLayout.WD_HUSK_SLOTS) + husks + 1024)
 	var cd := CoreDish.new()
 	cd.spec = s
 	cd.grid = grid
@@ -765,7 +833,7 @@ func count(row: int) -> int:
 	return _ds(row, GpuLayout.DS_COUNT)
 
 
-## WORLD's overflow flag as read after the iterations so far (0: no physical overflow ever).
+## The OVERFLOW_* bits seen so far (0: no buffer was ever full and no room was ever refused). Once set they stay.
 func overflow() -> int:
 	return _overflow
 
@@ -819,6 +887,61 @@ func canonical_dump(row: int) -> Dictionary:
 		"deaths": ev[1],
 		"stats": rd.buffer_get_data(arena.buf("STATS"), row * GpuLayout.STATS_DISH_WORDS * 4, GpuLayout.STATS_WORDS * 4),
 	}
+
+
+## The share of dish `row`'s bups whose `gene` (a name of GpuLayout.GENE_NAMES) is at least `threshold` (BupSim's
+## fraction_with_gene_at_least, goal 2's input; a blocking read). The kernel counts the records' float genes at or above the least float
+## that is not below `threshold`, which is the same as comparing each float gene with `threshold` itself.
+func fraction_with_gene_at_least(row: int, gene: String, threshold: float) -> float:
+	var g := GpuLayout.GENE_NAMES.find(gene)
+	var n := count(row) if _dishes.has(row) else 0
+	if g < 0 or n == 0:
+		return 0.0
+	arena.put_small("FRQ", arena.zeros(16))
+	_run_list(func(cl: int) -> void: _disp(cl, "pool_fraction", _bup_groups(), float(GpuLayout.R_SPEED + g), float(row), _float_at_least(threshold)))
+	return float(rd.buffer_get_data(arena.buf("FRQ"), 0, 4).decode_u32(0)) / n
+
+
+## The least float (32-bit) that is not below `x`.
+static func _float_at_least(x: float) -> float:
+	var b := PackedByteArray()
+	b.resize(4)
+	b.encode_float(0, x)
+	var f := b.decode_float(0)
+	if f < x:
+		var bits := b.decode_u32(0)
+		if f == 0.0:
+			bits = 1
+		elif f > 0.0:
+			bits += 1
+		else:
+			bits -= 1
+		b.encode_u32(0, bits)
+	return b.decode_float(0)
+
+
+## The energy ledger on or off (WORLD[WD_LEDGER]; off in the game): while on, the kernels add each running dish's energy flows into its
+## DSTATE words DS_LEDGER... (see `ledger_of`); turning it on starts every running dish's sums from 0.
+func keep_ledger(on: bool) -> void:
+	_ledger = on
+	_set_wd(GpuLayout.WD_LEDGER, 1 if on else 0)
+	if not on:
+		return
+	for row: int in _dishes:
+		var ds := dstate_row(row)
+		for w in 2 * GpuLayout.LG_TERMS:
+			ds.encode_u32((GpuLayout.DS_LEDGER + w) * 4, 0)
+		_set_ds_row(row, ds)
+
+
+## A dish's energy ledger from its DSTATE row (`dstate_row`, or a dump's "dstate"): term LG_* -> the sum since the ledger was turned on.
+static func ledger_of(dstate: PackedByteArray) -> PackedFloat64Array:
+	var out := PackedFloat64Array()
+	for t in GpuLayout.LG_TERMS:
+		var lo := dstate.decode_u32((GpuLayout.DS_LEDGER + 2 * t) * 4)
+		var hi := dstate.decode_u32((GpuLayout.DS_LEDGER + 2 * t + 1) * 4)
+		out.append((float(hi) * 4294967296.0 + float(lo)) / 1048576.0)
+	return out
 
 
 ## The ring's events of dish `row` from the last iteration: [births, deaths] as bytes.
@@ -1216,13 +1339,11 @@ func _derived_seed(number: int) -> int:
 	return h if h != 0 else 1
 
 
-## A new dish for a pipette's bups: the source's size, grid, limit and settings, a fresh medium, the next number.
+## A new dish for a pipette's bups: the source's size, grid, limit and settings, a fresh medium, the next number (`next_number`: past
+## every dish this world has had, running, frozen or gone).
 func _receiver_spec(row: int) -> DishSpec:
 	var s := (_dishes[row] as CoreDish).spec.copy()
-	var most := 0
-	for r: int in _dishes:
-		most = maxi(most, (_dishes[r] as CoreDish).spec.number)
-	s.number = most + 1
+	s.number = next_number
 	s.seed = 0
 	s.patch_seed = 0
 	s.step = 0

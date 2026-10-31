@@ -6,7 +6,10 @@ extends SceneTree
 ##   the dump's records within 1e-5 relative [placeholder: the fold order of the stats pass is not pinned; if it is pinned the
 ##   comparison becomes exact].
 ## - the stats of a dish are the same alone and in a pool (checked on the stats words only) [derived].
-## - `fraction_with_gene_at_least`, the goals' question, is a stub: it needs the question kernels. Enabled by a later change.
+## - `fraction_with_gene_at_least` (the goals' question, SimCore's kernel): for each gene and each of four thresholds (the
+##   median record's own value, so that equal genes count; a value between two floats, 0.3 of the way from the median to the largest;
+##   0, which every bup passes; past the largest, which none does) it equals the share of the dump's records whose float gene is at least
+##   the threshold, exactly [derived: an integer count over the same floats, divided on the host in double].
 ## Needs a GPU. Windowed only.
 
 const TOLERANCE := 1e-5  ## placeholder
@@ -34,5 +37,22 @@ func _init() -> void:
 	TestUtil.show(stats.decode_u32(GpuLayout.ST_DONORS * 4) == donors, "ST_DONORS %d equals %d" % [stats.decode_u32(GpuLayout.ST_DONORS * 4), donors])
 	var lone := SimHarness.make([s.copy()]).step(200).dump(0)
 	TestUtil.show(lone["stats"] == stats, "stats are the same alone and in a pool")
-	print("SKIP stats_test: fraction_with_gene_at_least, enabled by a later change")
-	TestUtil.finish(self, "OK stats_test (fraction_with_gene_at_least skipped)")
+	_fractions(h, recs, n)
+	TestUtil.finish(self, "OK stats_test")
+
+
+func _fractions(h: SimHarness, recs: PackedByteArray, n: int) -> void:
+	for g in GpuLayout.GENE_NAMES.size():
+		var values := PackedFloat64Array()
+		for i in n:
+			values.append(recs.decode_float(i * GpuLayout.RECORD_BYTES + (GpuLayout.R_SPEED + g) * 4))
+		var sorted := values.duplicate()
+		sorted.sort()
+		var median := sorted[n / 2]
+		for thr: float in [median, median + 0.3 * (sorted[n - 1] - median) + 1e-9, 0.0, sorted[n - 1] * 1.5 + 1.0]:
+			var at_least := 0
+			for v: float in values:
+				at_least += 1 if v >= thr else 0
+			var want := float(at_least) / n
+			var got: float = h.core.fraction_with_gene_at_least(0, GpuLayout.GENE_NAMES[g], thr)
+			TestUtil.show(got == want, "fraction of %s at least %.9f: %.9f, recount %.9f (%d of %d)" % [GpuLayout.GENE_NAMES[g], thr, got, want, at_least, n])

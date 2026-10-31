@@ -22,6 +22,7 @@ const uint DP_WORDS = 32u;
 const uint DS_CLOUD_SLOTS = 19u;
 const uint DS_COUNT = 1u;
 const uint DS_HUSKS = 22u;
+const uint DS_LEDGER = 24u;
 const uint DS_SEED = 7u;
 const uint DS_START = 0u;
 const uint DS_STEP = 8u;
@@ -33,7 +34,10 @@ const int P_CELLS = 1;
 const int P_DEATH_GIVE = 8;
 const uint RECORD_WORDS = 28u;
 const uint WD_CLOUD_SLOTS = 1u;
+const uint WD_HUSK_CAPACITY = 8u;
 const uint WD_HUSK_SLOTS = 2u;
+const uint WD_LEDGER = 10u;
+const uint WD_PUFF_CAPACITY = 7u;
 const uint WD_SLOTS = 0u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
@@ -55,6 +59,7 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define BUP_LOOP(F) void main() { uint n_ = WORLD[WD_SLOTS]; for (uint i_ = gl_GlobalInvocationID.x; i_ < n_; i_ += GRID_STRIDE) { uint d_ = BLKDISH[i_ >> BLK_SHIFT]; if (d_ == NO_DISH) continue; uint l_ = i_ - DS(d_, DS_START); if (l_ < DS(d_, DS_COUNT)) F(i_, d_, l_); } }
 #define BLOCK_LOOP(F) void main() { uint nb_ = (WORLD[WD_SLOTS] + BLK_SLOTS - 1u) >> BLK_SHIFT; for (uint k_ = gl_WorkGroupID.x; k_ < nb_; k_ += gl_NumWorkGroups.x) { F(k_, BLKDISH[k_]); barrier(); } }
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
+#define LEDGER(d, t, amount) { if (WORLD[WD_LEDGER] != 0u) { float rest_ = (amount); uint lo_ = (d) * DS_WORDS + DS_LEDGER + 2u * (t), hi_ = lo_ + 1u; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); uint old_ = atomicAdd(DSTATE[lo_], q_); if (old_ + q_ < old_) atomicAdd(DSTATE[hi_], 1u); } } }
 
 uint deaths_of(uint d) { return DS(d, DS_COUNT) - DS(d, DS_SURVIVORS); }
 uint husk_room(uint d) {
@@ -66,8 +71,8 @@ uint husk_room(uint d) {
 void f(uint d) {
 	bool give = P[P_DEATH_GIVE] > 0.0;
 	if (d == 0u) {
-		if (give) WORLD[WD_CLOUD_SLOTS] += CBASE[D_MAX];
-		WORLD[WD_HUSK_SLOTS] += CBASE[2u * D_MAX + 1u];
+		if (give) WORLD[WD_CLOUD_SLOTS] = min(WORLD[WD_CLOUD_SLOTS] + CBASE[D_MAX], WORLD[WD_PUFF_CAPACITY]);
+		WORLD[WD_HUSK_SLOTS] = min(WORLD[WD_HUSK_SLOTS] + CBASE[2u * D_MAX + 1u], WORLD[WD_HUSK_CAPACITY]);
 	}
 	if (((DPU(d, DP_FLAGS) >> DPF_RUNNING) & 1u) == 0u) return;
 	uint room = husk_room(d);

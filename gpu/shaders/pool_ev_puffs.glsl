@@ -27,6 +27,7 @@ const uint DS_CLOUDS_TO_GRID = 20u;
 const uint DS_CLOUD_SLOTS = 19u;
 const uint DS_COUNT = 1u;
 const uint DS_HUSKS = 22u;
+const uint DS_LEDGER = 24u;
 const uint DS_OVERFLOW = 23u;
 const uint DS_SEED = 7u;
 const uint DS_START = 0u;
@@ -40,6 +41,7 @@ const uint RECORD_WORDS = 28u;
 const uint WD_CLOUD_SLOTS = 1u;
 const uint WD_HUSK_CAPACITY = 8u;
 const uint WD_HUSK_SLOTS = 2u;
+const uint WD_LEDGER = 10u;
 const uint WD_OVERFLOW = 4u;
 const uint WD_PUFF_CAPACITY = 7u;
 const uint WD_SLOTS = 0u;
@@ -63,6 +65,7 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define BUP_LOOP(F) void main() { uint n_ = WORLD[WD_SLOTS]; for (uint i_ = gl_GlobalInvocationID.x; i_ < n_; i_ += GRID_STRIDE) { uint d_ = BLKDISH[i_ >> BLK_SHIFT]; if (d_ == NO_DISH) continue; uint l_ = i_ - DS(d_, DS_START); if (l_ < DS(d_, DS_COUNT)) F(i_, d_, l_); } }
 #define BLOCK_LOOP(F) void main() { uint nb_ = (WORLD[WD_SLOTS] + BLK_SLOTS - 1u) >> BLK_SHIFT; for (uint k_ = gl_WorkGroupID.x; k_ < nb_; k_ += gl_NumWorkGroups.x) { F(k_, BLKDISH[k_]); barrier(); } }
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
+#define LEDGER(d, t, amount) { if (WORLD[WD_LEDGER] != 0u) { float rest_ = (amount); uint lo_ = (d) * DS_WORDS + DS_LEDGER + 2u * (t), hi_ = lo_ + 1u; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); uint old_ = atomicAdd(DSTATE[lo_], q_); if (old_ + q_ < old_) atomicAdd(DSTATE[hi_], 1u); } } }
 
 bool accepts_d(uint d, float x, float y) {
 	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS);
@@ -111,7 +114,7 @@ void to_grid_d(uint d, float x, float y, float mass, float v) {
 void put_cloud(uint d, float x, float y, float mass, float v, float cut) {
 	uint q = DS(d, DS_CLOUD_SLOTS);
 	if (q >= DPU(d, DP_CLOUD_QUOTA)) { to_grid_d(d, x, y, mass, v); DS(d, DS_CLOUDS_TO_GRID) += 1u; return; }
-	if (slots_g >= cap_g) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; return; }
+	if (slots_g >= cap_g) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; to_grid_d(d, x, y, mass, v); return; }
 	uint o = slots_g * 8u;
 	PUFF[o] = x; PUFF[o + 1] = y; PUFF[o + 2] = mass; PUFF[o + 3] = v; PUFF[o + 4] = cut;
 	PUFF[o + 5] = uintBitsToFloat(PUFF_ROW_BASE + d); PUFF[o + 6] = 0.0; PUFF[o + 7] = 0.0;
@@ -128,12 +131,13 @@ void main() {
 		uint d = floatBitsToUint(EVP[q + 5]) - PUFF_ROW_BASE;
 		if (EVP[q + 4] < 0.0) {  // a plankton husk
 			uint hv = DS(d, DS_HUSKS), hs = WORLD[WD_HUSK_SLOTS];
-			if (hv >= DPU(d, DP_HUSK_QUOTA)) {  // (as the CPU's add_cloud of radius 0: a cloud of variance 100, or onto the grid)
+			bool quota_full = hv >= DPU(d, DP_HUSK_QUOTA);
+			if (quota_full || hs >= husk_cap) {  // (as the CPU's add_cloud of radius 0: a cloud of variance 100, or onto the grid)
+				if (!quota_full) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; }
 				if (accepts_d(d, EVP[q], EVP[q + 1]) && 10.0 < DPF(d, DP_HANDOVER)) put_cloud(d, EVP[q], EVP[q + 1], EVP[q + 2], 100.0, 1.0);
 				else deposit_now_d(d, EVP[q], EVP[q + 1], EVP[q + 2]);
 				continue;
 			}
-			if (hs >= husk_cap) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; continue; }
 			uint o = hs * 8u;
 			HUSK[o] = EVP[q]; HUSK[o + 1] = EVP[q + 1]; HUSK[o + 2] = EVP[q + 2]; HUSK[o + 3] = 0.0; HUSK[o + 4] = 0.0;
 			HUSK[o + 5] = uintBitsToFloat(PUFF_ROW_BASE + d); HUSK[o + 6] = 1.0; HUSK[o + 7] = 0.0;

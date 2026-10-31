@@ -16,8 +16,8 @@ extends SceneTree
 ## C2 isolation: every dish of a pool of 2, 8 and 65 dishes (random rows, sizes, seeds, limits, caps, flags and donors; every dish
 ##    packed round 0, 0, so all of them overlap) equals its run alone (another row, at slot 0, another grid size), batch by batch:
 ##    records, every DSTATE word but the start, its events (births by the id's dish number, deaths by ED_STEP's), its stats. 0 words differ.
-## C3 permutation: the 65 dishes with their rows reversed, then shuffled, with one dish removed after 40 steps (DPF_REMOVED for a step,
-##    then its row cleared) and one added after 60 steps: every dish equals its run alone (the added one from its own step 0). 0 differ.
+## C3 permutation: the 65 dishes with their rows reversed, then shuffled, with one dish removed after 40 steps (its blocks made padding
+##    and its DISHP and DSTATE rows cleared, as SimCore.remove_dish) and one added after 60 steps: every dish equals its run alone (the added one from its own step 0). 0 differ.
 ## C4 conjugation across dishes: in C2/C3 every dish lies over the others; a pool run with a dish-blind donors' index (no dish in the
 ##    bucket's hash, no dish check: the single-dish table) differs from the runs alone (so C2 can see a transfer across dishes), the
 ##    real kernels do not (0 transfers across).
@@ -254,10 +254,17 @@ func segment(w: World, row: int) -> PackedByteArray:
 	return get_bytes(w, cur(w, "BUPS"), ds.decode_u32(L.DS_START * 4) * RB, n * RB)
 
 
-func set_flags(w: World, row: int, flags: int) -> void:
-	var b := zeros(4)
-	b.encode_u32(0, flags)
-	put(w, "DISHP", b, (row * L.DP_WORDS + L.DP_FLAGS) * 4)
+## A dish leaves at once, as SimCore.remove_dish: its blocks become padding (the next compaction closes the gap), its rows are cleared.
+func remove_dish(w: World, row: int) -> void:
+	var ds := dstate_row(w, row)
+	var blocks := (ds.decode_u32(L.DS_COUNT * 4) + 255) / 256
+	if blocks > 0:
+		var none := PackedByteArray()
+		none.resize(blocks * 4)
+		none.fill(0xFF)
+		put(w, cur(w, "BLKDISH"), none, (ds.decode_u32(L.DS_START * 4) / 256) * 4)
+	put(w, "DISHP", zeros(L.DP_WORDS * 4), row * L.DP_WORDS * 4)
+	put(w, "DSTATE", zeros(L.DS_WORDS * 4), row * L.DS_WORDS * 4)
 
 
 # ---- recording ----------------------------------------------------------------------------------------------------------------------------
@@ -576,8 +583,7 @@ func alone(s: Dictionary, batches: int) -> Dictionary:
 
 
 ## A pool of `specs` in `rows` (rows[k] for specs[k]) for `batches` batches of 10 steps, each dish compared after every batch with its
-## run alone (`alone_runs`: number -> step -> dump). `remove` [batch, index]: that dish is removed in that batch (DPF_REMOVED, then its
-## row cleared); `add` [batch, spec, row]: that dish joins before that batch, at the end of the slots in use. Returns the dishes that differ.
+## run alone (`alone_runs`: number -> step -> dump). `remove` [batch, index]: that dish is removed before that batch (`remove_dish`); `add` [batch, spec, row]: that dish joins before that batch, at the end of the slots in use. Returns the dishes that differ.
 func pool_run(specs: Array, rows: Array, batches: int, alone_runs: Dictionary, apply := "pool_conj_apply", remove := [], add := []) -> Array:
 	var phys := 0
 	for s: Dictionary in specs:
@@ -596,7 +602,7 @@ func pool_run(specs: Array, rows: Array, batches: int, alone_runs: Dictionary, a
 		var removed_row := -1
 		if not remove.is_empty() and bt == remove[0]:
 			removed_row = rows[remove[1]]
-			set_flags(w, removed_row, flags_of(specs[remove[1]]) | (1 << L.DPF_REMOVED))
+			remove_dish(w, removed_row)
 			live.erase(removed_row)
 		if not add.is_empty() and bt == add[0]:
 			put_dish(w, add[2], add[1], get_bytes(w, "WORLD").decode_u32(L.WD_SLOTS * 4))
@@ -611,7 +617,6 @@ func pool_run(specs: Array, rows: Array, batches: int, alone_runs: Dictionary, a
 				td += ds_word(w, row, L.DS_DEATHS)
 			var gone := ring_events(w, tb, td, number)
 			ok(ds_word(w, removed_row, L.DS_COUNT) == 0 and ds_word(w, removed_row, L.DS_DEATHS) == 0 and ds_word(w, removed_row, L.DS_BIRTHS) == 0 and (gone[0] as PackedByteArray).is_empty() and (gone[1] as PackedByteArray).is_empty(), "the removed dish %d leaves with no bups, no births, no deaths and no events" % number)
-			set_flags(w, removed_row, 0)
 		var dumps := dump_pool(w, live)
 		for number: int in dumps:
 			var d: Dictionary = dumps[number]

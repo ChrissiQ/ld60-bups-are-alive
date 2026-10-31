@@ -191,16 +191,18 @@ func set_field(row: int, values: PackedFloat32Array) -> SimHarness:
 	return self
 
 
-## The pipette's retarget into a new dish like the source (its size, grid and limit; a world with nothing in it): returns the number moved;
-## the new dish's row is `last_pipette_row`.
+## The pipette's retarget into dish row `dest`, or (-1) a new dish like the source (its size, grid and limit; a world with nothing in it):
+## returns the number moved; the destination's row is `last_pipette_row`.
 var last_pipette_row := -1
 
 
-func pipette(row: int, centre: Vector2, radius: float) -> int:
-	var reply: Dictionary = core.pipette(row, centre, radius)
+func pipette(row: int, centre: Vector2, radius: float, dest := -1) -> int:
+	var reply: Dictionary = core.pipette(row, centre, radius, dest if dest >= 0 else null)
 	if reply.is_empty():
 		return 0
 	last_pipette_row = int(reply["new_row"])
+	if dest >= 0:
+		return int(reply["moved"])
 	var s := Scenario.small(0, scenarios[row].radius)
 	s.resolution = scenarios[row].resolution
 	s.limit = scenarios[row].limit

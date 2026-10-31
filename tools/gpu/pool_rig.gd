@@ -8,7 +8,7 @@ extends RefCounted
 ##
 ## The order of a step, which the pool's host keeps:
 ##   pool_ev_puffs and ev_deposits (pa: the step's place in EVR), pool_feed, the diffusion's passes, pool_puff_advance, pool_dep_apply,
-##   pool_snapshot, the cloud lists (clear, count, scan, cut, cursor, scatter, sort), pool_clear, pool_puff_clear, pool_swim, pool_demand,
+##   pool_snapshot, the cloud lists (clear, count, scan, the quota's cut, scan, the room's cut, cursor, scatter, sort), pool_clear, pool_puff_clear, pool_swim, pool_demand,
 ##   pool_cells, pool_puff_scale, pool_apply, pool_puff_commit, pool_ac_cells, pool_ac_apply; life up to its finalize (SURV, EXCS,
 ##   DS_SURVIVORS; DS_COUNT still the step's first count); pool_death_bases, pool_husk_spawn, pool_death_clouds, pool_death_count; the
 ##   husks' leak (pool_husk_age, scan hl, pool_husk_leak, pool_husk_leak_count); pool_cloud_live, pool_husk_live, pool_cloud_cadence;
@@ -445,6 +445,8 @@ func record_index(cl: int, cut := true) -> void:
 ## 1.9x at 2M bups, pool_cost_check.gd).
 func record_index_rest(cl: int) -> void:
 	dispatch(cl, "pool_bin_cut", D_MAX / 64)
+	scan(cl, "pool_bn", bins)
+	dispatch(cl, "pool_bin_room", D_MAX / 64)
 	dispatch(cl, "pool_bin_cursor", groups_for(bins))
 	dispatch(cl, "pool_bin_scatter", ceili(cloud_hint / 64.0))
 	dispatch(cl, "pool_bin_sort", ceili(bins / 64.0))

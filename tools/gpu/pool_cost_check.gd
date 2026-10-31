@@ -145,7 +145,7 @@ func measure_pool(st: GpuSim.State) -> Dictionary:
 	var one := func(kname: String, groups: int, pa := 0.0, pb := 0.0) -> Callable: return func(cl: int) -> void: rig.dispatch(cl, kname, groups, pa, pb)
 	time_it(rig.rd, func(cl: int) -> void: rig.record_index(cl), 1)
 	var plan := [["pool_feed", cg], ["pool_diffuse_a", cg], ["pool_diffuse2_a", cg], ["pool_puff_advance", hg], ["pool_dep_apply", cg], ["pool_snapshot", cg],
-		["pool_bin_clear", Rig.groups_for(rig.bins)], ["pool_bin_count", hg], ["pool_bin_cut", GpuLayout.D_MAX / 64], ["pool_bin_cursor", Rig.groups_for(rig.bins)],
+		["pool_bin_clear", Rig.groups_for(rig.bins)], ["pool_bin_count", hg], ["pool_bin_cut", GpuLayout.D_MAX / 64], ["pool_bin_room", GpuLayout.D_MAX / 64], ["pool_bin_cursor", Rig.groups_for(rig.bins)],
 		["pool_bin_scatter", ceili(CLOUDS / 64.0)], ["pool_bin_sort", ceili(rig.bins / 64.0)], ["pool_clear", cg], ["pool_puff_clear", hg], ["pool_swim", bg], ["pool_demand", bg],
 		["pool_cells", cg], ["pool_puff_scale", hg], ["pool_apply", bg], ["pool_puff_commit", hg], ["pool_ac_cells", cg], ["pool_ac_apply", bg],
 		["pool_pmark", hg], ["pool_pcompact", Rig.groups_for(CLOUDS * 2)], ["pool_pcopy", Rig.groups_for(CLOUDS * 2)], ["pool_cloud_live", hg],

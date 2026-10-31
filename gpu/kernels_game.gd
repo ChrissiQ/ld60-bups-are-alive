@@ -280,10 +280,10 @@ GRID_LOOP(ev_begin, D_MAX)
 
 ## `events` for the pool (after pool_finalize, before pool_compact), one pass over the bups: a dish's births and deaths of the step go to
 ## the event ring from the places pool_finalize gave the dish, in the order of its bups; a death carries the number of the dish it died
-## in. A removed dish has none.
+## in.
 static func pool_events() -> String:
-	var t := GpuKernelsLife.swapped(K_EVENTS, "void main() {\n\tBUP_THREAD\n", "void event_bup(uint i, uint d, uint l) {\n\tif (FLAG(d, DPF_REMOVED)) return;\n\tuint kid = EXCK[i] - DN(d, DN_KID_BASE);\n")
-	t = GpuKernelsLife.swapped(t, "CNT[CNT_SURVIVORS] + EXCK[i] < uint(P[P_CAPACITY])", "DS(d, DS_SURVIVORS) + kid < DPU(d, DP_CAP)")
+	var t := GpuKernelsLife.swapped(K_EVENTS, "void main() {\n\tBUP_THREAD\n", "void event_bup(uint i, uint d, uint l) {\n\tuint kid = EXCK[i] - DN(d, DN_KID_BASE);\n")
+	t = GpuKernelsLife.swapped(t, "CNT[CNT_SURVIVORS] + EXCK[i] < uint(P[P_CAPACITY])", "DS(d, DS_SURVIVORS) + kid < DS(d, DS_NEXT_COUNT)")  # (DP_CAP's cut, and pool_slot_check's)
 	t = GpuKernelsLife.swapped(t, "CNT[CNT_BIRTHS] + EXCK[i]", "DN(d, DN_BIRTH_BASE) + kid")
 	t = GpuKernelsLife.swapped(t, "CNT[CNT_NEXT_ID_LO] + EXCK[i]", "DS(d, DS_NEXT_ID_LO) + kid")
 	t = GpuKernelsLife.swapped(t, "CNT[CNT_NEXT_ID_HI] + (lo < CNT[CNT_NEXT_ID_LO]", "DS(d, DS_NEXT_ID_HI) + (lo < DS(d, DS_NEXT_ID_LO)")

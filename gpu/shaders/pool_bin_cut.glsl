@@ -21,7 +21,7 @@ const uint DP_FLAGS = 12u;
 const uint DP_WORDS = 32u;
 const uint DS_COUNT = 1u;
 const uint DS_ENTRIES_CUT = 21u;
-const uint DS_OVERFLOW = 23u;
+const uint DS_LEDGER = 24u;
 const uint DS_SEED = 7u;
 const uint DS_START = 0u;
 const uint DS_STEP = 8u;
@@ -30,8 +30,7 @@ const uint D_MAX = 1024u;
 const uint NO_DISH = 4294967295u;
 const int P_CELLS = 1;
 const uint RECORD_WORDS = 28u;
-const uint WD_OVERFLOW = 4u;
-const uint WD_PUFF_CAPACITY = 7u;
+const uint WD_LEDGER = 10u;
 const uint WD_SLOTS = 0u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
@@ -53,6 +52,7 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define BUP_LOOP(F) void main() { uint n_ = WORLD[WD_SLOTS]; for (uint i_ = gl_GlobalInvocationID.x; i_ < n_; i_ += GRID_STRIDE) { uint d_ = BLKDISH[i_ >> BLK_SHIFT]; if (d_ == NO_DISH) continue; uint l_ = i_ - DS(d_, DS_START); if (l_ < DS(d_, DS_COUNT)) F(i_, d_, l_); } }
 #define BLOCK_LOOP(F) void main() { uint nb_ = (WORLD[WD_SLOTS] + BLK_SLOTS - 1u) >> BLK_SHIFT; for (uint k_ = gl_WorkGroupID.x; k_ < nb_; k_ += gl_NumWorkGroups.x) { F(k_, BLKDISH[k_]); barrier(); } }
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
+#define LEDGER(d, t, amount) { if (WORLD[WD_LEDGER] != 0u) { float rest_ = (amount); uint lo_ = (d) * DS_WORDS + DS_LEDGER + 2u * (t), hi_ = lo_ + 1u; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); uint old_ = atomicAdd(DSTATE[lo_], q_); if (old_ + q_ < old_) atomicAdd(DSTATE[hi_], 1u); } } }
 const uint ENTRIES_PER_SLOT = 12u;
 
 // the first of the dish's nbins bins (from base) whose end passes `limit` (counted from `from`), nbins when none does
@@ -66,18 +66,16 @@ uint first_past(uint base, uint nbins, uint from, uint limit) {
 	}
 	return lo;
 }
-void f(uint k) {
-	uint d = k;
-	if (((DPU(d, DP_FLAGS) >> DPF_RUNNING) & 1u) == 0u) return;
+// empties the dish's bins from the first whose end passes `limit` (counted from `from`, or from its first entry when `own`); the entries dropped
+uint cut_from(uint d, bool own, uint limit) {
+	if (((DPU(d, DP_FLAGS) >> DPF_RUNNING) & 1u) == 0u) return 0u;
 	uint base = DPU(d, DP_BIN_BASE), nbins = DPU(d, DP_BINS_ACROSS) * DPU(d, DP_BINS_ACROSS);
-	if (nbins == 0u) return;
-	uint first = BINS[base];
-	uint by_quota = first_past(base, nbins, first, ENTRIES_PER_SLOT * DPU(d, DP_CLOUD_QUOTA));
-	uint by_room = first_past(base, nbins, 0u, ENTRIES_PER_SLOT * WORLD[WD_PUFF_CAPACITY]);
-	if (by_room < by_quota) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; }
-	uint cut = min(by_quota, by_room);
+	if (nbins == 0u) return 0u;
+	uint cut = first_past(base, nbins, own ? BINS[base] : 0u, limit);
 	uint dropped = 0u;
 	for (uint b = base + cut; b < base + nbins; b++) { dropped += BINC[b]; BINC[b] = 0u; }
-	if (by_quota < nbins) DS(d, DS_ENTRIES_CUT) += dropped;
+	return dropped;
 }
+
+void f(uint d) { DS(d, DS_ENTRIES_CUT) += cut_from(d, true, ENTRIES_PER_SLOT * DPU(d, DP_CLOUD_QUOTA)); }
 GRID_LOOP(f, D_MAX)

@@ -225,6 +225,8 @@ func record_pool_index(b: GpuSim, cl: int, hint: int) -> void:
 	pd(b, cl, "pool_bin_count", hg)
 	scan(b, cl, "pool_bn", b._bins)
 	pd(b, cl, "pool_bin_cut", GpuLayout.D_MAX / 64)
+	scan(b, cl, "pool_bn", b._bins)
+	pd(b, cl, "pool_bin_room", GpuLayout.D_MAX / 64)
 	pd(b, cl, "pool_bin_cursor", Rig.groups_for(b._bins))
 	pd(b, cl, "pool_bin_scatter", ceili(hint / 64.0))
 	pd(b, cl, "pool_bin_sort", ceili(b._bins / 64.0))

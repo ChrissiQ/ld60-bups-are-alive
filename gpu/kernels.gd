@@ -91,7 +91,9 @@ const THREAD_FUNCS := """
 ##   (l / DP_CELLS across). CELLDISH, DISHP.
 ## The dish's own words: DS(d, word) (DSTATE, read or written), DPU(d, word) and DPF(d, word) (DISHP as uint or float), DISH_STREAM(d, l,
 ## salt) the random stream of the dish's bup l this step (the single dish's formula with the dish's seed and step), DISH_KEY(d) the key
-## of the dish's step (its seed and step).
+## of the dish's step (its seed and step). LEDGER(d, term, amount) adds an amount to term LG_* of the dish's energy ledger while
+## WORLD[WD_LEDGER] is on (a branch every thread takes alike, so the game, with it off, pays only the read of WORLD); an amount of 0 or
+## less adds nothing, so a flow of either sign is two calls, its loss to one term and its negation to LG_MADE.
 const POOL_FUNCS := """
 #define DS(d, w) DSTATE[(d) * DS_WORDS + (w)]
 #define DPU(d, w) DISHP[(d) * DP_WORDS + (w)]
@@ -104,12 +106,14 @@ const POOL_FUNCS := """
 #define BUP_LOOP(F) void main() { uint n_ = WORLD[WD_SLOTS]; for (uint i_ = gl_GlobalInvocationID.x; i_ < n_; i_ += GRID_STRIDE) { uint d_ = BLKDISH[i_ >> BLK_SHIFT]; if (d_ == NO_DISH) continue; uint l_ = i_ - DS(d_, DS_START); if (l_ < DS(d_, DS_COUNT)) F(i_, d_, l_); } }
 #define BLOCK_LOOP(F) void main() { uint nb_ = (WORLD[WD_SLOTS] + BLK_SLOTS - 1u) >> BLK_SHIFT; for (uint k_ = gl_WorkGroupID.x; k_ < nb_; k_ += gl_NumWorkGroups.x) { F(k_, BLKDISH[k_]); barrier(); } }
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
+#define LEDGER(d, t, amount) { if (WORLD[WD_LEDGER] != 0u) { float rest_ = (amount); uint lo_ = (d) * DS_WORDS + DS_LEDGER + 2u * (t), hi_ = lo_ + 1u; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); uint old_ = atomicAdd(DSTATE[lo_], q_); if (old_ + q_ < old_) atomicAdd(DSTATE[hi_], 1u); } } }
 """
 
 ## The buffers each of POOL_FUNCS' macros reads (a kernel that uses the macro must bind them).
 const POOL_MACRO_BUFFERS := {
 	"GRID_LOOP": [], "SLOT_LOOP": ["WORLD", "BLKDISH", "DSTATE"], "BUP_LOOP": ["WORLD", "BLKDISH", "DSTATE"], "BLOCK_LOOP": ["WORLD", "BLKDISH"],
 	"CELL_LOOP": ["CELLDISH", "DISHP"], "DS": ["DSTATE"], "DPU": ["DISHP"], "DPF": ["DISHP"], "DISH_KEY": ["DSTATE"], "DISH_STREAM": ["DSTATE"],
+	"LEDGER": ["WORLD", "DSTATE"],
 }
 
 ## The groups of 64 a per-bup kernel of the pool is dispatched with, for `slots` slots in use (the host's last WORLD[WD_SLOTS]; only the

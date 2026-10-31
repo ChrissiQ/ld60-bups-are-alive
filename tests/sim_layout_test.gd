@@ -5,10 +5,10 @@ extends SceneTree
 ##  - the record: 28 words, each of R_* named once (0-27), no word or constant naming a dish (a bup's dish is its segment);
 ##  - ids: 1 + 19 + 44 = 64 bits; make_id(524287, 2^44 - 1) is positive; R_ID_HI is the id's high word, (dish << 12) | counter >> 32;
 ##  - a death event's ED_STEP: 13 low bits step, 19 high bits dish number, 13 + 19 = 32; MAX_STEPS_PER_BATCH (1024) fits in 13 bits;
-##  - DISHP: 32 words = 128 B; DP_* name 22 distinct words 0-21 (10 spare, 22-31 unused); seven DPF_* flags in 0-6;
+##  - DISHP: 32 words = 128 B; DP_* name 22 distinct words 0-21 (10 spare, 22-31 unused); six DPF_* flags in 0-6 (bit 4 spare);
 ##    it names seed, step, k_total, iterations, noise_reference and radius;
-##  - DSTATE: 32 words; DS_* name 24 distinct words 0-23 (8 spare), including moved_in and moved_out;
-##  - WORLD: 16 words, 10 named (the totals the kernels bound their loops by are uints there, not floats in P); payload: 4 words = 16 B, id texture 2 words = 8 B, colour bytes inside the fourth word above its spare low byte;
+##  - DSTATE: 32 words; DS_* name 25 distinct words 0-24 (24-31 the energy ledger's four sums), including moved_in and moved_out;
+##  - WORLD: 16 words, 11 named (the totals the kernels bound their loops by are uints there, not floats in P); payload: 4 words = 16 B, id texture 2 words = 8 B, colour bytes inside the fourth word above its spare low byte;
 ##  - STATS per dish: 16 words x (1 + 16) = 272 words; QIN and QOUT pools are D_MAX rows of the single-dish path's QIN_WORDS (44) and QOUT_WORDS (240);
 ##  - D_MAX 1,024 rows: DISHP + DSTATE = 1,024 x 256 B = 256 KB;
 ##  - no kernel reads a dish table by a number, and no layout name is also a kernel's buffer name.
@@ -22,8 +22,8 @@ func _init() -> void:
 	_ids()
 	_death_step()
 	_table(constants, "DP_", 22, L.DP_WORDS, "DISHP")
-	_table(constants, "DS_", 24, L.DS_WORDS, "DSTATE")
-	_table(constants, "WD_", 10, L.WD_WORDS, "WORLD")
+	_table(constants, "DS_", 25, L.DS_WORDS, "DSTATE")
+	_table(constants, "WD_", 11, L.WD_WORDS, "WORLD")
 	_dishp(constants)
 	_dstate()
 	_payload()
@@ -91,7 +91,7 @@ func _dishp(constants: Dictionary) -> void:
 		if name.begins_with("DPF_") and name != "DPF_COUNT":
 			TestUtil.check(constants[name] >= 0 and constants[name] < 32 and not bits.has(constants[name]), "flag %s is a bit in use or outside the word" % name)
 			bits[constants[name]] = name
-	TestUtil.check(bits.size() == L.DPF_COUNT and L.DPF_COUNT == 7, "DISHP has seven flags")
+	TestUtil.check(bits.size() == L.DPF_COUNT and L.DPF_COUNT == 6, "DISHP has six flags")
 
 
 func _dstate() -> void:

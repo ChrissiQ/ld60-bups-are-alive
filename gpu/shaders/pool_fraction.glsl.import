@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://4qaobo5dmvx8"
+path="res://.godot/imported/pool_fraction.glsl-9dd31db342d7c2edd1d906efcf99fc6b.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_fraction.glsl"
+dest_files=["res://.godot/imported/pool_fraction.glsl-9dd31db342d7c2edd1d906efcf99fc6b.res"]
+
+[params]
+

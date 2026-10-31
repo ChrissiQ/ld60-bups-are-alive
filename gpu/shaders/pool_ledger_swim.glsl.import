@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://briqlaleqn3va"
+path="res://.godot/imported/pool_ledger_swim.glsl-10bc42ac69fc245515c92946ca323512.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_ledger_swim.glsl"
+dest_files=["res://.godot/imported/pool_ledger_swim.glsl-10bc42ac69fc245515c92946ca323512.res"]
+
+[params]
+
