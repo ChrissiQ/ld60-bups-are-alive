@@ -11,7 +11,8 @@ extends SceneTree
 ##                                  log), in the game build 
 ##   long [hours] [founders] [limit] [feed] [bloom]   x10,000 for `hours` sim-hours: frame times, memory, the population; MEM lines
 ##   perf [bups] [radius] [speed] [seconds]           a dish filled with `bups` at once, drawn, at `speed`: frame times, achieved speed
-## Prints "GAME CHECK OK" or the failures. Every SCRIPT ERROR or ERROR line Godot prints is a failure too: grep the output for them.
+## Prints "GAME CHECK OK" or the failures. A SCRIPT ERROR anywhere while it runs fails it (a Logger counts them); an ERROR line Godot
+## prints is a failure too: grep the output for them.
 ##
 ## Expected values of `edits`, written before the first run [derived unless marked]:
 ## - consistent (after each change, paused and settled): the pool's live ids of the dish are unique and equal the family tree's living
@@ -44,9 +45,33 @@ var args: PackedStringArray
 var frame_ms := PackedFloat64Array()
 var _last_usec := 0
 var g: ParityGame  ## perf's world (a dish filled at once, not the game screen's)
+var script_errors := ScriptErrors.new()
+
+
+## Counts the SCRIPT ERRORs Godot reports while the check runs (from any thread), so one fails the check.
+class ScriptErrors extends Logger:
+	var _mutex := Mutex.new()
+	var _seen: Array = []
+
+	func _log_error(function: String, file: String, line: int, code: String, _rationale: String, _editor_notify: bool, error_type: int, _script_backtraces: Array[ScriptBacktrace]) -> void:
+		if error_type != ERROR_TYPE_SCRIPT:
+			return
+		_mutex.lock()
+		_seen.append("%s (%s:%d %s)" % [code, file, line, function])
+		_mutex.unlock()
+
+	func _log_message(_message: String, _error: bool) -> void:
+		pass
+
+	func seen() -> Array:
+		_mutex.lock()
+		var out := _seen.duplicate()
+		_mutex.unlock()
+		return out
 
 
 func _initialize() -> void:
+	OS.add_logger(script_errors)
 	args = OS.get_cmdline_user_args()
 	mode = args[0] if args.size() > 0 else "smoke"
 	if DisplayServer.get_name() == "headless":
@@ -107,6 +132,9 @@ func _run() -> void:
 			TestUtil.show(false, "no mode named %s" % mode)
 	if TestUtil.checks == 0:
 		TestUtil.show(false, "the mode made its checks (a script error stops a mode before them)")
+	var errors := script_errors.seen()
+	TestUtil.show(errors.is_empty(), "no SCRIPT ERROR while the check ran (%d%s)" % [errors.size(), ": " + "; ".join(errors.slice(0, 3)) if not errors.is_empty() else ""])
+	OS.remove_logger(script_errors)
 	print("%d checks, %d failed" % [TestUtil.checks, TestUtil.failures.size()])
 	TestUtil.finish(self, "GAME CHECK OK", "GAME CHECK FAILED:")
 
@@ -468,7 +496,6 @@ func _save(d: Dish) -> void:
 		return
 	var loaded := Dish.new()
 	main.add_child(loaded)
-	loaded.global_position = main._free_slot_position()
 	loaded.load_blob(back)
 	for i in 600:
 		if loaded._state != null:
