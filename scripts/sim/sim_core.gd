@@ -151,8 +151,9 @@ func release() -> void:
 # ---- dishes --------------------------------------------------------------------------------------------------------------------------
 
 ## Adds a dish (its founders as its first segment, its field filled); returns its row, or -1 when there is no free row or it would pass
-## the memory budget.
-func add_dish(spec: DishSpec) -> int:
+## the memory budget. `grid`: the dish's grid made already (DishGrid.make of the spec's size, resolution, patchiness and patch seed, which
+## must then be set), so the caller can make it on another thread: the landscape of a big grid takes a while in script.
+func add_dish(spec: DishSpec, grid: DishGrid = null) -> int:
 	var row := _free_row()
 	if row < 0:
 		return -1
@@ -161,7 +162,8 @@ func add_dish(spec: DishSpec) -> int:
 		s.seed = _derived_seed(s.number)
 	if s.patch_seed == 0:
 		s.patch_seed = hash([s.seed, 7]) & 0x7FFFFFFF
-	var grid := DishGrid.make(s.radius, s.resolution, s.patchiness, s.patch_seed)
+	if grid == null:
+		grid = DishGrid.make(s.radius, s.resolution, s.patchiness, s.patch_seed)
 	var count := s.founders.size() / RB
 	if not _make_room(row, s, grid, count):
 		return -1
@@ -279,8 +281,8 @@ func thaw(blob: DishBlob) -> int:
 ## size, grid, limit and settings, fresh medium, `next_number`). A pass of its own: no step, no draw, no event; the stats after it
 ## count the moved bups in the destination. Returns {new_row, moved, ids} ({} when the destination could not be made or the room for
 ## the move would pass the memory budget: then nothing moved, a destination made for it is gone again, and `errors` says so; nothing
-## ran, so OVERFLOW_BUDGET is not set).
-func pipette(row: int, centre: Vector2, radius: float, dest: Variant = null) -> Dictionary:
+## ran, so OVERFLOW_BUDGET is not set). `grid`: a new destination's grid made already (see `add_dish`).
+func pipette(row: int, centre: Vector2, radius: float, dest: Variant = null, grid: DishGrid = null) -> Dictionary:
 	var dst := -1
 	var made := false
 	if dest is int:
@@ -288,9 +290,11 @@ func pipette(row: int, centre: Vector2, radius: float, dest: Variant = null) -> 
 		if not _dishes.has(dst):
 			return {}
 	else:
-		var spec: DishSpec = dest if dest is DishSpec else _receiver_spec(row)
+		if not _dishes.has(row):
+			return {}
+		var spec: DishSpec = dest if dest is DishSpec else receiver_spec(row)
 		spec.founders = PackedByteArray()
-		dst = add_dish(spec)
+		dst = add_dish(spec, grid)
 		made = dst >= 0
 	if dst < 0 or dst == row or not _dishes.has(row):
 		if made:
@@ -414,13 +418,14 @@ func _resized(blob: DishBlob, old: DishGrid, new_radius: float, res: int) -> Dic
 	out.conc2 = _resample(blob.conc2, old, grid, shrinking)
 	out.dplo = arena.zeros(grid.n * grid.n * 4)
 	out.dphi = arena.zeros(grid.n * grid.n * 4)
-	var kept := PackedByteArray()
 	var deaths := PackedByteArray()
 	var removed := 0
-	var mass_um := float(_consts["mass_um"])
-	for i in blob.count():
-		var rec := blob.records.slice(i * RB, (i + 1) * RB)
-		if shrinking:
+	out.records = blob.records
+	if shrinking:
+		var kept := PackedByteArray()
+		var mass_um := float(_consts["mass_um"])
+		for i in blob.count():
+			var rec := blob.records.slice(i * RB, (i + 1) * RB)
 			var x := float(rec.decode_float(GpuLayout.R_X * 4))
 			var y := float(rec.decode_float(GpuLayout.R_Y * 4))
 			var dist := sqrt(x * x + y * y)
@@ -429,8 +434,8 @@ func _resized(blob: DishBlob, old: DishGrid, new_radius: float, res: int) -> Dic
 				removed += 1
 				continue
 			_keep_inside(rec, new_radius - 0.5 * rec.decode_float(GpuLayout.R_MASS * 4) * mass_um, dist)
-		kept.append_array(rec)
-	out.records = kept
+			kept.append_array(rec)
+		out.records = kept
 	out.clouds = blob.clouds
 	out.husks = blob.husks
 	var ds := blob.dstate.duplicate()
@@ -1697,12 +1702,14 @@ func _derived_seed(number: int) -> int:
 
 
 ## A new dish for a pipette's bups: the source's size, grid, limit and settings, a fresh medium, the next number (`next_number`: past
-## every dish this world has had, running, frozen or gone).
-func _receiver_spec(row: int) -> DishSpec:
+## every dish this world has had, running, frozen or gone; taken now, so a dish added before this one is made does not take it), its seed
+## and its landscape's seed drawn as `add_dish` would.
+func receiver_spec(row: int) -> DishSpec:
 	var s := (_dishes[row] as CoreDish).spec.copy()
 	s.number = next_number
-	s.seed = 0
-	s.patch_seed = 0
+	next_number += 1
+	s.seed = _derived_seed(s.number)
+	s.patch_seed = hash([s.seed, 7]) & 0x7FFFFFFF
 	s.step = 0
 	s.world = {}
 	return s

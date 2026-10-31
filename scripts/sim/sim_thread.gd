@@ -69,6 +69,7 @@ var _births_per_step := 0.0
 var _last_timing := {}
 var _last_events: Array = [0, 0]  ## the last iteration's births and deaths
 var _refusal := ""  ## why the iterations are being refused (the memory budget), while they are; "" once one runs
+var _pipettes: Array = []  ## pipettes waiting for their new dish's grid, made on the worker pool: {client, centre, radius, dest, reply, spec, made, task}
 
 
 func _init(p_limits: PoolLimits = null, p_store: Object = null) -> void:
@@ -165,6 +166,7 @@ func _run() -> void:
 	while not _stopping():
 		for cmd in queue.drain():
 			_handle(cmd)
+		_finish_pipettes()
 		if _stopping():
 			break
 		_give_bound()
@@ -176,6 +178,11 @@ func _run() -> void:
 			continue
 		var busy := _iterate(k)
 		_rest(governor.rest_ms(busy))
+	for p: Dictionary in _pipettes:
+		WorkerThreadPool.wait_for_task_completion(p["task"])
+		if p["reply"] != null:
+			p["reply"].complete(null, "shutdown")
+	_pipettes.clear()
 	_core.release()
 	_core = null
 	_set_status("alive", false)
@@ -672,15 +679,40 @@ func _thaw(client: int, blob: DishBlob) -> void:
 			st.import_bytes(data, watched, live, number))
 
 
-## The pipette's retarget into a new dish like the source, at client row `dest`. The reply ({new_row, number, moved, ids})
-## comes from the worker after the store has the moved bups' new home, in event order.
+## The pipette's retarget into a new dish like the source, at client row `dest`. The new dish's grid (its landscape takes a while
+## in script: 135 ms for 100 cells across) is made on the worker pool while the dishes run on; the retarget is the first thing done once it
+## is ready, between iterations. The reply ({new_row, number, moved, ids}) comes from the worker after the store has the moved bups' new
+## home, in event order; a command about the source drained before then (a freeze, a trash) is done first.
 func _pipette(client: int, centre: Vector2, radius: float, dest: int, reply: SimReply) -> void:
 	if not _rows.has(client):
 		_refused[dest] = "no such dish"
 		if reply != null:
 			reply.complete(null, "no such dish")
 		return
-	var res := _core.pipette(_rows[client], centre, radius)
+	var spec := _core.receiver_spec(_rows[client])
+	var made := {}
+	var task := WorkerThreadPool.add_task(func() -> void:
+		made["grid"] = DishGrid.make(spec.radius, spec.resolution, spec.patchiness, spec.patch_seed)
+		queue.wake())
+	_pipettes.append({"client": client, "centre": centre, "radius": radius, "dest": dest, "reply": reply, "spec": spec, "made": made, "task": task})
+
+
+## The pipettes whose new dish's grid is ready, done now in the order they were asked.
+func _finish_pipettes() -> void:
+	while not _pipettes.is_empty() and WorkerThreadPool.is_task_completed(_pipettes[0]["task"]):
+		var p: Dictionary = _pipettes.pop_front()
+		WorkerThreadPool.wait_for_task_completion(p["task"])
+		_retarget(p["client"], p["centre"], p["radius"], p["dest"], p["reply"], p["spec"], p["made"]["grid"])
+		_changed = true
+
+
+func _retarget(client: int, centre: Vector2, radius: float, dest: int, reply: SimReply, spec: DishSpec, grid: DishGrid) -> void:
+	if not _rows.has(client):
+		_refused[dest] = "no such dish"
+		if reply != null:
+			reply.complete(null, "no such dish")
+		return
+	var res := _core.pipette(_rows[client], centre, radius, spec, grid)
 	if res.is_empty():
 		_refused[dest] = _core.errors[-1] if not _core.errors.is_empty() else "the pipette was refused"
 		if reply != null:
@@ -688,12 +720,12 @@ func _pipette(client: int, centre: Vector2, radius: float, dest: int, reply: Sim
 		return
 	var nr: int = res["new_row"]
 	_map(dest, nr)
-	var spec := _core.spec_of(nr)
-	_worlds[dest] = _new_world(spec, {})
+	var made_spec := _core.spec_of(nr)
+	_worlds[dest] = _new_world(made_spec, {})
 	var moved: int = res["moved"]
 	_had_bups[dest] = moved > 0
 	var ids: PackedInt64Array = res["ids"]
-	var number := spec.number
+	var number := made_spec.number
 	worker.push_op(func(st: Object) -> void:
 		if st != null and ids.size() > 0:
 			st.retarget_ids(ids, number)

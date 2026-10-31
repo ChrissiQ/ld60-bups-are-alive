@@ -31,6 +31,12 @@ extends SceneTree
 ##    unchanged; the same with 1,500 plankton husks names the husk slots; with the budget raised again the step runs (the flag stays).
 ##    Through SimThread: 8,000 founders in a pool of 16,384 slots with the budget at the bytes it holds: the iterations are refused, the
 ##    thread reports it once (status errors 1, the snapshot's timing["refused_iteration"] set), and a freeze still replies with its blob.
+## S  through SimThread with a LineageStore (the path WorldClient's calls take): a dish of 20 founders run a few iterations and frozen
+##    replies with lineage bytes of more than 8 and lineage ids holding every live id of its blob; for a second dish of 40 founders,
+##    asking for two of its ids and a probe gives, in a later snapshot, their records (ANSWER_BYTES each, the right ids), a steering
+##    Vector3 each and 4 floats for the probe; set_params' feed reaches the core's spec; a pipette of a 700 µm disc replies with moved
+##    > 0 and new_row 2 while the iterations run on (the new dish's grid is made on the worker pool), and dish 2 is in a later snapshot
+##    with that count; resizing the second dish to 400 µm replies with removed > 0 and the core's spec says 400.
 
 var _store_ok := ClassDB.class_exists("LineageStore")
 
@@ -45,6 +51,7 @@ func _init() -> void:
 	_founders()
 	_refused()
 	_refused_through_thread()
+	_through_thread()
 	TestUtil.finish(self, "OK core_calls_test")
 
 
@@ -345,6 +352,78 @@ func _refused_through_thread() -> void:
 	TestUtil.show(freeze.is_done() and freeze.error() == "" and freeze.value() is DishBlob and (freeze.value() as DishBlob).count() == 8000, "O a freeze still replies with the dish's blob (%s)" % [freeze.error()])
 	thread.stop()
 	TestUtil.show(not thread.status()["alive"], "O the thread stops and joins")
+
+
+func _through_thread() -> void:
+	if not _store_ok:
+		print("SKIP core_calls_test through SimThread: no LineageStore in this build")
+		return
+	var store: Object = ClassDB.instantiate("LineageStore")
+	store.set_constants(Cell.RESERVE_PER_MASS, Cell.ADD_MASS_FACTOR)
+	var thread := SimThread.new(PoolLimits.new(), store)
+	thread.start()
+	var until := Time.get_ticks_msec() + 20000
+	while not thread.status()["ready"] and Time.get_ticks_msec() < until:
+		OS.delay_msec(10)
+	var a := _spec(1, Scenario.small(20, 1500.0).seed(71))
+	var b := _spec(2, Scenario.small(40, 1500.0).seed(72))
+	thread.submit(SimCommand.new(SimCommand.KIND_ADD_DISH, {"row": 0, "spec": a}))
+	thread.submit(SimCommand.new(SimCommand.KIND_ADD_DISH, {"row": 1, "spec": b}))
+	var ids := PackedInt64Array([GpuLayout.id_of(b.founders, 3), GpuLayout.id_of(b.founders, 17)])
+	thread.submit(SimCommand.new(SimCommand.KIND_ASK, {"row": 1, "questions": {"tracked": Array(ids), "probes": [[0.0, 0.0, 20.0, 1.0]]}}))
+	_run_for(thread, 20)
+	var freeze := SimReply.new()
+	thread.submit(SimCommand.new(SimCommand.KIND_FREEZE, {"row": 0}, freeze))
+	_wait(freeze)
+	var blob: DishBlob = freeze.value()
+	var lineage: PackedByteArray = blob.host.get("lineage", PackedByteArray()) if blob != null else PackedByteArray()
+	var exported := PackedInt64Array(blob.host.get("lineage_ids", [])) if blob != null else PackedInt64Array()
+	var all_in := blob != null and blob.count() > 0
+	for i in (blob.count() if blob != null else 0):
+		all_in = all_in and exported.has(GpuLayout.id_of(blob.records, i))
+	TestUtil.show(lineage.size() > 8 and all_in, "S a frozen dish's lineage through the thread: %d bytes, %d ids, every live id in it" % [lineage.size(), exported.size()])
+	var snap: Snapshot = thread.worker.latest()
+	var ans: Dictionary = snap.answers.get(1, {})
+	var tracked: Dictionary = ans.get("tracked", {})
+	var right := tracked.size() == 2
+	for id: int in ids:
+		var r: PackedByteArray = tracked.get(id, PackedByteArray())
+		right = right and r.size() == GpuLayout.ANSWER_BYTES and SimCore._answer_id(r) == id and (ans.get("steer", {}) as Dictionary).get(id) is Vector3
+	TestUtil.show(right and (ans.get("probes", PackedFloat32Array()) as PackedFloat32Array).size() == 4, "S the snapshot answers the tracked bups (%d), their steering and the probe" % tracked.size())
+	thread.submit(SimCommand.new(SimCommand.KIND_SET_PARAMS, {"row": 1, "params": {"feed_density": 7.0}}))
+	var feed := SimReply.new()
+	thread.submit(SimCommand.new(SimThread.KIND_INSPECT, {"call": func(core: SimCore, rows: Dictionary) -> float: return core.spec_of(rows[1]).feed_density}, feed))
+	_wait(feed)
+	TestUtil.show(is_equal_approx(float(feed.value()), 7.0), "S set_params' feed reaches the core (%s)" % [feed.value()])
+	var iterations_before := int(thread.worker.latest().timing.get("iterations", 0))
+	var pip := SimReply.new()
+	thread.submit(SimCommand.new(SimCommand.KIND_PIPETTE, {"row": 1, "centre": Vector2.ZERO, "radius": 700.0, "new_row": 2}, pip))
+	_run_for(thread, 30, pip)
+	var value: Dictionary = pip.value() if pip.value() is Dictionary else {}
+	var iterations_after := int(thread.worker.latest().timing.get("iterations", 0))
+	TestUtil.show(pip.error() == "" and int(value.get("moved", 0)) > 0 and int(value.get("new_row", -1)) == 2, "S a pipette through the thread moved %d bups into row %d (%s)" % [int(value.get("moved", 0)), int(value.get("new_row", -1)), pip.error()])
+	print("S iterations while the pipette's grid was made: %d" % (iterations_after - iterations_before))
+	_run_for(thread, 10)
+	var ds: DishState = thread.worker.latest().dishes.get(2)
+	TestUtil.show(ds != null and ds.count > 0, "S the new dish is in a later snapshot (%d bups)" % (ds.count if ds != null else -1))
+	var rs := SimReply.new()
+	thread.submit(SimCommand.new(SimCommand.KIND_RESIZE, {"row": 1, "radius": 400.0}, rs))
+	_wait(rs)
+	var radius := SimReply.new()
+	thread.submit(SimCommand.new(SimThread.KIND_INSPECT, {"call": func(core: SimCore, rows: Dictionary) -> float: return core.spec_of(rows[1]).radius}, radius))
+	_wait(radius)
+	var rv: Dictionary = rs.value() if rs.value() is Dictionary else {}
+	TestUtil.show(int(rv.get("removed", 0)) > 0 and is_equal_approx(float(radius.value()), 400.0), "S resizing through the thread removed %d bups; the spec says %s um" % [int(rv.get("removed", 0)), radius.value()])
+	thread.stop()
+
+
+## Frames of x600 for `frames` sixtieths of a second (until `reply` is done, when one is given).
+static func _run_for(thread: SimThread, frames: int, reply: SimReply = null) -> void:
+	for f in frames:
+		thread.submit(SimCommand.new(SimCommand.KIND_SET_TIME, {"speed": 600.0, "paused": false, "real_dt": 1.0 / 60.0}))
+		OS.delay_msec(16)
+	if reply != null:
+		_wait(reply)
 
 
 static func _wait(reply: SimReply) -> void:

@@ -12,8 +12,10 @@ extends SceneTree
 ## After: the moved ids and a trash's ids come from a kernel that writes only the ids (8 bytes a bup) and are read through a right-sized
 ## copy, so the pipette's read is under 1 ms and a trash about the copy of 8 MB; a freeze reads the records once.
 ## Measured [M1 Pro, 1M bups, 356 MB record buffers, medians of 3]: before, trash 158.6 ms, gather 24.4, freeze 187.3, pipette 2 mm 161.6,
-## pipette 30 mm 180.8; after, 4.2, 23.1, 29.0, 148.9, 149.3. What the pipette has left is its new dish's grid (DishGrid.make for a 90 mm
-## dish of 100 cells, 140 ms in script), not a read.
+## pipette 30 mm 180.8; after, 4.1, 22.5, 27.9, 149.9, 149.7. What the pipette has left is its new dish's grid (DishGrid.make for a 90 mm
+## dish of 100 cells, 140 ms in script, 135 of them the landscape), not a read: with the grid made beforehand, as the sim thread makes it on
+## the worker pool, the pipette of 2 mm takes 8.2 ms. A resize (not a read either: the records changed in script, the field resampled, a
+## new grid) takes 1,629 ms to 60 mm and 323 ms to 120 mm.
 
 const RADIUS := 90000.0
 
@@ -30,12 +32,18 @@ func _initialize() -> void:
 	var blob := _blob()
 	var core := SimCore.new()
 	print("SimCore kernels' errors: %s" % [core.errors])
-	var times := {"remove_dish (trash)": [], "gather": [], "freeze": [], "pipette 2 mm": [], "pipette 30 mm": []}
+	var times := {"remove_dish (trash)": [], "gather": [], "freeze": [], "pipette 2 mm": [], "pipette 30 mm": [], "pipette 2 mm, its grid made already (the sim thread's way)": [],
+		"resize to 60 mm": [], "resize to 120 mm": []}
 	var moved := {}
 	for r in reps:
 		for op: String in times:
 			var row := core.load_dish(blob)
 			core.run(1, 18.0)
+			var spec: DishSpec = null
+			var grid: DishGrid = null
+			if op.contains("made already"):
+				spec = core.receiver_spec(row)
+				grid = DishGrid.make(spec.radius, spec.resolution, spec.patchiness, spec.patch_seed)
 			var t0 := Time.get_ticks_usec()
 			match op:
 				"remove_dish (trash)":
@@ -53,6 +61,15 @@ func _initialize() -> void:
 				"pipette 30 mm":
 					var res: Dictionary = core.pipette(row, Vector2.ZERO, 30000.0)
 					moved[op] = res.get("moved", -1)
+				"pipette 2 mm, its grid made already (the sim thread's way)":
+					var res: Dictionary = core.pipette(row, Vector2.ZERO, 2000.0, spec, grid)
+					moved[op] = res.get("moved", -1)
+				"resize to 60 mm":
+					core.resize(row, 60000.0)
+					moved[op] = core.count(row)
+				"resize to 120 mm":
+					core.resize(row, 120000.0)
+					moved[op] = core.count(row)
 			times[op].append((Time.get_ticks_usec() - t0) / 1000.0)
 			for rr: int in core.running_rows():
 				core.remove_dish(rr)
