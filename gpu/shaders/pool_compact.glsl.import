@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://c8m12f1b3713y"
+path="res://.godot/imported/pool_compact.glsl-26e1a47e614190f118bbf442cdee61e8.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_compact.glsl"
+dest_files=["res://.godot/imported/pool_compact.glsl-26e1a47e614190f118bbf442cdee61e8.res"]
+
+[params]
+

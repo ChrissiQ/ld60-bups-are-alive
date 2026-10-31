@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://m5tmwkjkuvpw"
+path="res://.godot/imported/pool_scan_s_chunks.glsl-83d63c9543b8b89aa544a2cce356539c.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_scan_s_chunks.glsl"
+dest_files=["res://.godot/imported/pool_scan_s_chunks.glsl-83d63c9543b8b89aa544a2cce356539c.res"]
+
+[params]
+

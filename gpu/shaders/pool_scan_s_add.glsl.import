@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://bnk5f84pi41jr"
+path="res://.godot/imported/pool_scan_s_add.glsl-0e51c7550b2991b4908617209b292d46.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_scan_s_add.glsl"
+dest_files=["res://.godot/imported/pool_scan_s_add.glsl-0e51c7550b2991b4908617209b292d46.res"]
+
+[params]
+

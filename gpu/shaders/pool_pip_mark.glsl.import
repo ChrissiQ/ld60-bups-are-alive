@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://cqstidvblfskc"
+path="res://.godot/imported/pool_pip_mark.glsl-7f196e6635716f1bc7d95463a31fab3a.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_pip_mark.glsl"
+dest_files=["res://.godot/imported/pool_pip_mark.glsl-7f196e6635716f1bc7d95463a31fab3a.res"]
+
+[params]
+

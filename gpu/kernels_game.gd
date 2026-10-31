@@ -269,6 +269,54 @@ void main() {
 """
 
 
+# ---- the pooled world (see gpu/kernels_life.gd, "the pooled world", for the step's order and DNEXT) -----------------------------------
+
+## Before a batch: every dish's births, deaths and moves of the batch start from 0 (before a retarget pass, which counts its moves).
+const K_POOL_EV_BEGIN := """
+void ev_begin(uint d) { DS(d, DS_BIRTHS) = 0u; DS(d, DS_DEATHS) = 0u; DS(d, DS_MOVED_IN) = 0u; DS(d, DS_MOVED_OUT) = 0u; }
+GRID_LOOP(ev_begin, D_MAX)
+"""
+
+
+## `events` for the pool (after pool_finalize, before pool_compact), one pass over the bups: a dish's births and deaths of the step go to
+## the event ring from the places pool_finalize gave the dish, in the order of its bups; a death carries the number of the dish it died
+## in. A removed dish has none.
+static func pool_events() -> String:
+	var t := GpuKernelsLife.swapped(K_EVENTS, "void main() {\n\tBUP_THREAD\n", "void event_bup(uint i, uint d, uint l) {\n\tif (FLAG(d, DPF_REMOVED)) return;\n\tuint kid = EXCK[i] - DN(d, DN_KID_BASE);\n")
+	t = GpuKernelsLife.swapped(t, "CNT[CNT_SURVIVORS] + EXCK[i] < uint(P[P_CAPACITY])", "DS(d, DS_SURVIVORS) + kid < DPU(d, DP_CAP)")
+	t = GpuKernelsLife.swapped(t, "CNT[CNT_BIRTHS] + EXCK[i]", "DN(d, DN_BIRTH_BASE) + kid")
+	t = GpuKernelsLife.swapped(t, "CNT[CNT_NEXT_ID_LO] + EXCK[i]", "DS(d, DS_NEXT_ID_LO) + kid")
+	t = GpuKernelsLife.swapped(t, "CNT[CNT_NEXT_ID_HI] + (lo < CNT[CNT_NEXT_ID_LO]", "DS(d, DS_NEXT_ID_HI) + (lo < DS(d, DS_NEXT_ID_LO)")
+	t = GpuKernelsLife.swapped(t, "atomicAdd(CNT[CNT_BIRTHS_LOST], 1u)", "atomicAdd(DS(d, DS_BIRTHS_LOST), 1u)")
+	t = GpuKernelsLife.swapped(t, "CNT[CNT_DEATHS] + (i - EXCS[i])", "DN(d, DN_DEATH_BASE) + (l - (EXCS[i] - DN(d, DN_SURV_BASE)))")
+	t = GpuKernelsLife.swapped(t, "EVD[o + ED_STEP] = st;", "EVD[o + ED_STEP] = (DPU(d, DP_NUMBER) << EV_DISH_SHIFT) | (st & EV_STEP_MASK);")
+	t = GpuKernelsLife.swapped(t, "atomicAdd(CNT[CNT_DEATHS_LOST], 1u)", "atomicAdd(DS(d, DS_DEATHS_LOST), 1u)")
+	assert(not t.contains("CNT["), "pool_events still reads CNT")
+	return t + "BUP_LOOP(event_bup)\n"
+
+
+## `stats1` for the pool: the sums of each block of BLK_SLOTS slots (a block is one dish's) into SPART at the block's place.
+static func pool_stats1() -> String:
+	var t := GpuKernelsLife.swapped(K_STATS1, "void main() {\n\tuint i = gl_GlobalInvocationID.x, l = gl_LocalInvocationID.x;", "void stats_block(uint blk, uint d) {\n\tuint l = gl_LocalInvocationID.x, i = (blk << BLK_SHIFT) + l;")
+	t = GpuKernelsLife.swapped(t, "if (i < CNT[CNT_BUPS]) {", "if (d != NO_DISH && i - DS(d, DS_START) < DS(d, DS_COUNT)) {")
+	t = GpuKernelsLife.swapped(t, "SPART[gl_WorkGroupID.x * STATS_SUMS", "SPART[blk * STATS_SUMS")
+	assert(not t.contains("CNT["), "pool_stats1 still reads CNT")
+	return t + "BLOCK_LOOP(stats_block)\n"
+
+
+## `stats2` for the pool: one group for each running dish sums its blocks' partial sums in the order of its bups, as `stats2` sums a
+## single dish's, into the dish's row of STATS as sample `pcs.pb` (STATS_WORDS words each, STATS_DISH_WORDS a dish), taken after step
+## `pcs.pc`. A dish's blocks that a single dish would have had besides (up to its capacity) add exactly 0, so a dish's sums are its own alone.
+static func pool_stats2() -> String:
+	var t := GpuKernelsLife.swapped(K_STATS2, "void main() {\n\tuint l = gl_LocalInvocationID.x, groups = uint(pcs.pa);", "void stats_dish(uint d) {\n\tuint l = gl_LocalInvocationID.x, first = DS(d, DS_START) >> BLK_SHIFT, groups = (DS(d, DS_COUNT) + BLK_SLOTS - 1u) >> BLK_SHIFT;")
+	t = GpuKernelsLife.swapped(t, "SPART[g * STATS_SUMS", "SPART[(first + g) * STATS_SUMS")
+	t = GpuKernelsLife.swapped(t, "uint o = uint(pcs.pb);", "uint o = d * STATS_DISH_WORDS + uint(pcs.pb) * STATS_WORDS;")
+	t = GpuKernelsLife.swapped(t, "float(CNT[CNT_BUPS])", "float(DS(d, DS_COUNT))")
+	t = t.replace("OUT[", "STATS[")
+	assert(not t.contains("CNT[") and not t.contains("OUT["), "pool_stats2 still reads CNT or writes OUT")
+	return t + "void main() {\n\tfor (uint d = gl_WorkGroupID.x; d < D_MAX; d += gl_NumWorkGroups.x) {\n\t\tif (FLAG(d, DPF_RUNNING)) stats_dish(d);\n\t\tbarrier();\n\t}\n}\n"
+
+
 ## Adds these kernels to `out` (see GpuKernels.all()).
 static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "ev_begin", K_EV_BEGIN, ["CNT"])
@@ -286,3 +334,8 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "erase_puffs", K_ERASE_PUFFS, ["PCNT", "PUFF", "ERASE"])
 	GpuKernels.add(out, "mirror", K_MIRROR, ["PCNT", "PUFF", "MIRROR"])
 	GpuKernels.add(out, "out_keep", K_OUT_KEEP, ["OUT", "OUTK"])
+	var dn := GpuKernelsLife.dn_funcs() + GpuKernelsLife.FLAG_FUNC
+	GpuKernels.add(out, "pool_ev_begin", K_POOL_EV_BEGIN, ["DSTATE"])
+	GpuKernels.add(out, "pool_events", pool_events(), ["P", "BUPS_U", "CHILD_U", "SURV", "KID", "EXCS", "EXCK", "EVB", "EVD", "WORLD", "BLKDISH", "DSTATE", "DISHP", "DNEXT"], dn, 64, GpuKernelsLife.POOL_TYPES)
+	GpuKernels.add(out, "pool_stats1", pool_stats1(), ["BUPS", "SPART", "WORLD", "BLKDISH", "DSTATE"], "", 256)
+	GpuKernels.add(out, "pool_stats2", pool_stats2(), ["SPART", "STATS", "DSTATE", "DISHP"], GpuKernelsLife.FLAG_FUNC, 256, {"STATS": "uint"})

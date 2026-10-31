@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://cmcawalf5miag"
+path="res://.godot/imported/pool_finalize.glsl-7e4e938a3da4d296b6a28e5c306bd788.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_finalize.glsl"
+dest_files=["res://.godot/imported/pool_finalize.glsl-7e4e938a3da4d296b6a28e5c306bd788.res"]
+
+[params]
+

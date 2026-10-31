@@ -258,6 +258,398 @@ void main() {
 """
 
 
+# ---- the pooled world: the same lives for every dish of the pool at once (see gpu/kernels.gd, POOL_FUNCS) ------------------------------
+# A dish's bups are the segment of slots it occupies (BLKDISH, DS_START, DS_COUNT); its random streams, ranks, ids, limit and counters are
+# its own (keyed by the bup's place l in its segment), so a dish's run is the same alone or among others. A step's order:
+#   pool_conj_clear, pool_conj_count, pool_conj_scan_*, pool_conj_scatter, pool_conj_apply (conjugation)
+#   pool_life, pool_scan_s_* (SURV -> EXCS), pool_scan_k_* (KID -> EXCK), pool_finalize
+#   (the death clouds read: SURV 0 for a bup not kept, R_PY -2 for one dead of starvation or chance, its rank among its dish's dead
+#   l - (EXCS[i] - DN_SURV_BASE), the dish's dead DS_COUNT - DS_SURVIVORS; a removed dish has no dead)
+#   pool_events, pool_blk_fill, pool_compact (into the other half), pool_setcount (pa 1), then the halves swap (GpuKernels.PING_PONG)
+# and a batch begins with pool_ev_begin (kernels_game.gd). The pipette's retarget pass, at the head of a batch after pool_ev_begin:
+#   pool_pip_mark, pool_pip_max, pool_scan_s_*, pool_pip_final, pool_pip_scatter, pool_blk_fill, pool_setcount (pa 0), the halves
+#   swap, then the stats (pool_stats1, pool_stats2) over the new layout.
+# Segments lie in the order of their dishes' rows: a compaction or a retarget places each running row's segment after the rows before
+# it, so a segment the host writes anywhere (a new dish, a thaw) is in row order after the next pass.
+# The scratch buffers these kernels add (uint words): DNEXT (the step's per-dish words DN_*, D_MAX + 1 rows of DN_WORDS: the last row's
+# first word is the next layout's slots), CBKT (a slot each: a donor's bucket or NOT_DONOR), DCNT and DOFF (a word a bucket:
+# conj_buckets(slots)), DLIST (a slot each: the donors by bucket), GSUM and GOFF (GpuKernels.scan_groups' most groups: a grid scan's
+# sums and offsets).
+
+const DN_WORDS := 8  ## words of a dish's row of DNEXT
+const DN_START := 0  ## the dish's first slot in the next layout
+const DN_SIZE := 1  ## its segment's slots in the next layout (its count rounded up to whole blocks; 0 for a row not running)
+const DN_SURV_BASE := 2  ## EXCS at the dish's first slot (the kept, or in a retarget the moved, bups of the dishes before it)
+const DN_KID_BASE := 3  ## EXCK at the dish's first slot
+const DN_BIRTH_BASE := 4  ## the event ring's place of the dish's first birth of the step
+const DN_DEATH_BASE := 5  ## and of its first death
+const DN_MOVED_HI := 6  ## a retarget: the largest counter of the bups moved into this dish, its bits 32-43
+const DN_MOVED_LO := 7  ## and its low 32 bits (both 0 outside a retarget pass)
+const DN_TOTAL_WORD := GpuLayout.D_MAX * DN_WORDS  ## the word of DNEXT that holds the next layout's slots in use
+const DNEXT_WORDS := (GpuLayout.D_MAX + 1) * DN_WORDS
+const CONJ_MIN_BUCKETS := 65536  ## the fewest buckets of the donors' index
+const POOL_ROWS_PER_THREAD := GpuLayout.D_MAX / 256  ## pool_finalize and pool_pip_final: one group of 256 threads over every row
+
+## The scratch buffers' element types (for GpuKernels.add).
+const POOL_TYPES := {"DNEXT": "uint", "CBKT": "uint", "DCNT": "uint", "DOFF": "uint", "DLIST": "uint", "GSUM": "uint", "GOFF": "uint"}
+
+
+## The buckets of the donors' index for a pool of `slots` slots in use (the kernels work it out from WORLD[WD_SLOTS] the same way): a
+## quarter of the next power of two, and at least CONJ_MIN_BUCKETS. DCNT and DOFF hold this many for the most slots the pool can have.
+static func conj_buckets(slots: int) -> int:
+	var p := 2
+	while p < slots:
+		p <<= 1
+	return maxi(CONJ_MIN_BUCKETS, p >> 2)
+
+
+## The GLSL of the DNEXT names and its lookup DN(d, word) (a kernel that uses DN binds DNEXT).
+static func dn_funcs() -> String:
+	var names := {
+		"DN_WORDS": DN_WORDS, "DN_START": DN_START, "DN_SIZE": DN_SIZE, "DN_SURV_BASE": DN_SURV_BASE, "DN_KID_BASE": DN_KID_BASE,
+		"DN_BIRTH_BASE": DN_BIRTH_BASE, "DN_DEATH_BASE": DN_DEATH_BASE, "DN_MOVED_HI": DN_MOVED_HI, "DN_MOVED_LO": DN_MOVED_LO,
+		"DN_TOTAL_WORD": DN_TOTAL_WORD, "CONJ_MIN_BUCKETS": CONJ_MIN_BUCKETS, "POOL_ROWS_PER_THREAD": POOL_ROWS_PER_THREAD,
+	}
+	var text := ""
+	for name: String in names:
+		text += "const uint %s = %du;\n" % [name, names[name]]
+	return text + "#define DN(d, w) DNEXT[(d) * DN_WORDS + (w)]\n"
+
+
+## FLAG(d, f): flag f (a DPF_* bit) of dish row d (a kernel that uses it binds DISHP).
+const FLAG_FUNC := "#define FLAG(d, f) ((DPU(d, DP_FLAGS) & (1u << (f))) != 0u)\n"
+
+
+## A copy of `text` with `from` replaced by `to`, which must be there exactly once: the pooled kernels are the single-dish path's with their single
+## dish's words replaced by the dish's own, so the model's arithmetic has one source.
+static func swapped(text: String, from: String, to: String) -> String:
+	assert(text.count(from) == 1, "pooled kernel: expected one '%s'" % from)
+	return text.replace(from, to)
+
+
+## `life` for each slot of the pool: SURV and KID 0 for every slot, then the single-dish path's division, death and mutation for each bup with its
+## dish's stream, limit, growth and stationary flag; a removed dish's bups are not kept and draw nothing.
+static func pool_life() -> String:
+	var t := swapped(K_LIFE, """void main() {
+	uint i = gl_GlobalInvocationID.x;
+	if (i >= uint(P[P_CAPACITY])) return;
+	uint n_now = CNT[CNT_BUPS];
+	SURV[i] = 0u; KID[i] = 0u;
+	if (i >= n_now) return;
+	uint b = i * RECORD_WORDS;
+	uint s = hash(hash(CNT[CNT_SEED] ^ (CNT[CNT_STEP] * 0x85EBCA6BU) ^ 777U) + i * 0x9E3779B9U);  // (this dish's stream, this step, this bup)""", """void life_slot(uint i, uint d, uint l) {
+	SURV[i] = 0u; KID[i] = 0u;
+	if (d == NO_DISH) return;
+	uint n_now = DS(d, DS_COUNT);
+	if (l >= n_now || FLAG(d, DPF_REMOVED)) return;
+	uint b = i * RECORD_WORDS;
+	uint s = DISH_STREAM(d, l, 777U);  // (this dish's stream, this step, this bup)""")
+	t = swapped(t, "float(CNT[CNT_GROWTH]) - P[P_LIMIT]", "float(DS(d, DS_GROWTH)) - float(DPU(d, DP_LIMIT))")
+	t = swapped(t, "if (P[P_STATIONARY] > 0.5)", "if (FLAG(d, DPF_STATIONARY))")
+	t = swapped(t, "atomicAdd(CNT[CNT_TRIMMED], 1u)", "atomicAdd(DS(d, DS_TRIMMED), 1u)")
+	assert(not t.contains("CNT["), "pool_life still reads CNT")
+	return t + "SLOT_LOOP(life_slot)\n"
+
+
+## Each dish's counts after `life` and the scans, and the next layout (one group of 256 threads, POOL_ROWS_PER_THREAD rows each): for a
+## running row its kept bups and newborns (from the scans at its first and last slot), the count after the step (up to DP_CAP), what
+## the trim expects of the next step (the single-dish path's `finalize`), its births and deaths (none for a removed dish); then over every row in row
+## order the next layout's starts (segments of whole blocks) and the event ring's places of each dish's births and deaths this step
+## (after every event of the iteration so far: the sum of DS_BIRTHS and DS_DEATHS over the rows), and the next layout's slots in use.
+const K_POOL_FINALIZE := """
+const float CAP_SIGMAS = 4.0;  // (as `finalize`)
+shared uint sh_size[256], sh_births[256], sh_deaths[256], sh_tb[256], sh_td[256];
+void main() {
+	if (gl_WorkGroupID.x != 0u) return;
+	uint t = gl_LocalInvocationID.x;
+	uint size[POOL_ROWS_PER_THREAD], births[POOL_ROWS_PER_THREAD], deaths[POOL_ROWS_PER_THREAD];
+	uint my_size = 0u, my_births = 0u, my_deaths = 0u, tb = 0u, td = 0u;
+	for (uint r = 0u; r < POOL_ROWS_PER_THREAD; r++) {
+		uint d = t * POOL_ROWS_PER_THREAD + r;
+		size[r] = 0u; births[r] = 0u; deaths[r] = 0u;
+		tb += DS(d, DS_BIRTHS); td += DS(d, DS_DEATHS);
+		if (!FLAG(d, DPF_RUNNING)) continue;
+		uint n = DS(d, DS_COUNT), start = DS(d, DS_START);
+		uint surv = 0u, kids = 0u;
+		if (n > 0u) {
+			uint last = start + n - 1u;
+			DN(d, DN_SURV_BASE) = EXCS[start]; DN(d, DN_KID_BASE) = EXCK[start];
+			surv = EXCS[last] + SURV[last] - EXCS[start];
+			kids = EXCK[last] + KID[last] - EXCK[start];
+		}
+		uint next = min(surv + kids, DPU(d, DP_CAP));
+		DS(d, DS_SURVIVORS) = surv; DS(d, DS_NEWBORN) = kids; DS(d, DS_NEXT_COUNT) = next;
+		if (FLAG(d, DPF_REMOVED)) {
+			DS(d, DS_GROWTH) = 0u;
+		} else {
+			int natural = int(n - surv) - int(DS(d, DS_TRIMMED));
+			int growth = int(kids) - natural;
+			float margin = CAP_SIGMAS * sqrt(2.0 * float(kids + uint(max(natural, 0))));
+			DS(d, DS_GROWTH) = uint(max(float(growth), 0.0) + ceil(margin));
+			births[r] = next - surv; deaths[r] = n - surv;
+		}
+		DS(d, DS_TRIMMED) = 0u;
+		size[r] = (next + BLK_SLOTS - 1u) & ~(BLK_SLOTS - 1u);
+		my_size += size[r]; my_births += births[r]; my_deaths += deaths[r];
+	}
+	sh_size[t] = my_size; sh_births[t] = my_births; sh_deaths[t] = my_deaths; sh_tb[t] = tb; sh_td[t] = td;
+	barrier();
+	for (uint off = 1u; off < 256u; off <<= 1u) {
+		uint a = t >= off ? sh_size[t - off] : 0u, bb = t >= off ? sh_births[t - off] : 0u, c = t >= off ? sh_deaths[t - off] : 0u;
+		uint e = t >= off ? sh_tb[t - off] : 0u, f = t >= off ? sh_td[t - off] : 0u;
+		barrier();
+		sh_size[t] += a; sh_births[t] += bb; sh_deaths[t] += c; sh_tb[t] += e; sh_td[t] += f;
+		barrier();
+	}
+	uint at = sh_size[t] - my_size, bat = sh_tb[255] + sh_births[t] - my_births, dat = sh_td[255] + sh_deaths[t] - my_deaths;
+	for (uint r = 0u; r < POOL_ROWS_PER_THREAD; r++) {
+		uint d = t * POOL_ROWS_PER_THREAD + r;
+		DN(d, DN_START) = at; DN(d, DN_SIZE) = size[r]; DN(d, DN_BIRTH_BASE) = bat; DN(d, DN_DEATH_BASE) = dat;
+		at += size[r]; bat += births[r]; dat += deaths[r];
+		if (FLAG(d, DPF_RUNNING)) { DS(d, DS_BIRTHS) += births[r]; DS(d, DS_DEATHS) += deaths[r]; }
+	}
+	if (t == 255u) DNEXT[DN_TOTAL_WORD] = sh_size[255];
+}
+"""
+
+## The block table of the next layout (into BLKDISH2, the other half's): each block of the next layout's slots belongs to the last row whose
+## next start is at or before it (the starts rise with the row), if it lies inside that row's segment.
+const K_POOL_BLK_FILL := """
+void blk_fill(uint k) {
+	uint at = k << BLK_SHIFT, lo = 0u, hi = D_MAX - 1u;
+	while (lo < hi) { uint mid = (lo + hi + 1u) >> 1u; if (DN(mid, DN_START) <= at) lo = mid; else hi = mid - 1u; }
+	BLKDISH2[k] = at < DN(lo, DN_START) + DN(lo, DN_SIZE) ? lo : NO_DISH;
+}
+GRID_LOOP(blk_fill, DNEXT[DN_TOTAL_WORD] >> BLK_SHIFT)
+"""
+
+## `compact` for the pool (one thread per 16 bytes of a record of the layout now, into the other half): a kept bup goes to its dish's
+## next start plus its rank among the dish's kept ones, a newborn the dish places after them, with its id (the dish's next id plus its
+## rank among the dish's newborns: 64 bits in R_ID_LO and R_ID_HI, with the carry).
+const K_POOL_COMPACT := """
+void compact_piece(uint t) {
+	uint i = t / RECORD_VEC4, part = t % RECORD_VEC4;
+	uint d = BLKDISH[i >> BLK_SHIFT];
+	if (d == NO_DISH || i - DS(d, DS_START) >= DS(d, DS_COUNT)) return;
+	if (SURV[i] == 1u) BUPS2_V4U[(DN(d, DN_START) + EXCS[i] - DN(d, DN_SURV_BASE)) * RECORD_VEC4 + part] = BUPS_V4U[i * RECORD_VEC4 + part];
+	if (KID[i] == 1u) {
+		uint k = EXCK[i] - DN(d, DN_KID_BASE), place = DS(d, DS_SURVIVORS) + k;
+		if (place < DPU(d, DP_CAP)) {
+			uvec4 v = CHILD_V4U[i * RECORD_VEC4 + part];
+			uint lo = DS(d, DS_NEXT_ID_LO) + k;
+			if (part == R_ID_LO / 4u) v[R_ID_LO % 4u] = lo;
+			if (part == R_ID_HI / 4u) v[R_ID_HI % 4u] = DS(d, DS_NEXT_ID_HI) + (lo < DS(d, DS_NEXT_ID_LO) ? 1u : 0u);
+			BUPS2_V4U[(DN(d, DN_START) + place) * RECORD_VEC4 + part] = v;
+		}
+	}
+}
+GRID_LOOP(compact_piece, WORLD[WD_SLOTS] * RECORD_VEC4)
+"""
+
+## After a compaction (pa 1: a step) or a retarget (pa 0): each running row takes the next layout's start and count, a step also its
+## next id (past every newborn, placed or not, as `setcount`) and its step; the pool its slots in use.
+const K_POOL_SETCOUNT := """
+void setcount_row(uint d) {
+	if (d == 0u) WORLD[WD_SLOTS] = DNEXT[DN_TOTAL_WORD];
+	if (!FLAG(d, DPF_RUNNING)) return;
+	DS(d, DS_START) = DN(d, DN_START); DS(d, DS_COUNT) = DS(d, DS_NEXT_COUNT);
+	if (pcs.pa > 0.5) {
+		uint lo = DS(d, DS_NEXT_ID_LO) + DS(d, DS_NEWBORN); if (lo < DS(d, DS_NEXT_ID_LO)) DS(d, DS_NEXT_ID_HI) += 1u; DS(d, DS_NEXT_ID_LO) = lo;
+		DS(d, DS_STEP) += 1u;
+	}
+}
+GRID_LOOP(setcount_row, D_MAX)
+"""
+
+## Conjugation for the pool. The single-dish path's rule (see CONJ_FUNCS above): a recipient takes, of the donors of its dish that touch it and transfer
+## to it this step (a draw keyed by the dish's step and the two bups' places in their dish), the one with the lowest place. That is a
+## least value, the same in whatever order the donors are listed, so the donors' index need not be sorted within a bucket: it is a count
+## of the donors in each bucket of (dish, 20 µm cell), a scan, and a scatter, with no overflow (CBKT keeps each donor's bucket between
+## the count and the scatter; DLIST is the donors by bucket, bucket b's from DOFF[b] - DCNT[b] up to DOFF[b] after the scatter).
+const POOL_CONJ_FUNCS := """
+const uint NOT_DONOR = 0xFFFFFFFFu;
+uint conj_mask() { return CONJ_BUCKETS - 1u; }
+uint dbucket(uint d, int cx, int cy, uint mask) { return hash(uint(cx) * 73856093u ^ uint(cy) * 19349663u ^ d * 83492791u) & mask; }
+"""
+
+## WORLD[WD_SLOTS]'s count of buckets as a GLSL expression (conj_buckets()).
+const CONJ_BUCKETS_EXPR := "max(CONJ_MIN_BUCKETS, (2u << uint(findMSB(max(WORLD[WD_SLOTS], 2u) - 1u))) >> 2u)"
+
+const K_POOL_CONJ_CLEAR := """
+void conj_clear(uint k) {
+	if (k < CONJ_BUCKETS) DCNT[k] = 0u;
+	if (k < D_MAX) { DS(k, DS_DONORS) = 0u; DS(k, DS_DONOR_REACH) = 0u; }
+}
+GRID_LOOP(conj_clear, max(CONJ_BUCKETS, D_MAX))
+"""
+
+const K_POOL_CONJ_COUNT := """
+void conj_count(uint i, uint d, uint l) {
+	uint b = i * RECORD_WORDS;
+	if (BUPS[b + R_DONOR] < 0.5) { CBKT[i] = NOT_DONOR; return; }
+	atomicAdd(DS(d, DS_DONORS), 1u);
+	atomicMax(DS(d, DS_DONOR_REACH), floatBitsToUint(0.5 * BUPS[b + R_MASS] * P[P_MASS_UM]));  // (a positive float's bits order as the float does)
+	uint h = dbucket(d, int(floor(BUPS[b + R_X] / DCELL)), int(floor(BUPS[b + R_Y] / DCELL)), conj_mask());
+	CBKT[i] = h;
+	atomicAdd(DCNT[h], 1u);
+}
+BUP_LOOP(conj_count)
+"""
+
+const K_POOL_CONJ_SCATTER := """
+void conj_scatter(uint i, uint d, uint l) {
+	uint h = CBKT[i];
+	if (h != NOT_DONOR) DLIST[atomicAdd(DOFF[h], 1u)] = i;
+}
+BUP_LOOP(conj_scatter)
+"""
+
+const K_POOL_CONJ_APPLY := """
+void conj_apply(uint i, uint d, uint l) {
+	if (DS(d, DS_DONORS) == 0u) return;
+	uint b = i * RECORD_WORDS;
+	if (BUPS[b + R_DONOR] > 0.5) return;
+	float x = BUPS[b + R_X], y = BUPS[b + R_Y];
+	float rr = 0.5 * BUPS[b + R_MASS] * P[P_MASS_UM];
+	float reach = uintBitsToFloat(DS(d, DS_DONOR_REACH)) + rr + P[P_CONTACT_UM];  // (the farthest a donor's centre can be and touch it)
+	int x0 = int(floor((x - reach) / DCELL)), x1 = int(floor((x + reach) / DCELL)), y0 = int(floor((y - reach) / DCELL)), y1 = int(floor((y + reach) / DCELL));
+	uint start = DS(d, DS_START), key = DISH_KEY(d), mask = conj_mask(), best = NOT_DONOR;
+	for (int gx = x0; gx <= x1; gx++) for (int gy = y0; gy <= y1; gy++) {
+		uint h = dbucket(d, gx, gy, mask), n = DCNT[h];
+		if (n == 0u) continue;
+		uint end = DOFF[h];
+		for (uint k = end - n; k < end; k++) {
+			uint j = DLIST[k];
+			if (BLKDISH[j >> BLK_SHIFT] != d) continue;  // (another dish's donor in the same bucket)
+			uint lj = j - start;
+			if (lj >= best) continue;
+			uint db = j * RECORD_WORDS;
+			float dx = BUPS[db + R_X] - x, dy = BUPS[db + R_Y] - y;
+			float range = 0.5 * BUPS[db + R_MASS] * P[P_MASS_UM] + rr + P[P_CONTACT_UM];
+			if (dx * dx + dy * dy > range * range) continue;
+			if (keyed01(key, l, lj) < P[P_CONJ_CHANCE]) best = lj;
+		}
+	}
+	if (best == NOT_DONOR) return;
+	int run = 1;
+	for (int k = 0; k < 3; k++) {
+		if (keyed01(key ^ 0x5bd1e995u, l * 4u + uint(k), best) < P[P_CONJ_CONTINUE]) run++; else break;
+	}
+	uint db = (start + best) * RECORD_WORDS;
+	for (int g = 0; g < run; g++) BUPS[b + R_SPEED + uint(g)] = BUPS[db + R_SPEED + uint(g)];
+	int mask_ = (1 << (2 * run)) - 1;  // (the raised ceilings of the genes that moved go with them)
+	BUPS[b + R_REACH] = float((int(BUPS[b + R_REACH] + 0.5) & ~mask_) | (int(BUPS[db + R_REACH] + 0.5) & mask_));
+}
+BUP_LOOP(conj_apply)
+"""
+
+## The pipette's retarget: the bups of the source dish inside a disc move to the destination dish, with their ids, genes and
+## everything else but their place, shifted by the disc's centre (the destination's middle); no step, no draw, no event. The push constant
+## of every pass: pa, pb the disc's centre and pc its radius (µm, the source dish's own coordinates), pd the rows (source + destination
+## x D_MAX). pool_pip_mark marks the moved bups (SURV 1, PIPDST their destination) and the largest counter among them (its high bits),
+## pool_pip_max its low bits; after the scan of SURV, pool_pip_final gives every running row its next layout (the source less the moved,
+## the destination with them after its own bups), counts the move (DS_MOVED_OUT, DS_MOVED_IN), sets the destination's next id past the
+## largest moved counter (with the destination's own number), and pool_pip_scatter repacks the pool into the other half.
+const PIP_FUNCS := """
+uint pip_src() { return uint(pcs.pd) % D_MAX; }
+uint pip_dst() { return uint(pcs.pd) / D_MAX; }
+"""
+
+const K_POOL_PIP_MARK := """
+void pip_mark(uint i, uint d, uint l) {
+	bool moved = false;
+	uint b = i * RECORD_WORDS;
+	if (d == pip_src() && l < DS(d, DS_COUNT)) {
+		float dx = uintBitsToFloat(BUPS_U[b + R_X]) - pcs.pa, dy = uintBitsToFloat(BUPS_U[b + R_Y]) - pcs.pb;
+		moved = dx * dx + dy * dy <= pcs.pc * pcs.pc;
+	}
+	SURV[i] = moved ? 1u : 0u;
+	PIPDST[i] = moved ? pip_dst() : NO_DISH;
+	if (moved) atomicMax(DN(pip_dst(), DN_MOVED_HI), BUPS_U[b + R_ID_HI] & ID_HI_COUNTER_MASK);
+}
+SLOT_LOOP(pip_mark)
+"""
+
+const K_POOL_PIP_MAX := """
+void pip_max(uint i, uint d, uint l) {
+	uint to = PIPDST[i];
+	if (to == NO_DISH) return;
+	uint b = i * RECORD_WORDS;
+	if ((BUPS_U[b + R_ID_HI] & ID_HI_COUNTER_MASK) == DN(to, DN_MOVED_HI)) atomicMax(DN(to, DN_MOVED_LO), BUPS_U[b + R_ID_LO]);
+}
+BUP_LOOP(pip_max)
+"""
+
+const K_POOL_PIP_FINAL := """
+shared uint sh_size[256];
+void main() {
+	if (gl_WorkGroupID.x != 0u) return;
+	uint t = gl_LocalInvocationID.x, src = pip_src(), dst = pip_dst();
+	uint moved = 0u, n_src = DS(src, DS_COUNT), first = DS(src, DS_START);
+	if (n_src > 0u) { uint last = first + n_src - 1u; moved = EXCS[last] + SURV[last] - EXCS[first]; }
+	uint size[POOL_ROWS_PER_THREAD], my_size = 0u;
+	for (uint r = 0u; r < POOL_ROWS_PER_THREAD; r++) {
+		uint d = t * POOL_ROWS_PER_THREAD + r;
+		size[r] = 0u;
+		if (!FLAG(d, DPF_RUNNING)) continue;
+		uint next = DS(d, DS_COUNT);
+		if (d == src) { next -= moved; DN(d, DN_SURV_BASE) = n_src > 0u ? EXCS[first] : 0u; DS(d, DS_MOVED_OUT) += moved; }
+		if (d == dst) {
+			next += moved; DS(d, DS_MOVED_IN) += moved;
+			if (moved > 0u) {  // (the dish's next counter: past the largest moved one, as BupSim::add_state_bytes kept ids)
+				uint mlo = DN(d, DN_MOVED_LO) + 1u, mhi = DN(d, DN_MOVED_HI) + (mlo == 0u ? 1u : 0u);
+				uint hi = DS(d, DS_NEXT_ID_HI), chi = hi & ID_HI_COUNTER_MASK, clo = DS(d, DS_NEXT_ID_LO);
+				if (mhi > chi || (mhi == chi && mlo > clo)) { DS(d, DS_NEXT_ID_HI) = (hi & ~ID_HI_COUNTER_MASK) | mhi; DS(d, DS_NEXT_ID_LO) = mlo; }
+			}
+			DN(d, DN_MOVED_HI) = 0u; DN(d, DN_MOVED_LO) = 0u;
+		}
+		DS(d, DS_NEXT_COUNT) = next;
+		size[r] = (next + BLK_SLOTS - 1u) & ~(BLK_SLOTS - 1u);
+		my_size += size[r];
+	}
+	sh_size[t] = my_size;
+	barrier();
+	for (uint off = 1u; off < 256u; off <<= 1u) {
+		uint a = t >= off ? sh_size[t - off] : 0u;
+		barrier();
+		sh_size[t] += a;
+		barrier();
+	}
+	uint at = sh_size[t] - my_size;
+	for (uint r = 0u; r < POOL_ROWS_PER_THREAD; r++) {
+		uint d = t * POOL_ROWS_PER_THREAD + r;
+		DN(d, DN_START) = at; DN(d, DN_SIZE) = size[r];
+		at += size[r];
+	}
+	if (t == 255u) DNEXT[DN_TOTAL_WORD] = sh_size[255];
+}
+"""
+
+const K_POOL_PIP_SCATTER := """
+void pip_piece(uint t) {
+	uint i = t / RECORD_VEC4, part = t % RECORD_VEC4;
+	uint d = BLKDISH[i >> BLK_SHIFT];
+	if (d == NO_DISH) return;
+	uint l = i - DS(d, DS_START);
+	if (l >= DS(d, DS_COUNT)) return;
+	uvec4 v = BUPS_V4U[i * RECORD_VEC4 + part];
+	uint to = DN(d, DN_START) + l;
+	if (d == pip_src()) {
+		uint before = EXCS[i] - DN(d, DN_SURV_BASE);  // (the moved bups before this one in the dish)
+		if (SURV[i] == 1u) {
+			uint dst = pip_dst();
+			to = DN(dst, DN_START) + DS(dst, DS_COUNT) + before;
+			if (part == R_X / 4u) { v[R_X % 4u] = floatBitsToUint(uintBitsToFloat(v[R_X % 4u]) - pcs.pa); v[R_Y % 4u] = floatBitsToUint(uintBitsToFloat(v[R_Y % 4u]) - pcs.pb); }
+		} else {
+			to = DN(d, DN_START) + l - before;
+		}
+	}
+	BUPS2_V4U[to * RECORD_VEC4 + part] = v;
+}
+GRID_LOOP(pip_piece, WORLD[WD_SLOTS] * RECORD_VEC4)
+"""
+
+
 ## Adds these kernels to `out` (see GpuKernels.all()).
 static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "life", K_LIFE, ["P", "CNT", "BUPS", "CHILD", "SURV", "KID"])
@@ -275,3 +667,28 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "conj_clear", K_CONJ_CLEAR, ["CNT", "DTAB"], CONJ_FUNCS)
 	GpuKernels.add(out, "conj_insert", K_CONJ_INSERT, ["P", "CNT", "BUPS", "DTAB"], CONJ_FUNCS)
 	GpuKernels.add(out, "conj_apply", K_CONJ_APPLY, ["P", "CNT", "BUPS", "DTAB"], CONJ_FUNCS)
+	_register_pool(out)
+
+
+## The pooled world's kernels (see "the pooled world" above).
+static func _register_pool(out: Dictionary) -> void:
+	assert(GpuLayout.R_X / 4 == GpuLayout.R_Y / 4 and GpuLayout.D_MAX % 256 == 0, "pool_pip_scatter shifts x and y in one piece; pool_finalize splits the rows over 256 threads")
+	var dn := dn_funcs()
+	var conj := CONJ_FUNCS + dn + "#define CONJ_BUCKETS (%s)\n" % CONJ_BUCKETS_EXPR + POOL_CONJ_FUNCS
+	var t := POOL_TYPES
+	GpuKernels.add(out, "pool_conj_clear", K_POOL_CONJ_CLEAR, ["WORLD", "DSTATE", "DCNT"], dn + "#define CONJ_BUCKETS (%s)\n" % CONJ_BUCKETS_EXPR, 64, t)
+	GpuKernels.add(out, "pool_conj_count", K_POOL_CONJ_COUNT, ["P", "BUPS", "WORLD", "BLKDISH", "DSTATE", "CBKT", "DCNT"], conj, 64, t)
+	GpuKernels.add_grid_scan(out, "pool_conj_scan", "DCNT", "DOFF", "GSUM", "GOFF", CONJ_BUCKETS_EXPR.replace("CONJ_MIN_BUCKETS", "%du" % CONJ_MIN_BUCKETS), ["WORLD"])
+	GpuKernels.add(out, "pool_conj_scatter", K_POOL_CONJ_SCATTER, ["WORLD", "BLKDISH", "DSTATE", "CBKT", "DOFF", "DLIST"], conj, 64, t)
+	GpuKernels.add(out, "pool_conj_apply", K_POOL_CONJ_APPLY, ["P", "BUPS", "WORLD", "BLKDISH", "DSTATE", "DCNT", "DOFF", "DLIST"], conj, 64, t)
+	GpuKernels.add(out, "pool_life", pool_life(), ["P", "BUPS", "CHILD", "SURV", "KID", "WORLD", "BLKDISH", "DSTATE", "DISHP"], FLAG_FUNC)
+	GpuKernels.add_grid_scan(out, "pool_scan_s", "SURV", "EXCS", "GSUM", "GOFF", "WORLD[WD_SLOTS]", ["WORLD"])
+	GpuKernels.add_grid_scan(out, "pool_scan_k", "KID", "EXCK", "GSUM", "GOFF", "WORLD[WD_SLOTS]", ["WORLD"])
+	GpuKernels.add(out, "pool_finalize", K_POOL_FINALIZE, ["SURV", "KID", "EXCS", "EXCK", "DSTATE", "DISHP", "DNEXT"], dn + FLAG_FUNC, 256, t)
+	GpuKernels.add(out, "pool_blk_fill", K_POOL_BLK_FILL, ["DNEXT", "BLKDISH2"], dn, 64, t)
+	GpuKernels.add(out, "pool_compact", K_POOL_COMPACT, ["BUPS_V4U", "BUPS2_V4U", "CHILD_V4U", "SURV", "KID", "EXCS", "EXCK", "WORLD", "BLKDISH", "DSTATE", "DISHP", "DNEXT"], dn, 64, t)
+	GpuKernels.add(out, "pool_setcount", K_POOL_SETCOUNT, ["WORLD", "DSTATE", "DISHP", "DNEXT"], dn + FLAG_FUNC, 64, t)
+	GpuKernels.add(out, "pool_pip_mark", K_POOL_PIP_MARK, ["BUPS_U", "SURV", "PIPDST", "WORLD", "BLKDISH", "DSTATE", "DNEXT"], dn + PIP_FUNCS, 64, t)
+	GpuKernels.add(out, "pool_pip_max", K_POOL_PIP_MAX, ["BUPS_U", "PIPDST", "WORLD", "BLKDISH", "DSTATE", "DNEXT"], dn, 64, t)
+	GpuKernels.add(out, "pool_pip_final", K_POOL_PIP_FINAL, ["SURV", "EXCS", "DSTATE", "DISHP", "DNEXT"], dn + FLAG_FUNC + PIP_FUNCS, 256, t)
+	GpuKernels.add(out, "pool_pip_scatter", K_POOL_PIP_SCATTER, ["BUPS_V4U", "BUPS2_V4U", "SURV", "EXCS", "WORLD", "BLKDISH", "DSTATE", "DNEXT"], dn + PIP_FUNCS, 64, t)

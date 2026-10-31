@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://c5l8tg8pn18l6"
+path="res://.godot/imported/pool_conj_count.glsl-89657dc69a3f140d2b701a8bca74df15.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_conj_count.glsl"
+dest_files=["res://.godot/imported/pool_conj_count.glsl-89657dc69a3f140d2b701a8bca74df15.res"]
+
+[params]
+
