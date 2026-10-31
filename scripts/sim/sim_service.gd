@@ -5,6 +5,12 @@ extends Node
 ## `WorldClient.snapshot_changed` is emitted on the main thread.
 ##
 ## A test swaps in its own backend (a FakeSimBackend) with `use_backend` before any scene asks for the world.
+##
+## The GPU backend's script is loaded by path when the world is first asked for, not named here: naming its class makes this autoload load
+## the simulation's and the game's scripts when it is compiled, and some of them are then left in use at exit (Godot reports 78 objects and
+## 41 resources leaked in a headless test that never asks for the world).
+
+const GPU_BACKEND := "res://scripts/sim/gpu_sim_backend.gd"
 
 var _backend: SimBackend = null
 var _world: WorldClient = null
@@ -14,7 +20,8 @@ var _world: WorldClient = null
 func world() -> WorldClient:
 	if _world == null:
 		if _backend == null:
-			_backend = GpuSimBackend.new() if GpuSimBackend.available() else CpuSimBackend.new()
+			var gpu: GDScript = load(GPU_BACKEND)
+			_backend = gpu.new() if gpu.available() else CpuSimBackend.new()
 			_backend.start(PoolLimits.from_settings())
 		_world = WorldClient.new(_backend)
 	return _world

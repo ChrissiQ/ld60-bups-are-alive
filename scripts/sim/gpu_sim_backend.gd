@@ -68,6 +68,7 @@ func view_source() -> ViewSource:
 func shutdown() -> void:
 	if thread != null:
 		thread.stop()
+	_warm.clear()
 
 
 # ---- beyond the seam (WorldClient uses them when the backend has them) ---------------------------------------------------------------
