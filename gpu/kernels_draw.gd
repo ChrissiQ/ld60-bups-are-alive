@@ -83,6 +83,144 @@ void main() {
 """
 
 
+## ---- The pooled world's drawing kernels. Their outputs are storage buffers laid out as the textures they stand for
+## (the kernel framework binds buffers only): PAYLOAD one uvec4 a texel, IDTEX two words a texel, HAZEPIX and STEERPIX one RGBA8 word a cell
+## (red in the low byte, the way `haze_bytes` and `steer_bytes` lay their bytes), THUMBS the atlas, one RGBA8 word a texel. ----
+
+const THUMB_TILE := 64  ## a dish's thumbnail tile: THUMB_TILE x THUMB_TILE texels
+const THUMB_ATLAS := 2048  ## the atlas's width and height in texels: THUMB_ATLAS / THUMB_TILE tiles a row, so D_MAX tiles fill it
+const POOL_DRAW_TYPES := {
+	"PAYLOAD": "uvec4", "IDTEX": "uint", "VIEW": "float", "VQ": "float", "HAZEPIX": "uint", "STEERPIX": "uint",
+	"THUMBN": "uint", "THUMBMAX": "uint", "THUMBS": "uint",
+}
+
+## The main-view dish's records as picture words, one thread a texel of `pcs.pa`'s row, for the whole last row of the texture: a dead bup
+## (the marker R_PY = -2 that `life` leaves until `compact`) and the texels past the dish's bups are zero (length 0: nothing drawn). The
+## length is the body's true length, with no minimum and no trail; the angle is where it faces.
+const K_POOL_PAYLOAD := COLOUR_FUNCS + """
+uint byte_of(float v) { return uint(clamp(v * 255.0 + 0.5, 0.0, 255.0)); }
+void f(uint k) {
+	uint d = uint(pcs.pa);
+	uvec4 px = uvec4(0u);
+	uint lo = 0u, hi = 0u;
+	if (k < DS(d, DS_COUNT)) {
+		uint b = (DS(d, DS_START) + k) * RECORD_WORDS;
+		if (BUPS[b + R_PY] != -2.0) {
+			px[PL_X] = floatBitsToUint(BUPS[b + R_X]);
+			px[PL_Y] = floatBitsToUint(BUPS[b + R_Y]);
+			px[PL_SHAPE] = packHalf2x16(vec2(BUPS[b + R_MASS] * P[P_MASS_UM], atan(BUPS[b + R_DY], BUPS[b + R_DX])));
+			vec3 col = from_hsv(BUPS[b + R_HUE], BUPS[b + R_SAT], BUPS[b + R_VAL]);
+			px[PL_COLOR] = (byte_of(col.r) << PL_RED_SHIFT) | (byte_of(col.g) << PL_GREEN_SHIFT) | (byte_of(col.b) << PL_BLUE_SHIFT);
+			lo = BUPS_U[b + R_ID_LO]; hi = BUPS_U[b + R_ID_HI];
+		}
+	}
+	PAYLOAD[k] = px;
+	IDTEX[k * 2u + IDT_LO] = lo; IDTEX[k * 2u + IDT_HI] = hi;
+}
+GRID_LOOP(f, ((DS(uint(pcs.pa), DS_COUNT) + PAYLOAD_TEX_WIDTH - 1u) / PAYLOAD_TEX_WIDTH) * PAYLOAD_TEX_WIDTH)
+"""
+
+## What a cell of dish row `pcs.pa` shows (NutrientField::view_values): its concentration, and in a cell inside the dish the clouds' at the
+## cell's centre. VIEW is indexed by pool cell.
+const K_POOL_VIEW := """
+void f(uint l) {
+	uint d = uint(pcs.pa), n = DPU(d, DP_CELLS), c = DPU(d, DP_FIELD_BASE) + l;
+	float v = CONC[c];
+	if (INSIDE[c] != 0) {
+		float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS);
+		float pc, pgx, pgy, sg;
+		puffs_at_d(d, (float(l % n) + 0.5) * sp - org, (float(l / n) + 0.5) * sp - org, pc, pgx, pgy, sg);
+		v += pc;
+	}
+	VIEW[c] = v;
+}
+GRID_LOOP(f, DPU(uint(pcs.pa), DP_CELLS) * DPU(uint(pcs.pa), DP_CELLS))
+"""
+
+## The nutrient picture of dish row `pcs.pa` (NutrientField::haze_bytes): `pcs.pb` visible_above, `pcs.pc` alpha_scale, `pcs.pd` max_alpha.
+const K_POOL_HAZE := """
+void f(uint l) {
+	uint d = uint(pcs.pa);
+	float c = VIEW[DPU(d, DP_FIELD_BASE) + l];
+	uint px = 0u;
+	if (c > pcs.pb) px = 230u | (191u << 8) | (77u << 16) | (uint(min(sqrt(c) * pcs.pc, pcs.pd)) << 24);
+	HAZEPIX[l] = px;
+}
+GRID_LOOP(f, DPU(uint(pcs.pa), DP_CELLS) * DPU(uint(pcs.pa), DP_CELLS))
+"""
+
+## The steering picture of dish row `pcs.pa` (NutrientField::steer_bytes): VQ holds the swimmer's speed, its sense range, max_alpha and the
+## steering window.
+const K_POOL_STEER_MAP := """
+float view_cell(uint base, uint n, int ix, int iy) {
+	int o = OWNER[base + uint(iy) * n + uint(ix)];
+	return o < 0 ? 0.0 : VIEW[uint(o)];
+}
+void f(uint l) {
+	uint d = uint(pcs.pa), n = DPU(d, DP_CELLS), base = DPU(d, DP_FIELD_BASE);
+	uint px = 0u;
+	if (INSIDE[base + l] != 0) {
+		int ni = int(n), x = int(l % n), y = int(l / n);
+		int xm = max(x - 1, 0), xp = min(x + 1, ni - 1), ym = max(y - 1, 0), yp = min(y + 1, ni - 1);
+		float sp = DPF(d, DP_SPACING);
+		float gx = (view_cell(base, n, xp, y) - view_cell(base, n, xm, y)) / (float(xp - xm) * sp);
+		float gy = (view_cell(base, n, x, yp) - view_cell(base, n, x, ym)) / (float(yp - ym) * sp);
+		float reliable = 2.0 * steering_chance_d(d, VQ[0], VQ[1], VIEW[base + l], sqrt(gx * gx + gy * gy), VQ[3]) - 1.0;
+		px = 90u | (190u << 8) | (255u << 16) | (uint(clamp(reliable * VQ[2], 0.0, 255.0)) << 24);
+	}
+	STEERPIX[l] = px;
+}
+GRID_LOOP(f, DPU(uint(pcs.pa), DP_CELLS) * DPU(uint(pcs.pa), DP_CELLS))
+"""
+
+## The thumbnails' density tiles: a count of the bups in each texel of each dish's tile, the most in any texel of the tile,
+## then the tile's texels as white with the alpha the square root of the count over the most (so a sparse dish still shows). THUMBN is
+## D_MAX x THUMB_TILE² counts; THUMBMAX one word a row.
+const K_POOL_THUMB_CLEAR := """
+void f(uint k) { THUMBN[k] = 0u; if (k < D_MAX) THUMBMAX[k] = 0u; }
+GRID_LOOP(f, D_MAX * THUMB_TILE * THUMB_TILE)
+"""
+
+const K_POOL_THUMB_SPLAT := """
+void f(uint i, uint d, uint l) {
+	uint b = i * RECORD_WORDS;
+	if (BUPS[b + R_PY] == -2.0) return;
+	float r = DPF(d, DP_RADIUS), scale = float(THUMB_TILE) / (2.0 * r);
+	uint tx = uint(clamp(int((BUPS[b + R_X] + r) * scale), 0, int(THUMB_TILE) - 1));
+	uint ty = uint(clamp(int((BUPS[b + R_Y] + r) * scale), 0, int(THUMB_TILE) - 1));
+	uint n = atomicAdd(THUMBN[(d * THUMB_TILE + ty) * THUMB_TILE + tx], 1u) + 1u;
+	atomicMax(THUMBMAX[d], n);
+}
+BUP_LOOP(f)
+"""
+
+const K_POOL_THUMB_RESOLVE := """
+void f(uint k) {
+	uint d = k / (THUMB_TILE * THUMB_TILE), t = k % (THUMB_TILE * THUMB_TILE), tx = t % THUMB_TILE, ty = t / THUMB_TILE;
+	uint most = THUMBMAX[d], n = THUMBN[k];
+	uint alpha = most == 0u ? 0u : uint(clamp(sqrt(float(n) / float(most)) * 255.0 + 0.5, 0.0, 255.0));
+	uint across = THUMB_ATLAS / THUMB_TILE;
+	THUMBS[((d / across) * THUMB_TILE + ty) * THUMB_ATLAS + (d % across) * THUMB_TILE + tx] = alpha == 0u ? 0u : (255u | (255u << 8) | (255u << 16) | (alpha << 24));
+}
+GRID_LOOP(f, D_MAX * THUMB_TILE * THUMB_TILE)
+"""
+
+
+static func _register_pool(out: Dictionary) -> void:
+	var tile := "const uint THUMB_TILE = %du;\nconst uint THUMB_ATLAS = %du;\n" % [THUMB_TILE, THUMB_ATLAS]
+	var view_buffers := ["DISHP", "OWNER", "INSIDE", "VIEW"]
+	assert(GpuLayout.D_MAX == (THUMB_ATLAS / THUMB_TILE) * (THUMB_ATLAS / THUMB_TILE), "the atlas holds one tile a dish row")
+	GpuKernels.add(out, "pool_payload", K_POOL_PAYLOAD, ["P", "DSTATE", "BUPS", "BUPS_U", "PAYLOAD", "IDTEX"], "", 64, POOL_DRAW_TYPES)
+	GpuKernels.add(out, "pool_view", K_POOL_VIEW, ["DISHP", "CONC", "INSIDE", "ENTD", "BINS", "BINC", "VIEW"], GpuKernelsClouds.POOL_CLOUD_FUNCS, 64, POOL_DRAW_TYPES)
+	GpuKernels.add(out, "pool_haze", K_POOL_HAZE, ["DISHP", "VIEW", "HAZEPIX"], "", 64, POOL_DRAW_TYPES)
+	GpuKernels.add(out, "pool_steer_map", K_POOL_STEER_MAP, ["P", "TABLE", "DISHP", "OWNER", "INSIDE", "VIEW", "VQ", "STEERPIX"],
+		GpuKernelsField.LOOKUP_FUNCS + GpuKernelsClouds.POOL_STEER_FUNCS, 64, POOL_DRAW_TYPES)
+	GpuKernels.add(out, "pool_thumb_clear", K_POOL_THUMB_CLEAR, ["THUMBN", "THUMBMAX"], tile, 64, POOL_DRAW_TYPES)
+	GpuKernels.add(out, "pool_thumb_splat", K_POOL_THUMB_SPLAT, ["WORLD", "BLKDISH", "DSTATE", "DISHP", "BUPS", "THUMBN", "THUMBMAX"], tile, 64, POOL_DRAW_TYPES)
+	GpuKernels.add(out, "pool_thumb_resolve", K_POOL_THUMB_RESOLVE, ["THUMBN", "THUMBMAX", "THUMBS"], tile, 64, POOL_DRAW_TYPES)
+
+
 ## Adds the drawing's kernels to `out` (see GpuKernels.all()).
 static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "render_bups", K_RENDER_BUPS, ["P", "CNT", "BUPS", "INST"], COLOUR_FUNCS, 64, TYPES)
+	_register_pool(out)

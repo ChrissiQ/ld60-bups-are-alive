@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://cstys3rbp2s2o"
+path="res://.godot/imported/pool_steer_map.glsl-aa18e6f65b864eb19080e3f298421a48.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_steer_map.glsl"
+dest_files=["res://.godot/imported/pool_steer_map.glsl-aa18e6f65b864eb19080e3f298421a48.res"]
+
+[params]
+

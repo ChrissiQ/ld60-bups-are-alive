@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://begun6u777pgu"
+path="res://.godot/imported/pool_probe_full.glsl-b6fb2536ff753f68d7a6038e9c3243b1.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_probe_full.glsl"
+dest_files=["res://.godot/imported/pool_probe_full.glsl-b6fb2536ff753f68d7a6038e9c3243b1.res"]
+
+[params]
+

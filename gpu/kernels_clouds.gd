@@ -695,6 +695,44 @@ void f(uint i) {
 GRID_LOOP(f, uint(pcs.pa))
 """
 
+## The chance of steering up a slope (params.h `steering_chance`), for dish `d` (its receptor-noise scale is its own): from the motion table
+## (LOOKUP_FUNCS must come with it, and the buffers P and TABLE). `window` is the steering window in seconds, which is a constant of
+## SimConstants and no slot of P: the caller passes it. erf by the Chebyshev fit of Numerical Recipes' erfc (fractional error under 1.2e-7).
+const POOL_STEER_FUNCS := """
+float erfc_fit(float x) {
+	float z = abs(x), t = 1.0 / (1.0 + 0.5 * z);
+	float r = t * exp(-z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))));
+	return x >= 0.0 ? r : 2.0 - r;
+}
+float steering_chance_d(uint d, float speed, float sense_range, float c, float gradient, float window) {
+	float s = speed * gradient / (P[P_DETECTION_FLOOR] + c);
+	float eps = min(P[P_GRADIENT_NOISE] * (P[P_REFERENCE_SENSE] / sense_range) * sqrt(DPF(d, DP_NOISE_REFERENCE) / max(c, 1e-5)), 5.0);
+	float f, along, across;
+	lookup(s, eps, f, along, across);
+	float z = f * sqrt(window / (2.0 * max(along, 1e-6)));
+	return 0.5 * erfc_fit(-z * 0.70710678);
+}
+"""
+
+## The full point answer of dish row `pcs.pb` for `pcs.pa` queries (SPQ: x, y, speed, sense range; SPR: the unit direction up the gradient, the
+## chance of steering up it, the concentration; `pcs.pc` the steering window): `BupSim::steering_at` and the hover card's nutrient, from the
+## grid snapshot and the clouds as the single dish reads them. No gradient (1e-12 or less) gives (0, 0, 0.5).
+const K_POOL_PROBE_FULL := """
+void f(uint i) {
+	uint d = uint(pcs.pb);
+	float x = SPQ[i * 4u], y = SPQ[i * 4u + 1u], speed = SPQ[i * 4u + 2u], sense_range = SPQ[i * 4u + 3u];
+	float c, gx, gy, pc, pgx, pgy, sg;
+	readf_d(d, x, y, c, gx, gy);
+	puffs_at_d(d, x, y, pc, pgx, pgy, sg);
+	c += pc; gx += pgx; gy += pgy;
+	float glen = sqrt(gx * gx + gy * gy);
+	vec3 answer = vec3(0.0, 0.0, 0.5);
+	if (glen > 1e-12) answer = vec3(gx / glen, gy / glen, steering_chance_d(d, speed, sense_range, c, glen, pcs.pc));
+	SPR[i * 4u] = answer.x; SPR[i * 4u + 1u] = answer.y; SPR[i * 4u + 2u] = answer.z; SPR[i * 4u + 3u] = c;
+}
+GRID_LOOP(f, uint(pcs.pa))
+"""
+
 ## What a death gives back (the single dish's death_clouds, per dish). The dishes' death slots follow the step's other appends in the dish
 ## order: `pool_death_bases` (one thread over the rows) gives each dish the first of the deaths' slots, in CBASE (the clouds') and CBASE
 ## from D_MAX + 1 (the husks'). A dish with death husks makes husks of its first deaths up to the room its quota leaves (`husk_room`) and
@@ -814,6 +852,8 @@ static func _register_pool(out: Dictionary) -> void:
 	GpuKernels.add(out, "pool_cloud_live", K_POOL_CLOUD_LIVE, ["WORLD", "DSTATE", "PUFF", "CLIVE"], "", 64, types)
 	GpuKernels.add(out, "pool_cloud_cadence", K_POOL_CLOUD_CADENCE, ["DSTATE", "DISHP", "CLIVE"], "", 64, types)
 	GpuKernels.add(out, "pool_probe", K_POOL_PROBE, ["DISHP", "ENTD", "BINS", "BINC", "PQ", "PR"], POOL_CLOUD_FUNCS)
+	GpuKernels.add(out, "pool_probe_full", K_POOL_PROBE_FULL, ["P", "TABLE", "DISHP", "EFF", "ENTD", "BINS", "BINC", "SPQ", "SPR"],
+		GpuKernelsField.POOL_READF + GpuKernelsField.LOOKUP_FUNCS + POOL_CLOUD_FUNCS + POOL_STEER_FUNCS, 64, {"SPQ": "float", "SPR": "float"})
 	assert(GpuLayout.D_MAX == 1024, "pool_death_bases takes four rows a thread of one group of 256")
 	GpuKernels.add(out, "pool_death_bases", K_POOL_DEATH_BASES, ["P", "DSTATE", "DISHP", "CBASE"], DEATH_FUNCS, 256, types)
 	GpuKernels.add(out, "pool_death_clouds", K_POOL_DEATH_CLOUDS, ["P", "WORLD", "BLKDISH", "DSTATE", "DISHP", "BUPS", "SURV", "EXCS", "PUFF", "INSIDE", "DPLO", "DPHI", "CBASE"], fixed + POOL_DEP_FUNCS + DEATH_FUNCS, 64, types)

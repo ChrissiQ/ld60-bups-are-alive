@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://o0didm5r0h8l"
+path="res://.godot/imported/pool_thumb_splat.glsl-9ad73452d3814ef9f6057018082633e1.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_thumb_splat.glsl"
+dest_files=["res://.godot/imported/pool_thumb_splat.glsl-9ad73452d3814ef9f6057018082633e1.res"]
+
+[params]
+

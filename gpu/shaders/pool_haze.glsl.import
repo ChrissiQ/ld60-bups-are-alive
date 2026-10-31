@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://be8bkn764i35s"
+path="res://.godot/imported/pool_haze.glsl-c7bb1f4a97e024c33620e781e4ccc0d8.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_haze.glsl"
+dest_files=["res://.godot/imported/pool_haze.glsl-c7bb1f4a97e024c33620e781e4ccc0d8.res"]
+
+[params]
+
