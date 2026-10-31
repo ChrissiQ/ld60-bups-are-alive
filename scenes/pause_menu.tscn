@@ -199,7 +199,7 @@ label_text = "@pause.record_plankton_husks"
 [node name="RunningRow" parent="Scroll/Page/Card/Columns/Right/Initial" instance=ExtResource("3")]
 unique_name_in_owner = true
 layout_mode = 2
-label_text = "@pause.record_running"
+label_text = "@pause.record_device"
 
 [node name="LimitRow" parent="Scroll/Page/Card/Columns/Right/Initial" instance=ExtResource("3")]
 unique_name_in_owner = true
