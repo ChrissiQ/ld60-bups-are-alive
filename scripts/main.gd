@@ -196,7 +196,10 @@ func _ready() -> void:
 	Session.load_requested = false
 	var blob: DishBlob = DishCodec.read_blob(data["dish"]) if not data.is_empty() else null
 	if blob != null:
-		_carry_to(blob, world_time())
+		var now := world_time()
+		_carry_to(blob, now)
+		var saved := DishHistory.read(blob.host.get("history", {}))
+		_begin_game(now if saved.is_empty() else float(saved["origin"]))  # (the goals' dish began with the game, its history says when)
 	if blob == null or not dish.load_blob(blob):
 		if not data.is_empty():
 			SaveGame.delete(save_path)  # (a save that will not load is no save: the title screen stops offering it)
@@ -205,7 +208,6 @@ func _ready() -> void:
 		if dish.row >= 0:
 			_asked_rows[dish.row] = dish
 		tracker.from_dict(data["goals"])
-		_set_game_began(dish.history.origin)  # (the goals' dish began with the game)
 		stage_input.fit_camera()
 	_sync_tool_locks()
 	layers_panel.sync_from(dish)
@@ -240,20 +242,23 @@ func _exit_tree() -> void:
 
 
 func _begin_dish() -> void:
+	_begin_game(world_time())  # (the game begins with its dish, at the world's time)
 	dish.strike(Session.free_start if free_mode else null)
 	if dish.row >= 0:
 		_asked_rows[dish.row] = dish
-	_set_game_began(dish.history.origin)  # (the game begins with its dish, at the world's time)
 	tracker.apply_costs(dish)  # (strike resets it: experiment 2 and after costs what it did)
 	stage_input.fit_camera()
 	if free_mode:
 		toolbar.set_paused(true)  # the playground starts paused so you can set the scene
 
 
-## The game's clock begins at `world` (the world's time then): the readout, the graph with every dish together and the freezer count from it.
-func _set_game_began(world: float) -> void:
+## The game's clock begins at `world` (the world's time then): the readout, the graph with every dish together, the freezer and the family
+## tree's births and deaths count from it. The world is told before the game's first dish is asked for (WorldClient.begin_game: the
+## dishes' numbers start again too).
+func _begin_game(world: float) -> void:
 	game_began = world
 	graph.game_began = world
+	WorldClient.shared().begin_game(world)
 
 
 ## A save is read into a world whose clock is not the one it was saved on: the times its history keeps go with the world's (the
