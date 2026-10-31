@@ -70,7 +70,6 @@ func _rebuild() -> void:
 			continue
 		var entry := Button.new()
 		_style_entry(entry, d, id)
-		entry.clip_text = true
 		entry.pressed.connect(bup_chosen.emit.bind(d, id))
 		var row := BupListRow.make(info, 12.0, entry, &"TightRow")
 		var stop := Button.new()

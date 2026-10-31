@@ -18,6 +18,8 @@ static func make(info: Dictionary, swatch_size: float, entry: Button, row_variat
 	row.add_child(swatch)
 	entry.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	entry.focus_mode = Control.FOCUS_NONE
+	entry.clip_text = true
+	entry.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS  # (a name too long for the row ends in "...", never mid-number)
 	entry.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(entry)
 	return row

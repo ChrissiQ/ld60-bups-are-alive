@@ -19,6 +19,7 @@ var editing: bool:
 
 var _dish: Dish = null
 var _id := -1
+var _shown_name := ""  ## the name the field stands for (a number-bearing default name may be shown cut short with an ellipsis)
 var _finishing := false  ## true while typing is being ended, so losing focus doesn't count as a second commit
 
 
@@ -31,6 +32,7 @@ func _ready() -> void:
 	edit.gui_input.connect(_on_edit_input)
 	name_label.gui_input.connect(_on_name_input)
 	name_label.focus_exited.connect(_rewind_name)
+	name_label.resized.connect(_fit_name)
 	_show_label()
 
 
@@ -42,10 +44,34 @@ func show_bup(dish: Dish, id: int, can_rename: bool) -> void:
 		_rewind_name()
 	var shown := dish.bup_display(id)
 	var shown_name: String = shown.get("name", "")
-	if name_label.text != shown_name:  # (a field's text is only set when it changes: setting it, even to the same text, puts the caret and the scroll back at the start)
-		name_label.text = shown_name
+	if _shown_name != shown_name:  # (a field's text is only set when it changes: setting it, even to the same text, puts the caret and the scroll back at the start)
+		_shown_name = shown_name
+		name_label.tooltip_text = ""
+		_fit_name()
 	swatch.show_info(shown["info"])
 	rename_button.visible = can_rename and not editing
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_THEME_CHANGED and is_node_ready():
+		_fit_name.call_deferred()  # (the field's font changes with the interface size, after the field was last measured)
+
+
+## The name in the field. A default name ("lil bup #1,234,567") that is wider than the field ends in an ellipsis, with the whole name on hover, so
+## the number is never cut in the middle; a name the player gave is shown whole and read with the arrow keys.
+func _fit_name() -> void:
+	var text := _shown_name
+	if _dish != null and _id >= 0 and _dish.bup_custom_name(_id) == "" and name_label.size.x > 0.0:
+		var font := name_label.get_theme_font("font")
+		var font_size := name_label.get_theme_font_size("font_size")
+		var room := name_label.size.x - name_label.get_theme_stylebox("normal").get_minimum_size().x - 2.0
+		var cut := text
+		while cut.length() > 1 and font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x > room:
+			cut = cut.left(cut.length() - 1)
+			text = cut.strip_edges() + "\u2026"
+		name_label.tooltip_text = _shown_name if text != _shown_name else ""
+	if name_label.text != text:
+		name_label.text = text
 
 
 func cancel_editing() -> void:
@@ -70,7 +96,8 @@ func _commit(text: String) -> void:
 		return
 	if _dish != null:
 		_dish.rename_bup(_id, text)
-		name_label.text = _dish.bup_name(_id)
+		_shown_name = _dish.bup_name(_id)
+		_fit_name()
 	_finish()
 
 

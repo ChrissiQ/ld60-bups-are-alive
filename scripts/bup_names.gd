@@ -26,9 +26,10 @@ static func random_pool() -> Array[String]:
 			push_error("No names in %s" % RANDOM_NAMES_FILE)
 	return _random_names
 
-## "lil bup #578": its size word, going by the size its genome grows to, and its number.
+## "lil bup #578": its size word, going by the size its genome grows to, and its number (the counter part of its
+## id: a pooled id also carries the number of the dish it was born in, which is not part of the name).
 static func default_name(size_gene: float, id: int) -> String:
-	return Strings.t("bups.name", [Cell.title_for(size_gene), UiText.group(str(id))])
+	return Strings.t("bups.name", [Cell.title_for(size_gene), UiText.group(str(GpuLayout.id_counter(id)))])
 
 
 ## What a typed name becomes: no line breaks or control characters, spaces trimmed, a sensible length.
