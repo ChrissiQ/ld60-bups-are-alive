@@ -18,6 +18,10 @@ extends SceneTree
 ##   like for like.
 ## - per kernel: swim, demand, apply about the single-dish path's (the same arithmetic, a grid-stride loop with a block lookup a bup); life's part less by
 ##   the single-dish path's copy (about 2 ms at 2M) [derived from the subsets].
+## The two chains take turns, an iteration each, both loaded at once: a device may run at one of two speeds, mostly the same one for a
+## whole process but sometimes switching within it (on an M1 Pro, the single-dish path's 19.5 or 22.4 ms, the pooled 18.2 or 20.5 [measured], in the
+## pooled table swim and apply slower, the rest not), both chains alike, so only iterations next to each other compare like for like; the
+## ratio is the median of each pair's.
 ## Reports: PERF lines (median, min, max of 8 iterations of 10 steps, per step, the iteration's stats sample included), the per-kernel
 ## table (each dispatch its own submit, less a one-thread kernel's round trip, median over 5 steps), and the memory the pool holds.
 
@@ -85,17 +89,23 @@ func _initialize() -> void:
 	ds.encode_u32(GpuLayout.DS_CLOUD_SLOTS * 4, clouds_at_start)
 	blob.dstate = ds
 	var row := core.load_dish(blob)
+	var today_sim := _today_load(spec, grid, recs, clouds)
 	var plan := IterationPlan.new()
 	var w := 0
 	var pooled: Array = []
 	var recorded: Array = []
+	var today: Array = []
+	var ratios: Array = []
 	for r in REPS + 2:
 		plan.events = {row: windows[w]}
-		w += 1
 		var res := core.run(STEPS, STEP, plan)
+		var t := _today_iteration(today_sim, windows[w])
+		w += 1
 		if r >= 2:
 			pooled.append(float(res["gpu_usec"]) / STEPS)
 			recorded.append(float(res["record_usec"]) / STEPS)
+			today.append(t)
+			ratios.append(pooled[-1] / t)
 	var prof: Dictionary = {}
 	var calls: Dictionary = {}
 	for r in 5:
@@ -119,11 +129,10 @@ func _initialize() -> void:
 	var deaths := core.dstate_row(row).decode_u32(GpuLayout.DS_DEATHS * 4)
 	print("last profiled step: %d births, %d deaths" % [births, deaths])
 	core = null
-
-	var today := _today(spec, grid, recs, clouds, windows)
+	_today_report(today_sim, today)
 	print("PERF pooled step (SimCore.run, %d steps a submit, stats sample included): median %.2f ms, min %.2f, max %.2f; recording %.3f ms a step" % [STEPS, _median(pooled) / 1000.0, pooled.min() / 1000.0, pooled.max() / 1000.0, _median(recorded) / 1000.0])
 	print("PERF the single-dish path's step (GpuSim, %d steps a submit, stats sample included): median %.2f ms, min %.2f, max %.2f" % [STEPS, _median(today) / 1000.0, today.min() / 1000.0, today.max() / 1000.0])
-	print("PERF ratio pooled / the single-dish path's: %.3f (gate 0.85; against the 22.75 ms: %.3f)" % [_median(pooled) / _median(today), _median(pooled) / 22750.0])
+	print("PERF ratio pooled / the single-dish path's: %.3f, the median of each iteration's pooled over the single-dish path's iteration right after it (the medians' ratio %.3f; gate 0.85; against the 22.75 ms: %.3f)" % [_median(ratios), _median(pooled) / _median(today), _median(pooled) / 22750.0])
 	var noop := _median(prof["_noop"])
 	var total := 0.0
 	var names: Array = prof.keys()
@@ -139,8 +148,9 @@ func _initialize() -> void:
 	quit()
 
 
-## The single-dish chain on the same state: GpuSim (imported shaders) loaded from it, the same windows of world events.
-func _today(spec: DishSpec, grid: DishGrid, recs: PackedByteArray, clouds: PackedFloat32Array, windows: Array) -> Array:
+## The single-dish chain on the same state: GpuSim (imported shaders) loaded from it, and a SimCore that only turns the world's rows
+## into events (a dish of the same grid at row 0, base 0). Returns [GpuSim, that SimCore, its row].
+func _today_load(spec: DishSpec, grid: DishGrid, recs: PackedByteArray, clouds: PackedFloat32Array) -> Array:
 	var st := GpuSim.State.new()
 	st.cells_across = grid.n
 	st.spacing = grid.spacing
@@ -161,24 +171,33 @@ func _today(spec: DishSpec, grid: DishGrid, recs: PackedByteArray, clouds: Packe
 	st.dish_seed = spec.seed
 	var g := GpuSim.new()
 	g.load_state(st)
-	var conv := SimCore.new()  # (only to turn the world's rows into events: a dish of the same grid at row 0, base 0)
+	var conv := SimCore.new()
 	var dspec := spec.copy()
 	dspec.founders = PackedByteArray()
 	var row0 := conv.add_dish(dspec)
-	var out: Array = []
-	for r in REPS + 2:
-		var ev: Dictionary = conv._world_events(STEPS, {row0: windows[r]})
-		g.prepare_steps(STEPS, {"delta": STEP, "events": ev})
-		var cl := g.rd.compute_list_begin()
-		g.record_steps(cl, STEPS, {})
-		g.record_stats(cl, 0)
-		g.rd.compute_list_end()
-		var t := Time.get_ticks_usec()
-		g.rd.submit()
-		g.rd.sync()
-		if r >= 2:
-			out.append(float(Time.get_ticks_usec() - t) / STEPS)
 	assert(row0 == 0)
+	return [g, conv, row0]
+
+
+## One iteration of the single-dish path's chain (STEPS steps and a stats sample, one submit) on the world's `window`: µs a step.
+func _today_iteration(today_sim: Array, window: Variant) -> float:
+	var g: GpuSim = today_sim[0]
+	var conv: SimCore = today_sim[1]
+	var ev: Dictionary = conv._world_events(STEPS, {today_sim[2]: window})
+	g.prepare_steps(STEPS, {"delta": STEP, "events": ev})
+	var cl := g.rd.compute_list_begin()
+	g.record_steps(cl, STEPS, {})
+	g.record_stats(cl, 0)
+	g.rd.compute_list_end()
+	var t := Time.get_ticks_usec()
+	g.rd.submit()
+	g.rd.sync()
+	return float(Time.get_ticks_usec() - t) / STEPS
+
+
+## The single-dish path's lists, its iterations and its kernels one submit each; then frees it.
+func _today_report(today_sim: Array, out: Array) -> void:
+	var g: GpuSim = today_sim[0]
 	var binc := g.rd.buffer_get_data(g.buffer("BINC")).to_int32_array()
 	var entries := 0
 	for v in binc:
@@ -197,7 +216,6 @@ func _today(spec: DishSpec, grid: DishGrid, recs: PackedByteArray, clouds: Packe
 		print("TODAY KERNEL %-10s %.3f ms (a submit, round trip included)" % [kname, _median(t) / 1000.0])
 	g.release()
 	g.rd.free()
-	return out
 
 
 ## `n` records with the founder's genes over 0.9 of the dish, reserves from none to full, masses 0.8 to 1.6 of the birth mass, a share
