@@ -64,6 +64,14 @@ func _initialize() -> void:
 			TestUtil.check(tour.index == before, "Next does nothing while step %d is not done" % (before + 1))
 			if tour.index > 0 and "bup" in key and "Click" in key:
 				TestUtil.check(m.camera.zoom.x > was_zoom.x, "the step that asks for a click on a bup has the camera close to it (%s, was %s, step %d)" % [m.camera.zoom, was_zoom, tour.index])
+				var fake := WorldClient.shared().backend as FakeWorld
+				var bup_at: Vector2 = m.dish.global_position + fake.place_of(m.dish.row, m._tutorial_bup)
+				for i in 10:
+					if m.camera.position.distance_to(bup_at) < 0.5:
+						break
+					await process_frame
+				var asked: Array = fake.calls_of(SimCommand.KIND_ASK)[-1]["args"]["questions"].get("tracked", [])
+				TestUtil.check(asked.has(m._tutorial_bup) and m.camera.position.distance_to(bup_at) < 0.5 and m.dish.selected.bup < 0, "the bup it asks for is asked after (not selected), and the camera goes to where the world says it is (%s, the bup at %s)" % [m.camera.position, bup_at])
 				m.dish.selected.bup = m._tutorial_bup  # (a pointer pick needs the picture the GPU draws: a headless run has none)
 			elif "eye" in key:
 				m.inspector.toggle_watch()

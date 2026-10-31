@@ -172,6 +172,7 @@ var _hover_known := false  ## `hovered` is what is at `_hover_pos` (it may be no
 var _click_at := Vector2.INF  ## a click made before the hover there was answered: it selects what the hover finds once it does
 var selected := DishPick.new()  ## what was clicked (`selection_changed` fires when its bup changes)
 var hovered := DishPick.new()  ## what is under the pointer
+var pointed_bup := -1  ## a bup the screen points out (the tour's), asked after as the selected and the hovered are, so its place is known
 const NO_HUSK := DishPick.NO_HUSK
 enum Preview { BRUSH, ERASE, MARKER }  ## what the placement preview shows: a circle the size of what a click scatters, the eraser's brush, or a single point (a source about to be placed: drawn as a GUI ring, like a selection)
 var place_preview_pos := Vector2.ZERO
@@ -370,6 +371,7 @@ func _reset_runtime_state() -> void:
 	_sources_by_id = {}
 	_plankton_by_key = {}
 	_resizes = []
+	pointed_bup = -1
 	sources.clear()
 	plankton.clear()
 	history.reset()
@@ -648,7 +650,7 @@ func _ask() -> void:
 	if row < 0:
 		return
 	var tracked: Array = []
-	for id in [selected.bup, hovered.bup]:
+	for id in [selected.bup, hovered.bup, pointed_bup]:
 		if id >= 0 and not tracked.has(id):
 			tracked.append(id)
 	var husks: Array = []
@@ -802,6 +804,11 @@ func bup_world_pos(id: int) -> Vector2:
 ## Whether the bup's place is known, so it can be drawn round.
 func _bup_shown(id: int) -> bool:
 	return drawing.ring_of(id) != null
+
+
+## Whether the bup's place is known (the picture's, or an answer's: a bup asked after), so `bup_world_pos` is where it is.
+func bup_place_known(id: int) -> bool:
+	return _bup_shown(id) or not bup_info(id).is_empty()
 
 
 ## The bup's position in the dish (relative to its centre): where the picture has it, else its newest answer's place.

@@ -100,6 +100,7 @@ var readout := Readout.new()  ## how the readouts are rewritten (see Readout)
 var inspector := Inspector.new()  ## the panels about what is picked, and the hover card
 var lineage := LineageView.new()  ## the views opened on bups (info, lineage) and the lineage list
 var _tutorial_bup := -1  ## the bup the tour asked the player to pick, once it has set the view up for that (-1: it has not)
+var _tutorial_look_pending := false  ## the camera waits for the world to say where the tour's bup is
 var _tutorial_watched_before: Array[int] = []  ## who was on the watch list when the tour began, so it takes off only whom it put there
 var _banner_left := 0.0
 
@@ -359,6 +360,7 @@ func _process(delta: float) -> void:
 	if _banner_left == 0.0:
 		banner.text = ""
 	stage_input.update_pointer()
+	_tutorial_look()
 	_update_info_panel()
 	inspector.place_hover_card()
 	stage_input.follow_selected()
@@ -1255,7 +1257,16 @@ func _tutorial_show_bup() -> void:
 	if ids.is_empty():
 		return
 	_tutorial_bup = dish.selected.bup if dish.has_bup(dish.selected.bup) else ids[0]  # (coming back to the step keeps the bup already chosen)
+	dish.pointed_bup = _tutorial_bup  # (asked after, so the world says where it is)
 	stage_input.look_at_world(dish.bup_world_pos(_tutorial_bup), TUTORIAL_ZOOM)
+	_tutorial_look_pending = not dish.bup_place_known(_tutorial_bup)
+
+
+## The tour's bup's place once the world has answered where it is: the camera goes there (it went to the dish's middle meanwhile).
+func _tutorial_look() -> void:
+	if _tutorial_look_pending and dish.bup_place_known(_tutorial_bup):
+		_tutorial_look_pending = false
+		stage_input.look_at_world(dish.bup_world_pos(_tutorial_bup), TUTORIAL_ZOOM)
 
 
 ## The lineage step comes with the lineage open, and the step that asks for it with it shut, whichever way they are reached.
@@ -1270,7 +1281,7 @@ func _tutorial_close_lineage() -> void:
 
 
 func _tutorial_bup_rect() -> Rect2:
-	if not dish.has_bup(_tutorial_bup):
+	if not dish.has_bup(_tutorial_bup) or not dish.bup_place_known(_tutorial_bup):
 		return Rect2()
 	var at := get_viewport().get_canvas_transform() * dish.bup_world_pos(_tutorial_bup)
 	return Rect2(at - Vector2.ONE * TUTORIAL_BUP_PIXELS, Vector2.ONE * 2.0 * TUTORIAL_BUP_PIXELS)
@@ -1283,6 +1294,8 @@ func _on_tutorial_closed(_completed: bool) -> void:
 			if not id in _tutorial_watched_before:
 				dish.unwatch_bup(id)
 		_tutorial_bup = -1
+		_tutorial_look_pending = false
+		dish.pointed_bup = -1
 		_clear_selection()
 		stage_input.fit_camera()
 	holds.release(&"tour")
