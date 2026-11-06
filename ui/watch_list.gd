@@ -19,7 +19,7 @@ const SCROLL_MAX_HEIGHT := 150.0  ## the most the list takes before it scrolls
 
 var numbers := {}  ## Dish -> its number (the screen's own record, shared)
 var dishes: Array[Dish] = []  ## every dish: the list is one for all of them (a bup the pipette moved is followed to its new dish)
-var _version := ""  ## what this was built from: each dish's watch_version
+var _version := -1  ## what this was built from: the dishes and each one's watch_version (as a number)
 var _entries_list: Array = []  ## [dish, id] for each entry, youngest first
 var _looked_msec := 0
 var _buttons := {}  ## [dish, bup id] -> its button, for the second look
@@ -29,14 +29,14 @@ var _waiting := false  ## a watched bup was left out for want of its family reco
 ## Called every frame by the screen that shows the list.
 func refresh() -> void:
 	var count := 0
-	var version := str(dishes.size())
+	var version := dishes.size()
 	for d in dishes:
 		count += d.watched.size()
-		version += ":%d" % d.watch_version
+		version = version * 1000003 + d.get_instance_id() + d.watch_version * 7919  # (wraps: only a change of it matters)
 	empty_note.visible = count == 0  # (it says so when there is nothing in it)
 	scroll.visible = count > 0
 	if count == 0:
-		_version = ""  # (so it is built afresh when it next has something)
+		_version = -1  # (so it is built afresh when it next has something)
 		return
 	var now := Time.get_ticks_msec()
 	if version == _version and now - _looked_msec < LOOK_AGAIN_MSEC:

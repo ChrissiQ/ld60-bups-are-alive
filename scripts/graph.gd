@@ -54,9 +54,9 @@ func refresh() -> void:
 	var version := 0
 	if combined():
 		for d: Dish in dishes:
-			version += d.history.version
+			version += d.history_version()
 	elif dish != null:
-		version = dish.history.version
+		version = dish.history_version()
 	var key := [version, trait_index, shown_span(), size, combined(), dishes.size()]
 	if key == _drawn_key:
 		return

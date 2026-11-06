@@ -179,13 +179,14 @@ var place_preview_pos := Vector2.ZERO
 var place_preview_radius := -1.0  ## < 0 hides the placement preview
 var place_preview_kind := Preview.BRUSH
 
-var history := DishHistory.new():  ## what the graph shows of this dish (a parked dish's samples are recorded when it is read: `take_parked`)
+var _history := DishHistory.new()
+var history: DishHistory:  ## what the graph shows of this dish (a parked dish's samples are recorded when it is read: `take_parked`)
 	get:
 		if not _unrecorded.is_empty():
 			var samples := _unrecorded
 			_unrecorded = []
-			history.take(samples)
-		return history
+			_history.take(samples)
+		return _history
 var _unrecorded: Array = []  ## history samples a parked dish was handed and has not recorded yet, oldest first
 var edit_count := 0  ## bumped by every change made to the dish by hand and by every new copy of its world, so screens can tell when to look again
 var patch_seed := 0  ## which landscape of richer and poorer patches the nutrient follows (see NUTRIENT_PATCHINESS)
@@ -288,6 +289,12 @@ func take_parked(snap: Snapshot) -> bool:
 ## Records the samples a parked dish was handed (reading the history does it).
 func record_history() -> void:
 	var _read := history  # (reading it records them)
+
+
+## The history's version as far as it is recorded: reading it does not record the samples a parked dish is holding (the screen records those within
+## a budget each frame, `Main._record_parked_history`), so a screen that only looks for a change can ask every dish every frame.
+func history_version() -> int:
+	return _history.version
 
 
 func has_unrecorded() -> bool:
