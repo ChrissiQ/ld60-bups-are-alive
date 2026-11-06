@@ -54,6 +54,7 @@ func _init() -> void:
 	_founders()
 	_refused()
 	_refused_through_thread()
+	_memory_fraction()
 	_through_thread()
 	TestUtil.finish(self, "OK core_calls_test")
 
@@ -324,6 +325,29 @@ func _refused() -> void:
 		res = core.run(1, 20.0, plan)
 		TestUtil.show(int(res["steps"]) == 1 and core.overflow() == SimCore.OVERFLOW_BUDGET, "O %s: with room again the step runs; the flag stays (overflow %d)" % [kind, core.overflow()])
 		core.release()
+
+
+## The share of the budget held reaches the warning: a budget set to the bytes held over 0.95 gives near, over 0.5 gives none, and one
+## at the bytes held gives 1 (the next growth is then over the budget).
+func _memory_fraction() -> void:
+	var core := SimCore.new(PoolLimits.new())
+	core.add_dish(_spec_small())
+	var held := core.arena.bytes_now()
+	core.limits.memory_budget_bytes = int(held / 0.95)
+	TestUtil.show(PoolLimits.warning_state({"memory_fraction": core.arena.memory_fraction()}) == PoolLimits.WARN_NEAR, "M a budget just above the bytes held (%.3f of it) warns" % core.arena.memory_fraction())
+	core.limits.memory_budget_bytes = held * 2
+	TestUtil.show(PoolLimits.warning_state({"memory_fraction": core.arena.memory_fraction()}) == "", "M half the budget held gives no warning")
+	core.limits.memory_budget_bytes = held
+	TestUtil.show(is_equal_approx(core.arena.memory_fraction(), 1.0) and core.arena.next_growth_bytes() > 0 and not core.arena.fits(core.arena.slot_cap * 2, 0, 0, 0, 0), "M at the whole budget the fraction is 1 and the next growth (%d bytes) does not fit" % core.arena.next_growth_bytes())
+	core.release()
+
+
+func _spec_small() -> DishSpec:
+	var spec := DishSpec.new()
+	spec.number = 1
+	spec.radius = 600.0
+	spec.seed = 3
+	return spec
 
 
 func _refused_through_thread() -> void:

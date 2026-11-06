@@ -25,6 +25,7 @@ var clock := START_CLOCK
 var speed := 1.0
 var paused := false
 var refusing_iteration := ""
+var memory_fraction := 0.0  ## the share of the memory budget the snapshots say is held
 var device := "fake world"  ## what device_name() answers ("": a world with no device, which the record shows as CPU)
 var means := {}  ## row -> the mean every statistic of that dish shows (1 when not set)
 
@@ -437,7 +438,7 @@ func _publish(t0: float) -> void:
 			d["world_sent"] = d["world_version"]
 			snap.worlds[row] = _copy_of(d["world"], d["world_version"])
 	snap.totals = DishState.aggregate(snap.dishes)
-	snap.timing = {"refused": _refused, "refused_iteration": refusing_iteration}
+	snap.timing = {"refused": _refused, "refused_iteration": refusing_iteration, "memory_fraction": memory_fraction, "next_growth_bytes": 123}
 	_refused = {}
 	_snapshot = snap
 

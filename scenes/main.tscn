@@ -933,6 +933,7 @@ offset_bottom = 232.0
 grow_horizontal = 2
 horizontal_alignment = 1
 mouse_filter = 2
+autowrap_mode = 3
 
 [node name="PauseRing" type="Panel" parent="HUD"]
 unique_name_in_owner = true

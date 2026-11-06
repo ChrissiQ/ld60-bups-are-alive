@@ -104,6 +104,12 @@ static func backend(dish: Dish) -> Dictionary:
 			"refused_iteration": timing.get("refused_iteration", ""),
 			"worker_queue": timing.get("worker_queue", 0),
 		},
+		"memory": {
+			"fraction": timing.get("memory_fraction", 0.0),
+			"next_growth_bytes": timing.get("next_growth_bytes", 0),
+			"warn_fraction": PoolLimits.WARN_FRACTION,
+			"warning": PoolLimits.warning_state(timing),
+		},
 		"pool": timing.get("pool", {}),
 		"pool_overflow": timing.get("overflow", 0),
 		"payload_behind_sim_s": snap.sim_time - shown.sim_time if shown != null else -1.0,

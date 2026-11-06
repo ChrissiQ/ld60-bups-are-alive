@@ -53,6 +53,26 @@ func _initialize() -> void:
 		TestUtil.check(data["nutrient"]["by_distance_from_centre"].size() == DebugLog.RIM_FRACTIONS.size(), "it has the nutrient by distance from the centre")
 		TestUtil.check(data["selected"].has("bup") and data["selected"]["bup"].has("genome") == false and data["selected"]["bup"].has("sense"), "it has the selected bup")
 		TestUtil.check(data["screen"]["tutorial_step"] == 0, "it says the tour is up, and where")
+	# The memory warning: the fraction and the state are in the log, and the screen's banner says it while it holds.
+	TestUtil.check(data["backend"]["memory"]["warning"] == "" and data["backend"]["memory"]["warn_fraction"] == PoolLimits.WARN_FRACTION, "the log has the memory share and no warning below the threshold")
+	canned.memory_fraction = PoolLimits.WARN_FRACTION + 0.02
+	for i in 4:
+		await process_frame
+	var warned: Dictionary = JSON.parse_string(DebugLog.report(dish, m, m.debug_state()))["backend"]["memory"]
+	TestUtil.check(warned["warning"] == PoolLimits.WARN_NEAR and absf(float(warned["fraction"]) - 0.92) < 0.001 and int(warned["next_growth_bytes"]) == 123, "at the threshold the log says near, with the fraction and the next growth")
+	TestUtil.check(m.banner.text == Strings.t("banner.memory_near"), "...and the banner says graphics memory is nearly full")
+	canned.refusing_iteration = "no room"
+	for i in 4:
+		await process_frame
+	var stalled: Dictionary = JSON.parse_string(DebugLog.report(dish, m, m.debug_state()))["backend"]["memory"]
+	TestUtil.check(stalled["warning"] == PoolLimits.WARN_STALLED and m.banner.text == Strings.t("banner.memory_stalled") and Strings.t("banner.memory_stalled") != Strings.t("banner.memory_budget"), "refused iterations: the log says stalled and the banner has its own words, not the action's")
+	canned.refusing_iteration = ""
+	canned.memory_fraction = PoolLimits.WARN_FRACTION - 0.01
+	TestUtil.check(PoolLimits.warning_state({"memory_fraction": PoolLimits.WARN_FRACTION}) == PoolLimits.WARN_NEAR and PoolLimits.warning_state({"memory_fraction": PoolLimits.WARN_FRACTION - 0.001}) == "", "the threshold is at 0.90 exactly")
+	m.call("_show_banner", "", 0.0)
+	for i in 4:
+		await process_frame
+	TestUtil.check(m.banner.text == "", "below the threshold the warning goes")
 	var as_text := DebugLog.report(dish, m, {})
 	TestUtil.check(not as_text.contains(OS.get_environment("USER")) or OS.get_environment("USER").length() < 3, "it does not hold the user name")
 

@@ -365,8 +365,7 @@ func _process(delta: float) -> void:
 				_begin_pipette_wait()
 		if not free_mode:
 			tracker.update(dish, done)
-	if String(WorldClient.shared().latest().timing.get("refused_iteration", "")) != "":
-		_show_banner(Strings.t("banner.memory_budget"), BANNER_BRIEF_SECONDS)  # (the dishes have outgrown the graphics memory and stand still: up while it lasts)
+	_show_memory_warning()
 	_banner_left = maxf(0.0, _banner_left - delta)
 	if _banner_left == 0.0:
 		banner.text = ""
@@ -1109,6 +1108,18 @@ func _click(world: Vector2) -> void:
 		Toolbar.Tool.PIPETTE:
 			if dish.contains(world):
 				pipette(world, tool_options.pipette_radius())
+
+
+## The memory warning (PoolLimits.warning_state) as the banner while it holds, kept up a moment at a time; it never replaces a banner
+## about something else (the player's action, a goal), which comes first and leaves it to return.
+func _show_memory_warning() -> void:
+	var state := PoolLimits.warning_state(WorldClient.shared().latest().timing)
+	if state == "":
+		return
+	var text := Strings.t("banner.memory_stalled" if state == PoolLimits.WARN_STALLED else "banner.memory_near")
+	var ours := banner.text == Strings.t("banner.memory_stalled") or banner.text == Strings.t("banner.memory_near")
+	if _banner_left <= 0.0 or ours:
+		_show_banner(text, BANNER_BRIEF_SECONDS)
 
 
 func _show_banner(text: String, seconds: float) -> void:

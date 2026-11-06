@@ -371,9 +371,19 @@ func bytes_now() -> int:
 	return total
 
 
-## The capacities, the bytes held, the budget and the growths so far (for the debug log).
+## The share of the memory budget the buffers hold now.
+func memory_fraction() -> float:
+	return float(bytes_now()) / maxf(float(limits.memory_budget_bytes), 1.0)
+
+
+## The bytes the record slots' next growth would add (by GROW, as `ensure_slots` grows them first).
+func next_growth_bytes() -> int:
+	return estimate_bytes(_align(int(slot_cap * GROW)), cell_cap, bin_cap, cloud_cap, husk_cap) - estimate_bytes(slot_cap, cell_cap, bin_cap, cloud_cap, husk_cap)
+
+
+## The capacities, the bytes held, the budget, the share of it held, the next growth's bytes and the growths so far (for the debug log).
 func report() -> Dictionary:
-	return {"slots": slot_cap, "cells": cell_cap, "bins": bin_cap, "clouds": cloud_cap, "husks": husk_cap, "events": event_cap,
+	return {"fraction": memory_fraction(), "next_growth_bytes": next_growth_bytes(), "slots": slot_cap, "cells": cell_cap, "bins": bin_cap, "clouds": cloud_cap, "husks": husk_cap, "events": event_cap,
 		"bytes": bytes_now(), "budget_bytes": limits.memory_budget_bytes, "growths": growths.duplicate()}
 
 

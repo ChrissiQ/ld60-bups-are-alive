@@ -8,6 +8,10 @@ var field_cells := 65536  ## field cells (the dishes' 256-aligned blocks of n² 
 var cloud_slots := 16384  ## physical cloud slots (each with ENTRIES_PER_SLOT list entries)
 var husk_slots := 4096
 var bins := 65536  ## cloud-list squares
+const WARN_FRACTION := 0.90  ## the share of the memory budget at which the game warns that graphics memory is nearly full
+const WARN_NEAR := "near"
+const WARN_STALLED := "stalled"
+
 var d_max := GpuLayout.D_MAX  ## dish rows (fixed by the layout)
 var memory_budget_bytes := 6 * 1024 * 1024 * 1024  ## [placeholder]
 var payload_rows := 64  ## rows of PAYLOAD_TEX_WIDTH texels the payload textures start with
@@ -20,3 +24,13 @@ static func from_settings() -> PoolLimits:
 	var limits := PoolLimits.new()
 	limits.frame_queue_size = int(ProjectSettings.get_setting("rendering/rendering_device/vsync/frame_queue_size", 2))
 	return limits
+
+
+## The memory warning a timing dictionary (a snapshot's) calls for: WARN_STALLED while an iteration is refused for want of room (the
+## simulation waits), WARN_NEAR while the buffers hold WARN_FRACTION of the budget or more, else "".
+static func warning_state(timing: Dictionary) -> String:
+	if String(timing.get("refused_iteration", "")) != "":
+		return WARN_STALLED
+	if float(timing.get("memory_fraction", 0.0)) >= WARN_FRACTION:
+		return WARN_NEAR
+	return ""
