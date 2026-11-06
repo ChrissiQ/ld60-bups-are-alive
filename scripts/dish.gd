@@ -208,7 +208,6 @@ var _husk_reach := 0.0
 var _husks_seen := {}  ## a picked husk's place -> what an answer last said of it ([x, y, energy, age, pieces let go]), until one says it is gone
 var _world_time := 0.0  ## the world time of the newest copy of the dish's world (a source's `emitted` is as of then)
 var _pending_names := {}  ## id -> a name given before the bup's family record came
-var _founder_names: Array[String] = []  ## the names the founders were given at `strike`, in their order, until the founders' records come (their ids are the world's, given when the dish is added)
 var _extinct_signalled := false
 var _parked := false  ## out of the main view (`park`): what the snapshots say of it is read when asked, not taken from each one
 var _resizes: Array = []  ## [reply, radius asked] of each resize not yet answered, oldest first (`resize_to`)
@@ -371,7 +370,6 @@ func _reset_runtime_state() -> void:
 	_asked = {}
 	_fractions = {}
 	_pending_names = {}
-	_founder_names = []
 	_world_version = -1
 	_unrecorded = []
 	_source_to_select = Vector2.INF
@@ -440,13 +438,11 @@ func strike(start: StartConditions = null) -> void:
 	spec.patch_seed = patch_seed
 	var founders := clampi(start.bups, 1, bup_limit)
 	spec.founders = _founder_records(start, founders)
-	row = _world().add_dish(spec)
-	begin_at(_world().latest().sim_time)
 	for i in founders:
 		var chosen: Dictionary = start.founders[i] if i < start.founders.size() else {}
-		_founder_names.append(chosen.get("name", ""))
-	if _founder_names.all(func(n: String) -> bool: return n == ""):
-		_founder_names = []
+		spec.founder_names.append(chosen.get("name", ""))
+	row = _world().add_dish(spec)
+	begin_at(_world().latest().sim_time)
 
 
 ## The founders' records (GpuLayout's bup record, as SimCore.add_dish takes them): the founder's genome in the colour the player chose for
@@ -680,17 +676,6 @@ func _flush_names() -> void:
 	var store := lineage_store()
 	if store == null:
 		return
-	if not _founder_names.is_empty():
-		var roots := PackedInt64Array()  # (the founders: alive in this dish with no parent; their ids run in their order)
-		for id: int in bup_ids():
-			if store.chain(id).size() == 1:
-				roots.append(id)
-		if roots.size() >= _founder_names.size():
-			roots.sort()
-			for i in _founder_names.size():
-				if _founder_names[i] != "":
-					store.set_custom_name(roots[i], BupNames.clean(_founder_names[i]))
-			_founder_names = []
 	if _pending_names.is_empty():
 		return
 	for id: int in _pending_names.keys():

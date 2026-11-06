@@ -686,9 +686,14 @@ func _add_dish(client: int, spec: DishSpec) -> void:
 	if spec.founders.size() > 0:
 		var births := SimCore.founder_births(spec.founders, spec.number)
 		var now := governor.clock - _game_began
+		var founders := spec.founders  # (the core gave them the world's ids)
+		var names := spec.founder_names
 		worker.push_op(func(st: Object) -> void:
 			if st != null:
-				st.apply_events(births, PackedByteArray(), now, 0.0))
+				st.apply_events(births, PackedByteArray(), now, 0.0)
+				for i in mini(names.size(), founders.size() / GpuLayout.RECORD_BYTES):
+					if names[i] != "":
+						st.set_custom_name(GpuLayout.id_of(founders, i), BupNames.clean(names[i])))
 
 
 func _map(client: int, cr: int) -> void:

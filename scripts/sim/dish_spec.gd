@@ -21,6 +21,7 @@ var patchiness := Dish.NUTRIENT_PATCHINESS
 var cloud_quota := 262144  ## clouds the dish may hold (a lone dish's puff capacity)
 var husk_quota := 200000  ## husks the dish may hold (MAX_HUSKS)
 var founders := PackedByteArray()  ## the founders' records
+var founder_names: Array[String] = []  ## the names the founders were given, in their order ("" for none): the simulation binds each to its founder's id when it adds the dish
 var world := {}  ## what the dish's DishWorld starts with (plankton, sources), for the host that keeps it
 
 
@@ -49,5 +50,6 @@ static func from_dict(d: Dictionary) -> DishSpec:
 func copy() -> DishSpec:
 	var s := DishSpec.from_dict(to_dict())
 	s.founders = founders.duplicate()
+	s.founder_names = founder_names.duplicate()
 	s.world = world.duplicate(true)
 	return s
