@@ -107,10 +107,10 @@ static func key_event(code: Key, pressed := true, echo := false, shift := false)
 
 ## The simulation constants with diffusion and uptake switched off, so a bup's motion is all that moves: tests that pin the motion count on it.
 ## `structure` sets `motion_structure` too when it is a number.
-static func frozen_constants(structure := NAN) -> void:
+static func frozen_constants(structure := NAN) -> Dictionary:
 	var consts := SimConstants.build()
 	consts["diffusion"] = 0.0
 	consts["uptake_per_size"] = 0.0
 	if not is_nan(structure):
 		consts["motion_structure"] = structure
-	BupSim.configure(consts)
+	return consts
