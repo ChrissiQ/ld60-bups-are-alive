@@ -23,8 +23,6 @@ const uint DP_WORDS = 32u;
 const uint DS_COUNT = 1u;
 const uint DS_LEDGER = 24u;
 const uint DS_NEXT_COUNT = 4u;
-const uint DS_NEXT_ID_HI = 6u;
-const uint DS_NEXT_ID_LO = 5u;
 const uint DS_SEED = 7u;
 const uint DS_START = 0u;
 const uint DS_STEP = 8u;
@@ -37,6 +35,8 @@ const uint RECORD_WORDS = 28u;
 const uint R_ID_HI = 21u;
 const uint R_ID_LO = 0u;
 const uint WD_LEDGER = 10u;
+const uint WD_NEXT_ID_HI = 12u;
+const uint WD_NEXT_ID_LO = 11u;
 const uint WD_SLOTS = 0u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
@@ -66,8 +66,6 @@ const uint DN_SURV_BASE = 2u;
 const uint DN_KID_BASE = 3u;
 const uint DN_BIRTH_BASE = 4u;
 const uint DN_DEATH_BASE = 5u;
-const uint DN_MOVED_HI = 6u;
-const uint DN_MOVED_LO = 7u;
 const uint DN_TOTAL_WORD = 8192u;
 const uint CONJ_MIN_BUCKETS = 65536u;
 const uint POOL_ROWS_PER_THREAD = 4u;
@@ -86,9 +84,9 @@ void compact_piece(uint t) {
 		uint k = EXCK[i] - DN(d, DN_KID_BASE), place = DS(d, DS_SURVIVORS) + k;
 		if (place < next) {
 			uvec4 v = CHILD_V4U[i * RECORD_VEC4 + part];
-			uint lo = DS(d, DS_NEXT_ID_LO) + k;
+			uint lo = WORLD[WD_NEXT_ID_LO] + EXCK[i];
 			if (part == R_ID_LO / 4u) v[R_ID_LO % 4u] = lo;
-			if (part == R_ID_HI / 4u) v[R_ID_HI % 4u] = DS(d, DS_NEXT_ID_HI) + (lo < DS(d, DS_NEXT_ID_LO) ? 1u : 0u);
+			if (part == R_ID_HI / 4u) v[R_ID_HI % 4u] = WORLD[WD_NEXT_ID_HI] + (lo < WORLD[WD_NEXT_ID_LO] ? 1u : 0u);
 			BUPS2_V4U[(DN(d, DN_START) + place) * RECORD_VEC4 + part] = v;
 		}
 	}

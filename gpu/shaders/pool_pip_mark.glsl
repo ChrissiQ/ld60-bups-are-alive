@@ -23,11 +23,9 @@ const uint DS_START = 0u;
 const uint DS_STEP = 8u;
 const uint DS_WORDS = 32u;
 const uint D_MAX = 1024u;
-const uint ID_HI_COUNTER_MASK = 4095u;
 const uint NO_DISH = 4294967295u;
 const int P_CELLS = 1;
 const uint RECORD_WORDS = 28u;
-const uint R_ID_HI = 21u;
 const uint R_X = 1u;
 const uint R_Y = 2u;
 const uint WD_LEDGER = 10u;
@@ -60,8 +58,6 @@ const uint DN_SURV_BASE = 2u;
 const uint DN_KID_BASE = 3u;
 const uint DN_BIRTH_BASE = 4u;
 const uint DN_DEATH_BASE = 5u;
-const uint DN_MOVED_HI = 6u;
-const uint DN_MOVED_LO = 7u;
 const uint DN_TOTAL_WORD = 8192u;
 const uint CONJ_MIN_BUCKETS = 65536u;
 const uint POOL_ROWS_PER_THREAD = 4u;
@@ -79,6 +75,5 @@ void pip_mark(uint i, uint d, uint l) {
 	}
 	SURV[i] = moved ? 1u : 0u;
 	PIPDST[i] = moved ? pip_dst() : NO_DISH;
-	if (moved) atomicMax(DN(pip_dst(), DN_MOVED_HI), BUPS_U[b + R_ID_HI] & ID_HI_COUNTER_MASK);
 }
 SLOT_LOOP(pip_mark)

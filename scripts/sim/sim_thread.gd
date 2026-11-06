@@ -684,7 +684,7 @@ func _add_dish(client: int, spec: DishSpec) -> void:
 	_worlds[client] = _new_world(_core.spec_of(cr), spec.world)
 	_had_bups[client] = spec.founders.size() > 0
 	if spec.founders.size() > 0:
-		var births := SimCore.founder_births(spec.founders)
+		var births := SimCore.founder_births(spec.founders, spec.number)
 		var now := governor.clock - _game_began
 		worker.push_op(func(st: Object) -> void:
 			if st != null:

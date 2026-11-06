@@ -73,7 +73,7 @@ static func _ids(records: PackedByteArray) -> Array:
 	return out
 
 
-## The existing-destination path: row 1's own bups first, then the moved ones in the source's order; its id counter past theirs.
+## The existing-destination path: row 1's own bups first, then the moved ones in the source's order.
 func _into_a_dish_there(h: SimHarness) -> void:
 	var own: PackedByteArray = h.dump(1)["records"]
 	var own_count := own.size() / GpuLayout.RECORD_BYTES
@@ -89,14 +89,11 @@ func _into_a_dish_there(h: SimHarness) -> void:
 	TestUtil.show(after.slice(0, own.size()) == own, "row 1's own %d bups come first, unchanged and in their order" % own_count)
 	var ids := _ids(after)
 	TestUtil.show(ids.slice(own_count) == went, "then the moved bups, in the source's order")
-	var ds := h.dstate(1)
-	var next := (ds[GpuLayout.DS_NEXT_ID_HI] << 32) | ds[GpuLayout.DS_NEXT_ID_LO]
-	var mask := (1 << GpuLayout.ID_DISH_SHIFT) - 1
+	var world_next: int = h.core.next_id()
 	var most := 0
 	for id: int in went:
-		most = maxi(most, id & mask)
-	var number: int = h.core.spec_of(1).number
-	TestUtil.show(next >> GpuLayout.ID_DISH_SHIFT == number and (next & mask) > most, "row 1's next id keeps its number %d and its counter %d is past the moved bups' %d" % [number, next & mask, most])
+		most = maxi(most, id)
+	TestUtil.show(world_next > most, "the world's next id %d is past the moved bups' %d, and the moved bups kept their ids" % [world_next, most])
 
 
 ## Every record of the destination that is also in the source (by id) keeps its genes and reach, and its position (the centre is 0, 0).

@@ -145,7 +145,7 @@ func founder_records(dish_number: int) -> PackedByteArray:
 		var o := i * GpuLayout.RECORD_BYTES
 		var at := Vector2.from_angle(rng.randf() * TAU) * (0.9 * radius * sqrt(rng.randf()))
 		var dir := Vector2.from_angle(rng.randf() * TAU)
-		GpuLayout.set_id(out, i, GpuLayout.make_id(dish_number, i + 1))
+		GpuLayout.set_id(out, i, (i + 1))
 		out.encode_float(o + GpuLayout.R_X * 4, at.x)
 		out.encode_float(o + GpuLayout.R_Y * 4, at.y)
 		out.encode_float(o + GpuLayout.R_DX * 4, dir.x)

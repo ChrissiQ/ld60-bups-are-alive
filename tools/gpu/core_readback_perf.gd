@@ -107,7 +107,7 @@ func _blob() -> DishBlob:
 		f[o + GpuLayout.R_Y] = r * sin(a)
 	var recs := f.to_byte_array()
 	for i in bups:
-		GpuLayout.set_id(recs, i, GpuLayout.make_id(1, i + 1))
+		GpuLayout.set_id(recs, i, (i + 1))
 	var blob := DishBlob.new()
 	blob.spec = spec.to_dict()
 	blob.records = recs
@@ -117,8 +117,6 @@ func _blob() -> DishBlob:
 	blob.dplo = SimArena.zeros(grid.n * grid.n * 4)
 	blob.dphi = SimArena.zeros(grid.n * grid.n * 4)
 	var ds := SimArena.zeros(GpuLayout.DS_WORDS * 4)
-	ds.encode_u32(GpuLayout.DS_NEXT_ID_LO * 4, GpuLayout.make_id(1, bups + 1) & 0xFFFFFFFF)
-	ds.encode_u32(GpuLayout.DS_NEXT_ID_HI * 4, GpuLayout.make_id(1, bups + 1) >> 32)
 	ds.encode_u32(GpuLayout.DS_SEED * 4, (spec.seed ^ (spec.seed >> 32)) & 0xFFFFFFFF)
 	blob.dstate = ds
 	return blob

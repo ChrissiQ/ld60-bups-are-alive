@@ -986,6 +986,6 @@ func _soak_spec(number: int, n: int, limit: int, spread: float) -> DishSpec:
 		f[o + GpuLayout.R_ENERGY] = mass * per * rng.randf()
 	var recs := f.to_byte_array()
 	for i in n:
-		GpuLayout.set_id(recs, i, GpuLayout.make_id(number, i + 1))
+		GpuLayout.set_id(recs, i, (i + 1))
 	spec.founders = recs
 	return spec

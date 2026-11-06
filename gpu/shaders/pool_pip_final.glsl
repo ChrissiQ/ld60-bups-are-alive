@@ -21,14 +21,11 @@ const uint DS_LEDGER = 24u;
 const uint DS_MOVED_IN = 17u;
 const uint DS_MOVED_OUT = 18u;
 const uint DS_NEXT_COUNT = 4u;
-const uint DS_NEXT_ID_HI = 6u;
-const uint DS_NEXT_ID_LO = 5u;
 const uint DS_SEED = 7u;
 const uint DS_START = 0u;
 const uint DS_STEP = 8u;
 const uint DS_WORDS = 32u;
 const uint D_MAX = 1024u;
-const uint ID_HI_COUNTER_MASK = 4095u;
 const uint NO_DISH = 4294967295u;
 const int P_CELLS = 1;
 const uint RECORD_WORDS = 28u;
@@ -62,8 +59,6 @@ const uint DN_SURV_BASE = 2u;
 const uint DN_KID_BASE = 3u;
 const uint DN_BIRTH_BASE = 4u;
 const uint DN_DEATH_BASE = 5u;
-const uint DN_MOVED_HI = 6u;
-const uint DN_MOVED_LO = 7u;
 const uint DN_TOTAL_WORD = 8192u;
 const uint CONJ_MIN_BUCKETS = 65536u;
 const uint POOL_ROWS_PER_THREAD = 4u;
@@ -88,12 +83,6 @@ void main() {
 		if (d == src) { next -= moved; DN(d, DN_SURV_BASE) = n_src > 0u ? EXCS[first] : 0u; DS(d, DS_MOVED_OUT) += moved; }
 		if (d == dst) {
 			next += moved; DS(d, DS_MOVED_IN) += moved;
-			if (moved > 0u) {  // (the dish's next counter: past the largest moved one, as BupSim::add_state_bytes kept ids)
-				uint mlo = DN(d, DN_MOVED_LO) + 1u, mhi = DN(d, DN_MOVED_HI) + (mlo == 0u ? 1u : 0u);
-				uint hi = DS(d, DS_NEXT_ID_HI), chi = hi & ID_HI_COUNTER_MASK, clo = DS(d, DS_NEXT_ID_LO);
-				if (mhi > chi || (mhi == chi && mlo > clo)) { DS(d, DS_NEXT_ID_HI) = (hi & ~ID_HI_COUNTER_MASK) | mhi; DS(d, DS_NEXT_ID_LO) = mlo; }
-			}
-			DN(d, DN_MOVED_HI) = 0u; DN(d, DN_MOVED_LO) = 0u;
 		}
 		DS(d, DS_NEXT_COUNT) = next;
 		size[r] = (next + BLK_SLOTS - 1u) & ~(BLK_SLOTS - 1u);

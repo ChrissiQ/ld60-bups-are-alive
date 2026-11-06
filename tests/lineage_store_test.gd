@@ -156,8 +156,13 @@ func _parity_import() -> void:
 
 # ---- the events and the queries -------------------------------------------------------------------------------------
 
+## An id here is `counter` made unique across the test's dishes (the store's ids carry no dish: a birth's home is in its step word).
 static func _id(dish: int, counter: int) -> int:
-	return (dish << GpuLayout.ID_DISH_SHIFT) | counter
+	return dish * 1000 + counter
+
+
+static func _home_of(id: int) -> int:
+	return id / 1000
 
 
 ## A birth event: the genes follow from the id so that each record is its own.
@@ -168,7 +173,7 @@ static func _birth(id: int, parent: int, step := 0, divisions := 0) -> PackedByt
 	e.encode_u32(GpuLayout.EB_ID_HI * 4, id >> 32)
 	e.encode_u32(GpuLayout.EB_PARENT_LO * 4, parent & 0xFFFFFFFF)
 	e.encode_u32(GpuLayout.EB_PARENT_HI * 4, parent >> 32)
-	e.encode_u32(GpuLayout.EB_STEP * 4, step)
+	e.encode_u32(GpuLayout.EB_STEP * 4, GpuLayout.event_step_word(step, _home_of(id)))
 	e.encode_u32(GpuLayout.EB_DIVISIONS * 4, divisions)
 	e.encode_u32(GpuLayout.EB_TRAITS * 4, 3 | (5 << 20) | (1 << 30))
 	var k := float(id & 0xFFFF)
@@ -187,7 +192,7 @@ static func _death(id: int, dish: int, step := 0, mass := 6.0) -> PackedByteArra
 	e.resize(DEATH_BYTES)
 	e.encode_u32(GpuLayout.ED_ID_LO * 4, id & 0xFFFFFFFF)
 	e.encode_u32(GpuLayout.ED_ID_HI * 4, id >> 32)
-	e.encode_u32(GpuLayout.ED_STEP * 4, GpuLayout.death_step_word(step, dish))
+	e.encode_u32(GpuLayout.ED_STEP * 4, GpuLayout.event_step_word(step, dish))
 	e.encode_u32(GpuLayout.ED_TRAITS * 4, 7 | (9 << 20))
 	e.encode_float(GpuLayout.ED_MASS * 4, mass)
 	e.encode_float(GpuLayout.ED_ENERGY * 4, 1.5)
@@ -260,7 +265,7 @@ static func _snapshot(store: LineageStore, ids: Array) -> Dictionary:
 
 
 ## Dish A (number 1) has a1 (a founder, dead by the freeze), a2 (child of a1), a3 (child of a2) and a5 (child of a1). A pipette moved
-## a2 to dish C: it is alive there with its id (`id >> 44` still 1) and its home 3, and C's c1 was born of it. A watches a3 (holder A) and
+## a2 to dish C: it is alive there with its id (its id is still dish A's) and its home 3, and C's c1 was born of it. A watches a3 (holder A) and
 ## C's c1 (holder C) is pinned. A's living bups are a3 and a5. Times: births at minute 10, a1's death at 50, the freeze at 500.
 func _pipetted_store(with_c_pin := true) -> LineageStore:
 	var store := _new_store()

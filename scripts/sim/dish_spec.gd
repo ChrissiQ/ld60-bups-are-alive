@@ -2,9 +2,9 @@ class_name DishSpec
 extends RefCounted
 ## A new dish for `SimCore.add_dish`: its size, grid, limit, settings, seed and founders. Positions are dish-local (µm
 ## from the centre). The founders are whole records (GpuLayout.RECORD_BYTES each, from RecordCodec or a test's builder); the core writes
-## them as the dish's first segment and starts the dish's id counter past the largest founder id.
+## them as the dish's first segment and gives them the world's next ids in founder order.
 
-var number := 1  ## the dish's number (the ids' high part); never reused in a game
+var number := 1  ## the dish's number (its name, and what a birth event carries); never reused in a game
 var radius := 3000.0  ## µm
 var resolution := StartConditions.MIN_NUTRIENT_RESOLUTION  ## the most cells across the nutrient grid (as StartConditions.nutrient_resolution)
 var limit := StartConditions.DEFAULT_BUP_LIMIT

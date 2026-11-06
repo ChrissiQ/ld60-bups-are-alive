@@ -5,7 +5,7 @@ extends SceneTree
 ## - `diff` of a dump with itself is ""; with one word of record 3 changed to R_ENERGY's place it is a line naming "record 3" and
 ##   "R_ENERGY"; with DS_MOVED_IN changed it names "DS_MOVED_IN"; with the picture words (R_PX, R_PY) changed and nothing else it is "".
 ## - a dump whose records are longer than the other's says "length".
-## - `Scenario.small(10, 500)`: 10 records of RECORD_BYTES, ids make_id(1, 1..10), every bup inside 0.9 x 500 µm, genes the founder's
+## - `Scenario.small(10, 500)`: 10 records of RECORD_BYTES, ids 1..10, every bup inside 0.9 x 500 µm, genes the founder's
 ##   (speed 20, sense 50, metabolism 1, size 4), mass = birth mass = Cell.mass_to_add(founder) = 0.5 x 4 x 4 = 8, no donors.
 ## - `with_flags({"conjugation": true})`: records 0, 5 are donors (R_DONOR 1.0), 1 is not; `{"key": true}`: record 2 has reach 2<<8.
 ## - `dish_flags` sets exactly the DPF bits of the flags given (stationary -> bit DPF_STATIONARY...).
@@ -62,7 +62,7 @@ func _scenario_checks() -> void:
 	TestUtil.check(r.size() == 10 * GpuLayout.RECORD_BYTES, "10 founders make 10 records")
 	var rim_ok := true
 	for i in 10:
-		TestUtil.check(GpuLayout.id_of(r, i) == GpuLayout.make_id(1, i + 1), "founder %d's id" % i)
+		TestUtil.check(GpuLayout.id_of(r, i) == (i + 1), "founder %d's id" % i)
 		var o := i * GpuLayout.RECORD_BYTES
 		var at := Vector2(r.decode_float(o + GpuLayout.R_X * 4), r.decode_float(o + GpuLayout.R_Y * 4))
 		rim_ok = rim_ok and at.length() <= 0.9 * 500.0 + 0.01

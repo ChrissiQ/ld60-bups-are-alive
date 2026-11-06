@@ -61,7 +61,7 @@ private:
 	double add_mass_factor = 0.5; // what a bup adds to its birth mass, times its size gene squared, before it divides
 
 	int now_minutes() const { return (int)(now_seconds / 60.0); }
-	void make_record(int64_t id, int64_t parent, const Record &fields);
+	void make_record(int64_t id, int64_t parent, const Record &fields, int dish);
 	void record_death(int64_t id, const Record &fields, int dish);
 	void free_if_unused(int64_t id);
 	void drop_pins_of(int holder, std::vector<int64_t> &touched);

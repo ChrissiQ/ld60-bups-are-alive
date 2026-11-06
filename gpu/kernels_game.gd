@@ -279,16 +279,17 @@ GRID_LOOP(ev_begin, D_MAX)
 
 
 ## `events` for the pool (after pool_finalize, before pool_compact), one pass over the bups: a dish's births and deaths of the step go to
-## the event ring from the places pool_finalize gave the dish, in the order of its bups; a death carries the number of the dish it died
-## in.
+## the event ring from the places pool_finalize gave the dish, in the order of its bups; a birth and a death carry the number of the dish they happened
+## in; a newborn's id is the world's next id plus its rank among the pool's newborns.
 static func pool_events() -> String:
 	var t := GpuKernelsLife.swapped(K_EVENTS, "void main() {\n\tBUP_THREAD\n", "void event_bup(uint i, uint d, uint l) {\n\tuint kid = EXCK[i] - DN(d, DN_KID_BASE);\n")
 	t = GpuKernelsLife.swapped(t, "CNT[CNT_SURVIVORS] + EXCK[i] < uint(P[P_CAPACITY])", "DS(d, DS_SURVIVORS) + kid < DS(d, DS_NEXT_COUNT)")  # (DP_CAP's cut, and pool_slot_check's)
 	t = GpuKernelsLife.swapped(t, "CNT[CNT_BIRTHS] + EXCK[i]", "DN(d, DN_BIRTH_BASE) + kid")
-	t = GpuKernelsLife.swapped(t, "CNT[CNT_NEXT_ID_LO] + EXCK[i]", "DS(d, DS_NEXT_ID_LO) + kid")
-	t = GpuKernelsLife.swapped(t, "CNT[CNT_NEXT_ID_HI] + (lo < CNT[CNT_NEXT_ID_LO]", "DS(d, DS_NEXT_ID_HI) + (lo < DS(d, DS_NEXT_ID_LO)")
+	t = GpuKernelsLife.swapped(t, "CNT[CNT_NEXT_ID_LO] + EXCK[i]", "WORLD[WD_NEXT_ID_LO] + EXCK[i]")
+	t = GpuKernelsLife.swapped(t, "CNT[CNT_NEXT_ID_HI] + (lo < CNT[CNT_NEXT_ID_LO]", "WORLD[WD_NEXT_ID_HI] + (lo < WORLD[WD_NEXT_ID_LO]")
 	t = GpuKernelsLife.swapped(t, "atomicAdd(CNT[CNT_BIRTHS_LOST], 1u)", "atomicAdd(DS(d, DS_BIRTHS_LOST), 1u)")
 	t = GpuKernelsLife.swapped(t, "CNT[CNT_DEATHS] + (i - EXCS[i])", "DN(d, DN_DEATH_BASE) + (l - (EXCS[i] - DN(d, DN_SURV_BASE)))")
+	t = GpuKernelsLife.swapped(t, "EVB[o + EB_STEP] = st;", "EVB[o + EB_STEP] = (DPU(d, DP_NUMBER) << EV_DISH_SHIFT) | (st & EV_STEP_MASK);")
 	t = GpuKernelsLife.swapped(t, "EVD[o + ED_STEP] = st;", "EVD[o + ED_STEP] = (DPU(d, DP_NUMBER) << EV_DISH_SHIFT) | (st & EV_STEP_MASK);")
 	t = GpuKernelsLife.swapped(t, "atomicAdd(CNT[CNT_DEATHS_LOST], 1u)", "atomicAdd(DS(d, DS_DEATHS_LOST), 1u)")
 	assert(not t.contains("CNT["), "pool_events still reads CNT")

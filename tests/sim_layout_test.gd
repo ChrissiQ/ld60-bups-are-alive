@@ -3,12 +3,12 @@ extends SceneTree
 ## The pooled world's word layouts (gpu/gpu_layout.gd), headless. Expected values, written before the first run:
 ## [derived]
 ##  - the record: 28 words, each of R_* named once (0-27), no word or constant naming a dish (a bup's dish is its segment);
-##  - ids: 1 + 19 + 44 = 64 bits; make_id(524287, 2^44 - 1) is positive; R_ID_HI is the id's high word, (dish << 12) | counter >> 32;
-##  - a death event's ED_STEP: 13 low bits step, 19 high bits dish number, 13 + 19 = 32; MAX_STEPS_PER_BATCH (1024) fits in 13 bits;
+##  - ids: one world-wide positive 63-bit number (ID_MAX 2^63 - 1), no dish in it; R_ID_HI is its high word; WORLD holds the next id (WD_NEXT_ID_LO/HI);
+##  - an event's step word (ED_STEP, and a birth's EB_STEP): 13 low bits step, 19 high bits dish number, 13 + 19 = 32; MAX_STEPS_PER_BATCH (1024) fits in 13 bits;
 ##  - DISHP: 32 words = 128 B; DP_* name 22 distinct words 0-21 (10 spare, 22-31 unused); six DPF_* flags in 0-6 (bit 4 spare);
 ##    it names seed, step, k_total, iterations, noise_reference and radius;
 ##  - DSTATE: 32 words; DS_* name 25 distinct words 0-24 (24-31 the energy ledger's four sums), including moved_in and moved_out;
-##  - WORLD: 16 words, 11 named (the totals the kernels bound their loops by are uints there, not floats in P); payload: 4 words = 16 B, id texture 2 words = 8 B, colour bytes inside the fourth word above its spare low byte;
+##  - WORLD: 16 words, 13 named (the totals the kernels bound their loops by are uints there, not floats in P); payload: 4 words = 16 B, id texture 2 words = 8 B, colour bytes inside the fourth word above its spare low byte;
 ##  - STATS per dish: 16 words x (1 + 16) = 272 words; QIN and QOUT pools are D_MAX rows of the single-dish path's QIN_WORDS (44) and QOUT_WORDS (240);
 ##  - D_MAX 1,024 rows: DISHP + DSTATE = 1,024 x 256 B = 256 KB;
 ##  - no kernel reads a dish table by a number, and no layout name is also a kernel's buffer name.
@@ -20,10 +20,10 @@ func _init() -> void:
 	var constants: Dictionary = (load("res://gpu/gpu_layout.gd") as Script).get_script_constant_map()
 	_record_has_no_dish(constants)
 	_ids()
-	_death_step()
+	_event_step()
 	_table(constants, "DP_", 22, L.DP_WORDS, "DISHP")
 	_table(constants, "DS_", 25, L.DS_WORDS, "DSTATE")
-	_table(constants, "WD_", 11, L.WD_WORDS, "WORLD")
+	_table(constants, "WD_", 13, L.WD_WORDS, "WORLD")
 	_dishp(constants)
 	_dstate()
 	_payload()
@@ -59,27 +59,22 @@ func _record_has_no_dish(constants: Dictionary) -> void:
 
 
 func _ids() -> void:
-	TestUtil.check(1 + L.ID_DISH_BITS + L.ID_COUNTER_BITS == 64 and L.ID_DISH_SHIFT == L.ID_COUNTER_BITS, "an id is a zero bit, 19 bits of dish number, 44 of counter")
-	TestUtil.check(L.ID_MAX_DISH == (1 << L.ID_DISH_BITS) - 1 and L.ID_HI_DISH_SHIFT == L.ID_COUNTER_BITS - 32 and L.ID_HI_COUNTER_MASK == (1 << 12) - 1, "the id's high word: the counter's 12 bits, then the number")
-	var counter_max := (1 << L.ID_COUNTER_BITS) - 1
-	for pair: Array in [[0, 0], [1, 1], [7, 12345], [524287, counter_max], [524287, 0], [3, 1 << 32], [100000, (1 << 32) - 1]]:
-		var id := L.make_id(pair[0], pair[1])
-		TestUtil.check(id >= 0, "make_id(%d, %d) is negative" % pair)
-		TestUtil.check(L.id_dish_number(id) == pair[0] and L.id_counter(id) == pair[1], "make_id(%d, %d) does not read back" % pair)
-		TestUtil.check(L.id_hi_word(id) == (id >> 32) and L.id_hi_word(id) <= 0xFFFFFFFF, "R_ID_HI of id %d is not its high word" % id)
+	TestUtil.check(L.ID_MAX == (1 << 63) - 1 and L.ID_MAX > 0, "an id is a positive 63-bit number")
+	TestUtil.check(L.WD_NEXT_ID_HI == L.WD_NEXT_ID_LO + 1, "WORLD holds the next id as two words")
+	for id: int in [1, 2, 12345, 1 << 32, (1 << 32) + 7, (1 << 44) + 3, L.ID_MAX]:
 		var records := PackedByteArray()
 		records.resize(L.RECORD_BYTES)
 		L.set_id(records, 0, id)
-		TestUtil.check(L.id_of(records, 0) == id and records.decode_u32(L.R_ID_HI * 4) == L.id_hi_word(id), "the record's two id words are not the id's")
+		TestUtil.check(L.id_of(records, 0) == id and records.decode_u32(L.R_ID_HI * 4) == (id >> 32) and records.decode_u32(L.R_ID_LO * 4) == (id & 0xFFFFFFFF), "the record's two id words are not the id %d" % id)
 
 
-func _death_step() -> void:
+func _event_step() -> void:
 	TestUtil.check(L.EV_STEP_BITS + L.EV_DISH_BITS == 32 and L.EV_DISH_SHIFT == L.EV_STEP_BITS, "ED_STEP: 13 bits of step, 19 of dish number")
-	TestUtil.check(L.EV_STEP_MASK == (1 << L.EV_STEP_BITS) - 1 and L.EV_DISH_MASK == (1 << L.EV_DISH_BITS) - 1 and L.EV_DISH_BITS == L.ID_DISH_BITS, "ED_STEP's masks")
+	TestUtil.check(L.EV_STEP_MASK == (1 << L.EV_STEP_BITS) - 1 and L.EV_DISH_MASK == (1 << L.EV_DISH_BITS) - 1, "ED_STEP's masks")
 	TestUtil.check(L.MAX_STEPS_PER_BATCH <= L.EV_STEP_MASK + 1, "a batch's steps fit ED_STEP's low bits")
 	for pair: Array in [[0, 0], [1023, 524287], [5, 1], [L.EV_STEP_MASK, 123456]]:
-		var word := L.death_step_word(pair[0], pair[1])
-		TestUtil.check(word >= 0 and word <= 0xFFFFFFFF and L.death_step(word) == pair[0] and L.death_dish_number(word) == pair[1], "ED_STEP (%d, %d) does not read back" % pair)
+		var word := L.event_step_word(pair[0], pair[1])
+		TestUtil.check(word >= 0 and word <= 0xFFFFFFFF and L.event_step(word) == pair[0] and L.event_dish_number(word) == pair[1], "ED_STEP (%d, %d) does not read back" % pair)
 
 
 func _dishp(constants: Dictionary) -> void:

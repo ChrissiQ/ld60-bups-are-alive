@@ -28,8 +28,9 @@ var refusing_iteration := ""
 var device := "fake world"  ## what device_name() answers ("": a world with no device, which the record shows as CPU)
 var means := {}  ## row -> the mean every statistic of that dish shows (1 when not set)
 
-var _dishes := {}  ## row -> {number, spec: DishSpec, bups: {id: Vector2 (dish-local)}, next: the next id counter, had_bups, asked: ids, over: {id: {word: value}}, world: DishWorld, world_version, world_sent}
+var _dishes := {}  ## row -> {number, spec: DishSpec, bups: {id: Vector2 (dish-local)}, had_bups, asked: ids, over: {id: {word: value}}, world: DishWorld, world_version, world_sent}
 var _next_number := 1
+var _next_id := 1  ## the world's next bup id (one counter for every dish)
 var _seq := 0
 var _snapshot := Snapshot.new()
 var _pending: Array[Dictionary] = []  ## {reply, value, error, due}
@@ -99,12 +100,12 @@ func add_bups(row: int, at: Array, parent := -1) -> PackedInt64Array:
 	var recs := PackedByteArray()
 	var ids := PackedInt64Array()
 	for p: Vector2 in at:
-		var id := GpuLayout.make_id(d["number"], d["next"])
-		d["next"] += 1
+		var id := _next_id
+		_next_id += 1
 		recs.append_array(_record(id, p))
 		d["bups"][id] = p
 		ids.append(id)
-	var births := SimCore.founder_births(recs)
+	var births := SimCore.founder_births(recs, d["number"])
 	if parent >= 0:
 		for i in ids.size():
 			births.encode_u32((i * GpuLayout.BIRTH_WORDS + GpuLayout.EB_PARENT_LO) * 4, parent & 0xFFFFFFFF)
@@ -138,7 +139,7 @@ func serve_dish(number: int, count: int) -> int:
 			row += 1
 		var spec := DishSpec.new()
 		spec.number = number
-		_dishes[row] = _entry(spec, {}, 0)
+		_dishes[row] = _entry(spec, {})
 		_next_number = maxi(_next_number, number + 1)
 	var have := ids_in(row)
 	if have.size() > count:
@@ -274,22 +275,22 @@ func _add(row: int, spec: DishSpec) -> void:
 		_refused[row] = "past the memory budget"
 		return
 	var bups := {}
-	var top := 0
 	for i in spec.founders.size() / GpuLayout.RECORD_BYTES:
+		GpuLayout.set_id(spec.founders, i, _next_id)
+		_next_id += 1
 		var id := GpuLayout.id_of(spec.founders, i)
 		var o := i * GpuLayout.RECORD_BYTES
 		bups[id] = Vector2(spec.founders.decode_float(o + GpuLayout.R_X * 4), spec.founders.decode_float(o + GpuLayout.R_Y * 4))
-		top = maxi(top, GpuLayout.id_counter(id))
-	_dishes[row] = _entry(spec.copy(), bups, top)
+	_dishes[row] = _entry(spec.copy(), bups)
 	_next_number = maxi(_next_number, spec.number + 1)
 	if spec.founders.size() > 0:
-		store.apply_events(SimCore.founder_births(spec.founders), PackedByteArray(), clock, 0.0)
+		store.apply_events(SimCore.founder_births(spec.founders, spec.number), PackedByteArray(), clock, 0.0)
 
 
-func _entry(spec: DishSpec, bups: Dictionary, top: int) -> Dictionary:
+func _entry(spec: DishSpec, bups: Dictionary) -> Dictionary:
 	var world := DishWorld.new(spec.radius, maxi(spec.seed, 1))
 	world.set_bloom(spec.bloom_density)
-	return {"number": spec.number, "spec": spec, "bups": bups, "next": top + 1, "had_bups": not bups.is_empty(), "asked": [], "over": {}, "world": world, "world_version": 1, "world_sent": 0}
+	return {"number": spec.number, "spec": spec, "bups": bups, "had_bups": not bups.is_empty(), "asked": [], "over": {}, "world": world, "world_version": 1, "world_sent": 0}
 
 
 func _live(row: int) -> PackedInt64Array:
@@ -344,13 +345,12 @@ func _thaw(row: int, blob: DishBlob) -> void:
 		return
 	var spec := DishSpec.from_dict(blob.spec)
 	var bups := {}
-	var top := 0
 	for i in blob.count():
 		var id := GpuLayout.id_of(blob.records, i)
 		var o := i * GpuLayout.RECORD_BYTES
 		bups[id] = Vector2(blob.records.decode_float(o + GpuLayout.R_X * 4), blob.records.decode_float(o + GpuLayout.R_Y * 4))
-		top = maxi(top, GpuLayout.id_counter(id))
-	_dishes[row] = _entry(spec, bups, top)
+		_next_id = maxi(_next_id, id + 1)
+	_dishes[row] = _entry(spec, bups)
 	_next_number = maxi(_next_number, spec.number + 1)
 	var data: PackedByteArray = blob.host.get("lineage", PackedByteArray())
 	if data.size() > 0:
@@ -374,15 +374,13 @@ func _pipette(row: int, centre: Vector2, radius: float, dest: int, reply: SimRep
 	spec.founders = PackedByteArray()
 	var moved := {}
 	var ids := PackedInt64Array()
-	var top := 0
 	for id: int in source["bups"].keys():
 		var at: Vector2 = source["bups"][id]
 		if at.distance_to(centre) <= radius:
 			moved[id] = at - centre
 			ids.append(id)
 			source["bups"].erase(id)
-			top = maxi(top, GpuLayout.id_counter(id))
-	_dishes[dest] = _entry(spec, moved, top)
+	_dishes[dest] = _entry(spec, moved)
 	store.retarget_ids(ids, number)
 	_answer(reply, {"new_row": dest, "number": number, "moved": ids.size(), "ids": ids})
 

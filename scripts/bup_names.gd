@@ -1,7 +1,8 @@
 class_name BupNames
 extends RefCounted
-## What bups are called. Every bup has a number, given in birth order within its dish (the 578th bup born
-## is #578) and kept for its whole life; the dish starting over starts the numbering again at 1. Unless
+## What bups are called. Every bup has a number, its id: given in birth order in the whole world (the 578th bup born
+## in the game is #578, whichever dish it was born in) and kept for its whole life, through a pipette too; a new game starts the
+## numbering again at 1. Unless
 ## the player renames one, a bup's name is its size word and that number ("lil bup #578"). A name the
 ## player gave is kept on the bup's family record in the simulation (see BupSim) and goes when the record does.
 ##
@@ -26,10 +27,9 @@ static func random_pool() -> Array[String]:
 			push_error("No names in %s" % RANDOM_NAMES_FILE)
 	return _random_names
 
-## "lil bup #578": its size word, going by the size its genome grows to, and its number (the counter part of its
-## id: a pooled id also carries the number of the dish it was born in, which is not part of the name).
+## "lil bup #578": its size word, going by the size its genome grows to, and its number (its id).
 static func default_name(size_gene: float, id: int) -> String:
-	return Strings.t("bups.name", [Cell.title_for(size_gene), UiText.group(str(GpuLayout.id_counter(id)))])
+	return Strings.t("bups.name", [Cell.title_for(size_gene), UiText.group(str(id))])
 
 
 ## What a typed name becomes: no line breaks or control characters, spaces trimmed, a sensible length.

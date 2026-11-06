@@ -53,7 +53,7 @@ func _init() -> void:
 
 
 static func _id(counter: int) -> int:
-	return (DISH << GpuLayout.ID_DISH_SHIFT) | counter
+	return counter
 
 
 static func _births(list: Array) -> PackedByteArray:
@@ -74,7 +74,7 @@ static func _birth(id: int, parent: int, step := 0, divisions := 0) -> PackedByt
 	e.encode_u32(GpuLayout.EB_ID_HI * 4, id >> 32)
 	e.encode_u32(GpuLayout.EB_PARENT_LO * 4, parent & 0xFFFFFFFF)
 	e.encode_u32(GpuLayout.EB_PARENT_HI * 4, parent >> 32)
-	e.encode_u32(GpuLayout.EB_STEP * 4, step)
+	e.encode_u32(GpuLayout.EB_STEP * 4, GpuLayout.event_step_word(step, DISH))
 	e.encode_u32(GpuLayout.EB_DIVISIONS * 4, divisions)
 	return e
 
@@ -84,6 +84,6 @@ static func _death(id: int, step := 0) -> PackedByteArray:
 	e.resize(DEATH_BYTES)
 	e.encode_u32(GpuLayout.ED_ID_LO * 4, id & 0xFFFFFFFF)
 	e.encode_u32(GpuLayout.ED_ID_HI * 4, id >> 32)
-	e.encode_u32(GpuLayout.ED_STEP * 4, GpuLayout.death_step_word(step, DISH))
+	e.encode_u32(GpuLayout.ED_STEP * 4, GpuLayout.event_step_word(step, DISH))
 	e.encode_float(GpuLayout.ED_MASS * 4, 6.0)
 	return e

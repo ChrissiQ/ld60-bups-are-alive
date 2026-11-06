@@ -15,7 +15,7 @@ extends SceneTree
 ##    none), so the packed dish is compared with the single-dish path's kernels given a 32-slot table, and its most donors in a bucket is reported.
 ## C2 isolation: every dish of a pool of 2, 8 and 65 dishes (random rows, sizes, seeds, limits, caps, flags and donors; every dish
 ##    packed round 0, 0, so all of them overlap) equals its run alone (another row, at slot 0, another grid size), batch by batch:
-##    records, every DSTATE word but the start, its events (births by the id's dish number, deaths by ED_STEP's), its stats. 0 words differ.
+##    records, every DSTATE word but the start, its events (births by EB_STEP's dish number, deaths by ED_STEP's), its stats. 0 words differ.
 ## C3 permutation: the 65 dishes with their rows reversed, then shuffled, with one dish removed after 40 steps (its blocks made padding
 ##    and its DISHP and DSTATE rows cleared, as SimCore.remove_dish) and one added after 60 steps: every dish equals its run alone (the added one from its own step 0). 0 differ.
 ## C4 conjugation across dishes: in C2/C3 every dish lies over the others; a pool run with a dish-blind donors' index (no dish in the
@@ -25,9 +25,9 @@ extends SceneTree
 ##    (float32, as the kernel) and keep every word but x, y, which are float32(x - cx), float32(y - cy); the source keeps the others in
 ##    their order, the destination holds the moved in their order; the other dishes are unchanged; DS_MOVED_OUT(source) =
 ##    DS_MOVED_IN(destination) = m > 0; counts n - m and m; the pass adds no birth, no death and writes no event; the stats after it
-##    count m in the destination and n - m in the source; the destination's next counter is above every moved counter and keeps its
-##    number; the block table is the segments. In the next batch every event of a moved bup or its descendants is the destination's
-##    (deaths by ED_STEP's number, births by the id's) and none is the source's; count after - before = births - deaths + moved in -
+##    count m in the destination and n - m in the source; the world's next id is left alone, past every moved id;
+##    the block table is the segments. In the next batch every event of a moved bup or its descendants is the destination's
+##    (births by EB_STEP's number, deaths by ED_STEP's) and none is the source's; count after - before = births - deaths + moved in -
 ##    moved out for every dish in both batches. The destination continued 20 steps equals it alone, loaded from its records and DSTATE.
 ## C0 every pooled kernel loads from the imported SPIR-V (gpu/shaders/pool_*.glsl) and makes a shader and a pipeline on the device.
 ## C6 (mode time N, default 2,000,000): each pooled kernel's cost on one dish of N bups (2% donors, 5% at division) against the single-dish path's
@@ -196,7 +196,7 @@ func records_of(s: Dictionary) -> PackedByteArray:
 			L.R_DONOR: 1.0 if r.randf() < float(s["donors"]) else 0.0, L.R_HUE: 0.33, L.R_SAT: 0.7, L.R_VAL: 1.0, L.R_PX: 3e38, L.R_PY: 3e38, L.R_FAST: -1.0}
 		for word: int in f:
 			out.encode_float(o + word * 4, f[word])
-		L.set_id(out, k, L.make_id(s["number"], k + 1))
+		L.set_id(out, k, (k + 1))
 	return out
 
 
@@ -218,9 +218,6 @@ func put_dish(w: World, row: int, s: Dictionary, start: int, records := PackedBy
 	put(w, "DISHP", dp, row * L.DP_WORDS * 4)
 	var ds := dstate.duplicate() if not dstate.is_empty() else zeros(L.DS_WORDS * 4)
 	if dstate.is_empty():
-		var first := L.make_id(s["number"], n + 1)
-		ds.encode_u32(L.DS_NEXT_ID_LO * 4, first & 0xFFFFFFFF)
-		ds.encode_u32(L.DS_NEXT_ID_HI * 4, first >> 32)
 		ds.encode_u32(L.DS_SEED * 4, s["seed"])
 	ds.encode_u32(L.DS_START * 4, start)
 	ds.encode_u32(L.DS_COUNT * 4, n)
@@ -236,6 +233,62 @@ func put_dish(w: World, row: int, s: Dictionary, start: int, records := PackedBy
 	var wd := zeros(4)
 	wd.encode_u32(0, maxi(slots, start + blocks * 256))
 	put(w, "WORLD", wd, L.WD_SLOTS * 4)
+	var next := world_next_id(w)  # (the world's next id is past every id the dish holds)
+	for k in n:
+		next = maxi(next, L.id_of(recs, k) + 1)
+	var ids := zeros(8)
+	ids.encode_u32(0, next & 0xFFFFFFFF)
+	ids.encode_u32(4, next >> 32)
+	put(w, "WORLD", ids, L.WD_NEXT_ID_LO * 4)
+
+
+func world_next_id(w: World) -> int:
+	var wd := get_bytes(w, "WORLD", L.WD_NEXT_ID_LO * 4, 8)
+	return wd.decode_u32(0) | (wd.decode_u32(4) << 32)
+
+
+## `dump`'s ids as their ranks among the ids it names (records, births, parents, deaths), 0 kept: ids are the world's, so a dish in a
+## pool and alone get different numbers, in the same order.
+func rank_ids(dump: Dictionary) -> void:
+	var recs: PackedByteArray = dump["records"].duplicate()
+	var births: PackedByteArray = dump["births"].duplicate()
+	var deaths: PackedByteArray = dump["deaths"].duplicate()
+	var bw := L.BIRTH_WORDS
+	var dw := L.DEATH_WORDS
+	var seen := {}
+	for k in recs.size() / RB:
+		seen[L.id_of(recs, k)] = true
+	for k in births.size() / (bw * 4):
+		seen[_id64(births, k * bw + L.EB_ID_LO)] = true
+		seen[_id64(births, k * bw + L.EB_PARENT_LO)] = true
+	for k in deaths.size() / (dw * 4):
+		seen[_id64(deaths, k * dw + L.ED_ID_LO)] = true
+	seen.erase(0)
+	var ids := seen.keys()
+	ids.sort()
+	var rank := {0: 0}
+	for k in ids.size():
+		rank[ids[k]] = k + 1
+	for k in recs.size() / RB:
+		L.set_id(recs, k, rank[L.id_of(recs, k)])
+	for k in births.size() / (bw * 4):
+		_put_id64(births, k * bw + L.EB_ID_LO, rank[_id64(births, k * bw + L.EB_ID_LO)])
+		_put_id64(births, k * bw + L.EB_PARENT_LO, rank[_id64(births, k * bw + L.EB_PARENT_LO)])
+	for k in deaths.size() / (dw * 4):
+		_put_id64(deaths, k * dw + L.ED_ID_LO, rank[_id64(deaths, k * dw + L.ED_ID_LO)])
+	dump["records"] = recs
+	dump["births"] = births
+	dump["deaths"] = deaths
+
+
+## The 64-bit id in words `word` (low) and `word + 1` (high) of `bytes` (every event keeps its id and its parent's as a low and a high word in a row).
+func _id64(bytes: PackedByteArray, word: int) -> int:
+	return bytes.decode_u32(word * 4) | (bytes.decode_u32((word + 1) * 4) << 32)
+
+
+func _put_id64(bytes: PackedByteArray, word: int, id: int) -> void:
+	bytes.encode_u32(word * 4, id & 0xFFFFFFFF)
+	bytes.encode_u32((word + 1) * 4, id >> 32)
 
 
 func dstate_row(w: World, row: int) -> PackedByteArray:
@@ -354,7 +407,6 @@ func pool_batch(w: World, steps: int, g: int, gs := -1, apply := "pool_conj_appl
 func pip_pass(cl: int, w: World, pip: Array, g: int, gs: int) -> void:
 	var pd := float(pip[0] + pip[1] * L.D_MAX)
 	disp(cl, w, "pool_pip_mark", g, pip[2], pip[3], pip[4], pd)
-	disp(cl, w, "pool_pip_max", g, pip[2], pip[3], pip[4], pd)
 	gscan(cl, w, "pool_scan_s", gs)
 	disp(cl, w, "pool_pip_final", 1, pip[2], pip[3], pip[4], pd)
 	disp(cl, w, "pool_pip_scatter", g, pip[2], pip[3], pip[4], pd)
@@ -373,7 +425,7 @@ func today_world(s: Dictionary, phys: int, wide := false) -> World:
 	var n := recs.size() / RB
 	var cnt := zeros(L.CNT_WORDS * 4)
 	cnt.encode_u32(L.CNT_BUPS * 4, n)
-	var first := L.make_id(s["number"], n + 1)
+	var first := (n + 1)
 	cnt.encode_u32(L.CNT_NEXT_ID_LO * 4, first & 0xFFFFFFFF)
 	cnt.encode_u32(L.CNT_NEXT_ID_HI * 4, first >> 32)
 	cnt.encode_u32(L.CNT_SEED * 4, s["seed"])
@@ -428,7 +480,7 @@ func today_batch(w: World, steps: int) -> void:
 
 # ---- dumps -----------------------------------------------------------------------------------------------------------------------------
 
-## The ring's events of dish `number` (births by the id's dish number, deaths by ED_STEP's), in ring order: [births, deaths].
+## The ring's events of dish `number` (births by EB_STEP's dish number, deaths by ED_STEP's), in ring order: [births, deaths].
 func ring_events(w: World, births: int, deaths: int, number: int) -> Array:
 	var bo := PackedByteArray()
 	var dout := PackedByteArray()
@@ -437,12 +489,12 @@ func ring_events(w: World, births: int, deaths: int, number: int) -> Array:
 	var eb := get_bytes(w, "EVB", 0, maxi(bn, 1) * L.BIRTH_WORDS * 4)
 	for k in bn:
 		var o := k * L.BIRTH_WORDS * 4
-		if (eb.decode_u32(o + L.EB_ID_HI * 4) >> L.ID_HI_DISH_SHIFT) == number:
+		if L.event_dish_number(eb.decode_u32(o + L.EB_STEP * 4)) == number:
 			bo.append_array(eb.slice(o, o + L.BIRTH_WORDS * 4))
 	var ed := get_bytes(w, "EVD", 0, maxi(dn, 1) * L.DEATH_WORDS * 4)
 	for k in dn:
 		var o := k * L.DEATH_WORDS * 4
-		if L.death_dish_number(ed.decode_u32(o + L.ED_STEP * 4)) == number:
+		if L.event_dish_number(ed.decode_u32(o + L.ED_STEP * 4)) == number:
 			dout.append_array(ed.slice(o, o + L.DEATH_WORDS * 4))
 	return [bo, dout]
 
@@ -467,6 +519,7 @@ func dump_pool(w: World, rows: Array) -> Dictionary:
 		ds.encode_u32(L.DS_START * 4, 0)
 		var ev := ring_events(w, tb, td, number)
 		out[number] = {"step": step, "records": recs, "dstate": ds, "stats": stats.slice(row * L.STATS_DISH_WORDS * 4, row * L.STATS_DISH_WORDS * 4 + L.STATS_WORDS * 4), "births": ev[0], "deaths": ev[1]}
+		rank_ids(out[number])
 	return out
 
 
@@ -514,13 +567,17 @@ func c1() -> void:
 			var ds := dstate_row(p, 0)
 			var n := cnt.decode_u32(L.CNT_BUPS * 4)
 			var pairs := [[L.CNT_BUPS, L.DS_COUNT], [L.CNT_SURVIVORS, L.DS_SURVIVORS], [L.CNT_NEWBORN, L.DS_NEWBORN], [L.CNT_NEXT_COUNT, L.DS_NEXT_COUNT],
-				[L.CNT_NEXT_ID_LO, L.DS_NEXT_ID_LO], [L.CNT_NEXT_ID_HI, L.DS_NEXT_ID_HI], [L.CNT_STEP, L.DS_STEP], [L.CNT_GROWTH, L.DS_GROWTH],
+				[L.CNT_STEP, L.DS_STEP], [L.CNT_GROWTH, L.DS_GROWTH],
 				[L.CNT_BIRTHS, L.DS_BIRTHS], [L.CNT_DEATHS, L.DS_DEATHS], [L.CNT_BIRTHS_LOST, L.DS_BIRTHS_LOST], [L.CNT_DEATHS_LOST, L.DS_DEATHS_LOST],
 				[L.CNT_DONORS, L.DS_DONORS], [L.CNT_DONOR_REACH, L.DS_DONOR_REACH], [L.CNT_TRIMMED, L.DS_TRIMMED]]
 			for pr: Array in pairs:
 				if cnt.decode_u32(pr[0] * 4) != ds.decode_u32(pr[1] * 4) and same:
 					same = false
 					why = "batch %d counter %d: today %d, pooled %d" % [batch, pr[0], cnt.decode_u32(pr[0] * 4), ds.decode_u32(pr[1] * 4)]
+			var today_next := cnt.decode_u32(L.CNT_NEXT_ID_LO * 4) | (cnt.decode_u32(L.CNT_NEXT_ID_HI * 4) << 32)
+			if same and today_next != world_next_id(p):
+				same = false
+				why = "batch %d next id: today %d, pooled %d" % [batch, today_next, world_next_id(p)]
 			if same and (get_bytes(t, "BUPS", 0, n * RB) if n > 0 else PackedByteArray()) != segment(p, 0):
 				same = false
 				why = "batch %d records" % batch
@@ -702,13 +759,14 @@ func c5() -> void:
 	for row: int in rows:
 		before[row] = segment(w, row)
 		counts[row] = ds_word(w, row, L.DS_COUNT)
+	var next_before := world_next_id(w)
 	var cx := 10.0
 	var cy := -5.0
 	var rad := 30.0
 	var moved := PackedByteArray()
 	var stay := PackedByteArray()
 	var moved_ids := {}
-	var max_counter := 0
+	var max_id := 0
 	var src_recs: PackedByteArray = before[4]
 	for k in src_recs.size() / RB:
 		var rec := src_recs.slice(k * RB, (k + 1) * RB)
@@ -720,7 +778,7 @@ func c5() -> void:
 			moved.append_array(rec)
 			var id := L.id_of(rec, 0)
 			moved_ids[id] = true
-			max_counter = maxi(max_counter, L.id_counter(id))
+			max_id = maxi(max_id, id)
 		else:
 			stay.append_array(rec)
 	var m := moved.size() / RB
@@ -743,9 +801,7 @@ func c5() -> void:
 	var st_src := get_bytes(w, "STATS", 4 * L.STATS_DISH_WORDS * 4, 4).decode_float(0)
 	var st_dst := get_bytes(w, "STATS", 6 * L.STATS_DISH_WORDS * 4, 4).decode_float(0)
 	ok(int(st_src) == counts[4] - m and int(st_dst) == m, "C5 the stats after the pass count %d in the source and %d in the destination" % [int(st_src), int(st_dst)])
-	var ds6 := dstate_row(w, 6)
-	var next_id := ds6.decode_u32(L.DS_NEXT_ID_LO * 4) | (ds6.decode_u32(L.DS_NEXT_ID_HI * 4) << 32)
-	ok(L.id_dish_number(next_id) == 77 and L.id_counter(next_id) == max_counter + 1, "C5 the destination's next id: number %d, counter %d (largest moved %d)" % [L.id_dish_number(next_id), L.id_counter(next_id), max_counter])
+	ok(world_next_id(w) == next_before and world_next_id(w) > max_id, "C5 the pass leaves the world's next id (%d) alone, past every moved id (largest %d)" % [world_next_id(w), max_id])
 	var blk := get_bytes(w, cur(w, "BLKDISH"))
 	var slots := get_bytes(w, "WORLD").decode_u32(L.WD_SLOTS * 4)
 	var table_ok := true
@@ -779,11 +835,11 @@ func c5() -> void:
 		if family.has(parent):
 			family[id] = true
 			seen += 1
-		events_ok = events_ok and (family.has(parent) == (L.id_dish_number(id) == 77))
+		events_ok = events_ok and (family.has(parent) == (L.event_dish_number(eb.decode_u32(o + L.EB_STEP * 4)) == 77))
 	for k in td:
 		var o := k * L.DEATH_WORDS * 4
 		var id := ed.decode_u32(o + L.ED_ID_LO * 4) | (ed.decode_u32(o + L.ED_ID_HI * 4) << 32)
-		var number := L.death_dish_number(ed.decode_u32(o + L.ED_STEP * 4))
+		var number := L.event_dish_number(ed.decode_u32(o + L.ED_STEP * 4))
 		if family.has(id):
 			seen += 1
 		events_ok = events_ok and (family.has(id) == (number == 77))
@@ -892,7 +948,6 @@ func timing(n: int) -> void:
 	put(p, "DISHP", dp)
 	var ds := zeros(L.DS_WORDS * 4)
 	ds.encode_u32(L.DS_COUNT * 4, n)
-	ds.encode_u32(L.DS_NEXT_ID_LO * 4, n + 1)
 	ds.encode_u32(L.DS_SEED * 4, s["seed"])
 	put(p, "DSTATE", ds)
 	var rows := PackedByteArray()
@@ -901,6 +956,9 @@ func timing(n: int) -> void:
 	var wd := zeros(4)
 	wd.encode_u32(0, (n + 255) / 256 * 256)
 	put(p, "WORLD", wd, L.WD_SLOTS * 4)
+	var next := zeros(8)
+	next.encode_u32(0, n + 1)
+	put(p, "WORLD", next, L.WD_NEXT_ID_LO * 4)
 	var g := GpuKernels.bup_groups(n)
 	var gs := GpuKernels.scan_groups(n)
 	var small_p := ["DSTATE", "DNEXT", "WORLD", "BLKDISH"]

@@ -59,6 +59,9 @@ func _run() -> void:
 	a.unpark()
 	g.look_at(a, 0.5)
 	a.clear_hover()
+	var theirs_ids := {}
+	for i in theirs.records.size() / GpuLayout.RECORD_BYTES:
+		theirs_ids[GpuLayout.id_of(theirs.records, i)] = true
 	var foreign: Array = []
 	var any_bup := 0
 	var drew_stale := 0
@@ -72,7 +75,7 @@ func _run() -> void:
 		var id := int(answer.get("id", -1))
 		if id >= 0:
 			any_bup += 1
-			if GpuLayout.id_dish_number(id) != 1:
+			if theirs_ids.has(id):
 				foreign.append(id)
 		var p := view.payload()
 		if p.count > 0 and p.row != a.row:

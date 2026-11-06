@@ -167,16 +167,20 @@ func _initialize() -> void:
 	var number_start := TestUtil.small_start()
 	number_start.bups = 5
 	var numbered := _make_dish()
+	var floor_id: int = fake._next_id
 	numbered.strike(number_start)
 	await _settle()
-	var founders: PackedInt64Array = numbered.bup_ids()
+	var founders := PackedInt64Array()
+	for id in numbered.bup_ids():
+		if id >= floor_id:
+			founders.append(id)
 	var in_order := founders.size() == 5
 	for i in founders.size():
-		in_order = in_order and founders[i] == GpuLayout.make_id(numbered.number, i + 1)
-	TestUtil.check(in_order, "the founders are numbered 1, 2, 3 ... in order, in the dish's own range")
+		in_order = in_order and founders[i] == founders[0] + i
+	TestUtil.check(in_order, "the founders are numbered one after another in the world's ids")
 	var first: int = founders[0]
 	numbered.rename_bup(first, "  Finnigan\n ")
-	TestUtil.check(numbered.bup_name(first) == "Finnigan" and numbered.bup_default_name(first).contains("#") and numbered.bup_custom_name(first) == "Finnigan", "a bup can be given a name, tidied up")
+	TestUtil.check(numbered.bup_name(first) == "Finnigan" and numbered.bup_default_name(first).ends_with("#" + UiText.group(str(first))) and numbered.bup_custom_name(first) == "Finnigan", "a bup can be given a name, tidied up")
 	numbered.rename_bup(first, "x".repeat(100))
 	TestUtil.check(numbered.bup_name(first).length() == BupNames.MAX_LENGTH, "names are kept to a sensible length")
 	numbered.rename_bup(first, "Finnigan")
@@ -188,7 +192,7 @@ func _initialize() -> void:
 	TestUtil.check(not numbered.has_bup(first) and numbered.population() == 4, "a bup killed in the world is gone from the dish")
 	numbered.strike(number_start)
 	await _settle()
-	TestUtil.check(numbered.bup_ids()[0] == GpuLayout.make_id(numbered.number, 1) and numbered.bup_name(numbered.bup_ids()[0]).contains("#"), "starting the dish over starts the numbers again")
+	TestUtil.check(numbered.bup_ids().has(founders[-1] + 1) and numbered.bup_name(founders[-1] + 1).ends_with("#" + UiText.group(str(founders[-1] + 1))), "starting the dish over takes new ids: the world never reuses one")
 
 	# --- The watch list: a watched bup is kept, until taken off.
 	var watching := _make_dish()

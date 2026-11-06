@@ -216,7 +216,7 @@ func _track_and_probe() -> void:
 	var h := SimHarness.make([Scenario.small(80, 1500.0).seed(31), Scenario.small(20, 1500.0).seed(32)]).step(10)
 	var core: SimCore = h.core
 	var recs := core.records(0)
-	var ids := PackedInt64Array([GpuLayout.id_of(recs, 0), GpuLayout.id_of(recs, 5), GpuLayout.id_of(recs, 9), core.live_ids(1)[0], GpuLayout.make_id(77, 5)])
+	var ids := PackedInt64Array([GpuLayout.id_of(recs, 0), GpuLayout.id_of(recs, 5), GpuLayout.id_of(recs, 9), core.live_ids(1)[0], 1 << 40])
 	var got := core.track(0, ids)
 	var right := got.size() == 3
 	for k in 3:
@@ -246,7 +246,7 @@ func _founders() -> void:
 	var spec := _spec(1, s)
 	var store: Object = ClassDB.instantiate("LineageStore")
 	store.set_constants(Cell.RESERVE_PER_MASS, Cell.ADD_MASS_FACTOR)
-	store.apply_events(SimCore.founder_births(spec.founders), PackedByteArray(), 0.0, 0.0)
+	store.apply_events(SimCore.founder_births(spec.founders, spec.number), PackedByteArray(), 0.0, 0.0)
 	var founders := {}
 	for i in 20:
 		founders[GpuLayout.id_of(spec.founders, i)] = true
@@ -374,7 +374,7 @@ func _through_thread() -> void:
 	var b := _spec(2, Scenario.small(40, 1500.0).seed(72))
 	thread.submit(SimCommand.new(SimCommand.KIND_ADD_DISH, {"row": 0, "spec": a}))
 	thread.submit(SimCommand.new(SimCommand.KIND_ADD_DISH, {"row": 1, "spec": b}))
-	var ids := PackedInt64Array([GpuLayout.id_of(b.founders, 3), GpuLayout.id_of(b.founders, 17)])
+	var ids := PackedInt64Array([a.founders.size() / GpuLayout.RECORD_BYTES + 4, a.founders.size() / GpuLayout.RECORD_BYTES + 18])  # (the core numbers dish b's founders after a's 20: 21..60)
 	thread.submit(SimCommand.new(SimCommand.KIND_ASK, {"row": 1, "questions": {"tracked": Array(ids), "probes": [[0.0, 0.0, 20.0, 1.0]]}}))
 	_run_for(thread, 20)
 	var freeze := SimReply.new()

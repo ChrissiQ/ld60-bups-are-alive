@@ -60,8 +60,63 @@ static func word_name(section: String, word: int) -> String:
 	return _names.get(section, {}).get(word, "")
 
 
+## A dump with its ids replaced by their rank among the ids the dump holds (the world's ids depend on the other dishes, their order within a
+## dish does not), and the dstate words only a blob keeps (DS_WORLD_ID_*) zeroed: what two runs of one dish are compared by.
+static func normalised(dump: Dictionary) -> Dictionary:
+	var out := dump.duplicate()
+	var recs: PackedByteArray = dump.get("records", PackedByteArray()).duplicate()
+	var births: PackedByteArray = dump.get("births", PackedByteArray()).duplicate()
+	var deaths: PackedByteArray = dump.get("deaths", PackedByteArray()).duplicate()
+	var dstate: PackedByteArray = dump.get("dstate", PackedByteArray()).duplicate()
+	var bw := GpuLayout.BIRTH_WORDS
+	var dw := GpuLayout.DEATH_WORDS
+	var rw := GpuLayout.RECORD_WORDS
+	var seen := {}
+	for k in recs.size() / GpuLayout.RECORD_BYTES:
+		seen[GpuLayout.id_of(recs, k)] = true
+	for k in births.size() / (bw * 4):
+		seen[_id64(births, k * bw + GpuLayout.EB_ID_LO)] = true
+		seen[_id64(births, k * bw + GpuLayout.EB_PARENT_LO)] = true
+	for k in deaths.size() / (dw * 4):
+		seen[_id64(deaths, k * dw + GpuLayout.ED_ID_LO)] = true
+	seen.erase(0)
+	seen.erase(-1)
+	var ids := seen.keys()
+	ids.sort()
+	var rank := {0: 0, -1: -1}
+	for k in ids.size():
+		rank[ids[k]] = k + 1
+	for k in recs.size() / GpuLayout.RECORD_BYTES:
+		GpuLayout.set_id(recs, k, rank[GpuLayout.id_of(recs, k)])
+	for k in births.size() / (bw * 4):
+		for w in [GpuLayout.EB_ID_LO, GpuLayout.EB_PARENT_LO]:
+			_put_id64(births, k * bw + w, rank[_id64(births, k * bw + w)])
+	for k in deaths.size() / (dw * 4):
+		_put_id64(deaths, k * dw + GpuLayout.ED_ID_LO, rank[_id64(deaths, k * dw + GpuLayout.ED_ID_LO)])
+	for k in dstate.size() / (GpuLayout.DS_WORDS * 4):
+		dstate.encode_u32((k * GpuLayout.DS_WORDS + GpuLayout.DS_WORLD_ID_LO) * 4, 0)
+		dstate.encode_u32((k * GpuLayout.DS_WORDS + GpuLayout.DS_WORLD_ID_HI) * 4, 0)
+	if rw > 0:
+		out["records"] = recs
+	out["births"] = births
+	out["deaths"] = deaths
+	out["dstate"] = dstate
+	return out
+
+
+static func _id64(bytes: PackedByteArray, word: int) -> int:
+	return bytes.decode_u32(word * 4) | (bytes.decode_u32((word + 1) * 4) << 32)
+
+
+static func _put_id64(bytes: PackedByteArray, word: int, id: int) -> void:
+	bytes.encode_u32(word * 4, id & 0xFFFFFFFF)
+	bytes.encode_u32((word + 1) * 4, (id >> 32) & 0xFFFFFFFF)
+
+
 ## "" when `a` and `b` are the same, else a line naming the first difference: the section, the record or event it is in and the word.
-static func diff(a: Dictionary, b: Dictionary) -> String:
+static func diff(p_a: Dictionary, p_b: Dictionary) -> String:
+	var a := normalised(p_a)
+	var b := normalised(p_b)
 	for s in SECTIONS:
 		var x: PackedByteArray = a.get(s, PackedByteArray())
 		var y: PackedByteArray = b.get(s, PackedByteArray())

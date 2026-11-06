@@ -99,7 +99,7 @@ func _init() -> void:
 	var added: Array = canned.calls_of(SimCommand.KIND_ADD_DISH)
 	var sent: DishSpec = added[-1]["args"]["spec"]
 	var hue := func(i: int) -> float: return sent.founders.decode_float(i * GpuLayout.RECORD_BYTES + (GpuLayout.R_HUE) * 4)
-	TestUtil.check(shorter_dish.bup_name(GpuLayout.make_id(shorter_dish.number, 1)) == "A" and shorter_dish.bup_name(GpuLayout.make_id(shorter_dish.number, 2)).contains("#") and shorter_dish.bup_name(GpuLayout.make_id(shorter_dish.number, 5)).contains("#") and absf(hue.call(1) - Color.html("#00ff00").h) < 0.01 and absf(hue.call(2) - Genome.founder()["hue"]) < 0.001, "with fewer saved than founders the first ones get theirs and the rest the defaults (hues %.3f, %.3f)" % [hue.call(1), hue.call(2)])
+	TestUtil.check(shorter_dish.bup_name((1)) == "A" and shorter_dish.bup_name((2)).contains("#") and shorter_dish.bup_name((5)).contains("#") and absf(hue.call(1) - Color.html("#00ff00").h) < 0.01 and absf(hue.call(2) - Genome.founder()["hue"]) < 0.001, "with fewer saved than founders the first ones get theirs and the rest the defaults (hues %.3f, %.3f)" % [hue.call(1), hue.call(2)])
 	shorter_dish.free()
 	var squeezed := StartConditions.from_dict({"bups": 50, "bup_limit": 10})
 	TestUtil.check(squeezed.bup_limit == 50, "the limit is never below the founders (%d)" % squeezed.bup_limit)

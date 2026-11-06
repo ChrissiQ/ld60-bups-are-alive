@@ -51,7 +51,7 @@ const EB_ID_LO := 0
 const EB_ID_HI := 1
 const EB_PARENT_LO := 2
 const EB_PARENT_HI := 3
-const EB_STEP := 4  ## the step's place in its batch (from 0)
+const EB_STEP := 4  ## the step's place in its batch (from 0) in the low EV_STEP_BITS, the dish it was born in above (EV_DISH_SHIFT)
 const EB_DIVISIONS := 5  ## uint
 const EB_TRAITS := 6  ## uint: the mutations in the low 20 bits, the reach word in bits 20-29, the F factor in bit 30 (EV_*)
 const EB_SPEED := 7  ## floats from here: the four genes in the record's order
@@ -167,21 +167,18 @@ const OUT_WORDS := OUT_STATS + STATS_WORDS * (1 + MAX_SAMPLES)
 const D_MAX := 1024  ## rows of DISHP and DSTATE (the running dishes)
 const NO_DISH := 0xFFFFFFFF  ## a row that is no dish (a block of no dish in BLKDISH, a bup that stays in PIPDST)
 
-## Ids are (dish number << ID_DISH_SHIFT) | counter, positive (bit 63 is 0). The number is the dish the bup was born in; a pipette leaves it as it
-## is, so it is never "the dish the bup is in now" (that is the segment).
-const ID_COUNTER_BITS := 44
-const ID_DISH_SHIFT := 44  ## the dish number's lowest bit in the id
-const ID_DISH_BITS := 19
-const ID_MAX_DISH := 524287  ## the largest dish number: (1 << ID_DISH_BITS) - 1
-const ID_HI_DISH_SHIFT := 12  ## in R_ID_HI (the id's high word) the number starts here, above the counter's high 12 bits
-const ID_HI_COUNTER_MASK := 0xFFF  ## the counter's bits 32-43
+## Ids are one world-wide counter: positive (bit 63 is 0), sequential from 1 at a new game, never reused, and independent of every dish. A
+## bup keeps its id through a pipette. Which dish a bup is in comes from where it sits (its segment), never from the id. The world's next id
+## is WORLD[WD_NEXT_ID_LO], WORLD[WD_NEXT_ID_HI].
+const ID_MAX := 0x7FFFFFFFFFFFFFFF  ## the largest id (2^63 - 1)
 
 ## The block table: BLKDISH[slot >> BLK_SHIFT] is the dish row of each block of BLK_SLOTS slots, or NO_DISH (A and B halves, like the records).
 const BLK_SLOTS := 256
 const BLK_SHIFT := 8
 const PIPDST_WORDS := 1  ## the pipette's scratch: one uint a slot (the destination row, NO_DISH: stays), apart from the record
 
-## A death event's ED_STEP: the step's place in its batch in the low EV_STEP_BITS, the number of the dish whose segment the bup was in above.
+## An event's step word (ED_STEP of a death, EB_STEP of a birth): the step's place in its batch in the low EV_STEP_BITS, the number of the dish
+## whose segment the bup was in (a newborn: the dish it was born in) above.
 const EV_STEP_BITS := 13
 const EV_STEP_MASK := 0x1FFF
 const EV_DISH_SHIFT := 13
@@ -213,7 +210,7 @@ const DP_K := 14  ## float: its k in one sub-iteration
 const DP_ITERATIONS := 15  ## uint: the sub-iterations (always even)
 const DP_CLOUD_QUOTA := 16  ## uint
 const DP_HUSK_QUOTA := 17  ## uint
-const DP_NUMBER := 18  ## uint: the dish's number (the id's high part)
+const DP_NUMBER := 18  ## uint: the dish's number (the number events carry, EV_DISH_SHIFT)
 const DP_SEED := 19  ## uint: the initial seed of a new or loaded dish (the running copy is DS_SEED)
 const DP_STEP := 20  ## uint: the initial step of a new or loaded dish (the running copy is DS_STEP)
 const DP_NOISE_REFERENCE := 21  ## float: the dish's receptor-noise scale for chemotaxis
@@ -232,8 +229,8 @@ const DS_COUNT := 1
 const DS_SURVIVORS := 2
 const DS_NEWBORN := 3
 const DS_NEXT_COUNT := 4
-const DS_NEXT_ID_LO := 5
-const DS_NEXT_ID_HI := 6
+const DS_WORLD_ID_LO := 5  ## the world's next id when the dish was gathered (a DishBlob's only: the device does not keep it, the world has the counter)
+const DS_WORLD_ID_HI := 6
 const DS_SEED := 7
 const DS_STEP := 8  ## the dish's own step, from 0 at its strike
 const DS_GROWTH := 9
@@ -258,7 +255,7 @@ const LG_MADE := 2  ## energy made: the acetate let go (besides the gain, not ta
 const LG_LIFE := 3  ## a death's reserve and body less what it gives back; a lethal daughter's share; a daughter's reserve past what she can hold
 const LG_TERMS := 4
 
-## WORLD: one row of the world's totals (uints; words 11-15 are spare).
+## WORLD: one row of the world's totals (uints; words 13-15 are spare).
 const WD_WORDS := 16
 const WD_SLOTS := 0  ## the slots in use (the sum of the aligned segment lengths)
 const WD_CLOUD_SLOTS := 1
@@ -271,6 +268,8 @@ const WD_PUFF_CAPACITY := 7  ## the physical cloud slots (PUFF holds 8 floats a 
 const WD_HUSK_CAPACITY := 8  ## the physical husk slots (HUSK holds 8 floats a slot; a kernel does not read a buffer's length, which Metal's translation of the SPIR-V cannot bind)
 const WD_SLOT_CAPACITY := 9  ## the physical record slots (BUPS, BUPS2 and CHILD hold this many records)
 const WD_LEDGER := 10  ## 1: the kernels keep the energy ledger (DS_LEDGER), for tests; 0: they do not (the game)
+const WD_NEXT_ID_LO := 11  ## the id the next newborn of any dish gets (64 bits: low word; a step takes its newborns' ids by their rank in the pool's scan)
+const WD_NEXT_ID_HI := 12
 
 ## The payload textures (a bup's picture, written sim-side after `finalize`): PAYLOAD (RGBA32UI, PAYLOAD_TEX_WIDTH wide) and the ids (RG32UI).
 const PL_WORDS := 4
@@ -439,36 +438,16 @@ static func whole_record(answer: PackedByteArray) -> PackedByteArray:
 	return record
 
 
-## The id of the bup numbered `counter` born in dish number `dish_number`.
-static func make_id(dish_number: int, counter: int) -> int:
-	return (dish_number << ID_DISH_SHIFT) | counter
-
-
-## The number of the dish an id was minted in (the birth dish).
-static func id_dish_number(id: int) -> int:
-	return (id >> ID_DISH_SHIFT) & ID_MAX_DISH
-
-
-## The counter part of an id.
-static func id_counter(id: int) -> int:
-	return id & ((1 << ID_COUNTER_BITS) - 1)
-
-
-## R_ID_HI of an id: the dish number above the counter's bits 32-43.
-static func id_hi_word(id: int) -> int:
-	return (id_dish_number(id) << ID_HI_DISH_SHIFT) | ((id_counter(id) >> 32) & ID_HI_COUNTER_MASK)
-
-
-## A death event's ED_STEP: `step` in its batch and the number of the dish the bup died in.
-static func death_step_word(step: int, dish_number: int) -> int:
+## An event's step word: `step` in its batch and the number of the dish the bup was in.
+static func event_step_word(step: int, dish_number: int) -> int:
 	return (dish_number << EV_DISH_SHIFT) | (step & EV_STEP_MASK)
 
 
-## The step's place in the batch from a death event's ED_STEP.
-static func death_step(word: int) -> int:
+## The step's place in the batch from an event's step word.
+static func event_step(word: int) -> int:
 	return word & EV_STEP_MASK
 
 
-## The dish number from a death event's ED_STEP.
-static func death_dish_number(word: int) -> int:
+## The dish number from an event's step word.
+static func event_dish_number(word: int) -> int:
 	return (word >> EV_DISH_SHIFT) & EV_DISH_MASK

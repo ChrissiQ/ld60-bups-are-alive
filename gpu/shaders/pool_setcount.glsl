@@ -3,10 +3,12 @@
 #version 450
 layout(local_size_x = 64) in;
 layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs;
-layout(set = 0, binding = 0, std430) buffer B_WORLD { uint WORLD[]; };
-layout(set = 0, binding = 1, std430) buffer B_DSTATE { uint DSTATE[]; };
-layout(set = 0, binding = 2, std430) buffer B_DISHP { uint DISHP[]; };
-layout(set = 0, binding = 3, std430) buffer B_DNEXT { uint DNEXT[]; };
+layout(set = 0, binding = 0, std430) buffer B_KID { uint KID[]; };
+layout(set = 0, binding = 1, std430) buffer B_EXCK { uint EXCK[]; };
+layout(set = 0, binding = 2, std430) buffer B_WORLD { uint WORLD[]; };
+layout(set = 0, binding = 3, std430) buffer B_DSTATE { uint DSTATE[]; };
+layout(set = 0, binding = 4, std430) buffer B_DISHP { uint DISHP[]; };
+layout(set = 0, binding = 5, std430) buffer B_DNEXT { uint DNEXT[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -17,10 +19,7 @@ const uint DP_FLAGS = 12u;
 const uint DP_WORDS = 32u;
 const uint DS_COUNT = 1u;
 const uint DS_LEDGER = 24u;
-const uint DS_NEWBORN = 3u;
 const uint DS_NEXT_COUNT = 4u;
-const uint DS_NEXT_ID_HI = 6u;
-const uint DS_NEXT_ID_LO = 5u;
 const uint DS_SEED = 7u;
 const uint DS_START = 0u;
 const uint DS_STEP = 8u;
@@ -30,6 +29,8 @@ const uint NO_DISH = 4294967295u;
 const int P_CELLS = 1;
 const uint RECORD_WORDS = 28u;
 const uint WD_LEDGER = 10u;
+const uint WD_NEXT_ID_HI = 12u;
+const uint WD_NEXT_ID_LO = 11u;
 const uint WD_SLOTS = 0u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
@@ -59,8 +60,6 @@ const uint DN_SURV_BASE = 2u;
 const uint DN_KID_BASE = 3u;
 const uint DN_BIRTH_BASE = 4u;
 const uint DN_DEATH_BASE = 5u;
-const uint DN_MOVED_HI = 6u;
-const uint DN_MOVED_LO = 7u;
 const uint DN_TOTAL_WORD = 8192u;
 const uint CONJ_MIN_BUCKETS = 65536u;
 const uint POOL_ROWS_PER_THREAD = 4u;
@@ -68,11 +67,18 @@ const uint POOL_ROWS_PER_THREAD = 4u;
 #define FLAG(d, f) ((DPU(d, DP_FLAGS) & (1u << (f))) != 0u)
 
 void setcount_row(uint d) {
-	if (d == 0u) WORLD[WD_SLOTS] = DNEXT[DN_TOTAL_WORD];
+	if (d == 0u) {
+		if (pcs.pa > 0.5) {  // (the newborns of the whole pool: the scan's last value and last flag, over the slots of the step that ran)
+			uint n = WORLD[WD_SLOTS], kids = n > 0u ? EXCK[n - 1u] + KID[n - 1u] : 0u;
+			uint lo = WORLD[WD_NEXT_ID_LO] + kids;
+			if (lo < WORLD[WD_NEXT_ID_LO]) WORLD[WD_NEXT_ID_HI] += 1u;
+			WORLD[WD_NEXT_ID_LO] = lo;
+		}
+		WORLD[WD_SLOTS] = DNEXT[DN_TOTAL_WORD];
+	}
 	if (!FLAG(d, DPF_RUNNING)) return;
 	DS(d, DS_START) = DN(d, DN_START); DS(d, DS_COUNT) = DS(d, DS_NEXT_COUNT);
 	if (pcs.pa > 0.5) {
-		uint lo = DS(d, DS_NEXT_ID_LO) + DS(d, DS_NEWBORN); if (lo < DS(d, DS_NEXT_ID_LO)) DS(d, DS_NEXT_ID_HI) += 1u; DS(d, DS_NEXT_ID_LO) = lo;
 		DS(d, DS_STEP) += 1u;
 	}
 }

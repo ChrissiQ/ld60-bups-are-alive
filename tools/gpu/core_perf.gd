@@ -83,8 +83,6 @@ func _initialize() -> void:
 	blob.dphi = SimArena.zeros(grid.n * grid.n * 4)
 	blob.clouds = clouds
 	var ds := SimArena.zeros(GpuLayout.DS_WORDS * 4)
-	ds.encode_u32(GpuLayout.DS_NEXT_ID_LO * 4, (GpuLayout.make_id(1, bups + 1)) & 0xFFFFFFFF)
-	ds.encode_u32(GpuLayout.DS_NEXT_ID_HI * 4, GpuLayout.make_id(1, bups + 1) >> 32)
 	ds.encode_u32(GpuLayout.DS_SEED * 4, (spec.seed ^ (spec.seed >> 32)) & 0xFFFFFFFF)
 	ds.encode_u32(GpuLayout.DS_CLOUD_SLOTS * 4, clouds_at_start)
 	blob.dstate = ds
@@ -245,7 +243,7 @@ func _records(n: int, share: float) -> PackedByteArray:
 		f[o + GpuLayout.R_DONOR] = 1.0 if rng.randf() < share else 0.0
 	var out := f.to_byte_array()
 	for i in n:
-		GpuLayout.set_id(out, i, GpuLayout.make_id(1, i + 1))
+		GpuLayout.set_id(out, i, (i + 1))
 	return out
 
 

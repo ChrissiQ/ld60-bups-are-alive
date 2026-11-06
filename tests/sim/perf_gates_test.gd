@@ -287,7 +287,7 @@ static func filled_records(n: int, radius: float, number: int, seed_value: int) 
 		all[o + GpuLayout.R_MASS] = born * (1.0 + rng.randf())
 	var out := all.to_byte_array()
 	for i in n:
-		GpuLayout.set_id(out, i, GpuLayout.make_id(number, i + 1))
+		GpuLayout.set_id(out, i, (i + 1))
 	return out
 
 

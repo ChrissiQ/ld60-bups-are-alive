@@ -247,17 +247,23 @@ static func text(file: String) -> String:
 	return FileAccess.get_file_as_string(FIXTURES + file)
 
 
-## The fixture's id `id` (the CPU dish's, a bare counter) as the id it has in dish `number` of the pool.
-static func pooled_id(number: int, id: int) -> int:
-	return GpuLayout.make_id(number, id) if id >= 0 else -1
+static var _fixture_ids := PackedInt64Array()
 
 
-## The fixture's records with every id given dish `number`'s high part (the counters kept).
-static func fixture_records(number: int) -> PackedByteArray:
-	var recs := gz("state_records.bin.gz")
-	for i in recs.size() / GpuLayout.RECORD_BYTES:
-		GpuLayout.set_id(recs, i, pooled_id(number, GpuLayout.id_of(recs, i) & ((1 << GpuLayout.ID_COUNTER_BITS) - 1)))
-	return recs
+## The fixture's id `id` (the CPU dish's, a bare counter) as the id it has in the pool: the fixture's dish is the first one of a fresh
+## world, whose founders take the world's ids 1, 2, ... in record order.
+static func pooled_id(_number: int, id: int) -> int:
+	if _fixture_ids.is_empty():
+		var recs := gz("state_records.bin.gz")
+		for i in recs.size() / GpuLayout.RECORD_BYTES:
+			_fixture_ids.append(GpuLayout.id_of(recs, i))
+	var at := _fixture_ids.find(id)
+	return at + 1 if at >= 0 else -1
+
+
+## The fixture's records (the founders' ids are the world's: the core gives them out when the dish is added).
+static func fixture_records(_number: int) -> PackedByteArray:
+	return gz("state_records.bin.gz")
 
 
 ## The fixture's clouds as pool slots (x, y, mass, variance, cut; the row word and the list words the core fills).

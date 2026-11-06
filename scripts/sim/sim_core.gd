@@ -121,6 +121,7 @@ func _init(p_limits: PoolLimits = null, from_source := false, device: RenderingD
 	_fill_p()
 	arena.make_all(_table_bytes())
 	_put_world_capacities()
+	_set_next_id(1)
 
 
 func _notification(what: int) -> void:
@@ -170,6 +171,16 @@ func release() -> void:
 
 # ---- dishes --------------------------------------------------------------------------------------------------------------------------
 
+## The id the next newborn of any dish gets: one counter for the whole world, from 1, never reused (`GpuLayout.WD_NEXT_ID_LO`).
+func next_id() -> int:
+	return _wd(GpuLayout.WD_NEXT_ID_LO) | (_wd(GpuLayout.WD_NEXT_ID_HI) << 32)
+
+
+func _set_next_id(id: int) -> void:
+	_set_wd(GpuLayout.WD_NEXT_ID_LO, id & 0xFFFFFFFF)
+	_set_wd(GpuLayout.WD_NEXT_ID_HI, (id >> 32) & 0xFFFFFFFF)
+
+
 ## Adds a dish (its founders as its first segment, its field filled); returns its row, or -1 when there is no free row or it would pass
 ## the memory budget. `grid`: the dish's grid made already (DishGrid.make of the spec's size, resolution, patchiness and patch seed, which
 ## must then be set), so the caller can make it on another thread: the landscape of a big grid takes a while in script.
@@ -177,6 +188,10 @@ func add_dish(spec: DishSpec, grid: DishGrid = null) -> int:
 	var row := _free_row()
 	if row < 0:
 		return -1
+	var count := spec.founders.size() / RB
+	var first := next_id()
+	for i in count:  # (the founders take the world's next ids in their order; the caller's spec shows them)
+		GpuLayout.set_id(spec.founders, i, first + i)
 	var s := spec.copy()
 	if s.seed == 0:
 		s.seed = _derived_seed(s.number)
@@ -184,21 +199,16 @@ func add_dish(spec: DishSpec, grid: DishGrid = null) -> int:
 		s.patch_seed = hash([s.seed, 7]) & 0x7FFFFFFF
 	if grid == null:
 		grid = DishGrid.make(s.radius, s.resolution, s.patchiness, s.patch_seed)
-	var count := s.founders.size() / RB
 	if not _make_room(row, s, grid, count):
 		return -1
+	_set_next_id(first + count)
 	next_number = maxi(next_number, s.number + 1)
 	var cd: CoreDish = _dishes[row]
 	var conc := grid.filled(clampf(s.nutrient_density, 0.0, StartConditions.MAX_NUTRIENT_DENSITY) * Dish.CONCENTRATION_PER_DENSITY)
 	var none := PackedFloat32Array()
 	none.resize(grid.n * grid.n)
 	_put_field(cd, conc, none, arena.zeros(grid.n * grid.n * 4), arena.zeros(grid.n * grid.n * 4))
-	var next_id := GpuLayout.make_id(s.number, 1)
-	for i in count:
-		next_id = maxi(next_id, GpuLayout.id_of(s.founders, i) + 1)
 	var ds := arena.zeros(GpuLayout.DS_WORDS * 4)
-	ds.encode_u32(GpuLayout.DS_NEXT_ID_LO * 4, next_id & 0xFFFFFFFF)
-	ds.encode_u32(GpuLayout.DS_NEXT_ID_HI * 4, (next_id >> 32) & 0xFFFFFFFF)
 	ds.encode_u32(GpuLayout.DS_SEED * 4, cd.seed32)
 	ds.encode_u32(GpuLayout.DS_STEP * 4, s.step)
 	_put_segment(row, s.founders, ds)
@@ -217,6 +227,11 @@ func load_dish(blob: DishBlob, at_row := -1) -> int:
 	if not _make_room(row, s, grid, blob.count(), blob.clouds.size() / 8, blob.husks.size() / 8):
 		return -1
 	next_number = maxi(next_number, s.number + 1)
+	var past := maxi(blob.dstate.decode_u32(GpuLayout.DS_WORLD_ID_LO * 4) | (blob.dstate.decode_u32(GpuLayout.DS_WORLD_ID_HI * 4) << 32), 1)
+	for i in blob.count():  # (the counter goes past every id the dish held and every id the world had given when it was gathered)
+		past = maxi(past, GpuLayout.id_of(blob.records, i) + 1)
+	if past > next_id():
+		_set_next_id(past)
 	var cd: CoreDish = _dishes[row]
 	_put_field(cd, blob.conc, blob.conc2, blob.dplo, blob.dphi)
 	_put_segment(row, blob.records, blob.dstate)
@@ -273,6 +288,8 @@ func gather(row: int) -> DishBlob:
 	var blob := DishBlob.new()
 	blob.spec = cd.spec.to_dict()
 	blob.dstate = _dstate.slice(row * GpuLayout.DS_WORDS * 4, (row + 1) * GpuLayout.DS_WORDS * 4)
+	blob.dstate.encode_u32(GpuLayout.DS_WORLD_ID_LO * 4, next_id() & 0xFFFFFFFF)
+	blob.dstate.encode_u32(GpuLayout.DS_WORLD_ID_HI * 4, (next_id() >> 32) & 0xFFFFFFFF)
 	var got := read_parts(_field_parts(cd) + [_records_part(row)])
 	blob.conc = (got[0] as PackedByteArray).to_float32_array()
 	blob.conc2 = (got[1] as PackedByteArray).to_float32_array()
@@ -336,7 +353,6 @@ func pipette(row: int, centre: Vector2, radius: float, dest: Variant = null, gri
 	_run_list(func(cl: int) -> void:
 		_disp(cl, "pool_ev_begin", D_MAX / 64)
 		_disp(cl, "pool_pip_mark", bg, centre.x, centre.y, radius, pd)
-		_disp(cl, "pool_pip_max", bg, centre.x, centre.y, radius, pd)
 		_scan(cl, "pool_scan_s", _wd(GpuLayout.WD_SLOTS))
 		_disp(cl, "pool_pip_final", 1, centre.x, centre.y, radius, pd)
 		_disp(cl, "pool_slot_check", 1)
@@ -567,8 +583,8 @@ static func death_event(rec: PackedByteArray, number: int) -> PackedByteArray:
 
 
 ## Birth events (GpuLayout's EB_* words, step 0, no parent) for records the pool never saw born: a new dish's founders, which the family
-## tree then holds as its roots (the single-dish path's BupSim.add_bup made their records).
-static func founder_births(recs: PackedByteArray) -> PackedByteArray:
+## tree then holds as its roots (the single-dish path's BupSim.add_bup made their records), born in dish number `number`.
+static func founder_births(recs: PackedByteArray, number: int) -> PackedByteArray:
 	var out := PackedByteArray()
 	out.resize(recs.size() / RB * GpuLayout.BIRTH_WORDS * 4)
 	for i in recs.size() / RB:
@@ -577,6 +593,7 @@ static func founder_births(recs: PackedByteArray) -> PackedByteArray:
 		var w := func(word: int) -> float: return recs.decode_float(o + word * 4)
 		out.encode_u32(e + GpuLayout.EB_ID_LO * 4, recs.decode_u32(o + GpuLayout.R_ID_LO * 4))
 		out.encode_u32(e + GpuLayout.EB_ID_HI * 4, recs.decode_u32(o + GpuLayout.R_ID_HI * 4))
+		out.encode_u32(e + GpuLayout.EB_STEP * 4, GpuLayout.event_step_word(0, number))
 		out.encode_u32(e + GpuLayout.EB_DIVISIONS * 4, int(w.call(GpuLayout.R_DIVISIONS)))
 		out.encode_u32(e + GpuLayout.EB_TRAITS * 4, _traits(int(w.call(GpuLayout.R_MUTATIONS)), w.call(GpuLayout.R_REACH), w.call(GpuLayout.R_DONOR)))
 		for pair in [[GpuLayout.EB_SPEED, GpuLayout.R_SPEED], [GpuLayout.EB_SENSE, GpuLayout.R_SENSE], [GpuLayout.EB_METABOLISM, GpuLayout.R_METABOLISM],
@@ -1448,12 +1465,12 @@ func _events_of(row: int) -> Array:
 	if tb > 0:
 		var eb: PackedByteArray = got[0]
 		for k in tb:
-			if (eb.decode_u32(k * bw + GpuLayout.EB_ID_HI * 4) >> GpuLayout.ID_HI_DISH_SHIFT) == number:
+			if GpuLayout.event_dish_number(eb.decode_u32(k * bw + GpuLayout.EB_STEP * 4)) == number:
 				births.append_array(eb.slice(k * bw, (k + 1) * bw))
 	if td > 0:
 		var ed: PackedByteArray = got[1]
 		for k in td:
-			if GpuLayout.death_dish_number(ed.decode_u32(k * dw + GpuLayout.ED_STEP * 4)) == number:
+			if GpuLayout.event_dish_number(ed.decode_u32(k * dw + GpuLayout.ED_STEP * 4)) == number:
 				deaths.append_array(ed.slice(k * dw, (k + 1) * dw))
 	return [births, deaths]
 
@@ -1913,9 +1930,11 @@ func _derived_seed(number: int) -> int:
 
 
 ## A new game begins in this world: the dishes' numbers start again past the running dishes' (1 when none runs), so numbers stay unique
-## within a game and a game's first pipette makes dish 2.
+## within a game and a game's first pipette makes dish 2; with no dish running the ids start again from 1.
 func begin_game() -> void:
 	next_number = 1
+	if _dishes.is_empty():
+		_set_next_id(1)
 	for row: int in _dishes:
 		next_number = maxi(next_number, (_dishes[row] as CoreDish).spec.number + 1)
 

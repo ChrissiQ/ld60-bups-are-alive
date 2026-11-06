@@ -32,8 +32,6 @@ const uint DS_COUNT = 1u;
 const uint DS_DEATHS_LOST = 16u;
 const uint DS_LEDGER = 24u;
 const uint DS_NEXT_COUNT = 4u;
-const uint DS_NEXT_ID_HI = 6u;
-const uint DS_NEXT_ID_LO = 5u;
 const uint DS_SEED = 7u;
 const uint DS_START = 0u;
 const uint DS_STEP = 8u;
@@ -102,6 +100,8 @@ const uint R_VAL = 18u;
 const uint R_X = 1u;
 const uint R_Y = 2u;
 const uint WD_LEDGER = 10u;
+const uint WD_NEXT_ID_HI = 12u;
+const uint WD_NEXT_ID_LO = 11u;
 const uint WD_SLOTS = 0u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
@@ -131,8 +131,6 @@ const uint DN_SURV_BASE = 2u;
 const uint DN_KID_BASE = 3u;
 const uint DN_BIRTH_BASE = 4u;
 const uint DN_DEATH_BASE = 5u;
-const uint DN_MOVED_HI = 6u;
-const uint DN_MOVED_LO = 7u;
 const uint DN_TOTAL_WORD = 8192u;
 const uint CONJ_MIN_BUCKETS = 65536u;
 const uint POOL_ROWS_PER_THREAD = 4u;
@@ -147,9 +145,9 @@ void event_bup(uint i, uint d, uint l) {
 		uint slot = DN(d, DN_BIRTH_BASE) + kid;
 		if (slot < cap) {
 			uint o = (base + slot) * BIRTH_WORDS, c = i * RECORD_WORDS;
-			uint lo = DS(d, DS_NEXT_ID_LO) + kid;
-			EVB[o + EB_ID_LO] = lo; EVB[o + EB_ID_HI] = DS(d, DS_NEXT_ID_HI) + (lo < DS(d, DS_NEXT_ID_LO) ? 1u : 0u);
-			EVB[o + EB_PARENT_LO] = BUPS_U[b + R_ID_LO]; EVB[o + EB_PARENT_HI] = BUPS_U[b + R_ID_HI]; EVB[o + EB_STEP] = st;
+			uint lo = WORLD[WD_NEXT_ID_LO] + EXCK[i];
+			EVB[o + EB_ID_LO] = lo; EVB[o + EB_ID_HI] = WORLD[WD_NEXT_ID_HI] + (lo < WORLD[WD_NEXT_ID_LO] ? 1u : 0u);
+			EVB[o + EB_PARENT_LO] = BUPS_U[b + R_ID_LO]; EVB[o + EB_PARENT_HI] = BUPS_U[b + R_ID_HI]; EVB[o + EB_STEP] = (DPU(d, DP_NUMBER) << EV_DISH_SHIFT) | (st & EV_STEP_MASK);
 			EVB[o + EB_DIVISIONS] = uint(uintBitsToFloat(CHILD_U[c + R_DIVISIONS])); EVB[o + EB_TRAITS] = (uint(uintBitsToFloat(CHILD_U[c + R_MUTATIONS])) & EV_LOW_MASK) | ((uint(uintBitsToFloat(CHILD_U[c + R_REACH]) + 0.5) & EV_REACH_MASK) << EV_REACH_SHIFT) | (uintBitsToFloat(CHILD_U[c + R_DONOR]) > 0.5 ? (1u << EV_DONOR_SHIFT) : 0u);
 			EVB[o + EB_SPEED] = CHILD_U[c + R_SPEED]; EVB[o + EB_SENSE] = CHILD_U[c + R_SENSE]; EVB[o + EB_METABOLISM] = CHILD_U[c + R_METABOLISM]; EVB[o + EB_SIZE] = CHILD_U[c + R_SIZE];
 			EVB[o + EB_HUE] = CHILD_U[c + R_HUE]; EVB[o + EB_SAT] = CHILD_U[c + R_SAT]; EVB[o + EB_VAL] = CHILD_U[c + R_VAL]; EVB[o + EB_HARM] = CHILD_U[c + R_HARM];

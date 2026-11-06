@@ -63,7 +63,7 @@ func _run() -> void:
 				break
 	TestUtil.show(made.value() == 300 and d.drawing.view != null and d.drawing.husks_drawn() == 300 and unit and at_places == 300, "V the husks are drawn: %d of %s, %d at a husk's place, unit bases %s, view %s" % [d.drawing.husks_drawn(), made.value(), at_places, unit, d.drawing.view != null])
 	d.show_layer(Dish.Layer.MEDIUM, false)
-	d.selected.bup = GpuLayout.make_id(d.number, 1)
+	d.selected.bup = (1)
 	t0 = Time.get_ticks_msec()
 	var steer: Texture2DRD = null
 	while Time.get_ticks_msec() - t0 < 3000 and (steer == null or not steer.texture_rd_rid.is_valid()):

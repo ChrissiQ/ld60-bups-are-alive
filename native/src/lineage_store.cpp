@@ -11,9 +11,8 @@ using namespace godot;
 
 namespace {
 constexpr int BIRTH_WORDS = 16, DEATH_WORDS = 14;
-constexpr uint32_t STEP_MASK = 0x1FFF; // a death's step word: the step's place in the batch in the low 13 bits, the dish number above
+constexpr uint32_t STEP_MASK = 0x1FFF; // a birth's or a death's step word: the step's place in the batch in the low 13 bits, the dish number above
 constexpr int DISH_SHIFT = 13, DISH_MASK = 0x7FFFF;
-constexpr int ID_DISH_SHIFT = 44; // an id: the dish it was born in above its counter's 44 bits
 
 uint32_t get_u32(const uint8_t *record, int word) {
 	uint32_t v;
@@ -40,8 +39,11 @@ T take(const uint8_t *&at) {
 	at += sizeof(T);
 	return value;
 }
-int birth_dish(int64_t id) {
-	return (int)((id >> ID_DISH_SHIFT) & DISH_MASK);
+int step_of(uint32_t word) { // a step word (a birth's or a death's): the step's place in the batch
+	return (int)(word & STEP_MASK);
+}
+int dish_of(uint32_t word) { // and the number of the dish the event happened in
+	return (int)((word >> DISH_SHIFT) & DISH_MASK);
 }
 } // namespace
 
@@ -84,7 +86,7 @@ void LineageStore::set_time(double seconds) {
 
 // ---- the records ------------------------------------------------------------------------------------------------
 
-void LineageStore::make_record(int64_t id, int64_t parent, const Record &fields) {
+void LineageStore::make_record(int64_t id, int64_t parent, const Record &fields, int dish) {
 	Record r = fields;
 	auto p = records.find(parent);
 	if (p != records.end()) {
@@ -92,7 +94,7 @@ void LineageStore::make_record(int64_t id, int64_t parent, const Record &fields)
 		p->second.holds++;
 	}
 	r.born = now_minutes();
-	r.home = birth_dish(id);
+	r.home = dish;
 	records[id] = r;
 }
 
@@ -150,13 +152,13 @@ void LineageStore::apply_events(const PackedByteArray &births, const PackedByteA
 	while (bi < born_count || di < died_count) {
 		uint32_t step = UINT32_MAX;
 		if (bi < born_count) {
-			step = get_u32(bp + bi * BIRTH_WORDS * 4, 4);
+			step = (uint32_t)step_of(get_u32(bp + bi * BIRTH_WORDS * 4, 4));
 		}
 		if (di < died_count) {
 			step = std::min(step, get_u32(dp + di * DEATH_WORDS * 4, 2) & STEP_MASK);
 		}
 		now_seconds = first_step_end_seconds + step * step_seconds;
-		for (; bi < born_count && get_u32(bp + bi * BIRTH_WORDS * 4, 4) == step; bi++) {
+		for (; bi < born_count && (uint32_t)step_of(get_u32(bp + bi * BIRTH_WORDS * 4, 4)) == step; bi++) {
 			const uint8_t *e = bp + bi * BIRTH_WORDS * 4;
 			int64_t id = get_id(e, 0, 1);
 			if (records.count(id) > 0) {
@@ -176,7 +178,7 @@ void LineageStore::apply_events(const PackedByteArray &births, const PackedByteA
 			f.g.val = get_f32(e, 13);
 			f.g.harm = get_f32(e, 14);
 			f.g.mutator = get_f32(e, 15);
-			make_record(id, get_id(e, 2, 3), f);
+			make_record(id, get_id(e, 2, 3), f, dish_of(get_u32(e, 4)));
 		}
 		for (; di < died_count && (get_u32(dp + di * DEATH_WORDS * 4, 2) & STEP_MASK) == step; di++) {
 			const uint8_t *e = dp + di * DEATH_WORDS * 4;
@@ -590,7 +592,7 @@ void LineageStore::import_bytes(const PackedByteArray &data, const PackedInt64Ar
 		}
 		r.alive = false;
 		r.died = died;
-		r.home = birth_dish(id);
+		r.home = number;
 		records[id] = r;
 		inserted.push_back(id);
 		blob_died[id] = died;

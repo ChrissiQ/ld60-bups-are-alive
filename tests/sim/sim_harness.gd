@@ -248,11 +248,12 @@ func dump_all() -> Dictionary:
 	return out
 
 
-## The checks; empty when all hold: count balance, unique ids, bups inside the rim, DSTATE's count equal to a recount of the live records.
+## The checks; empty when all hold: count balance, unique ids across the whole world, bups inside the rim, DSTATE's count equal to a recount of the live records.
 func invariants() -> PackedStringArray:
 	var bad := PackedStringArray()
 	if int(core.overflow()) != 0:
 		bad.append("WORLD.overflow is %d" % int(core.overflow()))
+	var seen := {}  ## id -> row: an id is the world's, so it is held by one bup of one dish
 	for row in scenarios:
 		var s: Scenario = scenarios[row]
 		var d := dump(row)
@@ -261,13 +262,12 @@ func invariants() -> PackedStringArray:
 		var ds := dstate(row)
 		if n != ds[GpuLayout.DS_COUNT]:
 			bad.append("row %d: DS_COUNT %d but %d records" % [row, ds[GpuLayout.DS_COUNT], n])
-		var seen := {}
 		for i in n:
 			var id := GpuLayout.id_of(recs, i)
 			if seen.has(id):
-				bad.append("row %d: id %d twice" % [row, id])
+				bad.append("row %d: id %d twice (also in row %d)" % [row, id, seen[id]])
 				break
-			seen[id] = true
+			seen[id] = row
 		for i in n:
 			var o := i * GpuLayout.RECORD_BYTES
 			var at := Vector2(recs.decode_float(o + GpuLayout.R_X * 4), recs.decode_float(o + GpuLayout.R_Y * 4))
