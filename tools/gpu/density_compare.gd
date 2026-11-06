@@ -8,7 +8,7 @@ extends SceneTree
 ##   ... -- cost        (view_build's cost at PACK_COUNTS at fit: capsule, rod, nearest, winner; no pictures)
 ##   ... -- smoke       (10,000 bups, fit zoom: that the kernels build and the looks draw)
 ## Env: PACK_COUNTS (comma list, default 10000,100000,1000000,2000000), PACK_OUT (the folder for the pictures and pack_<counts>.json, default
-## tools/gpu/baseline/zoomed_out/density), RUN_SECONDS (running: seconds a phase, default 8).
+## user://density_pack, outside the repository: the pictures are output to look at, not files to commit), RUN_SECONDS (running: seconds a phase, default 8).
 ##
 ## pack: for each count (a seeded state spread over the 90 mm dish, one step run, paused) and fit zoom and 20, 100 and 500 x
 ##   it (the closer ones centred on the densest 1 mm bin of the state): the picture of capsule (today), winner (density mode with bilinear taps), rod (two
@@ -108,7 +108,7 @@ func _run() -> void:
 	SimConstants.apply()
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 	Engine.max_fps = 0
-	out_dir = OS.get_environment("PACK_OUT") if OS.get_environment("PACK_OUT") != "" else ProjectSettings.globalize_path("res://tools/gpu/baseline/zoomed_out/density")
+	out_dir = OS.get_environment("PACK_OUT") if OS.get_environment("PACK_OUT") != "" else ProjectSettings.globalize_path("user://density_pack")
 	DirAccess.make_dir_recursive_absolute(out_dir)
 	var a := OS.get_cmdline_user_args()
 	print("DENSITY device %s, refresh %.1f Hz" % [RenderingServer.get_rendering_device().get_device_name(), DisplayServer.screen_get_refresh_rate(DisplayServer.window_get_current_screen())])
