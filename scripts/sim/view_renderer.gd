@@ -54,6 +54,7 @@ var _den_tex := RID()  ## the resolved picture (RGBA8, straight alpha)
 var _den_size := Vector2i.ZERO
 var _den_picture: Texture2DRD = null
 var _large := {}  ## density mode: the last count read back of the bups the capsule path must draw: {count, key}
+var _skipped_last := false  ## the last build left the capsule count out (`draw_into`: the next one counts them, so a bup that has grown large is found again)
 
 var _made := {}  ## kernel name -> ShaderSet.create's entry
 var _bufs := {}  ## P, VP, VCOUNT, VOFFS, VPD, VOUT -> RID
@@ -69,7 +70,7 @@ var _bound_mutex := Mutex.new()
 var _bound: Array = []  ## [kind, index, frame] not yet taken
 var _vp := PackedByteArray()
 var _last_build := []  ## what the instances were last built from
-var _visible := {}  ## the last visible count read back: {count, key}
+var _visible := {}  ## the last visible count read back: {count, key, bups (the payload's count at that build)}
 var _pick_request: Variant = null  ## {local, slack, pixel_um, near, hover, seq}
 var _pick_seq := 0
 var _answers := {}  ## "hover" / "click" -> the last pick answer
@@ -271,17 +272,20 @@ func draw_into(camera: Rect2, pixel_um: float, target: RID, capacity: int, multi
 	var den_size := Vector2i(maxi(ceili(camera.size.x / pixel_um - 0.001), 1), maxi(ceili(camera.size.y / pixel_um - 0.001), 1)) if dens else Vector2i.ZERO
 	var view_key := [camera, pixel_um, _payload.row, _imports["payload"]["generation"], mode]
 	var slots := count
-	if not _visible.is_empty() and _visible["key"] == view_key:
+	# (the last count is used while the bups have not grown by more than the half it is rounded up by: a burst of births draws them all)
+	if not _visible.is_empty() and _visible["key"] == view_key and count - int(_visible["bups"]) <= int(_visible["count"]) / 2:
 		slots = mini(count, maxi(MIN_SLOTS, nearest_po2(int(_visible["count"]) + int(_visible["count"]) / 2)))
 	slots = mini(maxi(slots, mini(MIN_SLOTS, capacity)), capacity)
 	var build := [view_key, _payload.seq, _shown["payload"], slots, target]
 	# (density mode: the capsule kernels need not run while the last build of this view found no bup to draw as a capsule)
-	var skip: bool = dens and not _large.is_empty() and _large["key"] == view_key and int(_large["count"]) == 0
+	var skip: bool = dens and not _skipped_last and not _large.is_empty() and _large["key"] == view_key and int(_large["count"]) == 0
 	var rebuild: bool = build != _last_build
 	var asking: bool = _pick_request != null or (not _follow.is_empty() and (rebuild or _follow_asked))
 	if not rebuild and not asking:
 		return
 	_last_build = build
+	if rebuild:
+		_skipped_last = skip
 	if rebuild and multimesh.is_valid():
 		RenderingServer.multimesh_set_visible_instances(multimesh, slots)
 	var pick: Variant = _pick_request
@@ -485,9 +489,9 @@ func _build(count: int, target: RID, index: int, pick: Variant, view_key: Array,
 	if _local:
 		rd.submit()
 		rd.sync()
-		_on_answer(rd.buffer_get_data(_bufs["VOUT"], 0, GpuKernelsView.VO_WORDS * 4), view_key if rebuild else [], pick, asking, dens)
+		_on_answer(rd.buffer_get_data(_bufs["VOUT"], 0, GpuKernelsView.VO_WORDS * 4), view_key if rebuild else [], pick, asking, dens, -1, count)
 	else:
-		rd.buffer_get_data_async(_bufs["VOUT"], _on_answer.bind(view_key if rebuild else [], pick, asking, dens, _epoch), 0, GpuKernelsView.VO_WORDS * 4)
+		rd.buffer_get_data_async(_bufs["VOUT"], _on_answer.bind(view_key if rebuild else [], pick, asking, dens, _epoch, count), 0, GpuKernelsView.VO_WORDS * 4)
 
 
 ## `cl` -1: (profiling on a local device) the kernel in a list and a submit of its own, timed.
@@ -575,13 +579,13 @@ func _free_sets() -> void:
 
 
 ## `view_key` empty: the build drew nothing (it only answered), so its visible count is not one.
-func _on_answer(data: PackedByteArray, view_key: Array, pick: Variant, asked: bool, dens := false, epoch := -1) -> void:
+func _on_answer(data: PackedByteArray, view_key: Array, pick: Variant, asked: bool, dens := false, epoch := -1, bups := 0) -> void:
 	if epoch >= 0 and epoch != _epoch:
 		return  # (asked before `let_go`: of a payload this view no longer holds)
 	var w := func(word: int) -> int: return data.decode_u32(word * 4)
 	var f := func(word: int) -> float: return data.decode_float(word * 4)
 	if not view_key.is_empty():
-		_visible = {"count": w.call(GpuKernelsView.VO_VISIBLE), "key": view_key}
+		_visible = {"count": w.call(GpuKernelsView.VO_VISIBLE), "key": view_key, "bups": bups}
 		if dens:
 			_large = {"count": w.call(GpuKernelsView.VO_LARGE), "key": view_key}
 	if not asked:
