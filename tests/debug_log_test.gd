@@ -39,14 +39,16 @@ func _initialize() -> void:
 	if data is Dictionary:
 		for key in ["written", "godot", "dish", "nutrient", "selected", "constants", "screen"]:
 			TestUtil.check(data.has(key), "the report has %s" % key)
-		TestUtil.check(data.has("backend") and data["backend"]["setting"] == "auto" and data["backend"]["running"] == "gpu" and data["backend"]["gpu_available"] == WorldClient.shared().backend.can_simulate(), "it says where the bups run: the setting, and that the world simulates (the canned backend can)")
-		TestUtil.check(data["backend"].get("gpu_device") == "test device" and data["backend"].has("gpu_overflows") and data["backend"]["gpu_overflows"] is Dictionary, "...the device's name from the backend and its overflow counters (none here)")
+		TestUtil.check(data.has("backend") and data["backend"]["setting"] == "auto" and data["backend"]["running"] == "gpu" and data["backend"]["gpu_available"] == GpuSimBackend.available(), "it says where the bups run: the setting, and that the world simulates (the canned backend can)")
+		TestUtil.check(data["backend"].get("gpu_device") == "test device" and data["backend"].get("main_device") is String, "...both devices' names: the simulation's from the backend, the main one's from the renderer")
 		var be: Dictionary = data["backend"]
-		for key in ["steps_cap", "record_usec", "record_steps", "apply_usec", "applied_events", "time_process"]:
-			TestUtil.check(be.has(key) and (be[key] is float or be[key] is int), "backend has the number %s" % key)
-		TestUtil.check(be["steps_cap"] == 0 and be["record_usec"] == 0 and be["record_steps"] == 0 and be["apply_usec"] == 0 and be["applied_events"] == 0, "...the figures the pooled world has no counterpart of are 0")
+		for key in ["k", "duty", "T_ITER_ms", "step_ms_ema", "sync_ms", "publish_ms"]:
+			TestUtil.check(be["governor"].has(key) and (be["governor"][key] is float or be["governor"][key] is int), "the governor has the number %s" % key)
+		TestUtil.check(be["governor"]["T_ITER_ms"] == Governor.T_ITER_MS and be["pool"] is Dictionary and be["pool_overflow"] is float and be["payload_behind_sim_s"] is float,"...T_ITER is the governor's, and the pool, its overflow bits and the payload's age are there (the canned world serves none)")
+		TestUtil.check(be.has("time_process") and (be["time_process"] is float or be["time_process"] is int), "backend has the process time")
 		TestUtil.check(be.has("draw_slots") and be["draw_slots"] is Dictionary and be["draw_slots"].has("drawn") and be["draw_slots"].has("capacity") and be["draw_slots"].has("live"), "...draw_slots has drawn, capacity and live")
-		TestUtil.check(be.has("pick_latency_frames") and be["pick_latency_frames"] is Dictionary and be["pick_latency_frames"].has("last") and be["pick_latency_frames"].has("max"), "...pick_latency_frames has last and max")
+		TestUtil.check(be.has("pick_latency_frames") and be["pick_latency_frames"] is Dictionary and be["pick_latency_frames"].has("last") and be["pick_latency_frames"].has("max") and be["pick_latency_frames"].has("last_ms"), "...pick_latency_frames has last, max and last_ms")
+		TestUtil.check(data["dish"].has("births_refused") and data["dish"]["births_refused"] is float,"the dish has its births refused at the pool's edge")
 		TestUtil.check(data["dish"].has("layers_hidden") and data["dish"]["layers_hidden"] is Array, "layers_hidden is an Array")
 		TestUtil.check(data["nutrient"]["by_distance_from_centre"].size() == DebugLog.RIM_FRACTIONS.size(), "it has the nutrient by distance from the centre")
 		TestUtil.check(data["selected"].has("bup") and data["selected"]["bup"].has("genome") == false and data["selected"]["bup"].has("sense"), "it has the selected bup")
@@ -127,4 +129,20 @@ func _initialize() -> void:
 	DebugLog.prune(Time.get_unix_time_from_system() + (DebugLog.MAX_AGE_DAYS + 1) * 86400.0)
 	TestUtil.check(_logs().is_empty() and DirAccess.get_files_at(DebugLog.directory).is_empty(), "logs older than %d days go, with their screenshots" % DebugLog.MAX_AGE_DAYS)
 	DirAccess.remove_absolute(DebugLog.directory)
+
+	# The pick latency: polls from a bup's first question to the first answer about it, from a snapshot taken after the question.
+	var fake := FakeSimBackend.new()
+	var wc := WorldClient.new(fake)
+	wc.ask(0, {"tracked": [7]})  # (asked at poll 0, before any snapshot)
+	var one := Snapshot.new()
+	one.seq = 1
+	fake.serve(one)
+	wc.poll()  # (poll 1: no answer yet)
+	TestUtil.check(wc.pick_latency()["max"] == 0, "no answer, no latency yet")
+	var two := Snapshot.new()
+	two.seq = 2
+	two.answers[0] = {"tracked": {7: PackedByteArray([0])}}
+	fake.serve(two)
+	wc.poll()  # (poll 2: the answer arrives)
+	TestUtil.check(wc.pick_latency()["last"] == 2 and wc.pick_latency()["max"] == 2, "the answer came two polls after the question (%s)" % wc.pick_latency())
 	TestUtil.finish(self, "DEBUG LOG TESTS OK")

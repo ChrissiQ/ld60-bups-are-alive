@@ -78,6 +78,7 @@ var _bin_free: Array = []
 var _low_since := {}  ## class -> msec since which it has used less than SHRINK_BELOW
 var _texels := 0
 var _pixels := 0
+var growths := {}  ## class -> how many times it grew (the debug log's pool figures)
 
 
 func _init(device: RenderingDevice, p_limits: PoolLimits) -> void:
@@ -184,6 +185,7 @@ func ensure_slots(slots: int) -> bool:
 		if not fits(want, 0, 0, 0, 0):
 			return false
 	slot_cap = want
+	_grew("slot")
 	_remake(["slot", "block", "bucket", "bucketbits"])
 	return true
 
@@ -198,6 +200,7 @@ func ensure_clouds(clouds: int) -> bool:
 		if not fits(0, 0, 0, want, 0):
 			return false
 	cloud_cap = want
+	_grew("cloud")
 	_remake(["cloud"])
 	return true
 
@@ -212,6 +215,7 @@ func ensure_husks(husks: int) -> bool:
 		if not fits(0, 0, 0, 0, want):
 			return false
 	husk_cap = want
+	_grew("husk")
 	_remake(["husk"])
 	return true
 
@@ -227,6 +231,7 @@ func ensure_events(events: int) -> int:
 		if not fits(0, 0, 0, 0, 0, want):
 			return -1
 	event_cap = want
+	_grew("event")
 	_remake(["event"])
 	return 1
 
@@ -238,6 +243,7 @@ func ensure_draw(texels: int, pixels: int) -> void:
 		return
 	_texels = maxi(texels, _texels)
 	_pixels = maxi(pixels, _pixels)
+	_grew("draw")
 	for nm: String in DRAW_BUFFERS:
 		_make(nm, _bytes_of(nm), false)
 
@@ -265,6 +271,7 @@ func alloc_cells(cells: int) -> int:
 		at = cell_top
 		cell_top += cells
 		if cell_top > cell_cap:
+			_grew("cell")
 			cell_cap = _align(maxi(cell_top, int(cell_cap * GROW)))
 			_remake(["cell", "view"])
 	return at
@@ -281,6 +288,7 @@ func alloc_bins(n: int) -> int:
 		at = bin_top
 		bin_top += n
 		if bin_top > bin_cap:
+			_grew("bin")
 			bin_cap = maxi(bin_top, int(bin_cap * GROW))
 			_remake(["bin"])
 	return at
@@ -361,6 +369,16 @@ func bytes_now() -> int:
 	for nm: String in sizes:
 		total += sizes[nm]
 	return total
+
+
+## The capacities, the bytes held, the budget and the growths so far (for the debug log).
+func report() -> Dictionary:
+	return {"slots": slot_cap, "cells": cell_cap, "bins": bin_cap, "clouds": cloud_cap, "husks": husk_cap, "events": event_cap,
+		"bytes": bytes_now(), "budget_bytes": limits.memory_budget_bytes, "growths": growths.duplicate()}
+
+
+func _grew(klass: String) -> void:
+	growths[klass] = int(growths.get(klass, 0)) + 1
 
 
 ## Shrinks a class that has used less than a quarter of its slots for a minute (at least to the limits' size, at most once a minute).

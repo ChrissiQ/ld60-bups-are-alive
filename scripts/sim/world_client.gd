@@ -26,6 +26,9 @@ var _waiting: Array = []  ## publishes seen and not yet shown, oldest first (at 
 var _shown: PayloadInfo = null
 var _known_publish := -1  ## the newest publish seen
 var _refusals_taken := {}  ## row -> the snapshot that first carried the last refusal of it that was taken (timing["refused_seq"])
+var _polls := 0  ## frames polled so far (the question latency counts in these)
+var _asked := {}  ## row -> {bup id: [poll, snapshot seq, msec] of its first question not yet answered}
+var _pick_latency := {"last": 0, "max": 0, "last_ms": 0.0}  ## frames and ms from a bup's first question to its first answer
 
 
 ## The game's world: the SimService autoload's (null where it is not there). Reached through the tree, not the autoload's name, so the
@@ -132,7 +135,21 @@ func set_view(row: int, view: ViewRequest) -> void:
 ## points (dish-local: the way up the gradient there, the chance of steering up it, the concentration, the gradient's size), "husks":
 ## [x, y, reach] places (dish-local, up to GpuLayout.HUSK_QUERIES: the nearest live husk within reach of each).
 func ask(row: int, questions: Dictionary) -> void:
+	var waiting: Dictionary = _asked.get(row, {})
+	var now_asked: Array = questions.get("tracked", [])
+	for id in now_asked:
+		if not waiting.has(id):
+			waiting[id] = [_polls, _last_seq, Time.get_ticks_msec()]
+	for id in waiting.keys():
+		if not now_asked.has(id):
+			waiting.erase(id)  # (no longer asked: not answered, not timed)
+	_asked[row] = waiting
 	_send(SimCommand.KIND_ASK, {"row": row, "questions": questions.duplicate(true)})
+
+
+## Frames, and the last and the longest, from a bup's first question to the first answer about it (the pick latency of the debug log).
+func pick_latency() -> Dictionary:
+	return _pick_latency.duplicate()
 
 
 ## Every running dish as a DishBlob (each with its own lineage), in row order; the dishes run on.
@@ -180,6 +197,7 @@ static func playout(waiting: Array, arrived: Array) -> Array:
 ## Once a frame on the main thread: a newer snapshot is acknowledged and emitted, the rows of refused dishes are freed, and the playout
 ## moves on a frame.
 func poll() -> void:
+	_polls += 1
 	var snap := backend.latest()
 	var arrived: Array = []
 	if snap != null and snap.seq > 0 and snap.seq != _last_seq:
@@ -197,6 +215,7 @@ func poll() -> void:
 	_last_seq = snap.seq
 	if backend.has_method("ack"):
 		backend.ack(snap.seq)
+	_time_answers(snap)
 	var gone: Dictionary = snap.timing.get("refused", {})
 	var first_carried: Dictionary = snap.timing.get("refused_seq", {})
 	for row: int in gone:
@@ -207,6 +226,23 @@ func poll() -> void:
 		_used.erase(row)
 		refused.emit(row, String(gone[row]))
 	snapshot_changed.emit(snap)
+
+
+## Times the answers of `snap` (a snapshot taken after a question was sent: its seq is past the one current then) against the questions waiting.
+func _time_answers(snap: Snapshot) -> void:
+	for row: int in snap.answers:
+		var waiting: Dictionary = _asked.get(row, {})
+		if waiting.is_empty():
+			continue
+		var answered: Dictionary = (snap.answers[row] as Dictionary).get("tracked", {})
+		for id in answered.keys():
+			if not waiting.has(id) or snap.seq <= int(waiting[id][1]):
+				continue
+			var frames := _polls - int(waiting[id][0])
+			_pick_latency["last"] = frames
+			_pick_latency["max"] = maxi(int(_pick_latency["max"]), frames)
+			_pick_latency["last_ms"] = Time.get_ticks_msec() - float(waiting[id][2])
+			waiting.erase(id)
 
 
 ## The main side used texture `index` of `kind`, holding publish `seq` (PayloadInfo.seq, FieldViewInfo.seq), on its frame `frame`: every
