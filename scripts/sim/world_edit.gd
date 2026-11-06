@@ -2,7 +2,7 @@ class_name WorldEdit
 extends RefCounted
 ## An edit of a dish's world, in the dish's own coordinates. Two kinds touch the field and are the core's
 ## (`SimCore.queue_edit` records them as kernels before the next batch): DROP (a dose of `amount` units of energy scattered over a disc of
-## `radius` µm, NutrientField::add_cloud: a cloud of the disc's spread where the grid is coarser than it, else onto the cells in the disc)
+## `radius` µm, a cloud of the disc's spread where the grid is coarser than it, else onto the cells in the disc)
 ## and ERASE (a disc of `radius` µm whose cells and clouds lose `amount` of what they hold at the centre, less towards the rim). The
 ## others are the dish's DishWorld's (`as_world_op`).
 

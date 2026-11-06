@@ -300,7 +300,7 @@ func forget_build() -> void:
 	_last_build = []
 
 
-## Asks which bup is at `local` (dish-local µm): BupSim.pick_bup's rule (within half its drawn length at `pixel_um` plus `slack`, the
+## Asks which bup is at `local` (dish-local µm): the pick's rule (within half its drawn length at `pixel_um` plus `slack`, the
 ## nearest), on the payload, and how many bups lie within `near` of it and how far the nearest is. The answer comes back a frame or two
 ## later (`answer`); `hover` keeps the hover's answer apart from a click's. Returns the question's number.
 func pick(local: Vector2, slack: float, pixel_um: float, hover := false, near := 0.0) -> int:
@@ -315,7 +315,7 @@ func answer(hover := false) -> Dictionary:
 	return _answers.get("hover" if hover else "click", {})
 
 
-## The nearest bup's distance from the last hover pick's point and how many bups lie within its `near` (BupSim.nearest_and_count).
+## The nearest bup's distance from the last hover pick's point and how many bups lie within its `near`.
 func near_count() -> Vector2:
 	var a: Dictionary = answer(true)
 	if a.is_empty():

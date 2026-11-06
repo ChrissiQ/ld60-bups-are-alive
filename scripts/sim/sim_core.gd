@@ -409,9 +409,9 @@ static func cap_for(limit: int) -> int:
 	return ((int(limit * 1.05) + 1024 + 255) / 256) * 256
 
 
-## Changes dish `row`'s size about its centre (Dish.resize_to, BupSim::grow and shrink, NutrientField::resize), and with `resolution` > 0
+## Changes dish `row`'s size about its centre (Dish.resize_to), and with `resolution` > 0
 ## its grid's most cells across: the dish is read whole, changed and loaded again under the same row (its segment, clouds and husks go to
-## the pool's end, which changes no dish's run). The field is resampled onto the new grid as NutrientField::resize does (bilinear, in
+## the pool's end, which changes no dish's run). The field is resampled onto the new grid (bilinear, in
 ## doubles, the deposits waiting folded in first; larger: scaled so no nutrient is lost; smaller: what is past the edge goes). Smaller:
 ## bups whose centre is past the new edge are gone, as deaths (their death events are returned for the family tree; they give nothing
 ## back, as any bup an edit removes), one straddling the edge is moved inside, and the clouds and husks past it go. The diffusion's k and
@@ -488,7 +488,7 @@ func _resized(blob: DishBlob, old: DishGrid, new_radius: float, res: int) -> Dic
 	return {"blob": out, "removed": removed, "deaths": deaths}
 
 
-## A field of the old grid on the new one (NutrientField::resize): each inside cell of the new grid whose centre lies over the old grid
+## A field of the old grid on the new one: each inside cell of the new grid whose centre lies over the old grid
 ## takes the old values there, bilinear, in doubles; the rest are 0. Larger: scaled so the total is what it was.
 static func _resample(values: PackedFloat32Array, old: DishGrid, grid: DishGrid, shrinking: bool) -> PackedFloat32Array:
 	var out := PackedFloat32Array()
@@ -533,7 +533,7 @@ static func _resample(values: PackedFloat32Array, old: DishGrid, grid: DishGrid,
 	return out
 
 
-## A bup straddling the edge moved inside (BupSim::keep_inside): to `limit` from the middle along its own line, facing along the wall.
+## A bup straddling the edge moved inside: to `limit` from the middle along its own line, facing along the wall.
 ## Where it faced straight at the wall, it turns the way its id's lowest bit says (the C++ draws it from the dish's stream).
 static func _keep_inside(rec: PackedByteArray, limit: float, dist: float) -> void:
 	if dist <= limit:
@@ -586,7 +586,7 @@ static func death_event(rec: PackedByteArray, number: int) -> PackedByteArray:
 
 
 ## Birth events (GpuLayout's EB_* words, step 0, no parent) for records the pool never saw born: a new dish's founders, which the family
-## tree then holds as its roots (the single-dish path's BupSim.add_bup made their records), born in dish number `number`.
+## tree then holds as its roots, born in dish number `number`.
 static func founder_births(recs: PackedByteArray, number: int) -> PackedByteArray:
 	var out := PackedByteArray()
 	out.resize(recs.size() / RB * GpuLayout.BIRTH_WORDS * 4)
@@ -825,7 +825,7 @@ func _refresh_stats() -> void:
 
 ## Each running dish's DishWorld rows (plan.events[row]: discs, puffs, deposits and husks, step n of the window 1-based, a pending row 0)
 ## as the batch's EVR, EVP, EVCC and EVCA: per step, the dishes in row order, each dish's plankton (discs or husks) then its sources'
-## clouds; a disc, a cloud and a deposit become clouds or cells as NutrientField's add_cloud, release_emitter and deposit_xy decide.
+## clouds; a disc, a cloud and a deposit become clouds or cells as the field's rules decide.
 func _world_events(steps: int, events: Dictionary) -> Dictionary:
 	var per_step: Array = []
 	per_step.resize(steps)
@@ -1275,8 +1275,8 @@ func canonical_dump(row: int) -> Dictionary:
 	}
 
 
-## The share of dish `row`'s bups whose `gene` (a name of GpuLayout.GENE_NAMES) is at least `threshold` (BupSim's
-## fraction_with_gene_at_least, goal 2's input; a blocking read). The kernel counts the records' float genes at or above the least float
+## The share of dish `row`'s bups whose `gene` (a name of GpuLayout.GENE_NAMES) is at least `threshold`
+## (goal 2's input; a blocking read). The kernel counts the records' float genes at or above the least float
 ## that is not below `threshold`, which is the same as comparing each float gene with `threshold` itself.
 func fraction_with_gene_at_least(row: int, gene: String, threshold: float) -> float:
 	var g := GpuLayout.GENE_NAMES.find(gene)
@@ -1368,7 +1368,7 @@ func husk_view(row: int) -> PackedFloat32Array:
 
 
 ## For each place of dish `row` (`places`: x, y, reach, up to GpuLayout.HUSK_QUERIES; dish-local µm), the nearest live husk within reach
-## (BupSim::husk_near): PackedFloat32Array([x, y, energy, age, pieces let go]), or an empty one for none.
+## as PackedFloat32Array([x, y, energy, age, pieces let go]), or an empty one for none.
 func husk_near(row: int, places: PackedFloat32Array) -> Array:
 	var n := mini(places.size() / 3, GpuLayout.HUSK_QUERIES)
 	var out: Array = []
@@ -1400,7 +1400,7 @@ func husk_near(row: int, places: PackedFloat32Array) -> Array:
 	return out
 
 
-## A bup's sense range from its record's words (GpuWorld's `_sense_range`, RecordCodec's): its sense gene times the root of its size (the
+## A bup's sense range from its record's words (RecordCodec's): its sense gene times the root of its size (the
 ## root of its mass) over the reference size.
 func sense_range_of(answer: PackedByteArray) -> float:
 	var mass := answer.decode_float(GpuLayout.R_MASS * 4)

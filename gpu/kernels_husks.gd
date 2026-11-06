@@ -151,7 +151,7 @@ GRID_LOOP(f, WORLD[WD_HUSK_SLOTS])
 """
 
 ## `pool_husk_near`, `pool_husk_near2`, `pool_husk_near3`: for each of `pcs.pb` places (HNQ: x, y, reach), the nearest live husk within
-## reach (BupSim::husk_near: of those as near, the last in the pool's order), in three passes: the least squared distance, the highest slot
+## reach (of those as near, the last in the pool's order), in three passes: the least squared distance, the highest slot
 ## at it, then that husk's x, y, energy, age and pieces into its answer (HNR, HN_WORDS a place; the host sets each to none first).
 const NEAR_FUNCS := """
 bool husk_of(uint k, out uint o) {

@@ -25,7 +25,7 @@ void puffs_at(float x, float y, out float c, out float gx, out float gy, out flo
 }
 """
 
-## New clouds and deposits come from the CPU (plankton bursts, sources: see NutrientField.set_recording) as events with the step they belong to.
+## New clouds and deposits come from the CPU (plankton bursts, sources) as events with the step they belong to.
 ## One thread, so the slots are taken in the events' order. A cloud that finds every slot taken goes onto the grid at once, as the CPU's
 ## add_puff does past MAX_CLOUDS (its deposit_gaussian, and deposit_xy if no cell takes any of it), and is counted in PCNT_TO_GRID.
 const K_EV_PUFFS := """
@@ -727,7 +727,7 @@ float steering_chance_d(uint d, float speed, float sense_range, float c, float g
 
 ## The full point answer of dish row `pcs.pb` for `pcs.pa` queries (SPQ: x, y, speed, sense range; SPR, PROBE_FLOATS a point: the unit
 ## direction up the gradient, the chance of steering up it, the concentration, the gradient's size; `pcs.pc` the steering window):
-## `BupSim::steering_at` and the hover card's nutrient, from the grid snapshot and the clouds as the single dish reads them. No gradient
+## The steering readout and the hover card's nutrient, from the grid snapshot and the clouds as the single dish reads them. No gradient
 ## (1e-12 or less) gives (0, 0, 0.5).
 const K_POOL_PROBE_FULL := """
 void f(uint i) {

@@ -186,7 +186,7 @@ void main() {
 	uint lo = CNT[CNT_NEXT_ID_LO] + CNT[CNT_NEWBORN]; if (lo < CNT[CNT_NEXT_ID_LO]) CNT[CNT_NEXT_ID_HI] += 1u; CNT[CNT_NEXT_ID_LO] = lo; CNT[CNT_BUPS] = CNT[CNT_NEXT_COUNT]; CNT[CNT_STEP] += 1u; }
 """
 
-## Conjugation (see the CPU's BupSim::conjugate). The donors (R_DONOR) go into a hashed table of the 20 µm cells they stand in, four slots a cell, and the
+## Conjugation. The donors (R_DONOR) go into a hashed table of the 20 µm cells they stand in, four slots a cell, and the
 ## largest donor's half length is kept (CNT_DONOR_REACH); then each bup that is not a donor looks in the cells round it as far as a donor can be and still touch
 ## it (its own half length, the largest donor's and contact_um: 3 x 3 cells or fewer for the usual sizes) for a donor it touches (centres no farther apart than the
 ## two bodies' half lengths and contact_um) that transfers to it this step (a draw keyed by the pair and the step, so that the order the threads run in does not

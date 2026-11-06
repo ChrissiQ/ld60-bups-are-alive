@@ -1,7 +1,7 @@
 class_name RecordCodec
 extends RefCounted
 ## A bup's record (28 words, `GpuLayout.R_*`) as the dictionary `bup_info` gives, worked out in script: a port of
-## `BupSim::info_from_state` (`native/src/bup_gpu_io.cpp`, `BupSim::info_of`). The pooled world has no BupSim to ask, so a
+## the native record reader's rule. The pooled world has no native simulation to ask, so a
 ## pick's panel reads its answer from the record this way.
 ##
 ## What a record cannot say comes in as arguments: `born` (the family record's, 0 for a founder), `steering` (the chance of

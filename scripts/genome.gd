@@ -70,7 +70,7 @@ const MUTATOR_RATE := 5.0e-6 * (TRAIT_MUTATIONS + HARMFUL_MUTATIONS) / Biology.R
 const MUTATOR_DOWN_SHARE := 0.3  ## antimutator mutations in a mutator, as a share of the mutator rate [choice: no measured ratio; Wielgoss et al. saw two in the time one mutator arose]
 
 # Conjugation: a donor is a bup with the F factor integrated in its chromosome (an Hfr cell). It passes a run of its genes to a bup that is not a
-# donor and that it touches (see BupSim.conjugate). Only the facts below are sourced; the rest are choices, marked as such.
+# donor and that it touches (see the conjugation kernel). Only the facts below are sourced; the rest are choices, marked as such.
 const DONOR_COST := 0.09  ## the share of its growth a donor gives up: carrying a conjugative plasmid costs about 9% (Vogwill & MacLean 2015)
 const CONTACT_UM := 1.0  ## how close the bodies must be, in µm: conjugation happens between cells in tight contact, and the F pilus is about 1 µm long (Goldlust et al. 2023)
 const CONJ_CONTINUE := 0.5  ## the chance that a transfer goes on to the next gene of the run (speed, sense, metabolism, size, from a fixed origin) [choice: the genes' places on the chromosome are not real, and so is this; in life transfer is sequential and breaks off at random, so the first genes move most]
@@ -163,7 +163,7 @@ static func label(gene: String) -> String:
 
 
 const DECIMALS := {"speed": 0, "sense": 0, "metabolism": 2, "size": 1, "mutator": 1}
-## Where each gene is in a bup's info (BupSim.bup_info): its body size is `size`, so the size gene is not.
+## Where each gene is in a bup's info: its body size is `size`, so the size gene is not.
 const INFO_KEYS := {"speed": "speed", "sense": "sense", "metabolism": "metabolism", "size": "size_gene", "mutator": "mutator"}
 
 

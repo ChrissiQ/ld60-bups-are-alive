@@ -16,7 +16,7 @@ extends RefCounted
 ##   (gpu/kernels_draw.gd) writes one with no trail: its length and width no less than the least footprint in screen pixels, a margin of a
 ##   pixel, its colour;
 ## - view_tail: the instances past the visible ones, up to the slots drawn, written as nothing, and the visible count for the host.
-## The questions (the pointer's pick, BupSim.pick_bup's rule; the nearest bup and how many are near; where the bups the rings follow are):
+## The questions (the pointer's pick; the nearest bup and how many are near; where the bups the rings follow are):
 ## view_pick, view_pick2, view_answer, after view_build in the same list.
 
 ## VP: the build's parameters, one word each (floats by their bits), written by the host before the list.
@@ -186,9 +186,9 @@ void f(uint j) {
 GRID_LOOP(f, max(VP[VW_SLOTS], 1u))
 """
 
-## The pick (BupSim.pick_bup's rule, as q_pick: within half its drawn length plus the slack, the nearest; ties to the first in the
+## The pick (as q_pick: within half its drawn length plus the slack, the nearest; ties to the first in the
 ## payload's order): the least d² by atomicMin on its bits (they order as the floats do for d² >= 0), each texel's own kept in VPD for
-## view_pick2; the nearest bup and the count within VW_NEAR (BupSim::nearest_and_count); and the texels of the bups looked up by id.
+## view_pick2; the nearest bup and the count within VW_NEAR; and the texels of the bups looked up by id.
 const K_PICK := """
 void f(uint k) {
 	uvec4 px = payload_at(k);

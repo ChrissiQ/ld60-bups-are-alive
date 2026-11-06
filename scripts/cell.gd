@@ -18,7 +18,7 @@ const REFERENCE_SIZE := 4.0  ## the founders' size (sqrt of mass) at division, w
 const REFERENCE_SENSE := 50.0
 const ADD_MASS_FACTOR := 0.5  ## a bup adds this times its size gene squared before dividing
 # A bup is drawn at its true size, unless that would be too small to see: each bup on its own is then drawn at
-# the least that shows. (The simulation does it as it builds the picture; see BupSim.drawn_length.)
+# the least that shows. (The simulation does it as it builds the picture.)
 const MIN_VISIBLE_LENGTH_PX := 2.0  ## no bup is drawn shorter than this many screen pixels ...
 const MIN_VISIBLE_WIDTH_PX := 1.0  ## ... or thinner than this
 

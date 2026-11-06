@@ -5,7 +5,7 @@ extends RefCounted
 ## `events` answers a window of steps with the clouds, deposits and husks it puts into the medium, each stamped with its step, and costs
 ## time in the events of the window, not in its steps. It touches no node, no scene and no `Strings`, so it can live on a thread.
 ##
-## What it keeps of the old per-step path (`Dish._step_plankton`, `Dish._step_world`, `NutrientField::emit_xy`):
+## What it keeps of the per-step path of a single dish:
 ## the bloom's arrivals are on a steady schedule and each draws its place, its life and its shape in that order; the plankton are looked
 ## over every BURST_CHECK_SECONDS of simulated time and burst at the first look at or after their time; a source's emitter lets go of
 ## what it kept when its age reaches clamp(lived, 5, EMIT_INTERVAL).
@@ -226,7 +226,7 @@ func _add_plankton(pos: Vector2, now: float) -> void:
 	_plankton.insert(lo, p)
 
 
-## Port of `NutrientField::emit_xy` over a window of equal steps. A source gives rate / 60 * delta * nutrient_energy a step.
+## The sources' emission over a window of equal steps. A source gives rate / 60 * delta * nutrient_energy a step.
 func _source_events(s: Dictionary, steps: int, delta: float, out: Dictionary) -> void:
 	var energy: float = s["rate"] / 60.0 * delta * nutrient_energy
 	s["emitted"] += s["rate"] / 60.0 * delta * steps
@@ -261,7 +261,7 @@ static func _steps_to_release(age: float, lived: float, delta: float) -> int:
 	return n_cap
 
 
-## Port of `NutrientField::release_emitter`. `into_pending` puts the row in the next window's (an edit's release), at step 0.
+## The release of an emitter's remaining nutrient. `into_pending` puts the row in the next window's (an edit's release), at step 0.
 func _release(s: Dictionary, step: int, into_pending: bool, out: Dictionary = {}) -> void:
 	if s["em_mass"] > 0.0:
 		var at: Vector2 = s["pos"]

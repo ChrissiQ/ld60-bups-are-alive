@@ -49,7 +49,7 @@ const SOURCE_PICK_PIXELS := 9.0  ## and can be picked from at least this many pi
 const SOURCE_PICK_RADIUS := 18.0  ## how close (in µm) a click must be to pick a source: generous, since it is small and often under bups
 const ERASE_STRENGTH := 0.9  ## the share of nutrient the eraser takes from the middle of its brush
 const DIFFUSE_INTERVAL := 5.0  ## seconds between solves of the nutrient field's diffusion (implicit, so long steps are fine)
-const DIFFUSE_ACCURACY := 0.004  ## the most D dt / cell^2 one solve of the diffusion is allowed (how far the nutrient spreads in it, in cells): a longer stretch is solved in pieces, down to DIFFUSE_INTERVAL. See BupSim.diffuse_pieces
+const DIFFUSE_ACCURACY := 0.004  ## the most D dt / cell^2 one solve of the diffusion is allowed (how far the nutrient spreads in it, in cells): a longer stretch is solved in pieces, down to DIFFUSE_INTERVAL.
 const MAX_STEP := 20.0  ## the longest single step, in seconds: growth, uptake and division are slow (doubling takes 40 minutes), so they run once per step
 const HUSK_PIXELS := 3.0  ## a husk's dot on screen
 const HUSK_REFRESH_MSEC := 100  ## how often the husks' picture is rebuilt while time moves
@@ -63,10 +63,10 @@ const TRAIL_FADE_PIXELS := 10.0  ## a trail is a third as bright this many scree
 const HAZE_REFRESH_MSEC := 100  ## how often the picture of the dissolved nutrient is rebuilt
 const STEER_ALPHA := 0.35 * 255.0  ## the most opaque the steering map gets (where a bup is sure to end up further up the slope)
 const MIN_STEER_ARC := deg_to_rad(15.0)  ## the narrowest arc on the selection ring: how reliably its drift tends one way
-const ARC_SHOWN_ABOVE := 0.54  ## the chance that it ends up further up the slope after a minute (0.5 a coin toss, 1 sure: see BupSim.bup_steering) above which the arc shows
+const ARC_SHOWN_ABOVE := 0.54  ## the chance that it ends up further up the slope after a minute (0.5 a coin toss, 1 sure) above which the arc shows
 const MOTION_STEP := 3.0  ## the longest motion sub-step on a fine nutrient grid, in seconds: a swimmer must not jump farther than a gradient is wide (~50-100 µm; a bup diffuses ~40 µm in 3 s). On a coarser grid it grows, see MOTION_STRUCTURE
-const MOTION_STRUCTURE := 500.0  ## µm: the size of the smallest structure in the nutrient worth looking for (a plankton cloud: a patch of 250 µm radius, spread by hours of diffusion). Where grid cells are bigger than this the motion sub-step grows with the square of the cell (BupSim.moves_for), since a bup sees no more by looking again after moving a short way across one
-const CLOUD_HANDOVER := 0.5  ## a plankton's nutrient is kept as a Gaussian cloud (BupSim's NutrientField) until its sigma is this share of a grid cell, then given to the grid
+const MOTION_STRUCTURE := 500.0  ## µm: the size of the smallest structure in the nutrient worth looking for (a plankton cloud: a patch of 250 µm radius, spread by hours of diffusion). Where grid cells are bigger than this the motion sub-step grows with the square of the cell since a bup sees no more by looking again after moving a short way across one
+const CLOUD_HANDOVER := 0.5  ## a plankton's nutrient is kept as a Gaussian cloud until its sigma is this share of a grid cell, then given to the grid
 const STEERING_WINDOW := 3600.0  ## seconds of swimming over which the steering readout asks whether a bup ends up further up the slope: an hour, about a generation and a half. Shorter and nearly every bup reads blind (a minute of drift is lost in its random walk wherever the slope is gentle); at an hour the words spread from blind where it is flat to sure on a cloud's flank (measured on 10 mm and 90 mm dishes at 100 h: about 40% blind, 30% faint, 15% clear, 15% sure)
 const CLOUD_CUT := 0.1  ## a cloud is looked for out to where it falls to this share of the detection floor (about 3-4 sigma): beyond, it is nothing a bup can tell from the medium or use
 const FINE_STEP := 0.25  ## steps this short or shorter follow individual runs and tumbles
@@ -1248,7 +1248,7 @@ func plankton_details(cell: Plankton) -> Dictionary:
 
 
 ## The husk under a world position (within its drawn size, plus `slack`): its place in the dish, or NO_HUSK. The place is asked after
-## from now on (BupSim.husk_near's rule: the nearest live husk within reach); the answer is the newest the simulation gave of any husk
+## from now on (the nearest live husk within reach); the answer is the newest the simulation gave of any husk
 ## asked after (a frame or two behind), the nearest of them within reach of the point.
 func husk_at(world_pos: Vector2, slack: float = 0.0) -> Vector2:
 	var local := world_pos - global_position

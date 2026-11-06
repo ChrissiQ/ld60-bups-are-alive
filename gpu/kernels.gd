@@ -3,7 +3,7 @@ extends RefCounted
 ## How the GPU's compute kernels are made: each is GLSL text and the buffers it binds, written by concern in its own file with its
 ## registration (gpu/kernels_field.gd, kernels_life.gd, kernels_clouds.gd, kernels_game.gd, kernels_draw.gd: each has a `register(out)`
 ## that calls `add` for its kernels). `all()` gives every kernel's complete file text; tools/gen_gpu_shaders.gd writes those to
-## gpu/shaders/<name>.glsl, which the game imports (SPIR-V) and GpuSim or a ShaderSet (gpu/shader_set.gd) loads. Kernels over the pooled
+## gpu/shaders/<name>.glsl, which the game imports (SPIR-V) and a ShaderSet (gpu/shader_set.gd) loads. Kernels over the pooled
 ## world loop over it with POOL_FUNCS' macros. After editing a kernel run the generator and then
 ## `godot --headless --path . --import` (tests/gpu_shaders_test.gd checks both were done). Any change to the model must be made in the
 ## kernels and in the C++ simulation.
@@ -25,7 +25,7 @@ const TYPES := {
 	# pattern that a float-typed move may flush, so ids are read through the uint views and records are moved whole through the
 	# uvec4 views (16 bytes at a time, so that neighbouring threads touch neighbouring memory). Never copy a record as floats.
 	"BUPS_U": "uint", "CHILD_U": "uint", "BUPS_V4U": "uvec4", "BUPS2_V4U": "uvec4", "CHILD_V4U": "uvec4",
-	# The game's side (gpu/gpu_world.gd): the family events of a batch (EVB births, EVD deaths, EVN their counts per event set), what
+	# The game's side (scripts/sim/): the family events of a batch (EVB births, EVD deaths, EVN their counts per event set), what
 	# the dish asks each frame (QIN) and the answers (OUT: counts, query answers, stats samples, as uint words; floats by their bits),
 	# the stats' partial sums (SPART), the eraser's discs (ERASE), the per-bup scratch of a pick (QD) and the field's copy (MIRROR).
 	"EVB": "uint", "EVD": "uint", "EVN": "uint", "QIN": "uint", "OUT": "uint", "OUTK": "uint", "SPART": "float", "ERASE": "vec4", "QD": "uint", "MIRROR": "float",
@@ -52,7 +52,7 @@ const PING_PONG := {
 
 # The layouts of P, the bup records (BUPS, BUPS2, CHILD), CNT, PCNT, the family events (EVB, EVD), QIN and OUT are in gpu/gpu_layout.gd
 # (GpuLayout): a kernel uses their names (P[P_DELTA], BUPS[b + R_MASS], CNT[CNT_BUPS], ...), which `add` declares at its top. The bup record
-# is BupSim.export_state_bytes()' layout, the events BupSim.apply_events'. The entries of P that depend on the step's length or on the
+# is the layout of an exported state, the events those of the family store. The entries of P that depend on the step's length or on the
 # batch's plan (the "batch" kind there, and the diffusion's k in the push constant) are set for every batch.
 # PUFF: 8 floats each: x, y, mass, variance, cut, alive, reach^2, sigma.
 # EVB / EVD: EVENT_SETS sets of P_EVENT_CAPACITY events each (a batch writes set `pcs.pb` of `events`). EVN (uint): per set, the births

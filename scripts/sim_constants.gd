@@ -32,14 +32,9 @@ const OTHER_CONSTANTS := [
 static var _applied := false
 
 
-## Configures the native simulation; safe to call as often as you like.
+## Checks in a debug game that the motion table is current; safe to call as often as you like.
 static func apply() -> void:
 	if _applied:
-		return
-	var missing := BupSim.configure(build())
-	if not missing.is_empty():  # (an assert would vanish from an exported game, and the sim would run on with zeros)
-		push_error("native constants missing: %s" % missing)
-		assert(false, "native constants missing: %s" % missing)
 		return
 	_applied = true
 	if OS.is_debug_build() and not MotionFingerprint.constants_current():  # (the full check, with the native sources, is in the tests)

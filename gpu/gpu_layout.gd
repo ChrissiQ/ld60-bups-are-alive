@@ -3,12 +3,10 @@ extends RefCounted
 ## The word layouts of the GPU path, in one place: the bup record, the family events, the counters (CNT, PCNT), the frame's questions
 ## (QIN) and answers (OUT), the slots of P, and the sizes of the buffers they live in. Every word is a 32-bit word. GpuKernels.add()
 ## declares the names a kernel uses at the top of its GLSL (an int constant here as `const uint NAME = value;`, a slot of P as
-## `const int P_<NAME> = slot;`), so the kernels, gpu/gpu_sim.gd, gpu/gpu_world.gd and the tools all read these. The C++ side (BupSim's
-## export_state_bytes, bup_from_record, apply_events) has its own literals: tests/gpu_layout_test.gd checks it against this table word
-## by word. What belongs here: int constants (every one becomes a GLSL name), P_SLOTS, the record's one float marker (NO_PICTURE) and
+## `const int P_<NAME> = slot;`), so the kernels, the host's pool code and the tools all read these. The native code has its own literals. What belongs here: int constants (every one becomes a GLSL name), P_SLOTS, the record's one float marker (NO_PICTURE) and
 ## its genes' names (GENE_NAMES), and the static helpers that read and write a record's words; none of it may refer to another class.
 
-# ---- the bup record (BUPS, BUPS2, CHILD; BupSim.export_state_bytes) ------------------------------------------------------------------
+# ---- the bup record (BUPS, BUPS2, CHILD; an exported state) ------------------------------------------------------------------
 const RECORD_WORDS := 28
 const RECORD_VEC4 := 7  ## the record in 16-byte pieces (RECORD_WORDS / 4): `compact` and `copy` move records as uvec4
 const R_ID_LO := 0  ## the id's low 32 bits (uint bits; ids are read through the uint views)
@@ -42,10 +40,10 @@ const R_TUMBLING := 27  ## the seconds of tumble left
 const ANSWER_WORDS := 24  ## the words of a record a pick's or a tracked bup's answer carries: all but the chemotaxis memory
 const RECORD_BYTES := RECORD_WORDS * 4
 const ANSWER_BYTES := ANSWER_WORDS * 4
-const GENE_NAMES := ["speed", "sense", "metabolism", "size"]  ## BupSim's genes in the record's order: R_SPEED + g is GENE_NAMES[g]
+const GENE_NAMES := ["speed", "sense", "metabolism", "size"]  ## the genes in the record's order: R_SPEED + g is GENE_NAMES[g]
 const NO_PICTURE := 3e38  ## R_PX, R_PY of a bup with no last picture: no trail (any value >= 1e30 means the same)
 
-# ---- the family events (EVB, EVD; BupSim.apply_events) --------------------------------------------------------------------------------
+# ---- the family events (EVB, EVD) --------------------------------------------------------------------------------
 const BIRTH_WORDS := 16
 const EB_ID_LO := 0
 const EB_ID_HI := 1
@@ -82,7 +80,7 @@ const EV_LOW_MASK := 0xFFFFF  ## a traits word's low 20 bits (mutations in a bir
 const EV_REACH_SHIFT := 20
 const EV_REACH_MASK := 0x3FF  ## the reach word's ten bits, above the low 20
 const EV_DONOR_SHIFT := 30  ## the F factor's bit
-const EV_PUFF_FLOATS := 6  ## a cloud among the clouds the dish's own world sends (EVP; GpuSim.WorldEvents): x, y, mass, variance, cut, a spare 0
+const EV_PUFF_FLOATS := 6  ## a cloud among the clouds the dish's own world sends (EVP): x, y, mass, variance, cut, a spare 0
 const EVENT_SETS := 4  ## the family events of this many batches can be held at once (each batch writes set seq % EVENT_SETS; a set is
 ## written again only once its batch's events are in the CPU's records: about 4 frames after it ran)
 const MAX_STEPS_PER_BATCH := 1024  ## the steps of one batch (EVR: four ints a step)

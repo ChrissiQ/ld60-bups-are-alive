@@ -1,6 +1,6 @@
 class_name GpuKernelsDraw
 extends RefCounted
-## The drawing's compute kernels (the bups' MultiMesh written on the GPU: see gpu/gpu_draw.gd), apart from the
+## The drawing's compute kernels (the bups' MultiMesh written on the GPU), apart from the
 ## simulation's (gpu/kernels_field.gd and the others) so they can change separately. GpuKernels.all() includes these; each gets its own
 ## gpu/shaders/<name>.glsl from tools/gen_gpu_shaders.gd, like the others.
 ##
@@ -8,7 +8,7 @@ extends RefCounted
 ## (the header, FUNCS and one declaration per buffer are added for you; binding = position in `buffer_names`). Buffers the simulation
 ## has (P, CNT, BUPS, BUPS_U, ...) take their types from GpuKernels.TYPES; a buffer of the drawing's own (the MultiMesh's, say) is
 ## declared in TYPES below, which `add` is given. The bup record and P are in gpu/gpu_layout.gd (P_MIN_LENGTH_PX to P_MAX_TRAIL_PX are the drawing's constants), and `add` declares the names a kernel uses.
-## A kernel bound to a buffer GpuSim does not own (the MultiMesh's RD buffer) is set up with GpuSim.make_external_kernel().
+## A kernel bound to a buffer the pool does not own (the MultiMesh's RD buffer) is set up on its own.
 
 ## The element type of each buffer only the drawing's kernels bind (name -> GLSL type).
 ## INST: the MultiMesh's instances (RenderingServer.multimesh_get_buffer_rd_rid, or a plain buffer in tools), 16 floats each as
@@ -18,7 +18,7 @@ const TYPES := {"INST": "vec4"}
 
 ## Godot's Color.from_hsv (core/math/color.cpp, Color::set_hsv), in floats as there: the hue scaled to six sectors, wrapped as C's
 ## fmod wraps (keeping the sign), and the sector's channels. Colours are made here, not in dish.gd or genome.gd, because the picture is
-## made on the GPU: this is the same colour BupSim.render_buffer gives each bup.
+## made on the GPU: this is the colour each bup gets.
 const COLOUR_FUNCS := """
 vec3 from_hsv(float h, float s, float v) {
 	if (s == 0.0) return vec3(v);
@@ -36,7 +36,7 @@ vec3 from_hsv(float h, float s, float v) {
 }
 """
 
-## A port of BupSim::render_buffer (native/src/bup_sim.cpp): one thread per MultiMesh slot, push constant pa = µm per pixel,
+## The bups' instances: one thread per MultiMesh slot, push constant pa = µm per pixel,
 ## pb = the slots in the picture. A bup is drawn at its true length unless that is under P_MIN_LENGTH_PX pixels, a streak back to where it was
 ## in the last picture (R_PX, R_PY; >= 1e30: none) when it has moved farther than its length (at most P_MAX_TRAIL_PX pixels), and its own
 ## colour. Slots past the live count are all zero (drawn as nothing); a bup past the picture's slots is not drawn and keeps no place,
@@ -120,7 +120,7 @@ void f(uint k) {
 GRID_LOOP(f, ((DS(uint(pcs.pa), DS_COUNT) + PAYLOAD_TEX_WIDTH - 1u) / PAYLOAD_TEX_WIDTH) * PAYLOAD_TEX_WIDTH)
 """
 
-## What a cell of dish row `pcs.pa` shows (NutrientField::view_values): its concentration, and in a cell inside the dish the clouds' at the
+## What a cell of dish row `pcs.pa` shows: its concentration, and in a cell inside the dish the clouds' at the
 ## cell's centre, a cloud counting where the cell is in the block of cells its reach covers (the CPU's picture rule: a square, one cell wider
 ## than the reach, where the bups' reads use the circle). The block's cells can lie three squares from a cloud's listed ones, so each cell
 ## looks at 7 x 7 squares and takes a cloud from the first of them that it and the cloud's squares share. VIEW is indexed by pool cell.
@@ -155,7 +155,7 @@ void f(uint l) {
 GRID_LOOP(f, DPU(uint(pcs.pa), DP_CELLS) * DPU(uint(pcs.pa), DP_CELLS))
 """
 
-## The nutrient picture of dish row `pcs.pa` (NutrientField::haze_bytes): `pcs.pb` visible_above, `pcs.pc` alpha_scale, `pcs.pd` max_alpha.
+## The nutrient picture of dish row `pcs.pa`: `pcs.pb` visible_above, `pcs.pc` alpha_scale, `pcs.pd` max_alpha.
 const K_POOL_HAZE := """
 void f(uint l) {
 	uint d = uint(pcs.pa);
@@ -167,7 +167,7 @@ void f(uint l) {
 GRID_LOOP(f, DPU(uint(pcs.pa), DP_CELLS) * DPU(uint(pcs.pa), DP_CELLS))
 """
 
-## The steering picture of dish row `pcs.pa` (NutrientField::steer_bytes): VQ holds the swimmer's speed, its sense range, max_alpha and the
+## The steering picture of dish row `pcs.pa`: VQ holds the swimmer's speed, its sense range, max_alpha and the
 ## steering window.
 const K_POOL_STEER_MAP := """
 float view_cell(uint base, uint n, int ix, int iy) {

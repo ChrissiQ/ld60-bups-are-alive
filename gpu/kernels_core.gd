@@ -24,7 +24,7 @@ void main() {
 }
 """
 
-## The eraser on dish row `pcs.pa` (NutrientField::erase_disc): a disc at (pcs.pb, pcs.pc) of radius ERASE's x and strength its y takes
+## The eraser on dish row `pcs.pa` a disc at (pcs.pb, pcs.pc) of radius ERASE's x and strength its y takes
 ## from each cell inside the dish whose centre lies within it, and from each of the dish's clouds whose centre does, the share
 ## strength x (1 - d / radius).
 const K_ERASE_CELLS := """
@@ -69,7 +69,7 @@ void main() {
 }
 """
 
-## The goals' question (BupSim::fraction_with_gene_at_least) for dish row `pcs.pb`: how many of its bups hold record word `pcs.pa` (a gene,
+## The goals' question for dish row `pcs.pb`: how many of its bups hold record word `pcs.pa` (a gene,
 ## R_SPEED + g) at or above `pcs.pc` (the threshold as the host rounds it up to a float), counted into FRQ[0]. An integer count, so the
 ## share the host works out from it does not depend on the order the threads run in.
 const K_FRACTION := """

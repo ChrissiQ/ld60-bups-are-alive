@@ -1,6 +1,6 @@
 class_name DishState
 extends RefCounted
-## What a snapshot says of one dish: a light record, not a node. `stats` has the keys of `BupSim.population_stats` (STATS_KEYS).
+## What a snapshot says of one dish: a light record, not a node. `stats` has the keys STATS_KEYS lists.
 
 const STATS_KEYS: Array[String] = ["count", "speed", "sense", "metabolism", "size", "harm", "mutations", "mutator", "donor", "key", "generation"]
 

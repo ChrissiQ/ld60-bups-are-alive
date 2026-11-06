@@ -39,7 +39,7 @@ func _initialize() -> void:
 	if data is Dictionary:
 		for key in ["written", "godot", "dish", "nutrient", "selected", "constants", "screen"]:
 			TestUtil.check(data.has(key), "the report has %s" % key)
-		TestUtil.check(data.has("backend") and data["backend"]["setting"] == "auto" and data["backend"]["running"] == "gpu" and data["backend"]["gpu_available"] == GpuWorld.available(), "it says where the bups run: the setting, and that the world simulates (the canned backend can)")
+		TestUtil.check(data.has("backend") and data["backend"]["setting"] == "auto" and data["backend"]["running"] == "gpu" and data["backend"]["gpu_available"] == WorldClient.shared().backend.can_simulate(), "it says where the bups run: the setting, and that the world simulates (the canned backend can)")
 		TestUtil.check(data["backend"].get("gpu_device") == "test device" and data["backend"].has("gpu_overflows") and data["backend"]["gpu_overflows"] is Dictionary, "...the device's name from the backend and its overflow counters (none here)")
 		var be: Dictionary = data["backend"]
 		for key in ["steps_cap", "record_usec", "record_steps", "apply_usec", "applied_events", "time_process"]:

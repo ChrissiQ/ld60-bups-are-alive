@@ -76,7 +76,7 @@ static func backend(dish: Dish) -> Dictionary:
 	return {
 		"setting": StartConditions.BACKEND_AUTO,
 		"running": "gpu" if sim.can_simulate() else "cpu",
-		"gpu_available": GpuWorld.available(),
+		"gpu_available": sim.can_simulate(),
 		"gpu_device": sim.device_name(),
 		"gpu_overflows": {},
 		"steps_cap": 0,

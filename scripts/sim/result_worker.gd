@@ -231,7 +231,7 @@ func _drop_acked(acked: int) -> void:
 	_payloads = _payloads.filter(func(p: Array) -> bool: return int(p[1]) > acked)
 
 
-## Stats sample `sample` of core row `core_row` in a read of STATS from row 0, as BupSim.population_stats' dictionary (DishState.STATS_KEYS).
+## Stats sample `sample` of core row `core_row` in a read of STATS from row 0, as a dictionary of DishState.STATS_KEYS.
 static func stats_at(stats: PackedByteArray, core_row: int, sample: int) -> Dictionary:
 	var o := (core_row * GpuLayout.STATS_DISH_WORDS + sample * GpuLayout.STATS_WORDS) * 4
 	var out := {}

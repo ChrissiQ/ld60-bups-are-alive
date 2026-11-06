@@ -127,7 +127,7 @@ void main() {
 }
 """
 
-## The pick (BupSim.pick_bup's rule: within half its drawn length plus the slack, the nearest; ties to the smaller index): the least d²
+## The pick (within half its drawn length plus the slack, the nearest; ties to the smaller index): the least d²
 ## by atomicMin on its bits (they order as the floats do, for d² >= 0), each bup's own kept in QD for the second pass.
 const K_Q_PICK := """
 void main() {
@@ -218,7 +218,7 @@ void main() {
 }
 """
 
-## The eraser (NutrientField::erase_disc): each disc of ERASE (x, y, radius, strength; `pcs.pa` of them, in order) takes from the cells
+## The eraser: each disc of ERASE (x, y, radius, strength; `pcs.pa` of them, in order) takes from the cells
 ## inside the dish whose centres lie within it, and from the clouds whose centres do, the share strength * (1 - d / radius).
 const K_ERASE_CELLS := """
 void main() {
@@ -255,7 +255,7 @@ const K_OUT_KEEP := """
 void main() { uint t = gl_GlobalInvocationID.x; if (t >= uint(pcs.pa)) return; OUTK[uint(pcs.pb) + t] = OUT[t]; }
 """
 
-## The field's copy for the CPU (NutrientField.import_packed): MIRROR[0] the slots in use, then 5 floats per slot for the first `pcs.pa`
+## The field's copy for the host: MIRROR[0] the slots in use, then 5 floats per slot for the first `pcs.pa`
 ## slots (x, y, mass, variance, cut; all 0 for a slot that holds no cloud, which import_packed passes over).
 const K_MIRROR := """
 void main() {

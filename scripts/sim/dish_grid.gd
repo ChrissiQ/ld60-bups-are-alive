@@ -1,6 +1,6 @@
 class_name DishGrid
 extends RefCounted
-## A dish's nutrient grid as the host builds it for the pooled world, a port of NutrientField's setup (build, the patchy landscape,
+## A dish's nutrient grid as the host builds it for the pooled world: the host's part of the field's setup (build, the patchy landscape,
 ## fill, export_fill_weights) and of what turns the dish's world events into cells and clouds (accepts, deposit_xy, deposit_disc,
 ## add_cloud's choice). Arithmetic in doubles and stored as float32, as the C++ does, so a dish starts with the field the single-dish path's would.
 
@@ -25,7 +25,7 @@ var _patch_size := 1.0
 var _patch_seed := 0
 
 
-## The cells across a dish of `dish_radius` with `resolution` the most (NutrientField::size_for_radius with set_max_across).
+## The cells across a dish of `dish_radius` with `resolution` the most.
 static func cells_across(dish_radius: float, resolution: int) -> int:
 	var wanted := ceili(2.0 * dish_radius / Dish.FIELD_TARGET_SPACING)
 	return clampi(wanted, Dish.FIELD_MIN_ACROSS, maxi(resolution, Dish.FIELD_MIN_ACROSS))
@@ -78,7 +78,7 @@ func _nearest_inside(ix: int, iy: int) -> int:
 	return best
 
 
-## The landscape's weights (NutrientField::ensure_fill_weights) and the feed's (export_fill_weights).
+## The landscape's weights and the feed's.
 func _make_weights() -> void:
 	weights.resize(n * n)
 	if _amplitude <= 0.0:
@@ -176,12 +176,12 @@ func index_at(x: float, y: float) -> int:
 	return iy * n + ix
 
 
-## Whether a point may hold a cloud (NutrientField::accepts).
+## Whether a point may hold a cloud.
 func accepts(x: float, y: float) -> bool:
 	return sqrt(x * x + y * y) <= radius and inside[index_at(x, y)] == 1
 
 
-## A point's energy shared out over the four cell centres about it (NutrientField::deposit_xy): appends cells (dish-local, plus `base`)
+## A point's energy shared out over the four cell centres about it: appends cells (dish-local, plus `base`)
 ## and amounts (concentrations) to the lists.
 func deposit_xy(x: float, y: float, energy: float, base: int, cells: PackedInt32Array, amounts: PackedFloat32Array) -> void:
 	var fx := (x + radius) / spacing - 0.5
@@ -213,7 +213,7 @@ func deposit_xy(x: float, y: float, energy: float, base: int, cells: PackedInt32
 		amounts.append(energy * ws[k] / kept / (spacing * spacing))
 
 
-## A disc's energy over the cells inside it (NutrientField::deposit_disc).
+## A disc's energy over the cells inside it.
 func deposit_disc(x: float, y: float, disc_radius: float, energy: float, base: int, cells: PackedInt32Array, amounts: PackedFloat32Array) -> void:
 	var x0 := maxi(0, floori((x - disc_radius + radius) / spacing - 0.5))
 	var x1 := mini(n - 1, ceili((x + disc_radius + radius) / spacing - 0.5))

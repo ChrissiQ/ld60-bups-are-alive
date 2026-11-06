@@ -4,7 +4,7 @@ extends RefCounted
 ## in the game is #578, whichever dish it was born in) and kept for its whole life, through a pipette too; a new game starts the
 ## numbering again at 1. Unless
 ## the player renames one, a bup's name is its size word and that number ("lil bup #578"). A name the
-## player gave is kept on the bup's family record in the simulation (see BupSim) and goes when the record does.
+## player gave is kept on the bup's family record in the simulation and goes when the record does.
 ##
 ## Nothing outside Dish and this file builds or looks up a name. To show a bup's name, ask the dish
 ## (`Dish.bup_name(id)`) or put a BupNameRow (ui/bup_name_row.tscn) in the panel; tests/ui_lint_test.gd fails
