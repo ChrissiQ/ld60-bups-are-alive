@@ -31,6 +31,7 @@ var _acked := 0
 var _seq := 0
 var _history := {}  ## row -> Array of {time, stats, seq}
 var _worlds := {}  ## row -> [DishWorldCopy, seq]
+var _row_numbers := {}  ## row -> the world number of the dish whose samples and copy `_history` and `_worlds` hold for it (a row reused by another dish starts clean)
 var _refused := {}  ## row -> [why, seq]
 var _payloads: Array = []  ## [PayloadInfo, seq] of each publish not yet acknowledged, oldest first
 var _payload_seq := -1  ## the publish last listed
@@ -160,6 +161,10 @@ func _iteration(item: Dictionary) -> void:
 		var row: int = r["row"]
 		var ds := DishState.new()
 		ds.number = r["number"]
+		if _row_numbers.get(row, ds.number) != ds.number:
+			_history.erase(row)
+			_worlds.erase(row)
+		_row_numbers[row] = ds.number
 		ds.count = r["count"]
 		ds.stats = stats_at(stats, r["core_row"], 0)
 		ds.stats["count"] = ds.count
