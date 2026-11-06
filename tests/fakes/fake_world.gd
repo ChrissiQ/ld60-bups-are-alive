@@ -285,6 +285,9 @@ func _add(row: int, spec: DishSpec) -> void:
 	_next_number = maxi(_next_number, spec.number + 1)
 	if spec.founders.size() > 0:
 		store.apply_events(SimCore.founder_births(spec.founders, spec.number), PackedByteArray(), clock, 0.0)
+		for i in mini(spec.founder_names.size(), spec.founders.size() / GpuLayout.RECORD_BYTES):  # (as SimThread binds them)
+			if spec.founder_names[i] != "":
+				store.set_custom_name(GpuLayout.id_of(spec.founders, i), BupNames.clean(spec.founder_names[i]))
 
 
 func _entry(spec: DishSpec, bups: Dictionary) -> Dictionary:

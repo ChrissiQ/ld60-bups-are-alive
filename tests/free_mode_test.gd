@@ -226,7 +226,7 @@ func _initialize() -> void:
 	founded_start.founders = [{"name": "Finnigan", "color": "#ff0000"}, {}]
 	founded.strike(founded_start)
 	await _settle()
-	var ids3 := founded.bup_ids()
+	var ids3 := founded.bup_ids().slice(-3)  # (this dish's founders: the world's newest ids, in their order; the dishes made before it share its number here)
 	TestUtil.check(founded.bup_name(ids3[0]) == "Finnigan" and founded.bup_name(ids3[1]).contains("#") and founded.bup_name(ids3[2]).contains("#"), "a founder given a name has it; the others keep their numbers (%s, %s)" % [founded.bup_name(ids3[0]), founded.bup_name(ids3[1])])
 	var red := Genome.color_from_hex("#ff0000")
 	var hues3 := _founder_words(_spec(), GpuLayout.R_HUE)
