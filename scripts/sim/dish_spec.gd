@@ -18,6 +18,7 @@ var upkeep := 1.0  ## the upkeep factor
 var medium_thickness := Biology.MEDIUM_THICKNESS  ## as StartConditions.medium_thickness: the medium's diffusion is the water's over this
 var patch_seed := 0  ## the landscape of richer and poorer patches the nutrient follows; 0: derived from the seed
 var patchiness := Dish.NUTRIENT_PATCHINESS
+var noise_reference := -1.0  ## the dish's receptor-noise scale for chemotaxis (DP_NOISE_REFERENCE); under 0: the constants' (every game dish; the motion table's pseudo-dishes each set their own)
 var cloud_quota := 262144  ## clouds the dish may hold (a lone dish's puff capacity)
 var husk_quota := 200000  ## husks the dish may hold (MAX_HUSKS)
 var founders := PackedByteArray()  ## the founders' records
@@ -36,7 +37,7 @@ func to_dict() -> Dictionary:
 		"number": number, "radius": radius, "resolution": resolution, "limit": limit, "seed": seed, "step": step, "flags": flags,
 		"nutrient_density": nutrient_density, "feed_density": feed_density, "bloom_density": bloom_density, "upkeep": upkeep,
 		"medium_thickness": medium_thickness, "patch_seed": patch_seed, "patchiness": patchiness, "cloud_quota": cloud_quota,
-		"husk_quota": husk_quota,
+		"husk_quota": husk_quota, "noise_reference": noise_reference,
 	}
 
 

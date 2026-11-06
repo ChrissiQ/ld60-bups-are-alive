@@ -1,11 +1,13 @@
 extends SceneTree
 ## Measures the motion table (scripts/motion_table.gd) from the real run-and-tumble swimming, and writes it.
 ##
-##   /Applications/Godot.app/Contents/MacOS/Godot --headless --path . -s tools/gen_motion_table.gd
+##   tools/run_windowed.sh <outfile> -- --path . --rendering-driver metal --position 6000,6000 -s tools/gen_motion_table.gd [-- out=<path> calibration=<x>]
 ##
-## About 5 minutes. Run it whenever tests/motion_table_test.gd says the table is stale, which it does when a constant
-## of the real swimming (SimConstants.MOTION_INPUTS) or the code that makes it (MotionFingerprint.FINE_MOTION) changes.
-## Nothing else needs doing: the table is read by the native code from SimConstants.build().
+## Windowed (it runs on the GPU). Run it whenever tests/motion_table_test.gd says the table is stale, which it does when a
+## constant of the real swimming (SimConstants.MOTION_INPUTS) or the kernel that makes it (MotionFingerprint: the text of
+## GpuKernelsField.K_SWIM) changes. `out=` writes somewhere else than OUT (to compare with the committed table); the run
+## prints how many cells of the new drift lie within 2 standard errors of the table it was started from.
+## Nothing else needs doing: the table is read by the simulation from SimConstants.build().
 ##
 ## What is measured. Fast playback moves a bup in long steps that span many runs and tumbles, so it needs what the real
 ## swimming averages to: a drift up the nutrient gradient and a random walk. Both depend only on two numbers: s, the speed
@@ -13,8 +15,8 @@ extends SceneTree
 ## (sense_error). For a grid of both, a crowd of identical swimmers is run in an exponential nutrient ramp (a constant
 ## log-gradient) that is held still, with no eating, far from any wall and far above the detection floor, after a warm-up
 ## long enough for the crowd's memory and headings to settle. The drift is how far the crowd's mean moves in 10 s, the
-## diffusion how fast its variance grows along and across the ramp. eps is set by the noise reference, which is changed
-## for each row; the swimmers' own eps (read from the model) is what the row is indexed by.
+## diffusion how fast its variance grows along and across the ramp. eps is set by the noise reference, which each trial
+## (a dish of one pooled world) carries in its own row of the dish table.
 ##
 ## The table: drift as a share of speed, and the diffusion along and across the slope per speed squared, on lattices even
 ## in log s and log eps, plus the diffusion with no slope at all (the s = 0 row), which is worked out from the swimming's
@@ -25,12 +27,18 @@ const OUT := "res://scripts/motion_table.gd"
 const V := 20.0  ## µm/s: the swimmers' speed (the table is per unit of speed: this only has to be one the run can measure)
 const C0 := 10000.0  ## the concentration at the ramp's centre; far above any detection floor, so the floor does not matter
 const RADIUS := 1200.0  ## µm: wide enough that no wall is in reach
+const RESOLUTION := 100
 const WARM := 20.0  ## s: long enough for the heading distribution (runs of about 7 s climbing) to reach its steady state
 const WINDOW := 10.0  ## s over which the drift and the diffusion are measured, after the warm-up
 const FINE_STEP := 0.05  ## s: the stepping of the measurement (the real swimming, not the coarse model)
 const BUPS := 20000
 const SEED := 1234
 const SENSE := 50.0  ## the swimmers' sense gene; eps is set through the noise reference, so this only has to be a usable one
+const EPS_PER_BATCH := 4  ## rows of EPSILONS in one pooled world (4 x 18 dishes of 20,000 bups)
+const FROZEN_MEDIUM := 1.0e15  ## the medium's thickness: a nutrient that does not spread
+const BUP_MASS := 9.0  ## a size of 3, as the swimmers have always had
+const NEVER_DIVIDES := 5000.0  ## the birth mass
+const REACH := 20.0  ## µm: how far from the ramp's centre the swimmers start
 const GRADIENTS := [0.01, 0.015, 0.025, 0.035, 0.05, 0.07, 0.1, 0.15, 0.2, 0.3, 0.45, 0.7, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0]  ## %/µm: log-gradients of the ramps
 const EPSILONS := [0.001, 0.002, 0.004, 0.008, 0.014, 0.02, 0.03, 0.045, 0.07, 0.1, 0.15, 0.25, 0.4, 0.7, 1.2, 2.3]  ## the estimate errors aimed for
 const S_POINTS := 24  ## lattice points in log s
@@ -39,125 +47,233 @@ const DRIFT_MAX := 0.25  ## a drift above this share of speed is noise
 const DIFFUSION_RANGE := Vector2(0.4, 1.5)  ## per speed squared: what the measurement can be taken for (tumbling, rotating and running: 160-600 µm²/s at 20 µm/s)
 ## The measured drift is multiplied by this. The coarse model reads the nutrient at the start of each sub-step and the
 ## crowd spreads as it goes, which together make it climb a little less than the crowd measured here did. It is set so that the
-## table at 20 s steps runs close to the real swimming on average over the cases of tests/motion_table_test.gd (the test allows
+## table at 20 s steps runs close to the real swimming on average over the cases of tests/sim/motion_test.gd (the test allows
 ## the average to be 0.1 µm/s off). If a change to the swimming pushes that average out of bounds, this is the number to adjust,
 ## then run this tool again.
 const CALIBRATION := 1.017
 
-var _constants: Dictionary
-var _probe: Dish
+static var _crowds := {}  ## the records of each kind of crowd made so far (trials of one kind start alike)
+var _calibration := CALIBRATION
+var _out := OUT
+
+
+## A pooled world in which nothing eats: the crowds swim in the nutrient they are given, which stays as set.
+static func new_world() -> SimHarness:
+	var h := SimHarness.make([], {"delta": FINE_STEP})
+	if h != null:
+		h.core._consts["uptake_per_size"] = 0.0
+		h.core._fill_p()
+		h.core._delta = -1.0
+	return h
 
 
 func _init() -> void:
-	_constants = SimConstants.build()  # (configured here, not by SimConstants.apply(), which would complain that this very table is stale)
-	_constants["diffusion"] = 0.0
-	_constants["uptake_per_size"] = 0.0
-	assert(FINE_STEP <= _constants["fine_step"], "the measurement must use the real (fine) swimming")
-	assert(C0 > 1.0e6 * _constants["detection_floor"], "the ramp must stay far above the detection floor")
-	BupSim.configure(_constants)
-	_probe = Dish.new()
-	root.add_child(_probe)
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("out="):
+			_out = a.substr(4)
+		elif a.begins_with("calibration="):
+			_calibration = float(a.substr(12))
+	var h := new_world()
+	if h == null:
+		TestUtil.check(false, "gen_motion_table: needs a window and the pooled core")
+		TestUtil.finish(self, "gen_motion_table OK")
+		return
 	var started := Time.get_ticks_msec()
 	var rows := {}  # s -> [[eps, drift per speed, d along per speed², d across per speed², s.e. of drift per speed], ...]
-	for eps_target: float in EPSILONS:
-		_aim_eps(eps_target)
-		for gradient: float in GRADIENTS:
-			var s := V * gradient / 100.0
-			var key := snappedf(s, 1e-6)
+	for first in range(0, EPSILONS.size(), EPS_PER_BATCH):
+		var trials := []
+		for eps_target: float in EPSILONS.slice(first, first + EPS_PER_BATCH):
+			for gradient: float in GRADIENTS:
+				trials.append(ramp_trial(gradient, noise_for(eps_target)))
+		var reads := run_world(h, trials, [[WARM, FINE_STEP, true], [WINDOW / 2.0, FINE_STEP, true], [WINDOW / 2.0, FINE_STEP, true]])
+		for k in trials.size():
+			var key := snappedf(V * float(trials[k]["gradient"]) / 100.0, 1e-6)
 			if not rows.has(key):
 				rows[key] = []
-			rows[key].append(_measure(gradient))
-		print("eps %s measured (%d s)" % [eps_target, (Time.get_ticks_msec() - started) / 1000])
+			rows[key].append(_measure(trials[k], reads[k]))
+		print("eps rows %d-%d measured (%d s)" % [first, first + EPS_PER_BATCH - 1, (Time.get_ticks_msec() - started) / 1000])
 	_write(rows)
-	print("written %s in %d s" % [OUT, (Time.get_ticks_msec() - started) / 1000])
-	quit()
+	print("written %s in %d s" % [_out, (Time.get_ticks_msec() - started) / 1000])
+	TestUtil.finish(self, "gen_motion_table OK")
 
 
-## Sets the noise reference so that a swimmer at C0 reads its slope with this error. The error goes as the square root of the
-## noise reference (Berg & Purcell), which is checked rather than assumed.
-func _aim_eps(target: float) -> void:
-	var reference: float = _constants["noise_reference"]
-	var before := _eps_at_c0()
-	_constants["noise_reference"] = reference * pow(target / before, 2.0)
-	BupSim.configure(_constants)
-	var after := _eps_at_c0()
-	assert(absf(after / target - 1.0) < 0.02, "the estimate error no longer goes as the square root of the noise reference (%.4f for %.4f): rework _aim_eps" % [after, target])
+# ---- the pooled world of pseudo-dishes (shared with tests/sim/motion_test.gd) ----------------------------------------------
+
+## A trial: `bups` identical swimmers placed within `reach` of the centre of a dish of `radius`, in the nutrient `field` (a Callable from a
+## dish-local position to a concentration), with its own noise reference (under 0: the constants').
+static func trial(radius: float, bups: int, speed: float, sense: float, reach: float, field: Callable, noise := -1.0) -> Dictionary:
+	return {"radius": radius, "bups": bups, "speed": speed, "sense": sense, "reach": reach, "field": field, "noise": noise}
 
 
-func _eps_at_c0() -> float:
-	_probe.clear_bups()
+## The founders' records: a full reserve and a huge birth mass (they neither eat nor divide), random places and headings.
+static func crowd_records(t: Dictionary, seed_value: int) -> PackedByteArray:
+	var key := [t["bups"], seed_value, t["speed"], t["sense"], t["reach"]]
+	if _crowds.has(key):
+		return _crowds[key]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value * 7919 + 17
 	var genome := Genome.founder()
-	genome["sense"] = SENSE
-	var id: int = _probe.sim.add_bup(Vector2.ZERO, genome, 1000.0, 3.0, 5000.0, 0, Vector2.RIGHT)
-	var eps: float = _probe.sim.bup_estimate_error(id, C0)
-	_probe.sim.remove_bup(id)
-	return eps
+	var n: int = t["bups"]
+	var out := PackedByteArray()
+	out.resize(n * GpuLayout.RECORD_BYTES)
+	for i in n:
+		var o := i * GpuLayout.RECORD_BYTES
+		var at := Vector2.from_angle(rng.randf() * TAU) * (float(t["reach"]) * sqrt(rng.randf()))
+		var dir := Vector2.from_angle(rng.randf() * TAU)
+		out.encode_float(o + GpuLayout.R_X * 4, at.x)
+		out.encode_float(o + GpuLayout.R_Y * 4, at.y)
+		out.encode_float(o + GpuLayout.R_DX * 4, dir.x)
+		out.encode_float(o + GpuLayout.R_DY * 4, dir.y)
+		out.encode_float(o + GpuLayout.R_ENERGY * 4, Cell.RESERVE_PER_MASS * BUP_MASS)
+		out.encode_float(o + GpuLayout.R_MASS * 4, BUP_MASS)
+		out.encode_float(o + GpuLayout.R_BIRTH_MASS * 4, NEVER_DIVIDES)
+		for g in GpuLayout.GENE_NAMES.size():
+			out.encode_float(o + (GpuLayout.R_SPEED + g) * 4, float(genome[GpuLayout.GENE_NAMES[g]]))
+		out.encode_float(o + GpuLayout.R_SPEED * 4, float(t["speed"]))
+		out.encode_float(o + GpuLayout.R_SENSE * 4, float(t["sense"]))
+		out.encode_float(o + GpuLayout.R_MUTATOR * 4, 1.0)
+		out.encode_float(o + GpuLayout.R_HUE * 4, float(genome["hue"]))
+		out.encode_float(o + GpuLayout.R_SAT * 4, float(genome["sat"]))
+		out.encode_float(o + GpuLayout.R_VAL * 4, float(genome["val"]))
+		out.encode_float(o + GpuLayout.R_PX * 4, GpuLayout.NO_PICTURE)
+		out.encode_float(o + GpuLayout.R_PY * 4, GpuLayout.NO_PICTURE)
+		out.encode_float(o + GpuLayout.R_FAST * 4, -1.0)
+	_crowds[key] = out
+	return out
+
+
+## Runs the trials as dishes of `h`'s world through `phases` ([seconds, step, read]: after a phase with read true every trial's bups
+## are read). Returns, for each trial, an Array of reads, each {"x", "y", "mass"} (PackedFloat32Arrays indexed by the bup's number from
+## 0, NAN where it has died). The dishes are removed afterwards.
+static func run_world(h: SimHarness, trials: Array, phases: Array) -> Array:
+	var rows := []
+	var firsts := []
+	for k in trials.size():
+		var t: Dictionary = trials[k]
+		var spec := DishSpec.new()
+		spec.number = k + 1
+		spec.radius = t["radius"]
+		spec.resolution = RESOLUTION
+		spec.limit = int(t["bups"]) + 100
+		spec.seed = SEED + k
+		spec.patchiness = 0.0
+		spec.nutrient_density = 0.0
+		spec.medium_thickness = FROZEN_MEDIUM
+		spec.noise_reference = t["noise"]
+		spec.cloud_quota = 1024
+		spec.husk_quota = 16
+		spec.founders = crowd_records(t, int(t.get("seed", SEED)))
+		var first: int = h.core.next_id()
+		var row: int = h.core.add_dish(spec)
+		assert(row >= 0, "gen_motion_table: the pool refused a dish")
+		var grid: DishGrid = h.core._dishes[row].grid
+		var values := PackedFloat32Array()
+		values.resize(grid.n * grid.n)
+		var field: Callable = t["field"]
+		for i in grid.n * grid.n:
+			values[i] = field.call(Vector2(((i % grid.n) + 0.5) * grid.spacing - grid.radius, ((i / grid.n) + 0.5) * grid.spacing - grid.radius))
+		h.core.set_field(row, values)
+		rows.append(row)
+		firsts.append(first)
+	var reads := []
+	for k in rows.size():
+		reads.append([])
+	for phase: Array in phases:
+		h.step(int(round(float(phase[0]) / float(phase[1]))), float(phase[1]))
+		if not phase[2]:
+			continue
+		for k in rows.size():
+			reads[k].append(_read(h, rows[k], firsts[k], int(trials[k]["bups"])))
+	for row: int in rows:
+		h.core.remove_dish(row)
+	return reads
+
+
+static func _read(h: SimHarness, row: int, first: int, bups: int) -> Dictionary:
+	var recs: PackedByteArray = h.core.records(row)
+	var f := recs.to_float32_array()
+	var n := recs.size() / GpuLayout.RECORD_BYTES
+	var xs := PackedFloat32Array()
+	var ys := PackedFloat32Array()
+	var ms := PackedFloat32Array()
+	xs.resize(bups)
+	ys.resize(bups)
+	ms.resize(bups)
+	xs.fill(NAN)
+	ys.fill(NAN)
+	ms.fill(NAN)
+	for i in n:
+		var k := GpuLayout.id_of(recs, i) - first
+		if k >= 0 and k < bups:
+			xs[k] = f[i * GpuLayout.RECORD_WORDS + GpuLayout.R_X]
+			ys[k] = f[i * GpuLayout.RECORD_WORDS + GpuLayout.R_Y]
+			ms[k] = f[i * GpuLayout.RECORD_WORDS + GpuLayout.R_MASS]
+	return {"x": xs, "y": ys, "mass": ms}
+
+
+## The error in the estimate of the slope of a swimmer of this sense and mass at concentration c, with this noise reference (the
+## swim kernel's `err`).
+static func estimate_error(sense: float, mass: float, c: float, noise_reference: float) -> float:
+	var k := SimConstants.build()
+	var sense_range: float = sense * sqrt(sqrt(mass) / float(k["reference_size"]))
+	return minf(float(k["gradient_noise"]) * (float(k["reference_sense"]) / sense_range) * sqrt(noise_reference / maxf(c, 1e-5)), 5.0)
+
+
+## The noise reference at which a swimmer at C0 reads its slope with the error `target` (the error goes as its square root).
+static func noise_for(target: float) -> float:
+	var one := estimate_error(SENSE, BUP_MASS, C0, 1.0)
+	return pow(target / one, 2.0)
+
+
+## A ramp trial: concentration C0 * exp(x / length) (held to ±400 µm), length 100 / gradient_percent.
+static func ramp_trial(gradient_percent: float, noise: float) -> Dictionary:
+	var length := 100.0 / gradient_percent
+	var t := trial(RADIUS, BUPS, V, SENSE, REACH, func(p: Vector2) -> float: return ramp_value(p.x, length), noise)
+	t["gradient"] = gradient_percent
+	return t
+
+
+static func ramp_value(x: float, length: float) -> float:
+	return C0 * exp(clampf(x, -400.0, 400.0) / length)
 
 
 ## One ramp: [eps of the crowd at the start of the window, drift / speed, D along / speed², D across / speed², s.e. of the drift / speed].
-func _measure(gradient_percent: float) -> Array:
-	var length := 100.0 / gradient_percent
-	var start := StartConditions.new()
-	start.dish_radius = RADIUS
-	start.bup_limit = 2 * BUPS  # (more than the crowd, so none is displaced)
-	start.nutrient_density = 0.0
-	var d := TestUtil.dish_from(self, start, SEED)
-	d.clear_bups()
-	d.feed_density = 0.0
-	var values := []
-	for i in d.field.size * d.field.size:
-		values.append(C0 * exp(clampf(d.field.cell_centre(i).x, -400.0, 400.0) / length))
-	d.field.load_values(values)
-	var ids := []
-	for i in BUPS:
-		var genome := Genome.founder()
-		genome["sense"] = SENSE
-		genome["speed"] = V
-		var p: Vector2 = d.sim.random_point(20.0)
-		ids.append(d.sim.add_bup(p, genome, 1000.0, 3.0, 5000.0, 0, Vector2.from_angle(d.sim.random_float() * TAU)))  # (a full reserve and a huge birth mass: it neither eats nor divides)
-	_run(d, WARM)
-	ids = ids.filter(func(id: int) -> bool: return not d.bup_info(id).is_empty())  # (a bup dies now and then: the crowd is who is left)
-	var starts := []
+func _measure(t: Dictionary, reads: Array) -> Array:
+	var start: Dictionary = reads[0]
+	var alive := []
 	var mean_x := 0.0
-	for id: int in ids:
-		var p: Vector2 = d.bup_info(id)["pos"]
-		starts.append(p)
-		mean_x += p.x / ids.size()
-	var eps: float = d.sim.bup_estimate_error(ids[0], d.field.read(Vector2(mean_x, 0.0)).x)  # (where the crowd is: what its swimmers read)
-	_run(d, WINDOW / 2.0)
-	var half := _spread(d, ids, starts)
-	_run(d, WINDOW / 2.0)
-	var whole := _spread(d, ids, starts)
-	d.free()
+	for k in BUPS:
+		if not is_nan(start["x"][k]):
+			alive.append(k)
+			mean_x += start["x"][k]
+	mean_x /= alive.size()
+	var eps := estimate_error(SENSE, start["mass"][alive[0]], ramp_value(mean_x, 100.0 / float(t["gradient"])), float(t["noise"]))
+	var half := _spread(reads[1], start, alive)
+	var whole := _spread(reads[2], start, alive)
 	var n: float = whole[4]
 	return [eps, whole[0] / WINDOW / V, (whole[2] - half[2]) / WINDOW / V / V, (whole[3] - half[3]) / WINDOW / V / V, sqrt(whole[2] / n) / WINDOW / V]
 
 
-func _run(d: Dish, seconds: float) -> void:
-	for i in int(round(seconds / FINE_STEP)):
-		d.step(FINE_STEP)
-
-
-## [mean displacement along x, along y, variance of x, variance of y, count] of the crowd since it started.
-func _spread(d: Dish, ids: Array, starts: Array) -> Array:
+## [mean displacement along x, along y, variance of x, variance of y, count] of the crowd (those of `alive` still there) since it started.
+static func _spread(read: Dictionary, start: Dictionary, alive: Array) -> Array:
 	var n := 0
 	var sx := 0.0
 	var sy := 0.0
 	var sxx := 0.0
 	var syy := 0.0
-	for i in ids.size():
-		var info: Dictionary = d.bup_info(ids[i])
-		if info.is_empty():
+	for k: int in alive:
+		if is_nan(read["x"][k]):
 			continue
-		var moved: Vector2 = info["pos"] - starts[i]
-		sx += moved.x
-		sy += moved.y
-		sxx += moved.x * moved.x
-		syy += moved.y * moved.y
+		var mx: float = read["x"][k] - start["x"][k]
+		var my: float = read["y"][k] - start["y"][k]
+		sx += mx
+		sy += my
+		sxx += mx * mx
+		syy += my * my
 		n += 1
-	var mx := sx / n
-	var my := sy / n
-	return [mx, my, sxx / n - mx * mx, syy / n - my * my, n]
+	var ax := sx / n
+	var ay := sy / n
+	return [ax, ay, sxx / n - ax * ax, syy / n - ay * ay, n]
 
 
 # ---- from the measurements to the table ----------------------------------------------------------------
@@ -170,7 +286,7 @@ func _write(rows: Dictionary) -> void:
 	# Each measured row (one s) read at the lattice's eps (the crowd's own eps drifts a little below the aimed one as it
 	# climbs, so rows are interpolated in ln eps by what was measured), then every column at the lattice's s, in ln s.
 	var by_row := {}
-	for column in [1, 2, 3]:
+	for column in [1, 2, 3, 4]:
 		by_row[column] = []
 		for s: float in s_measured:
 			var points: Array = rows[s].duplicate()
@@ -199,7 +315,8 @@ func _write(rows: Dictionary) -> void:
 			drift[i][j] = maxf(drift[i][j], drift[i - 1][j])
 	for i in s_axis.size():
 		for j in e_axis.size():
-			drift[i][j] *= CALIBRATION
+			drift[i][j] *= _calibration
+	_compare_with_table(s_axis, e_axis, drift, by_row[4], log_s_measured)
 	var flat := e_axis.map(func(e: float) -> float: return _flat_diffusion(e))
 	var text := "class_name MotionTable\nextends RefCounted\n"
 	text += "## GENERATED by tools/gen_motion_table.gd: do not edit by hand, run that (the command is in its header) to measure it again.\n"
@@ -212,10 +329,35 @@ func _write(rows: Dictionary) -> void:
 	text += _array("S_AXIS", s_axis) + _array("E_AXIS", e_axis) + _array("DRIFT", _flatten(drift))
 	text += "## Per speed squared.\n" + _array("D_ALONG", _flatten(along)) + _array("D_ACROSS", _flatten(across))
 	text += "## The diffusion with no slope at all (the s = 0 row), per speed squared, at each E_AXIS.\n" + _array("D_FLAT", flat)
-	var file := FileAccess.open(OUT, FileAccess.WRITE)
+	var file := FileAccess.open(_out, FileAccess.WRITE)
 	file.store_string(text)
 	file.close()
 	_report(s_axis, e_axis, drift, along, across, rows)
+
+
+## How far the new drift is from the table this run started from (MotionTable as loaded), cell by cell in units of the cell's standard error
+## (that of the new measurement, read at the cell the way the drift is). The two lattices are the same when the axes are.
+func _compare_with_table(s_axis: Array, e_axis: Array, drift: Array, se_lines: Array, log_s_measured: Array) -> void:
+	if MotionTable.S_AXIS.size() != s_axis.size() or MotionTable.E_AXIS.size() != e_axis.size():
+		print("comparison skipped: the table's axes differ")
+		return
+	var within := 0
+	var within_both := 0
+	var sum_gap := 0.0
+	var cells := 0
+	var worst := 0.0
+	for i in s_axis.size():
+		for j in e_axis.size():
+			var se: float = _interpolate(log(s_axis[i]), log_s_measured, se_lines.map(func(line: Array) -> float: return line[j])) * _calibration
+			var gap: float = drift[i][j] - float(MotionTable.DRIFT[i * e_axis.size() + j])
+			sum_gap += gap
+			cells += 1
+			worst = maxf(worst, absf(gap) * V)
+			if absf(gap) <= 2.0 * se:
+				within += 1
+			if absf(gap) <= 2.0 * sqrt(2.0) * se:
+				within_both += 1
+	print("new drift against the table it replaces: %d of %d cells within 2 s.e. of the new measurement (%.1f%%), %d within 2 s.e. of the difference of the two measurements (%.1f%%); mean gap %.4f µm/s, worst %.3f µm/s" % [within, cells, 100.0 * within / cells, within_both, 100.0 * within_both / cells, sum_gap / cells * V, worst])
 
 
 func _report(s_axis: Array, e_axis: Array, drift: Array, along: Array, across: Array, rows: Dictionary) -> void:
@@ -229,7 +371,7 @@ func _report(s_axis: Array, e_axis: Array, drift: Array, along: Array, across: A
 	var error := 0.0
 	for s: float in rows:  # how far the lattice is from the points it was made from (calibration undone)
 		for p: Array in rows[s]:
-			var gap: float = (_lattice_drift(s_axis, e_axis, drift, s, p[0]) / CALIBRATION - p[1]) * V
+			var gap: float = (_lattice_drift(s_axis, e_axis, drift, s, p[0]) / _calibration - p[1]) * V
 			worst = maxf(worst, absf(gap))
 			sum_sq += gap * gap
 			error += p[4] * V

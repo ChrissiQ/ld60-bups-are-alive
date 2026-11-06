@@ -1782,7 +1782,7 @@ func _put_dishp(row: int) -> void:
 	u.call(GpuLayout.DP_NUMBER, s.number)
 	u.call(GpuLayout.DP_SEED, cd.seed32)
 	u.call(GpuLayout.DP_STEP, s.step)
-	fl.call(GpuLayout.DP_NOISE_REFERENCE, float(_consts["noise_reference"]))
+	fl.call(GpuLayout.DP_NOISE_REFERENCE, s.noise_reference if s.noise_reference >= 0.0 else float(_consts["noise_reference"]))
 	rd.buffer_update(arena.buf("DISHP"), row * GpuLayout.DP_WORDS * 4, dp.size(), dp)
 
 
