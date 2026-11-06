@@ -4,21 +4,21 @@ extends SceneTree
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/density_compare.gd -- pack
 ##   ... -- sparse      (1,500 bups at fit zoom and 4 x: does every bup leave a lit pixel, in each look)
 ##   ... -- crossover   (a dense cluster of 200,000 bups at pixel sizes round the bups' least footprint: the picture across the crossover)
-##   ... -- running     (2M at fit zoom with a simulation running on a thread of this script's own: capsule, density, hidden)
-##   ... -- cost        (view_build's cost at PACK_COUNTS at fit: capsule, density, winner; no pictures)
-##   ... -- smoke       (10,000 bups, fit zoom: that the kernels build and the three looks draw)
+##   ... -- running     (2M at fit zoom with a simulation running on a thread of this script's own: capsule, winner, hidden)
+##   ... -- cost        (view_build's cost at PACK_COUNTS at fit: capsule, rod, nearest, winner; no pictures)
+##   ... -- smoke       (10,000 bups, fit zoom: that the kernels build and the looks draw)
 ## Env: PACK_COUNTS (comma list, default 10000,100000,1000000,2000000), PACK_OUT (the folder for the pictures and pack_<counts>.json, default
 ## tools/gpu/baseline/zoomed_out/density), RUN_SECONDS (running: seconds a phase, default 8).
 ##
 ## pack: for each count (a seeded state spread over the 90 mm dish, one step run, paused) and fit zoom and 20, 100 and 500 x
-##   it (the closer ones centred on the densest 1 mm bin of the state): the picture of capsule (today), density (bilinear taps), rod (two
+##   it (the closer ones centred on the densest 1 mm bin of the state): the picture of capsule (today), winner (density mode with bilinear taps), rod (two
 ##   bilinear splats along the bup's axis), point (a measured point path fed by the same view_build instances), the density's
 ##   nearest-tap variant and the bare dish, each frame
 ##   rebuilt (view_build every frame, as a running simulation makes it): the frame's interval (vsync off; median of 60 frames after 15)
 ##   with each look and with none (`hidden`), so a look's cost is its frame less hidden; view_build's cost
 ##   on a local device (wall clock around submit and sync, per kernel). The pictures compared: mean absolute difference per channel and
 ##   the share over 16/255 over the dish's disc, and over the lit pixels only (a pixel either picture differs from the bare dish in),
-##   density against capsule, and point against capsule.
+##   each density look against capsule, and point against capsule.
 ##
 ## Expected values, written before the first run:
 ## - density's view_build at 2M fit zoom about 3.1 ms of splat and resolve plus the capsule kernels' 1 ms [measured, 3.1 ms on a
@@ -46,7 +46,7 @@ const ZOOM_NAMES := ["fit", "zoom20", "zoom100", "zoom500"]
 const WARM := 15
 const SAMPLE := 60
 const VIEW := Vector2i(1280, 720)
-const DENSITY_MODES := ["density", "rod", "nearest", "winner"]  ## the density looks: bilinear taps (mean colour), a rod of two bilinear splats, one nearest tap, bilinear taps with a winner's colour (VW_WINNER)
+const DENSITY_MODES := ["winner", "rod", "nearest"]  ## the density looks (each colours a pixel with a covering bup's colour): bilinear taps, a rod of two bilinear splats, one nearest tap
 const LIT_DIFF := 2  ## a pixel is lit when a channel differs from the bare dish by this much or more
 const BG := Color(0.09, 0.11, 0.15)
 
@@ -86,7 +86,7 @@ var caps: MultiMeshInstance2D
 var pts: MultiMeshInstance2D
 var renderer: ViewRenderer
 var mode := "hidden"
-var COST_MODES := ["capsule", "density", "rod", "nearest", "winner"]
+var COST_MODES := ["capsule", "winner", "rod", "nearest"]
 var zoom := 1.0  ## screen pixels a µm (the camera's)
 var cam_pos := Vector2.ZERO
 var out := {}
@@ -121,7 +121,7 @@ func _run() -> void:
 		"smoke":
 			await _pack([10000], [1.0])
 		"cost":
-			COST_MODES = ["capsule", "density", "winner"]
+			COST_MODES = ["capsule", "winner", "rod"]
 			var fit := minf(VIEW.x * 0.5 - 40.0, VIEW.y * 0.5 - 120.0) / RADIUS
 			for n: int in _counts():
 				var spec := _spec(1, n, n, 0.9)
@@ -222,11 +222,11 @@ func _camera_rect() -> Rect2:
 	return Rect2(cam_pos - size * 0.5, size)
 
 
-## The look: "capsule" (today), "density" (bilinear taps), "rod" (density as two bilinear splats along the axis), "nearest" (density with
+## The look: "capsule" (today), "winner" (density mode, bilinear taps), "rod" (density as two bilinear splats along the axis), "nearest" (density with
 ## nearest taps), "point", or "hidden" (the bare dish).
 func _apply_mode(m: String) -> void:
 	mode = m
-	renderer.set_density(m in DENSITY_MODES, _taps(m), m == "winner")
+	renderer.set_density(m in DENSITY_MODES, _taps(m))
 	caps.visible = m == "capsule" or m in DENSITY_MODES
 	pts.visible = m == "point"
 	den_sprite.visible = m in DENSITY_MODES
@@ -497,15 +497,14 @@ func _pack(counts: Array, mults := ZOOMS) -> void:
 			var key := "%s_%s" % [_label(n), ZOOM_NAMES[ZOOMS.find(mults[zi])]]
 			var row := {"zoom_px_per_um": z, "centre": [cam_pos.x, cam_pos.y]}
 			var imgs := {}
-			for m: String in ["hidden", "capsule", "density", "rod", "nearest", "winner", "point"]:
+			for m: String in ["hidden", "capsule", "winner", "rod", "nearest", "point"]:
 				_apply_mode(m)
 				await _settle(true)
 				imgs[m] = _grab()
 				row[m] = await _measure(true)
-				if m in ["capsule", "density", "rod", "point", "winner"]:
+				if m in ["capsule", "winner", "rod", "point"]:
 					imgs[m].save_png(out_dir.path_join("%s_%s.png" % [key, m]))
 			var disc := RADIUS * z
-			row["density_vs_capsule"] = _diff(imgs["density"], imgs["capsule"], imgs["hidden"], disc)
 			row["rod_vs_capsule"] = _diff(imgs["rod"], imgs["capsule"], imgs["hidden"], disc)
 			row["nearest_vs_capsule"] = _diff(imgs["nearest"], imgs["capsule"], imgs["hidden"], disc)
 			row["point_vs_capsule"] = _diff(imgs["point"], imgs["capsule"], imgs["hidden"], disc)
@@ -546,7 +545,7 @@ func _buildcost(spec: DishSpec, centre: Vector2, fit: float, mults: Array) -> Di
 		var cam := Rect2(c - Vector2(VIEW) * 0.5 * px, Vector2(VIEW) * px)
 		var per_mode := {}
 		for m: String in COST_MODES:
-			view.set_density(m != "capsule", _taps(m), m == "winner")
+			view.set_density(m != "capsule", _taps(m))
 			var whole: Array = []
 			for rep in 12:
 				view.forget_build()
@@ -590,12 +589,12 @@ func _sparse() -> void:
 		var z := fit * mult
 		_view(Vector2.ZERO, z)
 		var imgs := {}
-		for m: String in ["hidden", "capsule", "density", "rod", "nearest", "point"]:
+		for m: String in ["hidden", "capsule", "winner", "rod", "nearest", "point"]:
 			_apply_mode(m)
 			await _settle(true)
 			imgs[m] = _grab()
 		var row := {"zoom_px_per_um": z}
-		for m: String in ["capsule", "density", "rod", "nearest", "point"]:
+		for m: String in ["capsule", "winner", "rod", "nearest", "point"]:
 			row[m] = _sparse_count(imgs[m], imgs["hidden"], pos, z)
 		rows["x%s" % str(mult)] = row
 		print("DENSITY SPARSE x%s %s" % [str(mult), JSON.stringify(row)])
@@ -646,21 +645,21 @@ func _crossover() -> void:
 	for z: float in [0.4, 0.5, 0.65, 0.8, 1.0, 1.25, 1.6]:
 		_view(Vector2.ZERO, z)
 		var imgs := {}
-		for m: String in ["hidden", "capsule", "density", "rod", "nearest"]:
+		for m: String in ["hidden", "capsule", "winner", "rod", "nearest"]:
 			_apply_mode(m)
 			await _settle(true)
 			imgs[m] = _grab()
-			if m == "density":
+			if m == "winner":
 				var large: int = renderer._large.get("count", -1)
 				rows["z%s" % str(z)] = {"pixel_um": snappedf(1.0 / z, 0.001), "large": large}
 		var row: Dictionary = rows["z%s" % str(z)]
 		var disc := RADIUS * z
-		row["density_vs_capsule"] = _diff(imgs["density"], imgs["capsule"], imgs["hidden"], disc)
+		row["winner_vs_capsule"] = _diff(imgs["winner"], imgs["capsule"], imgs["hidden"], disc)
 		row["rod_vs_capsule"] = _diff(imgs["rod"], imgs["capsule"], imgs["hidden"], disc)
 		row["nearest_vs_capsule"] = _diff(imgs["nearest"], imgs["capsule"], imgs["hidden"], disc)
 		if OS.get_environment("CROSS_PNG") != "":
 			imgs["capsule"].save_png(out_dir.path_join("cross_%s_capsule.png" % str(z)))
-			imgs["density"].save_png(out_dir.path_join("cross_%s_density.png" % str(z)))
+			imgs["winner"].save_png(out_dir.path_join("cross_%s_winner.png" % str(z)))
 		print("DENSITY CROSSOVER z%s %s" % [str(z), JSON.stringify(row)])
 	out["crossover"] = rows
 	await _close(core)
@@ -727,7 +726,7 @@ func _running(seconds: float) -> void:
 	print("ViewRenderer errors: %s" % [renderer.errors])
 	var last_seq := -1
 	var phases := {}
-	var order := ["capsule", "density", "winner", "hidden"]
+	var order := ["capsule", "winner", "hidden"]
 	for pi in order.size():
 		var m: String = order[pi]
 		_apply_mode(m)

@@ -58,7 +58,6 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define LEDGER(d, t, amount) { if (WORLD[WD_LEDGER] != 0u) { float rest_ = (amount); uint lo_ = (d) * DS_WORDS + DS_LEDGER + 2u * (t), hi_ = lo_ + 1u; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); uint old_ = atomicAdd(DSTATE[lo_], q_); if (old_ + q_ < old_) atomicAdd(DSTATE[hi_], 1u); } } }
 const uint DENSITY_WORDS = 6u;
 const uint DENSITY_ALPHA_SCALE = 1024u;
-const uint DENSITY_COLOUR_SCALE = 16u;
 const uint DENSITY_ROD = 3u;
 const uint DENSITY_BILINEAR = 2u;
 const uint DENSITY_NEAREST = 1u;
@@ -73,8 +72,7 @@ const uint VO_NEAREST = 3u;
 const uint VO_INDEX = 2u;
 const uint VO_D2 = 1u;
 const uint VO_VISIBLE = 0u;
-const uint VW_WORDS = 22u;
-const uint VW_WINNER = 21u;
+const uint VW_WORDS = 21u;
 const uint VW_DEN_H = 20u;
 const uint VW_DEN_W = 19u;
 const uint VW_DENSITY = 18u;
@@ -114,17 +112,9 @@ void put(ivec2 at, float share, uvec3 rgb) {
 	if (wa == 0u) return;
 	uint o = (uint(at.y) * VP[VW_DEN_W] + uint(at.x)) * DENSITY_WORDS;
 	atomicAdd(DEN[o + 4u], wa);
-	if (VP[VW_WINNER] != 0u) {
-		float score = float(WIN_HASH & 0xFFFFu) * (1.0 / 65536.0) * min(share, 1.0);
-		uint key = (max(uint(score * 255.0), 1u) << 24u) | (rgb.x << 16u) | (rgb.y << 8u) | rgb.z;
-		atomicMax(DEN[o + 5u], key);
-		return;
-	}
-	uint wc = max(uint(l * float(DENSITY_COLOUR_SCALE) + 0.5), 1u);
-	atomicAdd(DEN[o], wc * rgb.x);
-	atomicAdd(DEN[o + 1u], wc * rgb.y);
-	atomicAdd(DEN[o + 2u], wc * rgb.z);
-	atomicAdd(DEN[o + 3u], wc);
+	float score = float(WIN_HASH & 0xFFFFu) * (1.0 / 65536.0) * min(share, 1.0);
+	uint key = (max(uint(score * 255.0), 1u) << 24u) | (rgb.x << 16u) | (rgb.y << 8u) | rgb.z;
+	atomicMax(DEN[o + 5u], key);
 }
 void tent(vec2 u, float area, uvec3 rgb) {
 	vec2 v = u - 0.5;

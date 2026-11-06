@@ -45,7 +45,6 @@ var profiling := false
 ## picture (`density_texture`) that a quad the size of the camera's rectangle shows over the dish; a bup at or over its least footprint is
 ## drawn as today, so there is no jump where a bup crosses. Set with `set_density`.
 var density := false
-var density_winner := true  ## density mode's colour: true one covering bup's (the default: the mean of many bups' colours goes grey), false the weighted mean of their colours (GpuKernelsView.VW_WINNER)
 var density_taps := GpuKernelsView.DENSITY_BILINEAR  ## GpuKernelsView.DENSITY_NEAREST, DENSITY_BILINEAR or DENSITY_ROD (a footprint on one pixel, shared by four, or as a rod of two such)
 
 var _local := false  ## a local device (tools): its work is submitted and waited for, not run with the frame
@@ -111,10 +110,9 @@ func can_draw() -> bool:
 
 ## Density mode on or off (`taps`: GpuKernelsView.DENSITY_NEAREST, DENSITY_BILINEAR or DENSITY_ROD). The density kernels are made the first time it is
 ## switched on; if they do not build, `density_ready` stays false and the single-dish path's drawing goes on whatever the switch says.
-func set_density(on: bool, taps := GpuKernelsView.DENSITY_BILINEAR, winner := true) -> void:
+func set_density(on: bool, taps := GpuKernelsView.DENSITY_BILINEAR) -> void:
 	density = on
 	density_taps = taps
-	density_winner = winner
 	if not on or rd == null or not _den_made.is_empty():
 		return
 	var defs := {}
@@ -272,7 +270,7 @@ func draw_into(camera: Rect2, pixel_um: float, target: RID, capacity: int, multi
 	var dens := density_ready()
 	var mode := density_taps if dens else 0
 	var den_size := Vector2i(maxi(ceili(camera.size.x / pixel_um - 0.001), 1), maxi(ceili(camera.size.y / pixel_um - 0.001), 1)) if dens else Vector2i.ZERO
-	var view_key := [camera, pixel_um, _payload.row, _imports["payload"]["generation"], mode, density_winner]
+	var view_key := [camera, pixel_um, _payload.row, _imports["payload"]["generation"], mode]
 	var slots := count
 	# (the last count is used while the bups have not grown by more than the half it is rounded up by: a burst of births draws them all)
 	if not _visible.is_empty() and _visible["key"] == view_key and count - int(_visible["bups"]) <= int(_visible["count"]) / 2:
@@ -443,7 +441,6 @@ func _put_vp(count: int, camera: Rect2, pixel_um: float, slots: int, capacity: i
 		put_f.call(GpuKernelsView.VW_SLACK, pick["slack"])
 		put_f.call(GpuKernelsView.VW_NEAR, pick["near"])
 	put_u.call(GpuKernelsView.VW_DENSITY, mode)
-	put_u.call(GpuKernelsView.VW_WINNER, 1 if density_winner else 0)
 	put_u.call(GpuKernelsView.VW_DEN_W, den_size.x)
 	put_u.call(GpuKernelsView.VW_DEN_H, den_size.y)
 	put_u.call(GpuKernelsView.VW_FINDS, 0 if _follow.is_empty() else 1)

@@ -26,7 +26,6 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define CELL_THREAD uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
 const uint DENSITY_WORDS = 6u;
 const uint DENSITY_ALPHA_SCALE = 1024u;
-const uint DENSITY_COLOUR_SCALE = 16u;
 const uint DENSITY_ROD = 3u;
 const uint DENSITY_BILINEAR = 2u;
 const uint DENSITY_NEAREST = 1u;
@@ -41,8 +40,7 @@ const uint VO_NEAREST = 3u;
 const uint VO_INDEX = 2u;
 const uint VO_D2 = 1u;
 const uint VO_VISIBLE = 0u;
-const uint VW_WORDS = 22u;
-const uint VW_WINNER = 21u;
+const uint VW_WORDS = 21u;
 const uint VW_DEN_H = 20u;
 const uint VW_DEN_W = 19u;
 const uint VW_DENSITY = 18u;
