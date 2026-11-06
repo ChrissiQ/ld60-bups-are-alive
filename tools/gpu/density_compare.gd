@@ -5,6 +5,7 @@ extends SceneTree
 ##   ... -- sparse      (1,500 bups at fit zoom and 4 x: does every bup leave a lit pixel, in each look)
 ##   ... -- crossover   (a dense cluster of 200,000 bups at pixel sizes round the bups' least footprint: the picture across the crossover)
 ##   ... -- running     (2M at fit zoom with a simulation running on a thread of this script's own: capsule, density, hidden)
+##   ... -- cost        (view_build's cost at PACK_COUNTS at fit: capsule, density, winner; no pictures)
 ##   ... -- smoke       (10,000 bups, fit zoom: that the kernels build and the three looks draw)
 ## Env: PACK_COUNTS (comma list, default 10000,100000,1000000,2000000), PACK_OUT (the folder for the pictures and pack_<counts>.json, default
 ## tools/gpu/baseline/zoomed_out/density), RUN_SECONDS (running: seconds a phase, default 8).
@@ -45,7 +46,7 @@ const ZOOM_NAMES := ["fit", "zoom20", "zoom100", "zoom500"]
 const WARM := 15
 const SAMPLE := 60
 const VIEW := Vector2i(1280, 720)
-const DENSITY_MODES := ["density", "rod", "nearest"]  ## the density looks: bilinear taps, a rod of two bilinear splats, one nearest tap
+const DENSITY_MODES := ["density", "rod", "nearest", "winner"]  ## the density looks: bilinear taps (mean colour), a rod of two bilinear splats, one nearest tap, bilinear taps with a winner's colour (VW_WINNER)
 const LIT_DIFF := 2  ## a pixel is lit when a channel differs from the bare dish by this much or more
 const BG := Color(0.09, 0.11, 0.15)
 
@@ -85,6 +86,7 @@ var caps: MultiMeshInstance2D
 var pts: MultiMeshInstance2D
 var renderer: ViewRenderer
 var mode := "hidden"
+var COST_MODES := ["capsule", "density", "rod", "nearest", "winner"]
 var zoom := 1.0  ## screen pixels a µm (the camera's)
 var cam_pos := Vector2.ZERO
 var out := {}
@@ -114,8 +116,17 @@ func _run() -> void:
 	match a[0] if a.size() > 0 else "":
 		"pack":
 			await _pack(_counts())
+		"fit":
+			await _pack(_counts(), [1.0])
 		"smoke":
 			await _pack([10000], [1.0])
+		"cost":
+			COST_MODES = ["capsule", "density", "winner"]
+			var fit := minf(VIEW.x * 0.5 - 40.0, VIEW.y * 0.5 - 120.0) / RADIUS
+			for n: int in _counts():
+				var spec := _spec(1, n, n, 0.9)
+				var cost := _buildcost(spec, _densest(spec), fit, [1.0])
+				print("DENSITY COST %s %s" % [_label(n), JSON.stringify(cost)])
 		"sparse":
 			await _sparse()
 		"crossover":
@@ -215,7 +226,7 @@ func _camera_rect() -> Rect2:
 ## nearest taps), "point", or "hidden" (the bare dish).
 func _apply_mode(m: String) -> void:
 	mode = m
-	renderer.set_density(m in DENSITY_MODES, _taps(m))
+	renderer.set_density(m in DENSITY_MODES, _taps(m), m == "winner")
 	caps.visible = m == "capsule" or m in DENSITY_MODES
 	pts.visible = m == "point"
 	den_sprite.visible = m in DENSITY_MODES
@@ -293,6 +304,8 @@ static func _spec(number: int, n: int, limit: int, spread: float) -> DishSpec:
 		f.append_array(f.slice(0, mini(f.size(), n * GpuLayout.RECORD_WORDS - f.size())))
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 2000000 + number
+	var hues := RandomNumberGenerator.new()  ## its own stream, so the positions above do not move
+	hues.seed = 3000000 + number
 	var born := founder[GpuLayout.R_BIRTH_MASS]
 	var per := float(SimConstants.build()["reserve_per_mass"])
 	for i in n:
@@ -307,6 +320,9 @@ static func _spec(number: int, n: int, limit: int, spread: float) -> DishSpec:
 		var mass := born * rng.randf_range(0.8, 1.6)
 		f[o + GpuLayout.R_MASS] = mass
 		f[o + GpuLayout.R_ENERGY] = mass * per * rng.randf()
+		f[o + GpuLayout.R_HUE] = hues.randf()
+		f[o + GpuLayout.R_SAT] = hues.randf_range(0.6, 1.0)
+		f[o + GpuLayout.R_VAL] = hues.randf_range(0.7, 1.0)
 	var recs := f.to_byte_array()
 	for i in n:
 		GpuLayout.set_id(recs, i, (i + 1))
@@ -481,18 +497,19 @@ func _pack(counts: Array, mults := ZOOMS) -> void:
 			var key := "%s_%s" % [_label(n), ZOOM_NAMES[ZOOMS.find(mults[zi])]]
 			var row := {"zoom_px_per_um": z, "centre": [cam_pos.x, cam_pos.y]}
 			var imgs := {}
-			for m: String in ["hidden", "capsule", "density", "rod", "nearest", "point"]:
+			for m: String in ["hidden", "capsule", "density", "rod", "nearest", "winner", "point"]:
 				_apply_mode(m)
 				await _settle(true)
 				imgs[m] = _grab()
 				row[m] = await _measure(true)
-				if m in ["capsule", "density", "rod", "point"]:
+				if m in ["capsule", "density", "rod", "point", "winner"]:
 					imgs[m].save_png(out_dir.path_join("%s_%s.png" % [key, m]))
 			var disc := RADIUS * z
 			row["density_vs_capsule"] = _diff(imgs["density"], imgs["capsule"], imgs["hidden"], disc)
 			row["rod_vs_capsule"] = _diff(imgs["rod"], imgs["capsule"], imgs["hidden"], disc)
 			row["nearest_vs_capsule"] = _diff(imgs["nearest"], imgs["capsule"], imgs["hidden"], disc)
 			row["point_vs_capsule"] = _diff(imgs["point"], imgs["capsule"], imgs["hidden"], disc)
+			row["winner_vs_capsule"] = _diff(imgs["winner"], imgs["capsule"], imgs["hidden"], disc)
 			row["build"] = cost.get(ZOOM_NAMES[ZOOMS.find(mults[zi])], {})
 			row["visible_density"] = renderer._visible.get("count", -1)
 			row["large_density"] = renderer._large.get("count", -1)
@@ -528,8 +545,8 @@ func _buildcost(spec: DishSpec, centre: Vector2, fit: float, mults: Array) -> Di
 		var c := Vector2.ZERO if zi == 0 else centre
 		var cam := Rect2(c - Vector2(VIEW) * 0.5 * px, Vector2(VIEW) * px)
 		var per_mode := {}
-		for m: String in ["capsule", "density", "rod", "nearest"]:
-			view.set_density(m != "capsule", _taps(m))
+		for m: String in COST_MODES:
+			view.set_density(m != "capsule", _taps(m), m == "winner")
 			var whole: Array = []
 			for rep in 12:
 				view.forget_build()
@@ -674,6 +691,9 @@ func _sim_main() -> void:
 		var req := ViewRequest.new()
 		req.row = row
 		var pub := core.publish(req)
+		if not pub.has("payload"):  # (no free texture this time: nothing published, nothing to announce)
+			OS.delay_msec(1)
+			continue
 		var rids: Array = core.textures("payload")
 		if not gens.has("payload") or gens["payload"][0] != rids:
 			gens["payload"] = [rids.duplicate(), int(gens.get("payload", [[], 0])[1]) + 1]
@@ -707,7 +727,7 @@ func _running(seconds: float) -> void:
 	print("ViewRenderer errors: %s" % [renderer.errors])
 	var last_seq := -1
 	var phases := {}
-	var order := ["capsule", "density", "hidden", "rod", "capsule", "hidden", "density"]
+	var order := ["capsule", "density", "winner", "hidden"]
 	for pi in order.size():
 		var m: String = order[pi]
 		_apply_mode(m)

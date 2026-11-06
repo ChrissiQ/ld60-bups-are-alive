@@ -56,7 +56,7 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define BLOCK_LOOP(F) void main() { uint nb_ = (WORLD[WD_SLOTS] + BLK_SLOTS - 1u) >> BLK_SHIFT; for (uint k_ = gl_WorkGroupID.x; k_ < nb_; k_ += gl_NumWorkGroups.x) { F(k_, BLKDISH[k_]); barrier(); } }
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
 #define LEDGER(d, t, amount) { if (WORLD[WD_LEDGER] != 0u) { float rest_ = (amount); uint lo_ = (d) * DS_WORDS + DS_LEDGER + 2u * (t), hi_ = lo_ + 1u; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); uint old_ = atomicAdd(DSTATE[lo_], q_); if (old_ + q_ < old_) atomicAdd(DSTATE[hi_], 1u); } } }
-const uint DENSITY_WORDS = 5u;
+const uint DENSITY_WORDS = 6u;
 const uint DENSITY_ALPHA_SCALE = 1024u;
 const uint DENSITY_COLOUR_SCALE = 16u;
 const uint DENSITY_ROD = 3u;
@@ -73,7 +73,8 @@ const uint VO_NEAREST = 3u;
 const uint VO_INDEX = 2u;
 const uint VO_D2 = 1u;
 const uint VO_VISIBLE = 0u;
-const uint VW_WORDS = 21u;
+const uint VW_WORDS = 22u;
+const uint VW_WINNER = 21u;
 const uint VW_DEN_H = 20u;
 const uint VW_DEN_W = 19u;
 const uint VW_DENSITY = 18u;
@@ -101,18 +102,29 @@ float vpf(uint w) { return uintBitsToFloat(VP[w]); }
 bool small_at(float length, float pixel) { return length < P[P_MIN_LENGTH_PX] * pixel; }
 
 const float PI_QUARTER = 0.7853982;
+uint hash_u(uint x) {
+	x ^= x >> 16u; x *= 0x7feb352du; x ^= x >> 15u; x *= 0x846ca68bu; x ^= x >> 16u;
+	return x;
+}
+uint WIN_HASH;
 void put(ivec2 at, float share, uvec3 rgb) {
 	if (at.x < 0 || at.y < 0 || at.x >= int(VP[VW_DEN_W]) || at.y >= int(VP[VW_DEN_H])) return;
 	float l = -log(1.0 - min(share, 0.995));
 	uint wa = uint(l * float(DENSITY_ALPHA_SCALE) + 0.5);
 	if (wa == 0u) return;
-	uint wc = max(uint(l * float(DENSITY_COLOUR_SCALE) + 0.5), 1u);
 	uint o = (uint(at.y) * VP[VW_DEN_W] + uint(at.x)) * DENSITY_WORDS;
+	atomicAdd(DEN[o + 4u], wa);
+	if (VP[VW_WINNER] != 0u) {
+		float score = float(WIN_HASH & 0xFFFFu) * (1.0 / 65536.0) * min(share, 1.0);
+		uint key = (max(uint(score * 255.0), 1u) << 24u) | (rgb.x << 16u) | (rgb.y << 8u) | rgb.z;
+		atomicMax(DEN[o + 5u], key);
+		return;
+	}
+	uint wc = max(uint(l * float(DENSITY_COLOUR_SCALE) + 0.5), 1u);
 	atomicAdd(DEN[o], wc * rgb.x);
 	atomicAdd(DEN[o + 1u], wc * rgb.y);
 	atomicAdd(DEN[o + 2u], wc * rgb.z);
 	atomicAdd(DEN[o + 3u], wc);
-	atomicAdd(DEN[o + 4u], wa);
 }
 void tent(vec2 u, float area, uvec3 rgb) {
 	vec2 v = u - 0.5;
@@ -138,6 +150,7 @@ void f(uint k) {
 	float area = max(length_px - width_px, 0.0) * width_px + PI_QUARTER * width_px * width_px;
 	uint c = px[PL_COLOR];
 	uvec3 rgb = uvec3((c >> PL_RED_SHIFT) & 255u, (c >> PL_GREEN_SHIFT) & 255u, (c >> PL_BLUE_SHIFT) & 255u);
+	WIN_HASH = hash_u(k);
 	uint mode = VP[VW_DENSITY];
 	if (mode == DENSITY_NEAREST) {
 		put(ivec2(floor(u)), area, rgb);
