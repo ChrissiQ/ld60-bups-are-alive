@@ -855,6 +855,10 @@ func _remove_dish(d: Dish) -> void:
 	for row: int in _asked_rows.keys():
 		if _asked_rows[row] == d:
 			_asked_rows.erase(row)
+	for row: int in _thawing.keys():
+		if _thawing[row]["dish"] == d:
+			(_thawing[row]["entry"] as Dictionary).erase("thawing")
+			_thawing.erase(row)
 	dish_strip.remove(d)
 	dish_strip.light(dish)
 	d.queue_free()

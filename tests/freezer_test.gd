@@ -118,6 +118,13 @@ func _run() -> void:
 		await process_frame
 	TestUtil.check(m.dishes.size() == 2 and m.freezer_shelf.entries.size() == 1 and not m.freezer_shelf.entries[0].has("thawing") and m.banner.text == Strings.t("banner.memory_budget"), "a refused unfreeze leaves it in the freezer and says why (%s)" % m.banner.text)
 	m.thaw(m.freezer_shelf.entries[0])
+	var abandoned: Dish = m.dishes.back()
+	TestUtil.check(m._thawing.size() == 1 and m.freezer_shelf.entries[0].get("thawing", false), "an unfreeze waits for the world to show the dish")
+	m._remove_dish(abandoned)
+	TestUtil.check(m._thawing.is_empty() and not m.freezer_shelf.entries[0].has("thawing"), "a dish removed before the world showed it leaves no unfreeze waiting")
+	for i in 3:
+		await process_frame
+	m.thaw(m.freezer_shelf.entries[0])
 	TestUtil.check(m.freezer_shelf.entries.size() == 1 and m.holds.stills_world(), "an unfrozen dish stays in the freezer until the world shows it")
 	await process_frame
 	await process_frame
