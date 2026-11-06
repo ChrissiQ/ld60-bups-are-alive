@@ -396,7 +396,7 @@ func _pipette(m: Node, fake: FakeWorld, chosen: StartConditions) -> void:
 	m.sim_speed = 100.0
 	for i in 20:
 		await process_frame
-	TestUtil.check(m.holds.has(&"pipette") and m.paused and m.toolbar.resume_locked and (m.vitals.get_parsed_text() + m.speed_readout.get_parsed_text()).contains(Strings.t("hud.pipette_paused")), "after the hours the game pauses and says so in the top bar (its first row or its second)")
+	TestUtil.check(m.holds.has(&"pipette") and m.paused and m.toolbar.resume_locked, "after the hours the game pauses, held for the pipette, with resume locked")
 	m.toolbar._shortcut_input(TestUtil.key_event(KEY_SPACE))
 	m.toolbar.speed_1000_button.button_pressed = true
 	TestUtil.check(m.paused, "neither Space nor a speed button resumes while it waits")

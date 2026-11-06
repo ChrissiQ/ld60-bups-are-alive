@@ -1370,6 +1370,7 @@ func _fit_top_bar() -> void:
 	var gap := _bar_gap()
 	var fixed := playback_panel.get_combined_minimum_size().x + menu_button.get_combined_minimum_size().x
 	var tabs_shown := dish_strip.visible
+	dish_strip.tab_height = layers_panel.husks_button.get_combined_minimum_size().y
 	var strip_frame := dish_strip.get_theme_stylebox("panel").get_minimum_size().x  # (max_width is what is inside it)
 	var views_w := views.get_combined_minimum_size().x
 	var husks := layers_panel.husks_button
@@ -1380,7 +1381,7 @@ func _fit_top_bar() -> void:
 	var tabs_least := dish_strip.shortest_width() if tabs_shown else 0.0
 	var beside := left_with_views >= tabs_least
 	if tabs_shown:
-		var second_row_room := room - _speed_width - views_w - strip_frame - gap * 4.0  # (the speed, the spacer, the tabs, the spacer, the toggles)
+		var second_row_room := room - _speed_width - views.get_combined_minimum_size().x - strip_frame - gap * 4.0  # (the speed, the spacer, the tabs, the spacer, the toggles: no room kept for the husks' button, the tabs take what the toggles leave)
 		dish_strip.max_width = maxf(left_with_views if beside else second_row_room, dish_strip.narrowest_width())
 	var centred := not beside and dish_strip.full_width() <= dish_strip.max_width  # (when the tabs fill the row they are against the toggles whatever)
 	top_bar_more_row.get_node("MoreSpacer").size_flags_horizontal = Control.SIZE_EXPAND_FILL if centred else Control.SIZE_FILL
@@ -1400,7 +1401,7 @@ func _fit_top_bar() -> void:
 
 
 ## The readouts keep the width of their longest possible text, so nothing in the top bar moves as the figures change: the speed at its highest,
-## running slower, paused (or waiting for the pipette); as many bups as the bup limit has digits (the most digits of any running dish's limit, and the
+## running slower; as many bups as the bup limit has digits (the most digits of any running dish's limit, and the
 ## limit beside them in free mode); the clock at LONGEST_CLOCK_HOURS. Measured again when the readout's font size changes (the label's own size, not the
 ## setting: the setting changes a moment before the theme does), or the limit's digits.
 func _measure_readouts() -> void:
@@ -1412,7 +1413,7 @@ func _measure_readouts() -> void:
 	var lines := Strings.t("hud.readout_bups_limit", [bups, bups]) if free_mode else Strings.t("hud.readout_bups", [bups])
 	var clock := SimClock.format(LONGEST_CLOCK_HOURS * 3600.0 + 3599.0)
 	_speed_width = 0.0
-	var speeds := [Strings.t("hud.playback_slow_paused", [10000, 10000]), Strings.t("hud.pipette_paused")]
+	var speeds := [Strings.t("hud.playback_slow", [10000, 8499])]  # (the achieved part shows only below 85% of the speed asked)
 	for text: String in speeds:
 		_speed_width = maxf(_speed_width, _readout_width(text))
 	_vitals_short_width = _readout_width(Strings.t("hud.vitals_short", [lines, clock]))
@@ -1464,13 +1465,7 @@ func _dish_lines() -> String:
 
 ## The playback speed, and the speed actually achieved when the simulation can't keep up with it.
 func _playback_text() -> String:
-	if holds.has(&"pipette"):
-		return Strings.t("hud.pipette_paused")
 	var slow := sim_speed > 1.0 and achieved_speed < 0.85 * sim_speed  # (while paused the speed it reached stays what it was: nothing updates it)
-	if paused:
-		if slow:
-			return Strings.t("hud.playback_slow_paused", [int(sim_speed), int(achieved_speed)])
-		return Strings.t("hud.playback_speed_paused", [int(sim_speed)])
 	if slow:
 		return Strings.t("hud.playback_slow", [int(sim_speed), int(achieved_speed)])
 	return Strings.t("hud.playback_speed", [int(sim_speed)])

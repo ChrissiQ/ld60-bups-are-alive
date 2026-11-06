@@ -26,7 +26,7 @@ def gd(path, name):
 
 def num(x): return "%g" % x
 def secs(x): return num(x) + " s"
-SCALE_MIN, SCALE_MAX, ROOM, PLEX_FACTOR, MONO_FACTOR = (setting(n) for n in ("SCALE_MIN", "SCALE_MAX", "ROOM_EXPONENT", "PLEX_SIZE", "MONO_SIZE"))
+SCALE_MIN, SCALE_MAX, ROOM, PLEX_FACTOR, MONO_FACTOR, LINE_MAX = (setting(n) for n in ("SCALE_MIN", "SCALE_MAX", "ROOM_EXPONENT", "PLEX_SIZE", "MONO_SIZE", "LINE_RATIO_MAX"))
 
 def rem(px): return "%g" % (px / 16)  # 1rem is 16 px, the game's text size at 100%
 
@@ -260,8 +260,9 @@ def size_section():
     return ('<div class="group" id="size"><h3>Interface size</h3><ul class="principles">'
             '<li><span>Setting:</span> %s to %s. Text scales fully.</li>'
             '<li><span>Text:</span> IBM Plex Sans is the baseline; Commit Mono is drawn at %s of it.</li>'
-            '<li><span>Room:</span> paddings, gaps and control heights grow at power %g.</li></ul></div>'
-            % (pct(SCALE_MIN), pct(SCALE_MAX), pct(MONO_FACTOR / PLEX_FACTOR), ROOM))
+            '<li><span>Room:</span> paddings, gaps and control heights grow at power %g.</li>'
+            '<li><span>Lines:</span> a font keeps its own line height at 100%% and a line shortens evenly to %s times the text size at %s.</li></ul></div>'
+            % (pct(SCALE_MIN), pct(SCALE_MAX), pct(MONO_FACTOR / PLEX_FACTOR), ROOM, "%g" % LINE_MAX, pct(SCALE_MAX)))
 
 def floating_section():
     rows = [

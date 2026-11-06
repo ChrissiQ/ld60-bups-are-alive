@@ -149,7 +149,7 @@ func _init() -> void:
 				if color_rx.search(code) != null:
 					fail(path, i + 1, "hard-coded colour in '%s'" % code.strip_edges(), "add a colour to the theme (a theme type for custom drawing) and read it with get_theme_color()")
 			for word in banned:
-				if code.contains(word):
+				if code.contains(word) and not (word == "FontVariation" and path == "res://scripts/user_settings.gd"):  # (the interface-size code shortens big text's lines in the theme's fonts)
 					fail(path, i + 1, "uses '%s'" % word, "style through the theme and theme_type_variation, never in code")
 			if code.contains("theme_type_variation") or code.contains("_VARIATION"):
 				for m in named_rx.search_all(code):

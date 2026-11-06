@@ -79,7 +79,7 @@ func _run() -> void:
 
 
 ## The top bar's rows do not change as the playback changes: in the 1280 x 720 window, three dishes of the default 100,000 limit in free mode, the speed
-## goes x1, x100, x1,000, x10,000, x10,000 running x8,499, the same paused, waiting for the pipette, and back to x1, and the bar keeps one row or two
+## goes x1, x100, x1,000, x10,000, x10,000 (actual x8,499), the same paused, held for the pipette, and back to x1, and the bar keeps one row or two
 ## throughout, with every readout as wide as its longest possible text and showing all of what it has.
 ## Expected [derived from the widths measured on this build (printed as "TOP BAR figures"): the longest readout with the speed 719 / 944 / 1,305 px at
 ## 100 / 150 / 250%, without it 380 / 502 / 692, the speed alone 315 / 410 / 568; a row's room 1,680 / 1,451 / 1,206 at a display scale of 0.7407 (the

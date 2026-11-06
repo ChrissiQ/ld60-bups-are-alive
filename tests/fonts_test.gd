@@ -51,7 +51,7 @@ func _init() -> void:
 			var text := FileAccess.get_file_as_string(path)
 			scanned += 1
 			for needle in ["SystemFont", "FontVariation", "theme_override_fonts", "load_dynamic_font", ".woff"]:
-				TestUtil.check(not text.contains(needle), "%s contains '%s'" % [path, needle])
+				TestUtil.check(not text.contains(needle) or (needle == "FontVariation" and path == "res://scripts/user_settings.gd"), "%s contains '%s'" % [path, needle])  # (user_settings shortens big text's lines in the theme's fonts)
 			if path != THEME and path != "res://scripts/ui_text.gd":
 				TestUtil.check(not text.contains(".otf") and not text.contains(".ttf"), "%s references a font file directly; fonts belong in the theme" % path)
 	TestUtil.check(scanned > 10, "scanned the project (%d files)" % scanned)

@@ -17,7 +17,7 @@ theme_type_variation = &"SegmentRow"
 [node name="Previous" type="Button" parent="Bar"]
 visible = false
 layout_mode = 2
-theme_type_variation = &"IconButton"
+theme_type_variation = &"DishArrow"
 focus_mode = 0
 tooltip_text = "@dishes.scroll_left"
 icon = ExtResource("2")
@@ -46,7 +46,7 @@ mouse_filter = 2
 [node name="Next" type="Button" parent="Bar"]
 visible = false
 layout_mode = 2
-theme_type_variation = &"IconButton"
+theme_type_variation = &"DishArrow"
 focus_mode = 0
 tooltip_text = "@dishes.scroll_right"
 icon = ExtResource("3")
@@ -56,5 +56,5 @@ icon_alignment = 1
 layout_mode = 2
 tooltip_text = "@dish_strip.count_tip"
 mouse_filter = 1
-theme_type_variation = &"Hint"
+theme_type_variation = &"DishCount"
 vertical_alignment = 1

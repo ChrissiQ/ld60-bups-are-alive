@@ -194,7 +194,7 @@ func _run() -> void:
 	for i in 3:
 		await process_frame
 	TestUtil.check(not m.old_dish_dialog.visible and m.freezer_shelf.entries.size() == 2 and m.dishes.size() == 1 and not m.toolbar.resume_locked and not m.paused, "freezing is an answer, and play goes on")
-	TestUtil.check(m.all_details != null and m.graph_section != null and m.graph.get_parent().get_parent().get_parent() == m.graph_section, "the graph is in the tray, under its section")
+	TestUtil.check(m.all_details != null and m.graph_section != null and m.graph_section.is_ancestor_of(m.graph) and m.graph_section.body.is_ancestor_of(m.graph), "the graph is in the tray, under its section")
 
 	# The last running dish dies out while dishes are frozen: it stays, empty, until one is thawed, which takes its place; that one dying out ends the game.
 	var emptied: Dish = m.dish

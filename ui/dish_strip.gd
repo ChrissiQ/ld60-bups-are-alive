@@ -26,6 +26,14 @@ var max_width := 240.0:  ## the most width the strip takes (its tabs, arrows and
 		max_width = value
 		_fit()
 
+var tab_height := 0.0:  ## how tall every tab is (the top bar gives it the height of a layer toggle, so the two rows of the bar line up)
+	set(value):
+		if value == tab_height:
+			return
+		tab_height = value
+		for tab in _tabs:
+			tab.custom_minimum_size.y = value
+
 @onready var scroll: ScrollContainer = $Bar/Scroll  ## the tabs in view (see `max_width`)
 @onready var row: HBoxContainer = $Bar/Scroll/Row
 @onready var lead: Control = $Bar/Scroll/Row/Lead  ## stands for the tabs before the first one made
@@ -228,13 +236,13 @@ func _lay_out() -> void:
 
 func _new_tab() -> Button:
 	var tab := Button.new()
-	tab.theme_type_variation = &"ChoiceButton"
+	tab.theme_type_variation = &"DishTab"
 	tab.toggle_mode = true
 	tab.focus_mode = Control.FOCUS_NONE
 	var thumb := DishThumb.new()
 	thumb.size = THUMB
 	tab.icon = thumb
-	tab.custom_minimum_size.x = _tab_width
+	tab.custom_minimum_size = Vector2(_tab_width, tab_height)
 	tab.pressed.connect(_on_tab.bind(tab))
 	tab.gui_input.connect(_wheel)
 	row.add_child(tab)
@@ -310,17 +318,18 @@ func _fit() -> void:
 	if not is_node_ready():
 		return
 	var needed := _content_width()
-	var room := max_width - _count_width()
-	var overflow := needed > room
+	var overflow := needed > max_width  # (the count and the arrows come only when the tabs do not all fit)
+	var room := max_width - (_count_width() if overflow else 0.0)
+	count_label.visible = overflow
 	previous_button.visible = overflow
 	next_button.visible = overflow
 	scroll.custom_minimum_size.x = maxf(minf(needed, room - (_arrows_width() if overflow else 0.0)), 24.0)
 	_lay_out()
 
 
-## The width the whole strip would take with every tab in view.
+## The width the whole strip would take with every tab in view (no count then).
 func full_width() -> float:
-	return _content_width() + _count_width()
+	return _content_width()
 
 
 ## What the two arrows take with their gaps.

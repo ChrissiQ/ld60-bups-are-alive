@@ -203,7 +203,7 @@ func _initialize() -> void:
 	TestUtil.check(m.paused and m.pause_ring.visible and m.toolbar.pause_button.button_pressed, "free mode starts paused with the ring")
 	await process_frame
 	TestUtil.check(m.pause_ring.visible and m.pause_ring.mouse_filter == Control.MOUSE_FILTER_IGNORE, "a ring shows while paused and does not swallow clicks")
-	TestUtil.check(_top_text(m).contains("paused"), "the top bar says paused ('%s')" % _top_text(m))
+	TestUtil.check(_top_text(m).contains("x1") and not _top_text(m).contains("paused"), "while paused the top bar keeps the speed and has no word for the pause ('%s')" % _top_text(m))
 	TestUtil.check(_exclusive(m.toolbar) and not m.toolbar.speed_1_button.button_pressed, "free mode start: only Pause is lit")
 	var t0: float = m.dish.time
 	await create_timer(1.2).timeout
@@ -367,7 +367,7 @@ func _initialize() -> void:
 	m.toolbar.set_paused(true)
 	await process_frame
 	await process_frame
-	TestUtil.check(_top_text(m).contains("paused"), "paused reads 'paused'")
+	TestUtil.check(_top_text(m).contains("x1,000") and m.pause_ring.visible, "paused keeps the speed it will go back to, and the ring shows")
 	m.toolbar.speed_1_button.button_pressed = true  # resume at normal speed
 
 	# --- Select tool: the panel follows the pointer until a bup or source is clicked.
@@ -912,7 +912,7 @@ func _initialize() -> void:
 	TestUtil.check(m.sim_speed == 10000.0 and _exclusive(m.toolbar) and m.toolbar.speed_ultra_button.button_pressed, "4 key sets the ultra speed, x10000")
 	TestUtil.check(m.achieved_speed == 10000.0 and not m._playback_text().contains("running"), "a speed just chosen reads as itself, not as 'running slower'")
 	m.achieved_speed = 4000.0
-	TestUtil.check(m._playback_text() == "x10000 (running x4000)", "when the sim can't keep up the readout says what it achieves: '%s'" % m._playback_text())
+	TestUtil.check(m._playback_text() == "x10000 (x4000)", "when the sim can't keep up the readout says what it achieves: '%s'" % m._playback_text())
 	m.achieved_speed = 10000.0
 	await _key(KEY_1)
 	await _key(KEY_EQUAL)

@@ -10,7 +10,8 @@ const SCALE_MIN := 0.6
 const SCALE_MAX := 2.5
 const HEADLESS_SIZE := Vector2i(1280, 720)
 const LARGE_TEXT := 40  ## font sizes from this up (the titles) grow only half as fast as the rest
-const ROOM_EXPONENT := 0.35  ## the room round the text grows with the interface size to this power; the text itself grows to the whole of it
+const ROOM_EXPONENT := 0.2  ## the room round the text grows with the interface size to this power; the text itself grows to the whole of it
+const LINE_RATIO_MAX := 1.05  ## a line is this many times the font size tall at SCALE_MAX (a font's own line is about 1.3; the cut grows linearly from none at 100%)
 const SCALE_STEP := 0.05
 const SCROLL_SPEED_MIN := 0.25
 const SCROLL_SPEED_MAX := 4.0
@@ -56,6 +57,7 @@ static func system_reduce_motion() -> bool:
 	return _system_motion
 static var _designed_icons := {}  ## "Type" -> the icon width the theme was designed with
 static var _designed_sizes := {}  ## "Type/name" -> the font size the theme was designed with
+static var _designed_fonts := {}  ## "Type/name" -> the font the theme was designed with ("default" for the theme's default font)
 
 
 ## Reads the file, once. Every reader asks through `load_once`, so nothing depends on which script runs first.
@@ -148,15 +150,8 @@ static func text_factor() -> float:
 
 
 ## Whether a font size of the theme is for text set in Commit Mono (looked up from the font the same type uses).
-static func _is_mono_size(theme: Theme, type: String, size_name: String) -> bool:
-	var font_name := "font"
-	match size_name:
-		"normal_font_size": font_name = "normal_font"
-		"bold_font_size": font_name = "bold_font"
-		"mono_font_size": font_name = "mono_font"
-		"font_size", "legend", "tick": font_name = "font"
-		_: return false
-	var font := theme.get_font(font_name, type)
+static func _is_mono_size(type: String, size_name: String) -> bool:
+	var font: Font = _designed_fonts.get("%s/%s" % [type, _font_name_of(size_name)])
 	return font != null and font.resource_path.contains("CommitMono")
 
 
@@ -167,18 +162,25 @@ static func _scale_theme_text() -> void:
 		return
 	if _designed_sizes.is_empty():
 		_designed_sizes["default"] = theme.default_font_size
+		_designed_fonts["default"] = theme.default_font
 		for type in theme.get_font_size_type_list():
 			for name in theme.get_font_size_list(type):
 				_designed_sizes["%s/%s" % [type, name]] = theme.get_font_size(name, type)
+		for key: String in _designed_sizes:  # (the font each size is for, as the theme resolves it: a variation takes its base type's fonts)
+			var parts := key.split("/")
+			var font_name := _font_name_of(parts[1]) if parts.size() == 2 else ""
+			if font_name != "":
+				_designed_fonts["%s/%s" % [parts[0], font_name]] = _font_of(theme, parts[0], font_name)
 	for key: String in _designed_sizes:
 		var designed := float(_designed_sizes[key])
 		var parts := key.split("/")
-		var ratio := MONO_SIZE if key != "default" and _is_mono_size(theme, parts[0], parts[1]) else PLEX_SIZE
+		var ratio := MONO_SIZE if key != "default" and _is_mono_size(parts[0], parts[1]) else PLEX_SIZE
 		var size := roundi(designed * ratio * (sqrt(_growth()) if designed >= LARGE_TEXT else _growth()))  # (big display type grows by half as much: it is already big)
 		if key == "default":
 			theme.default_font_size = size
 		else:
 			theme.set_font_size(parts[1], parts[0], size)
+			_set_line_height(theme, parts[0], parts[1], size)
 	# Icons are something to recognise, so they grow with the text, as the text does (the room round them grows by the window's scale only).
 	if _designed_icons.is_empty():
 		for type in theme.get_constant_type_list():
@@ -191,6 +193,45 @@ static func _scale_theme_text() -> void:
 	var strip := DialogStyle.TITLE_TOP + title_font.get_height(theme.get_font_size("font_size", "DialogTitle")) + DialogStyle.TITLE_GAP
 	for type in ["AcceptDialog", "ConfirmationDialog"]:
 		theme.get_stylebox("panel", type).content_margin_top = maxf(56.0, strip)
+
+
+## The font a type has under `name`, as a control would find it: the type's own, else its base type's (a theme read of a variation does not look there itself).
+static func _font_of(theme: Theme, type: String, name: String) -> Font:
+	var t := type
+	while t != "":
+		if name in theme.get_font_list(t):  # (not has_font: that is true for any name once the theme has a default font)
+			return theme.get_font(name, t)
+		t = theme.get_type_variation_base(t)
+	return theme.get_font(name, type)
+
+
+## The theme item naming the font that a font size item is for ("" when it is not a text size).
+static func _font_name_of(size_name: String) -> String:
+	match size_name:
+		"font_size", "legend", "tick": return "font"
+		"normal_font_size": return "normal_font"
+		"bold_font_size": return "bold_font"
+		"mono_font_size": return "mono_font"
+	return ""
+
+
+## Shortens the lines of the font a size is for, as the interface grows: a line is the font's own height at 100% and LINE_RATIO_MAX times the size at SCALE_MAX,
+## linearly between (the room above and below the letters is cut, half from each side), so big text does not take a tall line.
+static func _set_line_height(theme: Theme, type: String, size_name: String, size: int) -> void:
+	var font_name := _font_name_of(size_name)
+	var base: Font = _designed_fonts.get("%s/%s" % [type, font_name])
+	if base == null or size_name in ["legend", "tick"]:
+		return
+	var share := clampf((ui_scale - 1.0) / (SCALE_MAX - 1.0), 0.0, 1.0)
+	var cut := (base.get_height(size) - float(size) * lerpf(base.get_height(size) / float(size), LINE_RATIO_MAX, share)) if share > 0.0 else 0.0
+	if cut < 1.0:
+		theme.set_font(font_name, type, base)
+		return
+	var variation := FontVariation.new()
+	variation.base_font = base
+	variation.spacing_top = -floori(cut / 2.0)
+	variation.spacing_bottom = -ceili(cut / 2.0)
+	theme.set_font(font_name, type, variation)
 
 
 ## Applies the preferences if nothing has yet (each screen asks, so that one started on its own, as the tests start them, is laid out the same).

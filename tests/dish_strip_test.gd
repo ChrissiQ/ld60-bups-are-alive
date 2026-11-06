@@ -58,14 +58,14 @@ func _run() -> void:
 	m.add_dish(chosen)
 	m.add_dish(chosen)
 	await process_frame
-	TestUtil.check(strip.visible and strip.count() == 3 and strip.count_label.text == "..3", "three dishes: three entries and their count, '..3' (%s)" % strip.count_label.text)
+	TestUtil.check(strip.visible and strip.count() == 3 and strip.count_label.text == "..3" and not strip.count_label.visible, "three dishes: three entries, and no count while every tab is in view (%s)" % strip.count_label.text)
 	var three_digits: float = strip._tab_width
 	TestUtil.check(strip._tabs.all(func(t: Button) -> bool: return t.size.x == three_digits) and three_digits >= _caption_width(strip._tabs[0], "999") and three_digits >= _caption_width(strip._tabs[0], "888"), "with one-digit numbers every tab already has room for three digits (%.0f)" % three_digits)
 	while m.dishes.size() < m.MAX_DISHES:
 		m.add_dish(chosen)
 	for i in 3:
 		await process_frame
-	TestUtil.check(strip.count() == 999 and strip.count_label.text == "..999", "999 entries, counted as '..999' (%s)" % strip.count_label.text)
+	TestUtil.check(strip.count() == 999 and strip.count_label.text == "..999" and strip.count_label.visible, "999 entries, counted as '..999' and shown as they do not all fit (%s)" % strip.count_label.text)
 	var widths := {}
 	for tab: Button in strip._tabs:
 		widths[tab.size.x] = true

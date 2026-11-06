@@ -19,7 +19,8 @@ const CHEVRON_UP := preload("res://icons/chevron_up.svg")
 @export var tip_key := ""  ## the heading's hover tip (a string key; {details}-style keys are filled in by Strings)
 
 var header: Button
-var body: VBoxContainer
+var body: MarginContainer  ## what is under the heading, with room under it
+var stack: VBoxContainer  ## the content's own column, in `body`
 var _home := 0  ## its place in the tray as the scene has it
 var _dragged := false  ## this section's heading is being dragged
 var _open_before := true  ## whether it was open when the drag began (letting go over the heading must not toggle it)
@@ -33,7 +34,7 @@ var open := true:
 
 
 func _init() -> void:
-	theme_type_variation = &"HudPanel"
+	theme_type_variation = &"TraySectionPanel"
 
 
 func _ready() -> void:
@@ -52,8 +53,11 @@ func _ready() -> void:
 		header.text = Strings.t(title_key)
 	if tip_key != "":
 		header.tooltip_text = Strings.t(tip_key)
-	body = VBoxContainer.new()
-	body.theme_type_variation = &"TightStack"
+	body = MarginContainer.new()
+	body.theme_type_variation = &"SectionBody"
+	stack = VBoxContainer.new()
+	stack.theme_type_variation = &"TightStack"
+	body.add_child(stack)
 	add_child(box)
 	box.add_child(header)
 	box.add_child(body)
@@ -61,7 +65,7 @@ func _ready() -> void:
 	for child in content:
 		var owned := [child] + child.find_children("*", "", true, true).filter(func(n: Node) -> bool: return n.owner == scene_owner)
 		remove_child(child)
-		body.add_child(child)
+		stack.add_child(child)
 		for node: Node in owned:
 			node.owner = scene_owner  # (taking a node out of the tree lets go of its owner: the scene's % names need it)
 	_show_open()
@@ -119,7 +123,7 @@ func _drag_data(at: Vector2) -> Variant:
 	tray.add_child(_slot)
 	tray.move_child(_slot, get_index())
 	var lifted := PanelContainer.new()
-	lifted.theme_type_variation = &"HudPanel"
+	lifted.theme_type_variation = &"TraySectionPanel"
 	lifted.custom_minimum_size.x = size.x
 	lifted.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var copy := Button.new()
