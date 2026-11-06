@@ -811,6 +811,9 @@ func _labels_held() -> int:
 ## Whether every number is held, by the running dishes and the frozen ones together: then nothing that would add a dish (a pipette, a new dish)
 ## is done, and the banner says why (the tray's dish actions show a warning meanwhile, `_show_graph_choices`). An unfrozen dish has its own number.
 func _at_dish_limit() -> bool:
+	if _next_dish_number > GpuLayout.EV_DISH_MASK:  # (an event's dish number has no more bits: see EV_DISH_BITS)
+		_show_banner(Strings.t("banner.dish_numbers"), BANNER_BRIEF_SECONDS)
+		return true
 	if _labels_held() < MAX_DISHES:
 		return false
 	_show_banner(Strings.t("banner.dish_limit"), BANNER_BRIEF_SECONDS)

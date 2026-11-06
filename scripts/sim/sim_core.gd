@@ -185,6 +185,9 @@ func _set_next_id(id: int) -> void:
 ## the memory budget. `grid`: the dish's grid made already (DishGrid.make of the spec's size, resolution, patchiness and patch seed, which
 ## must then be set), so the caller can make it on another thread: the landscape of a big grid takes a while in script.
 func add_dish(spec: DishSpec, grid: DishGrid = null) -> int:
+	if spec.number > GpuLayout.EV_DISH_MASK:
+		errors.append("dish number %d does not fit an event's %d bits" % [spec.number, GpuLayout.EV_DISH_BITS])
+		return -1
 	var row := _free_row()
 	if row < 0:
 		return -1

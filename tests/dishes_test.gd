@@ -244,6 +244,10 @@ func _limit(fake: FakeWorld, chosen: StartConditions) -> void:
 	for i in 2:
 		await process_frame
 	TestUtil.check(m.dishes.size() == m.MAX_DISHES - 1 and m._next_dish_number == number_before and fake.calls_of(SimCommand.KIND_ADD_DISH).size() == adds and fake.calls_of(SimCommand.KIND_PIPETTE).size() == pipettes, "...and neither changed anything")
+	m._next_dish_number = GpuLayout.EV_DISH_MASK + 1
+	m.banner.text = ""
+	TestUtil.check(m.add_dish(chosen) == null and m.banner.text == Strings.t("banner.dish_numbers"), "a dish number past what an event holds is refused with its own banner (%s)" % m.banner.text)
+	m._next_dish_number = number_before
 	# A middle dish trashed: the next dish takes its number (the frozen dish's lower one stays held), and none of its bups has an id another has had.
 	var gone: Dish = m.dishes[6]
 	var freed: int = m._dish_numbers[gone]
