@@ -219,34 +219,6 @@ func _init() -> void:
 	adv.queue_free()
 	await process_frame
 
-	# The GPU setting is hidden: neither it nor its notice shows, whatever the field
-	# says; the field is kept with the other choices (saved and read back) and the reset puts it back to Auto, and it is never counted as a
-	# changed advanced option (the player could not see why).
-	Session.free_start = StartConditions.new()
-	var gs: Control = load(Scenes.FREE_SETUP).instantiate()
-	root.add_child(gs)
-	await process_frame
-	gs.advanced_toggle.pressed.emit()
-	await process_frame
-	TestUtil.check(not gs.backend_toggle.visible and not gs.backend_notice.visible, "the GPU setting and its notice are not shown on the advanced page")
-	gs._start.sim_backend = StartConditions.BACKEND_CPU
-	gs._go()
-	TestUtil.check(StartConditions.load_saved().sim_backend == StartConditions.BACKEND_CPU, "the hidden field is still saved with the other choices")
-	gs.queue_free()
-	await process_frame
-	Session.free_start = StartConditions.load_saved()
-	var gs2: Control = load(Scenes.FREE_SETUP).instantiate()
-	root.add_child(gs2)
-	await process_frame
-	gs2.advanced_toggle.pressed.emit()
-	await process_frame
-	TestUtil.check(gs2._start.sim_backend == StartConditions.BACKEND_CPU and not gs2.backend_toggle.visible and not gs2.backend_notice.visible, "a saved setting that is not Auto is read back and still not shown")
-	TestUtil.check(not gs2.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "...nor counted as a changed advanced option")
-	gs2.reset_button.pressed.emit()
-	TestUtil.check(gs2._start.sim_backend == StartConditions.BACKEND_AUTO and not gs2.backend_toggle.visible, "the reset puts the field back to Auto")
-	gs2.queue_free()
-	await process_frame
-
 	# A number box: focus from the keyboard selects the whole number (typing replaces it); focus from a click selects nothing,
 	# so the mouse can then select part of it.
 	Session.free_start = StartConditions.new()

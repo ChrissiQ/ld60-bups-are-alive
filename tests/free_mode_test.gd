@@ -709,12 +709,6 @@ func _initialize() -> void:
 	fake.device = ""
 	m.pause_menu.open(m.dish, true, chosen)
 	TestUtil.check(m.pause_menu.initial_running.value_label.text == Strings.t("pause.running_cpu"), "...and says CPU when the world has no device")
-	TestUtil.check(not m.pause_menu.initial_backend.visible, "the record has no row for the GPU setting (hidden: the world always runs on the GPU)")
-	var gpu_start := chosen.copy()
-	for setting: String in [StartConditions.BACKEND_GPU, StartConditions.BACKEND_CPU]:
-		gpu_start.sim_backend = setting
-		m.pause_menu.open(m.dish, true, gpu_start)
-		TestUtil.check(not m.pause_menu.initial_backend.visible, "...nor when the hidden field says %s" % setting)
 	m._close_menu()
 	# The dish-size slider covers every size, so a dish at its largest can still shrink.
 	m.dish.resize_to(StartConditions.MAX_DISH_RADIUS)
@@ -767,15 +761,9 @@ func _initialize() -> void:
 	TestUtil.finish(self, "FREE MODE TESTS OK")
 
 
-## The hidden backend field: saved with the rest, anything else is Auto; the husks setting; goal mode starts from the defaults.
+## The husks setting; goal mode starts from the defaults.
 func _setting_tests() -> void:
-	var auto := StartConditions.BACKEND_AUTO
-	var on := StartConditions.BACKEND_GPU
-	# The setting: saved with the rest, anything else is Auto, goal mode's dish is always Auto.
 	var chosen := StartConditions.new()
-	TestUtil.check(chosen.sim_backend == auto, "the GPU setting starts as Auto")
-	chosen.sim_backend = on
-	TestUtil.check(StartConditions.from_dict(chosen.to_dict()).sim_backend == on and chosen.copy().sim_backend == on, "the GPU setting is saved and loaded with the rest")
 	chosen.death_husks = true
 	TestUtil.check(StartConditions.from_dict(chosen.to_dict()).death_husks and chosen.copy().death_husks and not StartConditions.new().death_husks and not StartConditions.from_dict({"death_husks": 1}).death_husks, "the husks setting is saved and loaded with the rest, starts off, and anything but a boolean is off")
 	chosen.death_husks = false
@@ -805,4 +793,3 @@ func _setting_tests() -> void:
 		differs.append(9)
 	TestUtil.check(differs.is_empty(), "goal mode's dish begins from the free-mode defaults, `StartConditions.new()`, and nothing else (differs: %s)" % [differs])
 	goal_dish.free()
-	TestUtil.check(StartConditions.from_dict({"sim_backend": "fast"}).sim_backend == auto and StartConditions.from_dict({"sim_backend": 3}).sim_backend == auto and StartConditions.from_dict({}).sim_backend == auto, "a setting that is not one of the three is Auto")

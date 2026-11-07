@@ -20,10 +20,6 @@ const MAX_BLOOM_DENSITY := 10.0  ## plankton blooming in each mm² of the dish e
 const MIN_DISH_RADIUS := 1000.0  ## µm: 1 mm, the smallest dish a player can choose (smaller ones are not much use)
 const MIN_SIM_RADIUS := 150.0  ## µm: the smallest dish the simulation itself will run (the tests and old saves use small ones)
 const MAX_DISH_RADIUS := 90000.0  ## µm: 90 mm in radius, 180 mm across; the nutrient grid has the same number of cells at any size, so a big dish has coarse ones (1.8 mm each here)
-const BACKEND_AUTO := "auto"  ## the simulation runs on the GPU or the processor (a hidden field: the pooled world always runs on the GPU)
-const BACKEND_CPU := "cpu"  ## always on the processor
-const BACKEND_GPU := "gpu"  ## on the GPU whenever the machine has one
-const BACKENDS := [BACKEND_AUTO, BACKEND_CPU, BACKEND_GPU]
 
 ## The numeric settings and the range each is held to when read back (integers stay integers); a new one is a var and a row here.
 const NUMBERS := {
@@ -53,7 +49,6 @@ var bup_limit := DEFAULT_BUP_LIMIT  ## the most bups the dish holds: past it eac
 var stationary_phase := false  ## starving bups stop growing, shrink and die at a constant rate, as E. coli does (Biology.STARVE_*), instead of dying when the reserve is gone (an advanced option: off by default, as in goal mode, whose goals were tuned without it)
 var plankton_husks := false  ## a plankton that dies leaves a husk that leaks its nutrient back slowly (Biology.HUSK_SECONDS) instead of bursting into a cloud (an advanced option: off by default)
 var death_husks := false  ## a dead bup leaves a husk that leaks its nutrient back slowly (Biology.HUSK_SECONDS) instead of giving it back at once (an advanced option: off by default)
-var sim_backend := BACKEND_AUTO  ## where the bups are simulated (an advanced option: the default picks the faster one while playing, and goal mode always does)
 
 
 ## Where free mode remembers the player's last choices (separate from the experiment save).
@@ -79,7 +74,7 @@ func copy() -> StartConditions:
 
 
 func to_dict() -> Dictionary:
-	var d := {"sim_backend": sim_backend, "founders": founders.slice(0, bups).duplicate(true)}  # (only the founders there are: nothing hidden is carried over)
+	var d := {"founders": founders.slice(0, bups).duplicate(true)}  # (only the founders there are: nothing hidden is carried over)
 	for key in NUMBERS:
 		d[key] = get(key)
 	for key in FLAGS:
@@ -98,8 +93,6 @@ static func from_dict(d: Dictionary) -> StartConditions:
 	for key in FLAGS:
 		if d.get(key) is bool:
 			c.set(key, d[key])
-	var saved_backend: Variant = d.get("sim_backend")
-	c.sim_backend = saved_backend if saved_backend is String and saved_backend in BACKENDS else c.sim_backend
 	var saved_founders: Variant = d.get("founders")
 	if saved_founders is Array:
 		c.founders = []  # (what was saved replaces the default colours)

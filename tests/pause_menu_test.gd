@@ -31,7 +31,7 @@ func _initialize() -> void:
 	TestUtil.check(menu.initial_detail.visible and menu.initial_detail.value_label.text == "200" + Strings.t("pause.cells_across") and menu.initial_detail.name_label.text == Strings.t("pause.record_nutrient_detail"), "the detail row reads 200 across ('%s')" % menu.initial_detail.value_label.text)
 	TestUtil.check(menu.initial_thickness.visible and menu.initial_thickness.value_label.text == "10" + Strings.t("pause.times_water") and menu.initial_thickness.name_label.text == Strings.t("pause.record_medium_thickness"), "the thickness row reads 10 x water ('%s')" % menu.initial_thickness.value_label.text)
 	TestUtil.check(menu.initial_stationary.visible and menu.initial_stationary.value_label.text == Strings.t("pause.stationary_value") and menu.initial_stationary.name_label.text == Strings.t("pause.record_stationary"), "the starvation row shows its value")
-	TestUtil.check(not menu.initial_backend.visible and not menu.initial_husks.visible and not menu.initial_plankton_husks.visible, "the backend row and the husk rows are hidden at their defaults")
+	TestUtil.check(not menu.initial_husks.visible and not menu.initial_plankton_husks.visible, "the husk rows are hidden at their defaults")
 	TestUtil.check(menu.initial_running.visible and menu.initial_running.name_label.text == Strings.t("pause.record_device") and menu.initial_running.value_label.text == "Test GPU", "the device row names the world's device ('%s')" % menu.initial_running.value_label.text)
 
 	# Defaults: the detail, thickness and starvation rows hide.
@@ -50,10 +50,8 @@ func _initialize() -> void:
 	var more := StartConditions.new()
 	more.death_husks = true
 	more.plankton_husks = true
-	more.sim_backend = StartConditions.BACKEND_GPU
 	menu.open(dish, true, more)
 	TestUtil.check(menu.initial_husks.visible and menu.initial_plankton_husks.visible and menu.initial_husks.value_label.text == Strings.t("pause.husks_value"), "the husk rows show when those were set")
-	TestUtil.check(not menu.initial_backend.visible, "the GPU setting's row stays hidden whatever the hidden field says (the world always runs on the GPU)")
 
 	# The record belongs to free mode with a start; the quit button's words say whether the game is saved.
 	TestUtil.check(menu.quit_button.text == Strings.t("pause.quit"), "free mode's quit button reads '%s'" % menu.quit_button.text)

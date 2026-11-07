@@ -176,12 +176,6 @@ unique_name_in_owner = true
 layout_mode = 2
 label_text = "@pause.record_medium_thickness"
 
-[node name="BackendRow" parent="Scroll/Page/Card/Columns/Right/Initial" instance=ExtResource("3")]
-unique_name_in_owner = true
-visible = false
-layout_mode = 2
-label_text = "@pause.record_backend"
-
 [node name="StationaryRow" parent="Scroll/Page/Card/Columns/Right/Initial" instance=ExtResource("3")]
 unique_name_in_owner = true
 layout_mode = 2

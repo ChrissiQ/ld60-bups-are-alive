@@ -80,7 +80,6 @@ static func backend(dish: Dish) -> Dictionary:
 	var timing: Dictionary = snap.timing
 	var shown: PayloadInfo = world.shown_payload() if world != null else null
 	return {
-		"setting": StartConditions.BACKEND_AUTO,
 		"running": "gpu" if sim != null and sim.can_simulate() else "cpu",
 		"gpu_available": GpuSimBackend.available(),
 		"gpu_device": sim.device_name() if sim != null else "",

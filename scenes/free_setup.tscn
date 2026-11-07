@@ -217,21 +217,6 @@ theme_type_variation = &"Note"
 text = "@free_setup.thickness_tip"
 autowrap_mode = 3
 
-[node name="BackendToggle" parent="Panel/Box/Scroll/Rows/Advanced/Options" instance=ExtResource("toggle_row")]
-visible = false
-layout_mode = 2
-label_text = "@free_setup.backend"
-auto_text = "@free_setup.backend_auto"
-hint_text = "@free_setup.backend_hint"
-
-[node name="BackendNotice" type="Label" parent="Panel/Box/Scroll/Rows/Advanced/Options"]
-custom_minimum_size = Vector2(1, 0)
-visible = false
-layout_mode = 2
-theme_type_variation = &"Notice"
-text = "@free_setup.backend_unavailable"
-autowrap_mode = 3
-
 [node name="StationaryToggle" parent="Panel/Box/Scroll/Rows/Advanced/Options" instance=ExtResource("toggle_row")]
 layout_mode = 2
 label_text = "@free_setup.stationary_name"

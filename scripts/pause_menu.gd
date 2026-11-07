@@ -30,7 +30,6 @@ signal bup_limit_chosen(limit: int)
 @onready var initial_dish: StatRow = %DishRow
 @onready var initial_detail: StatRow = %DetailRow
 @onready var initial_thickness: StatRow = %ThicknessRow
-@onready var initial_backend: StatRow = %BackendRow  ## the GPU setting's row, hidden: the pooled world always runs on the GPU
 @onready var initial_stationary: StatRow = %StationaryRow  ## shown when the dish was started with starvation switched on
 @onready var initial_plankton_husks: StatRow = %PlanktonHusksRow  ## shown when the dish was started with plankton husks
 @onready var initial_husks: StatRow = %HusksRow  ## shown when the dish was started with husks

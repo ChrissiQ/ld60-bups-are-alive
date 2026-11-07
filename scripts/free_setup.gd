@@ -28,11 +28,9 @@ var _still: StillBups  ## the founders as a still picture, when the world has no
 @onready var advanced: VBoxContainer = $Panel/Box/Scroll/Rows/Advanced  ## options for testing the simulation itself, hidden until asked for
 @onready var detail_row: SettingRow = $Panel/Box/Scroll/Rows/Advanced/Options/DetailGroup/DetailRow
 @onready var thickness_row: SettingRow = $Panel/Box/Scroll/Rows/Advanced/Options/ThicknessGroup/ThicknessRow
-@onready var backend_toggle: ToggleRow = $Panel/Box/Scroll/Rows/Advanced/Options/BackendToggle  ## the GPU setting, hidden: the pooled world always runs on the GPU (StartConditions.sim_backend stays as a field nothing reads)
 @onready var stationary_toggle: ToggleRow = $Panel/Box/Scroll/Rows/Advanced/Options/StationaryToggle  ## whether starving bups shrink and die slowly (on) or die as soon as the reserve is gone
 @onready var plankton_husks_toggle: ToggleRow = $Panel/Box/Scroll/Rows/Advanced/Options/PlanktonHusksToggle  ## whether a plankton that dies leaves a husk that leaks its nutrient slowly
 @onready var husks_toggle: ToggleRow = $Panel/Box/Scroll/Rows/Advanced/Options/HusksToggle  ## whether a dead bup leaves a husk that leaks its nutrient slowly
-@onready var backend_notice: Label = $Panel/Box/Scroll/Rows/Advanced/Options/BackendNotice  ## the GPU setting's notice, hidden with it
 @onready var limit_row: SettingRow = $Panel/Box/Scroll/Rows/LimitGroup/LimitRow
 @onready var back_button: Button = $Panel/Box/Actions/BackButton
 @onready var go_button: Button = $Panel/Box/Actions/GoButton
@@ -290,7 +288,6 @@ func _reset_to_defaults() -> void:
 	husks_toggle.button_pressed = StartConditions.new().death_husks
 	plankton_husks_toggle.button_pressed = StartConditions.new().plankton_husks
 	stationary_toggle.button_pressed = StartConditions.new().stationary_phase
-	_start.sim_backend = StartConditions.new().sim_backend
 
 
 func _go() -> void:

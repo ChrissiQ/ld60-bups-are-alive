@@ -39,7 +39,7 @@ func _initialize() -> void:
 	if data is Dictionary:
 		for key in ["written", "godot", "dish", "nutrient", "selected", "constants", "screen"]:
 			TestUtil.check(data.has(key), "the report has %s" % key)
-		TestUtil.check(data.has("backend") and data["backend"]["setting"] == "auto" and data["backend"]["running"] == "gpu" and data["backend"]["gpu_available"] == GpuSimBackend.available(), "it says where the bups run: the setting, and that the world simulates (the canned backend can)")
+		TestUtil.check(data.has("backend") and data["backend"]["running"] == "gpu" and data["backend"]["gpu_available"] == GpuSimBackend.available(), "it says where the bups run: that the world simulates (the canned backend can)")
 		TestUtil.check(data["backend"].get("gpu_device") == "test device" and data["backend"].get("main_device") is String, "...both devices' names: the simulation's from the backend, the main one's from the renderer")
 		var be: Dictionary = data["backend"]
 		for key in ["k", "duty", "T_ITER_ms", "step_ms_ema", "sync_ms", "publish_ms"]:
