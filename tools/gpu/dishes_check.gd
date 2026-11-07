@@ -16,8 +16,16 @@ func _run() -> void:
 	start.bup_limit = 30000
 	start.spread_founders()
 	var m: Node = TestUtil.game_screen(self, start)
-	await process_frame
+	for i in 3600:  # (the screen's _ready, its dish and the world's device come a few frames after the script starts)
+		if m.is_node_ready() and m.dish != null and m.dish.row >= 0:
+			break
+		await process_frame
+	for i in 3600:
+		if WorldClient.shared().backend.status().get("ready", false):
+			break
+		await process_frame
 	m.toolbar.set_paused(false)
+	m._set_paused(false)
 	m.sim_speed = 3000.0
 	var second: Dish = m.add_dish(start)
 	var third_start := StartConditions.new()

@@ -1,22 +1,31 @@
 extends SceneTree
-## Whole runs, CPU against GPU. godot --path . [--rendering-driver metal --position 6000,6000] -s tools/gpu/validate_dynamics.gd -- mode scenario seed
-##   GPU_FROM_SOURCE=1 compiles the kernels from GpuKernels.all() at run time instead of using the imported shaders. NO_BUPS=1 runs the
-##   dish without bups (what goes into the field: feed, bursts, sources).
-##   mode: cpu | gpu     scenario: A (default dish until 1,000 bups) | B (3 mm dish, 20k cap, feed) | C (90 mm dish, 100k cap, feed) | D-F, L, S, M
-##   (tools/gpu/world_tools.gd holds the table)
+## A whole run of the pooled world, one dish, one seed: the SAMPLE line of every sim-hour, to compare with tools/gpu/golden/ or with another
+## run. Windowed, through the lock:
+##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/validate_dynamics.gd -- gpu scenario seed [hours [step]]
+##   mode: gpu (the only one; the processor's simulation is gone)   scenario: A (default dish until 1,000 bups) | B (3 mm dish, 20k cap, feed) |
+##   C (90 mm dish, 100k cap, feed) | D-F, L, S, M (tools/gpu/world_tools.gd holds the table)
 ## An optional fourth argument is the number of sim-hours to run (0 or absent: the scenario's own), and an optional fifth the step's
 ## length in seconds, a number or a fraction ("100/60": the game's step at x100 and 60 frames a second; default 20). An hour must be a
-## whole number of steps, and on the GPU a whole number of batches of 9. Prints one SAMPLE line per sim-hour: mode scenario seed hour
-## pop speed sense metabolism size harm energy nutrient
+## whole number of steps. Prints one SAMPLE line per sim-hour: mode scenario seed hour pop speed sense metabolism size harm energy nutrient,
+## then OVERFLOWS and "VALIDATE DYNAMICS OK".
+##   GPU_FROM_SOURCE=1 compiles the kernels from GpuKernels.all() at run time instead of using the imported shaders. NO_BUPS=1 runs the
+##   dish without bups (what goes into the field: feed, bursts, sources).
+##
+## Expected values, written before the first run [derived]: scenario B for 6 hours at seed 1 prints six SAMPLE lines (hours 1-6) whose
+## populations grow from 250 towards the limit 20,000 and stay at or under it, and OVERFLOWS 0; two runs of the same arguments print the
+## same lines byte for byte (the run is deterministic per seed on one machine).
 
 const Tools := preload("res://tools/gpu/world_tools.gd")
 const Lab := preload("res://tools/gpu/gpu_lab.gd")
+const BATCH := 9  ## steps a call of the core runs, as the game's batches did
+
+var failed := false
 
 
 func _hours(scenario: String) -> int:
 	var extra := OS.get_cmdline_user_args()
 	if extra.size() > 3 and int(extra[3]) > 0:
-		return int(extra[3])  # (an optional fourth argument: the hours to run)
+		return int(extra[3])
 	return Tools.default_hours(scenario)
 
 
@@ -24,7 +33,7 @@ func _hours(scenario: String) -> int:
 func _step_seconds() -> float:
 	var extra := OS.get_cmdline_user_args()
 	if extra.size() <= 4:
-		return 20.0
+		return SimHarness.DEFAULT_DELTA
 	var text: String = extra[4]
 	if text.contains("/"):
 		return float(text.get_slice("/", 0)) / float(text.get_slice("/", 1))
@@ -32,117 +41,59 @@ func _step_seconds() -> float:
 
 
 ## DUMP_FIELD=<path>: the grid at each sample, appended as raw floats (n*n each), to compare the fields of two runs.
-func _dump(conc: PackedFloat32Array) -> void:
+func _dump(d: Dictionary, s: Scenario) -> void:
 	var path := OS.get_environment("DUMP_FIELD")
 	if path == "":
 		return
+	var cells := int(pow(DishGrid.cells_across(s.radius, s.resolution), 2.0))
 	var f := FileAccess.open(path, FileAccess.READ_WRITE if FileAccess.file_exists(path) else FileAccess.WRITE)
 	f.seek_end()
-	f.store_buffer(conc.to_byte_array())
+	f.store_buffer((d["field"] as PackedByteArray).slice(0, cells * 4))
 	f.close()
 
 
 func _init() -> void:
 	var a := OS.get_cmdline_user_args()
-	var mode := a[0]; var scenario := a[1]; var seed_value := int(a[2])
+	if a.size() < 3 or a[0] != "gpu":
+		print("usage: ... -s tools/gpu/validate_dynamics.gd -- gpu scenario seed [hours [step]]")
+		quit(1)
+		return
+	if not SimHarness.begin(self, "validate_dynamics", "SimCore"):
+		return
+	var mode := a[0]
+	var scenario := a[1]
+	var seed_value := int(a[2])
 	SimConstants.apply()
-	var consts := SimConstants.build()
-	var start := Tools.start_conditions(scenario)
-	var dish := TestUtil.dish_from(self, start, seed_value)
+	var s := Tools.scenario(scenario, seed_value)
 	if OS.get_environment("NO_BUPS") == "1":
-		dish.clear_bups()  # (NO_BUPS=1: the field alone, feed, plankton and sources, to compare what goes into it)
-	Tools.place_sources(dish, scenario)
-	var field := dish.field
-	var hours := _hours(scenario)
+		s.bups = 0
 	var step := _step_seconds()
-	var per_hour := roundi(3600.0 / step)  # (steps in an hour: counted, so that rounding in the clock never moves a sample)
-	assert(absf(per_hour * step - 3600.0) < 1e-6 * 3600.0 and per_hour % 9 == 0, "an hour must be a whole number of batches of 9 steps")
-	if mode == "cpu":
-		var next_hour := 1
-		var reached := -1.0
-		var steps_done := 0
-		while steps_done < hours * per_hour:
-			dish.step(step)
-			steps_done += 1
-			if scenario == "A" and reached < 0.0 and dish.population() >= 1000:
-				reached = dish.time / 3600.0
-				print("REACHED %s %s %d %.3f" % [mode, scenario, seed_value, reached])
+	var hours := _hours(scenario)
+	var per_hour := roundi(3600.0 / step)
+	if absf(per_hour * step - 3600.0) > 1e-6 * 3600.0:
+		print("FAIL an hour must be a whole number of steps (step %s s)" % str(step))
+		quit(1)
+		return
+	var h := SimHarness.make([s], {"delta": step, "from_source": OS.get_environment("GPU_FROM_SOURCE") == "1"})
+	var steps_done := 0
+	var next_hour := 1
+	while steps_done < hours * per_hour:
+		var n := mini(BATCH, hours * per_hour - steps_done)
+		h.step(n)
+		steps_done += n
+		if scenario == "A" and h.core.count(0) >= 1000:
+			print("REACHED %s %s %d %.3f" % [mode, scenario, seed_value, steps_done * step / 3600.0])
+			break
+		if steps_done >= next_hour * per_hour:
+			var got := Lab.sample(h, 0)
+			Tools.sample_line(mode, scenario, seed_value, next_hour, got["count"], got["means"], got["energy"], got["nutrient"])
+			_dump(h.dump(0), s)
+			next_hour += 1
+			if got["count"] == 0 and OS.get_environment("NO_BUPS") != "1":
 				break
-			if steps_done >= next_hour * per_hour:
-				var st: Dictionary = dish.population_stats()
-				var energy := 0.0
-				var ex: PackedFloat32Array = dish.sim.export_state_bytes().to_float32_array()
-				var np: int = ex.size() / GpuLayout.RECORD_WORDS
-				for i in np:
-					energy += ex[i * GpuLayout.RECORD_WORDS + 5]
-				Tools.sample_line(mode, scenario, seed_value, next_hour, st["count"], [st["speed"], st["sense"], st["metabolism"], st["size"], st["harm"]], energy / maxf(np, 1), field.total())
-				_dump(field.values())
-				next_hour += 1
-				if st["count"] == 0 and OS.get_environment("NO_BUPS") != "1":
-					break
-	else:
-		var gpu := GpuSim.new(null, OS.get_environment("GPU_FROM_SOURCE") == "1")
-		var feed_per_second: float = Dish.feed_per_second(start.feed_density)
-		var with_world := scenario in ["D", "E", "F"]  # (plankton and sources: the CPU dish runs their part, recording what it would do to the field)
-		var start_state: PackedByteArray = dish.sim.export_state_bytes()
-		var state := GpuSim.State.of_grid(field, dish.radius, start_state, consts)
-		state.limit = start.bup_limit
-		state.fill_weights = field.export_fill_weights()
-		state.feed = feed_per_second
-		state.step = step
-		state.diffusion = field.get_diffusion()
-		state.dish_seed = seed_value
-		state.next_id = dish.sim.get_next_id()
-		gpu.load_state(state)
-		if with_world:
-			field.set_recording(true)
-			var zeros := []
-			zeros.resize(field.get_size() * field.get_size())
-			zeros.fill(0.0)
-			field.load_values(zeros)
-			dish.feed_density = 0.0
-			dish.clear_bups()
-		var steps_done := 0
-		var next_hour := 1
-		var area := field.get_spacing() * field.get_spacing()
-		while steps_done < hours * per_hour:
-			var events := {}
-			if with_world:
-				var world_events := GpuSim.WorldEvents.new()
-				for st in 9:
-					dish.step(step)
-					world_events.add_step(field)
-				events = world_events.as_dict()
-			Lab.run_steps(gpu, 9, events)  # (nine steps: three minutes of sim time at 20 s)
-			steps_done += 9
-			var cnt := gpu.counts()
-			if scenario == "A" and cnt[0] >= 1000:
-				print("REACHED %s %s %d %.3f" % [mode, scenario, seed_value, steps_done * step / 3600.0])
-				break
-			if steps_done >= next_hour * per_hour:
-				var bups := gpu.read_bups().to_float32_array()
-				var np := cnt[0]
-				var sums := [0.0, 0.0, 0.0, 0.0, 0.0]
-				var energy := 0.0
-				for i in np:
-					var o := i * GpuLayout.RECORD_WORDS
-					sums[0] += bups[o + 8]; sums[1] += bups[o + 9]; sums[2] += bups[o + 10]; sums[3] += bups[o + 11]; sums[4] += 1.0 - exp(-bups[o + 15])
-					energy += bups[o + 5]
-				var conc := gpu.read_conc()
-				_dump(conc)
-				var total := 0.0
-				for v in conc:
-					total += v
-				total *= area
-				if with_world:
-					for pf in Lab.puffs(gpu):
-						total += pf[2]
-					total += field.total()  # (only what the sources have kept back: the recording field's own grid stays empty)
-				for k in 5:
-					sums[k] /= maxf(np, 1)
-				Tools.sample_line(mode, scenario, seed_value, next_hour, np, sums, energy / maxf(np, 1), total)
-				next_hour += 1
-				if np == 0 and OS.get_environment("NO_BUPS") != "1":
-					break
-		print("OVERFLOWS %s %s %d %s" % [mode, scenario, seed_value, str(gpu.overflows())])  # (what found no room on the GPU over the run)
-	quit(0)
+	var overflow := int(h.core.overflow())
+	print("OVERFLOWS %s %s %d %d" % [mode, scenario, seed_value, overflow])
+	failed = overflow != 0 or not TestUtil.failures.is_empty()
+	print("VALIDATE DYNAMICS %s" % ("FAILED" if failed else "OK"))
+	h.core.release()
+	quit(1 if failed else 0)

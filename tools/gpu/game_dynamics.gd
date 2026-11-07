@@ -50,7 +50,7 @@ func _read_gpu() -> Array:
 	RenderingServer.call_on_render_thread(func() -> void:
 		var bytes := gpu.read_bups()
 		var conc := gpu.read_conc()
-		var puffs := Lab.puffs(gpu)
+		var puffs := Lab.puffs_of_gpu(gpu)
 		out.append([bytes, conc, puffs, gpu.rd.buffer_get_data(gpu.buffer("CONC2")).to_float32_array()]))
 	var bytes: PackedByteArray = out[0][0]
 	var bups := bytes.to_float32_array()

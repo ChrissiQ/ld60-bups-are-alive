@@ -191,7 +191,7 @@ func _process(_delta: float) -> bool:
 			return false
 		var gpu := world.gpu
 		var got := []
-		RenderingServer.call_on_render_thread(func() -> void: got.append(gpu.read_conc()); got.append(Lab.puffs(gpu)))
+		RenderingServer.call_on_render_thread(func() -> void: got.append(gpu.read_conc()); got.append(Lab.puffs_of_gpu(gpu)))
 		var conc: PackedFloat32Array = got[0]
 		var cpu_conc: PackedFloat32Array = copy_field.export_packed()["conc"]
 		var worst := 0.0

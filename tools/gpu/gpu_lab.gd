@@ -1,62 +1,82 @@
 extends RefCounted
-## What the windowed checks do with a GpuSim on a local RenderingDevice that the game never does: record by hand, submit and wait, time
-## kernels, probe the clouds. It reaches into GpuSim's own recording helpers (`_set_step`, `_record_*`, `_delta`, `_bins` ...), which is why it
-## lives here and not in the shipped class. Every function takes the GpuSim; none is for the main device (that frame submits itself).
+## What the windowed checks read from a `SimHarness` that a test does not: the figures of a SAMPLE line, a dish's nutrient by kind, its
+## clouds, and the time of each kernel. Every function takes the harness and a dish's row.
+##
+## `submit`, `build_index`, `probe` and `puffs_of_gpu` work on a lone `GpuSim` on a local device (queries_check.gd and pool_chain_check.gd
+## still hold one); they go with `GpuSim`.
+
+const CLOUD_WORDS := 8  ## per cloud in a dump: x, y, mass, variance, ...
 
 
-## Submits what was recorded and waits for it.
+## A dish's figures for a SAMPLE line, from one dump: {count, means (speed, sense, metabolism, size, harm), energy (the mean reserve),
+## nutrient (the grid and the deposits waiting, the clouds), acetate}. The means come from the stats pass, the mean reserve and the
+## nutrient from the records and the field.
+static func sample(h: SimHarness, row: int) -> Dictionary:
+	var d := h.dump(row)
+	var s: Scenario = h.scenarios[row]
+	var stats: PackedByteArray = d["stats"]
+	var n := int(stats.decode_float(GpuLayout.ST_COUNT * 4))
+	var means := []
+	for g in GpuLayout.GENE_NAMES.size():
+		means.append(stats.decode_float((GpuLayout.ST_SPEED + g) * 4) / maxf(n, 1))
+	means.append(stats.decode_float(GpuLayout.ST_HARM * 4) / maxf(n, 1))
+	var recs: PackedByteArray = d["records"]
+	var energy := 0.0
+	for i in recs.size() / GpuLayout.RECORD_BYTES:
+		energy += recs.decode_float(i * GpuLayout.RECORD_BYTES + GpuLayout.R_ENERGY * 4)
+	var stocks := nutrient(d, s)
+	return {"count": n, "means": means, "energy": energy / maxf(n, 1), "nutrient": stocks["glucose"], "acetate": stocks["acetate"]}
+
+
+## The glucose (cells, deposits waiting, clouds) and the acetate of a dish in energy, from its dump and its scenario.
+static func nutrient(d: Dictionary, s: Scenario) -> Dictionary:
+	var n := DishGrid.cells_across(s.radius, s.resolution)
+	var area := pow(2.0 * s.radius / n, 2.0)
+	var f: PackedByteArray = d["field"]
+	var n2 := n * n
+	var glucose := 0.0
+	var acetate := 0.0
+	var waiting := 0.0
+	for c in n2:
+		glucose += f.decode_float(c * 4)
+		acetate += f.decode_float((n2 + c) * 4)
+		waiting += f.decode_u32((3 * n2 + c) * 4) * 4096.0 + f.decode_u32((2 * n2 + c) * 4) / 1048576.0
+	var clouds := 0.0
+	for p in puffs(d):
+		clouds += p[2]
+	return {"glucose": glucose * area + waiting + clouds, "acetate": acetate * area}
+
+
+## The clouds of a dump: [x, y, mass, variance, ...] each (CLOUD_WORDS words).
+static func puffs(d: Dictionary) -> Array:
+	var cf: PackedFloat32Array = (d["clouds"] as PackedByteArray).to_float32_array()
+	var out := []
+	for k in cf.size() / CLOUD_WORDS:
+		out.append(Array(cf.slice(k * CLOUD_WORDS, (k + 1) * CLOUD_WORDS)))
+	return out
+
+
+## Microseconds of each kernel over `steps` steps of `delta` seconds, each dispatch in a submit of its own (`SimCore.profile_steps`): kernel
+## name -> the mean over the dispatches. The world is advanced by the steps.
+static func profile(h: SimHarness, steps := 20, delta := SimHarness.DEFAULT_DELTA) -> Dictionary:
+	var raw: Dictionary = h.core.profile_steps(steps, delta)
+	var out := {}
+	for k in raw:
+		var total := 0.0
+		for us in raw[k]:
+			total += us
+		out[k] = total / maxf(raw[k].size(), 1)
+	return out
+
+
+## Submits what was recorded on a lone `GpuSim` and waits for it.
 static func submit(gpu: GpuSim) -> void:
 	assert(not gpu.is_main, "submit/sync only on a local device: on the main device the frame submits what was recorded")
 	gpu.rd.submit()
 	gpu.rd.sync()
 
 
-## Whole steps of the current length, as many as asked, in one submit, waiting for them.
-static func run_steps(gpu: GpuSim, steps: int, events := {}) -> void:
-	gpu.prepare_steps(steps, {"events": events})
-	var cl := gpu.rd.compute_list_begin()
-	gpu.record_steps(cl, steps)
-	gpu.rd.compute_list_end()
-	submit(gpu)
-
-
-## The core of one step with the bups where they are (no feed, division or death): for comparing the pieces with the CPU's. The
-## diffusion is `diffuse_pieces` pieces of k = `k_per_piece` (D dt / cell² each) here, not the coefficient given to load_state.
-static func run(gpu: GpuSim, step_seconds: float, k_per_piece: float, diffuse_pieces: int, swim := true) -> void:
-	gpu._set_step(step_seconds, swim)
-	var cl := gpu.rd.compute_list_begin()
-	gpu._record_diffusion(cl, k_per_piece * diffuse_pieces)
-	gpu._record_after_diffusion(cl)
-	gpu._record_bups(cl)
-	gpu.rd.compute_list_end()
-	submit(gpu)
-
-
-## Time each kernel on its own (microseconds per dispatch, over `reps` dispatches in one submit; the state is not reset, so it is only for timing).
-static func profile(gpu: GpuSim, reps := 20) -> Dictionary:
-	gpu._set_step(gpu._delta)
-	var n := gpu.n
-	var capacity := gpu.capacity
-	var puff_capacity := gpu.puff_capacity
-	var out := {}
-	var plan := {}
-	if gpu._has_clouds:
-		plan.merge({"puff_advance": puff_capacity, "dep_apply": n * n, "bin_clear": gpu._bins, "bin_count": puff_capacity, "bin_cursor": gpu._bins, "bin_scatter": puff_capacity, "bin_sort": gpu._bins, "puff_clear": puff_capacity, "puff_scale": puff_capacity, "puff_commit": puff_capacity})
-	plan.merge({"feed": n * n, "diffuse_a": n * n, "snapshot": n * n, "clear": n * n, "swim": capacity, "demand": capacity, "cells": n * n, "apply": capacity, "ac_cells": n * n, "ac_apply": capacity, "life": capacity, "scan0_s": capacity, "compact": capacity * 7, "copy": capacity * 7})
-	for kname in plan:
-		var cl := gpu.rd.compute_list_begin()
-		var t0 := Time.get_ticks_usec()
-		for r in reps:
-			gpu.dispatch(cl, kname, plan[kname], float(capacity), 0.1)
-		gpu.rd.compute_list_end()
-		submit(gpu)
-		out[kname] = float(Time.get_ticks_usec() - t0) / reps
-	out["diffuse_a"] = out["diffuse_a"] * maxi(2, 2 * ceili(gpu._k_total / 0.4))
-	out["scans"] = out["scan0_s"] * 2.0 * 1.4  # (two scans: the first level is nearly all of each)
-	return out
-
-
-## Files the clouds by place (as at the start of a step).
+## Files the clouds of a lone `GpuSim` by place (as at the start of a step).
 static func build_index(gpu: GpuSim) -> void:
 	gpu._has_clouds = true
 	var cl := gpu.rd.compute_list_begin()
@@ -85,8 +105,8 @@ static func probe(gpu: GpuSim, points: PackedFloat32Array) -> PackedFloat32Array
 	return out
 
 
-## The clouds that are there: [x, y, mass, variance, cut] each.
-static func puffs(gpu: GpuSim) -> Array:
+## The clouds a lone `GpuSim` holds: [x, y, mass, variance, cut] each.
+static func puffs_of_gpu(gpu: GpuSim) -> Array:
 	var clouds := gpu.read_clouds()
 	var out := []
 	for k in clouds.size() / 5:
