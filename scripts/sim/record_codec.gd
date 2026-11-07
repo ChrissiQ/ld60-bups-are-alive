@@ -1,8 +1,7 @@
 class_name RecordCodec
 extends RefCounted
-## A bup's record (28 words, `GpuLayout.R_*`) as the dictionary `bup_info` gives, worked out in script: a port of
-## the native record reader's rule. The pooled world has no native simulation to ask, so a
-## pick's panel reads its answer from the record this way.
+## A bup's record (28 words, `GpuLayout.R_*`) as the dictionary the info panel reads, worked out in script from the
+## step kernel's formulas (tests/record_codec_test.gd checks it against the layout). A pick's panel reads its answer from the record this way.
 ##
 ## What a record cannot say comes in as arguments: `born` (the family record's, 0 for a founder), `steering` (the chance of
 ## steering up the gradient at the bup's place: the probe's answer, `pool_probe_full`) and `upkeep_scale` (the dish's).
@@ -12,7 +11,7 @@ const SIZE_GENE_KEY := "size_gene"
 const GENE_KEYS := ["speed", "sense", "metabolism", SIZE_GENE_KEY]
 
 
-## A float as the 32-bit float the native code keeps it in.
+## A float as the 32-bit float the kernels keep it in.
 static func f32(x: float) -> float:
 	var a := PackedFloat32Array([x])
 	return a[0]
@@ -23,7 +22,7 @@ static func id_of(records: PackedByteArray, index: int) -> int:
 	return records.decode_u32(o + GpuLayout.R_ID_LO * 4) | (records.decode_u32(o + GpuLayout.R_ID_HI * 4) << 32)
 
 
-## What `bup_info` would say of the bup in record `index` of `records`; empty when there is no such record.
+## The info of the bup in record `index` of `records`; empty when there is no such record.
 static func info_from_record(records: PackedByteArray, index: int, constants: Dictionary, born := 0, steering := 0.5, upkeep_scale := 1.0) -> Dictionary:
 	if index < 0 or (index + 1) * GpuLayout.RECORD_BYTES > records.size():
 		return {}
