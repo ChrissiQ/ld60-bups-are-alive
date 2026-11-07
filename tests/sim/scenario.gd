@@ -10,7 +10,7 @@ extends RefCounted
 
 const FLAG_NAMES := ["stationary", "death_husks", "plankton_husks", "key", "conjugation", "acetate"]
 const RESOLUTIONS := [100, 200, 400]
-const FOUNDER_ENERGY := 50.0  ## a founder's reserve
+const FOUNDER_ENERGY := Dish.FOUNDER_ENERGY  ## a founder's reserve: the game's
 const KEY_LEVEL_2_REACH := 2 << 8  ## the acetate key in the reach word (bits 8-9)
 
 var label := ""
@@ -134,17 +134,18 @@ func dish_flags() -> int:
 	return bits
 
 
-## The founders as records (GpuLayout.RECORD_WORDS words each, ids from `dish_number`), placed uniformly inside 90% of the rim.
+## The founders as records (GpuLayout.RECORD_WORDS words each, ids from `dish_number`), placed uniformly in the game's founders' disc, which grows with their number.
 func founder_records(dish_number: int) -> PackedByteArray:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = (layout_seed if layout_seed != 0 else seed_value) * 7919 + 17
+	var spread := minf(radius * 0.8, 40.0 + 40.0 * sqrt(maxf(bups - 4.0, 0.0)))  # (the game's disc: 4 in a spot 40 µm across, 100 across about 430 µm)
 	var founder := Genome.founder()
 	var born: float = Cell.mass_to_add(founder)
 	var out := PackedByteArray()
 	out.resize(bups * GpuLayout.RECORD_BYTES)
 	for i in bups:
 		var o := i * GpuLayout.RECORD_BYTES
-		var at := Vector2.from_angle(rng.randf() * TAU) * (0.9 * radius * sqrt(rng.randf()))
+		var at := Vector2.from_angle(rng.randf() * TAU) * (spread * sqrt(rng.randf()))
 		var dir := Vector2.from_angle(rng.randf() * TAU)
 		GpuLayout.set_id(out, i, (i + 1))
 		out.encode_float(o + GpuLayout.R_X * 4, at.x)
@@ -152,7 +153,7 @@ func founder_records(dish_number: int) -> PackedByteArray:
 		out.encode_float(o + GpuLayout.R_DX * 4, dir.x)
 		out.encode_float(o + GpuLayout.R_DY * 4, dir.y)
 		out.encode_float(o + GpuLayout.R_ENERGY * 4, founder_energy)
-		out.encode_float(o + GpuLayout.R_MASS * 4, born)
+		out.encode_float(o + GpuLayout.R_MASS * 4, born * (1.0 + rng.randf()))  # (not all at the same point in the cycle, as the game's founders)
 		out.encode_float(o + GpuLayout.R_BIRTH_MASS * 4, born)
 		for g in GpuLayout.GENE_NAMES.size():
 			out.encode_float(o + (GpuLayout.R_SPEED + g) * 4, founder[GpuLayout.GENE_NAMES[g]])
