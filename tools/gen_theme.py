@@ -245,6 +245,7 @@ T("Tagline","Label",colors={"font_color":EMPHASIS},sizes={"font_size":FS["2xl"]}
 T("Story","Label",colors={"font_color":TEXT},sizes={"font_size":FS["xl"]},consts={"line_spacing":5},fonts={"font":LIGHT})
 T("Notice","Label",colors={"font_color":TEXT},sizes={"font_size":FS["m"]},fonts={"font":REG},styles={"normal":"notice_panel"})
 T("Banner","Label",colors={"font_color":TEXT,"font_outline_color":OUTLINE},consts={"outline_size":6},sizes={"font_size":FS["4xl"]},fonts={"font":LIGHT})
+T("BannerNote","Label",colors={"font_color":TEXT,"font_outline_color":OUTLINE},consts={"outline_size":5},sizes={"font_size":FS["xl"]},fonts={"font":LIGHT})
 T("BupName","Label",colors={"font_color":EMPHASIS},sizes={"font_size":FS["l"]},fonts={"font":REG})
 T("BupNameField","LineEdit",colors={"caret_color":EMPHASIS,"font_color":EMPHASIS},sizes={"font_size":FS["l"]},fonts={"font":REG},styles={"focus":"bup_name_field","normal":"bup_name_field"})
 T("DialogTitle","Label",colors={"font_color":TEXT},sizes={"font_size":FS["2xl"]},fonts={"font":LIGHT})

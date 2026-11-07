@@ -1119,10 +1119,12 @@ func _show_memory_warning() -> void:
 	var text := Strings.t("banner.memory_stalled" if state == PoolLimits.WARN_STALLED else "banner.memory_near")
 	var ours := banner.text == Strings.t("banner.memory_stalled") or banner.text == Strings.t("banner.memory_near")
 	if _banner_left <= 0.0 or ours:
-		_show_banner(text, BANNER_BRIEF_SECONDS)
+		_show_banner(text, BANNER_BRIEF_SECONDS, true)
 
 
-func _show_banner(text: String, seconds: float) -> void:
+## `note`: a sentence of advice, set in the smaller `BannerNote` (the usual banner is a few words).
+func _show_banner(text: String, seconds: float, note := false) -> void:
+	banner.theme_type_variation = &"BannerNote" if note else &"Banner"
 	banner.text = text
 	_banner_left = seconds
 
