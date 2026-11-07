@@ -20,6 +20,7 @@ var resolution := 100  ## cells across
 var limit := 1000
 var bups := 20
 var nutrient_density := 32.0
+var founder_energy := FOUNDER_ENERGY  ## the founders' reserve
 var feed_density := 0.0
 var bloom_density := 0.0
 var medium_thickness := 25.0
@@ -150,7 +151,7 @@ func founder_records(dish_number: int) -> PackedByteArray:
 		out.encode_float(o + GpuLayout.R_Y * 4, at.y)
 		out.encode_float(o + GpuLayout.R_DX * 4, dir.x)
 		out.encode_float(o + GpuLayout.R_DY * 4, dir.y)
-		out.encode_float(o + GpuLayout.R_ENERGY * 4, FOUNDER_ENERGY)
+		out.encode_float(o + GpuLayout.R_ENERGY * 4, founder_energy)
 		out.encode_float(o + GpuLayout.R_MASS * 4, born)
 		out.encode_float(o + GpuLayout.R_BIRTH_MASS * 4, born)
 		for g in GpuLayout.GENE_NAMES.size():
