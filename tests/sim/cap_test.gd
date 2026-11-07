@@ -8,7 +8,7 @@ extends SceneTree
 ##   and 200 units/mm2, held 6,400 and stopped near 160 bups, measured with reserves of 50 and of 100.) Doubling takes 40 min, 20 to 600
 ##   is 5 doublings = 3.3 h.
 ## - after that, stepped as the game steps at x10,000 and 60 frames a second (166.7 s a frame: 8 steps of 20 s), the count read after each
-##   frame is over the limit in at most 1% of the frames [derived: cap_check's `max_share_over` default 0.01, AGENTS.md "cap_check"].
+##   frame is over the limit in at most 1% of the frames [derived: cap_check's `max_share_over` default 0.01; AGENTS.md "Limits"].
 ##   The trim expects the step's growth plus CAP_SIGMAS standard deviations, so the count stops a little short of the limit.
 ## Needs a GPU. Windowed only.
 

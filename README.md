@@ -2,7 +2,7 @@
 
 A small laboratory where you watch bacteria-like creatures ("bups") eat, swim, divide and evolve, with the real-world scales (micrometres, seconds) and a realistic model underneath. Play the guided experiments, or use free mode to set up any dish you like.
 
-The game is Godot 4.7 (GDScript). The simulation itself is C++ (a GDExtension in `native/`), so it has to be compiled for your operating system; prebuilt libraries are included in releases.
+The game is Godot 4.7 (GDScript). The simulation runs on the GPU (compute shaders in `gpu/`, driven from `scripts/sim/` through Godot's `RenderingDevice`), so the game needs a GPU that supports compute. The only C++ is the family-tree store (`LineageStore`, a GDExtension in `native/`), which has to be compiled for your operating system; prebuilt libraries are included in releases.
 
 ## Play it
 
@@ -13,37 +13,29 @@ The game is Godot 4.7 (GDScript). The simulation itself is C++ (a GDExtension in
 
 In game, **Controls** on the title screen lists the keys. The main ones: Space pauses, `1`-`4` set the speed (x1 to x10,000), `I` inspects, `H` pans, scroll or `+`/`-` zoom, `W A S D` move the view, `Z X C M V B` show or hide layers.
 
-## CPU and GPU simulation
+## The simulation
 
-The simulation has two backends that implement the same model: C++ on the CPU (`native/`) and compute shaders on the GPU (`gpu/`, run through Godot's `RenderingDevice`). The GPU is much faster with large populations at high playback speeds, and runs at any speed, slow ones too.
-
-The **GPU simulation** setting has three values:
-
-- **Auto** (default): chooses the backend while the game runs, from how much work the processor would need for the frame: the dish's grid and population, the playback speed, and the other dishes sharing the processor (it learns how fast your processor really is as it runs).
-- **On**: runs on the GPU whenever the machine can.
-- **Off**: runs on the CPU only.
-
-Free mode offers the setting under the setup screen's Advanced options; goal mode always uses Auto. A machine with no usable GPU runs on the CPU.
+Every running dish lives in one pooled world on the GPU: one set of buffers holds all the dishes' bups, nutrient grids, clouds and husks, and a dish's run does not depend on what else is in the pool. A thread of its own steps the world; the main thread shows the newest snapshot of it. There is no processor simulation and no backend setting. A machine without compute shaders (a headless run) gets a stub that runs nothing.
 
 ## Build and run from source
 
-You need Godot 4.7, Python 3 with SCons (`pip install scons`), and a C++ compiler (Xcode command line tools on macOS, MSVC on Windows, gcc/clang on Linux).
+You need Godot 4.7, Python 3 with SCons (`pip install scons`), and a C++ compiler (Xcode command line tools on macOS), and a GPU with compute shaders to run the simulation.
 
 1. **Get the C++ bindings.** `native/godot-cpp/` is not in the repository; clone it at the commit the game was built with (`GODOT_CPP_COMMIT` in `.github/workflows/build-native.yml`):
    ```
    git clone https://github.com/godotengine/godot-cpp native/godot-cpp
    git -C native/godot-cpp checkout <that commit>
    ```
-2. **Compile the simulation** (debug is what the editor uses; release is for exports):
+2. **Compile the lineage store** (debug is what the editor uses; release is for exports):
    ```
    cd native
    scons platform=macos arch=universal target=template_debug api_version=4.5 -j8
    scons platform=macos arch=universal target=template_release api_version=4.5 -j8
    ```
-   Use `platform=windows arch=x86_64` or `platform=linux arch=x86_64` on those systems. The libraries land in `native/bin/` (not committed).
+   The libraries land in `native/bin/` (not committed).
 3. **Open the project** in Godot 4.7 and press play (the first open imports assets), or run `godot --path .`.
 
-Only the C++ needs compiling. GDScript changes take effect on the next run.
+Only the lineage store needs compiling. GDScript changes take effect on the next run.
 
 ## Things to know
 

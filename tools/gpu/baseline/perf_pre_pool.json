@@ -7,9 +7,9 @@
  },
  "expected_before_running": {
   "written_before_running": true,
-  "G_50_cpu": "achieved speed x10,000 (the set speed; the processor can reach x68,000) [derived, AGENTS.md 'Cost of a nearly empty CPU dish']; frame near the display's period",
+  "G_50_cpu": "achieved speed x10,000 (the set speed; the processor can reach x68,000) [derived]; frame near the display's period",
   "G_gpu_vs_cpu": "GPU floor loses at 50 bups: ~x41,000 at best [derived]; both reach the set x10,000, so frame time decides the 'best of two' [placeholder]",
-  "E": "100k at x10,000 holds x10,000 on the GPU with frames near 16.7 ms [placeholder; AGENTS: 170k bups at x1 step 0.5 ms on the GPU]",
+  "E": "100k at x10,000 holds x10,000 on the GPU with frames near 16.7 ms [placeholder; 170k bups at x1 step 0.5 ms on the GPU]",
   "A": "1M: speed below x10,000, frame near the display period because the budget cuts steps [placeholder]",
   "F": "2M: frame about 66 ms [placeholder]",
   "B_C_D": "no derivation possible: first measurement [placeholder: frame at most ~3 display periods]",

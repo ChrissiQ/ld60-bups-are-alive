@@ -3,7 +3,7 @@ extends RefCounted
 ## The word layouts of the GPU path, in one place: the bup record, the family events, the counters (CNT, PCNT), the frame's questions
 ## (QIN) and answers (OUT), the slots of P, and the sizes of the buffers they live in. Every word is a 32-bit word. GpuKernels.add()
 ## declares the names a kernel uses at the top of its GLSL (an int constant here as `const uint NAME = value;`, a slot of P as
-## `const int P_<NAME> = slot;`), so the kernels, the host's pool code and the tools all read these. The native code has its own literals. What belongs here: int constants (every one becomes a GLSL name), P_SLOTS, the record's one float marker (NO_PICTURE) and
+## `const int P_<NAME> = slot;`), so the kernels, the host's pool code and the tools all read these. What belongs here: int constants (every one becomes a GLSL name), P_SLOTS, the record's one float marker (NO_PICTURE) and
 ## its genes' names (GENE_NAMES), and the static helpers that read and write a record's words; none of it may refer to another class.
 
 # ---- the bup record (BUPS, BUPS2, CHILD; an exported state) ------------------------------------------------------------------

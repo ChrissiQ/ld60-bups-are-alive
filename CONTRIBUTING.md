@@ -8,7 +8,7 @@ Open an issue. For a bug, say what you did, what you expected, and what happened
 
 ## Setting up
 
-Follow "Build and run from source" in the [README](README.md). The C++ simulation must be compiled once for your platform before the game will run from the editor.
+Follow "Build and run from source" in the [README](README.md). The C++ lineage store must be compiled once for your platform before the game will run from the editor.
 
 ## What a good change looks like
 
@@ -18,10 +18,10 @@ Follow "Build and run from source" in the [README](README.md). The C++ simulatio
 - **The encyclopedia** (`[encyclopedia]` in `text/strings.cfg`, order in `scripts/encyclopedia.gd`) explains the game's terms: what a thing is in real life, and how it works in the game. It does not say what to click (that is the tutorial's). A change that alters what an entry says updates the entry, a new feature or term gets one, and anything about real biology is checked against sources and says where the game departs from it.
 - **Interface styling** goes through the theme in `scenes/menu_theme.tres` (use a `theme_type_variation`, or add one there). No per-node overrides, no colours or styles in code. The theme is generated from `design/tokens.json`: edit the token there, run `python3 tools/gen_theme.py` and `python3 tools/gen_design.py` (the second rewrites the design system page, `docs/design-system.html`), then `godot --headless --path . --import`. Never edit the generated files; `design_tokens_test` fails when one is stale.
 - **Match the code around you:** naming, comment density and idiom. Comments say why, not what.
-- **Tests:** add or update a test for behaviour you change. The interface tests are quick and catch most slips (`ui_lint_test`, `strings_test`, `fonts_test`, `screens_test`, `settings_test`, `toolbar_test`, `free_mode_test`, `tutorial_test`); the simulation tests are slow, so run the ones your change can affect. How to run them is under "Tests" below. Please do not leave temporary test files behind.
-- **Model changes:** every change to the simulation model must be made in both backends, the C++ in `native/` and the GPU kernels in `gpu/`. See the GPU path section of `AGENTS.md`.
+- **Tests:** add or update a test for behaviour you change. The interface tests are quick and catch most slips (`ui_lint_test`, `strings_test`, `fonts_test`, `screens_test`, `settings_test`, `toolbar_test`, `free_mode_test`, `tutorial_test`); the simulation tests need a GPU and are slow, so run the ones your change can affect. How to run them is under "Tests" below. Please do not leave temporary test files behind.
+- **Model changes:** the model lives in the GPU kernels (`gpu/kernels*.gd`) and nowhere else; regenerate the shaders and run the windowed tests under `tests/sim/`. See "The simulation" in `AGENTS.md`.
 - **Motion table:** `scripts/motion_table.gd` is generated (`tools/gen_motion_table.gd`, about 5 minutes). Regenerate it when `motion_table_test` says it is stale.
-- **C++ changes:** rebuild for your platform and say in the pull request that the C++ changed; Windows and Linux libraries come from the release workflow.
+- **C++ changes** (only `LineageStore` is C++): rebuild for your platform and say in the pull request that the C++ changed; the other platforms' libraries come from the release workflow.
 
 `AGENTS.md` has the full list of project conventions and gotchas (it is written for coding agents, but it is just as useful for people).
 
@@ -35,7 +35,7 @@ godot --headless --path . -s tests/strings_test.gd
 godot --headless --path . res://tests/dialog_test.tscn
 ```
 
-The quick ones cover the interface (`ui_lint_test`, `strings_test`, `fonts_test`, `screens_test`, `settings_test`, `toolbar_test`, `free_mode_test`, `tutorial_test`, `dish_codec_test`). The simulation ones are slow: `model_test`, `cloud_test`, `substep_test`, `motion_table_test`, and `smoke`, which plays a whole game. Run `godot --headless --path . --import` after adding a `class_name` script.
+The quick ones cover the interface (`ui_lint_test`, `strings_test`, `fonts_test`, `screens_test`, `settings_test`, `toolbar_test`, `free_mode_test`, `tutorial_test`, `dish_codec_test`). The simulation ones (`tests/sim/`, run by `tools/run_sim_tests.sh`) open a window, need a GPU and are slow; `motion_table_test` checks the generated motion table. Run `godot --headless --path . --import` after adding a `class_name` script.
 
 ## Making a release
 
