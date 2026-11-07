@@ -68,8 +68,7 @@ float neglog1m(float x) { // -ln(1 - x)
 	if (x < 0.01) return x * (1.0 + x * (0.5 + x * (0.33333333 + x * 0.25)));
 	return -log(1.0 - x);
 }
-void f(uint i, uint d, uint l) {
-	if (OWNER[i] != int(i)) return;
+void share(uint i, uint d) {
 	float dm = FIX30(DHI[i], DLO[i]); // what the bups there wanted
 	SCALE[i] = 0.0;
 	float c0 = CONC[i];
@@ -93,5 +92,17 @@ void f(uint i, uint d, uint l) {
 	}
 	SCALE[i] = lo * area / dm;
 	CONC[i] = c0 - lo;
+}
+// only an owner cell holds sums (a bup's cell is always its owner), so this is where they are left at zero for the next step's demand
+// (a step's pool_clear is no longer a pass of its own); a word already zero is not written
+void f(uint i, uint d, uint l) {
+	if (OWNER[i] != int(i)) return;
+	share(i, d);
+	if (DLO[i] != 0u) DLO[i] = 0u;
+	if (DHI[i] != 0u) DHI[i] = 0u;
+	if (RLO[i] != 0u) RLO[i] = 0u;
+	if (RHI[i] != 0u) RHI[i] = 0u;
+	if (ALO[i] != 0u) ALO[i] = 0u;
+	if (AHI[i] != 0u) AHI[i] = 0u;
 }
 CELL_LOOP(f, WORLD[WD_CELLS])

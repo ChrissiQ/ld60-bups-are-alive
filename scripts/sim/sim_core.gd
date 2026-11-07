@@ -78,6 +78,9 @@ var _temp_sets: Array[RID] = []  ## the copy kernels' sets of one publish
 var _profile: Variant = null  ## while `profile_steps` runs: kernel name -> Array of µs, each dispatch its own submit
 var _scratch := RID()  ## where `read_parts` gathers what it reads (up to SCRATCH_KEEP bytes)
 var _scratch_bytes := 0
+var lone_field := false  ## checks only: a step runs the lone feed and diffusion passes (ping-pong, then pool_land_copy) in place of pool_fdiff (tools/gpu/fused_check.gd)
+var _tile_rounds := PackedInt32Array()  ## the tiles of pool_fdiff that run in each round (a prefix of TILES)
+var _tile_key := PackedInt32Array()  ## what TILES was built from: each dish's row, cells across and iterations
 var lone_passes := false  ## checks only: a step runs the lone kernels in place of the fused passes, in the same order (tools/gpu/fused_check.gd)
 var lone_order: Array = ["pool_ac_apply", "pool_conj_apply", "pool_life"]  ## what the lone passes run in place of pool_ac_conj_life and pool_donor_life (a check can change it to show that it would see a wrong order)
 
@@ -680,6 +683,7 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 		return {"steps": 0, "overflow": _overflow}
 	steps = mini(steps, MAX_STEPS)
 	_set_step(delta)
+	_sync_tiles()
 	var events: Dictionary = plan.events if plan != null and plan.get("events") != null else {}
 	var history: PackedByteArray = plan.history_flags if plan != null and plan.get("history_flags") != null else PackedByteArray()
 	var ev := _world_events(steps, events)
@@ -724,6 +728,7 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 func profile_steps(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 	_apply_edits()
 	_set_step(delta)
+	_sync_tiles()
 	var events: Dictionary = plan.events if plan != null and plan.get("events") != null else {}
 	var ev := _world_events(steps, events)
 	if not _ensure_room(steps, ev):
@@ -748,6 +753,50 @@ func profile_steps(steps: int, delta: float, plan: Variant = null) -> Dictionary
 	return out
 
 
+## Builds TILES for pool_fdiff: a word a tile of every dish (its row in the upper 16 bits, the tile's number in the lower), the dishes with the
+## most rounds first, so the tiles that have a round r to run are a prefix; `_tile_rounds[r]` is that prefix's length. Uploaded only when a
+## dish's row, size or iterations changed. Called after `_set_step`, before the compute list is begun.
+func _sync_tiles() -> void:
+	var rows := _dishes.keys()
+	rows.sort()
+	var key := PackedInt32Array()
+	for row: int in rows:
+		var cd: CoreDish = _dishes[row]
+		key.append(row)
+		key.append(cd.grid.n)
+		key.append(cd.iterations)
+	if key == _tile_key and not _tile_rounds.is_empty():
+		return
+	_tile_key = key
+	rows.sort_custom(func(a: int, b: int) -> bool:
+		var ra := GpuKernelsField.field_rounds((_dishes[a] as CoreDish).iterations)
+		var rb := GpuKernelsField.field_rounds((_dishes[b] as CoreDish).iterations)
+		return ra > rb or (ra == rb and a < b))
+	var words := PackedInt32Array()
+	_tile_rounds = PackedInt32Array()
+	var counts := []
+	for row: int in rows:
+		var cd: CoreDish = _dishes[row]
+		var across := GpuKernelsField.tiles_across(cd.grid.n)
+		for t in across * across:
+			words.append((row << 16) | t)
+		counts.append([GpuKernelsField.field_rounds(cd.iterations), across * across])
+	var most_rounds := 0
+	for c in counts:
+		most_rounds = maxi(most_rounds, c[0])
+	_tile_rounds.resize(most_rounds)
+	for r in most_rounds:
+		var n := 0
+		for c in counts:
+			if c[0] > r:
+				n += c[1]
+		_tile_rounds[r] = n
+	if words.is_empty():
+		return
+	var bytes := words.to_byte_array()
+	rd.buffer_update(arena.buf("TILES"), 0, bytes.size(), bytes)
+
+
 ## The step `s` of a batch, in the order of kernels_life.gd's header.
 func _record_step(cl: int, s: int) -> void:
 	var bg := _bup_groups()
@@ -757,24 +806,30 @@ func _record_step(cl: int, s: int) -> void:
 	var slots := maxi(_wd(GpuLayout.WD_SLOTS), BLK)
 	_disp(cl, "pool_ev_puffs", 1, float(s))
 	_disp(cl, "ev_deposits", 1, float(s))
-	_disp(cl, "pool_feed", cg)
-	var most := 0
-	for row: int in _dishes:
-		most = maxi(most, (_dishes[row] as CoreDish).iterations)
-	for pass_i in most:
-		var bound := 0
+	if lone_field:
+		_disp(cl, "pool_feed", cg)
+		var most := 0
 		for row: int in _dishes:
-			var cd: CoreDish = _dishes[row]
-			if cd.iterations > pass_i:
-				bound = maxi(bound, cd.base + cd.cells)
-		var ab := "a" if pass_i % 2 == 0 else "b"
-		_disp(cl, "pool_diffuse_" + ab, _groups(bound), float(pass_i), float(bound))
-		_disp(cl, "pool_diffuse2_" + ab, _groups(bound), float(pass_i), float(bound))
+			most = maxi(most, (_dishes[row] as CoreDish).iterations)
+		for pass_i in most:
+			var bound := 0
+			for row: int in _dishes:
+				var cd: CoreDish = _dishes[row]
+				if cd.iterations > pass_i:
+					bound = maxi(bound, cd.base + cd.cells)
+			var ab := "a" if pass_i % 2 == 0 else "b"
+			_disp(cl, "pool_diffuse_" + ab, _groups(bound), float(pass_i), float(bound))
+			_disp(cl, "pool_diffuse2_" + ab, _groups(bound), float(pass_i), float(bound))
+		_disp(cl, "pool_land_copy", cg)
+	else:
+		for r in _tile_rounds.size():
+			_disp(cl, "pool_fdiff", _tile_rounds[r], float(r), float(_tile_rounds[r]))
 	_disp(cl, "pool_puff_advance", hg)
-	_disp(cl, "pool_dep_apply", cg)
+	_disp(cl, "pool_dep_land", cg)
 	_disp(cl, "pool_snapshot", cg)
 	_record_lists(cl, hg)
-	_disp(cl, "pool_clear", cg)
+	if lone_field:
+		_disp(cl, "pool_clear", cg)
 	_disp(cl, "pool_puff_clear", hg)
 	for kname: String in (["pool_swim", "pool_demand"] if lone_passes else ["pool_swim_demand"]):
 		_disp(cl, kname, bg)

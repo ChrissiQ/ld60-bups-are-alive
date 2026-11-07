@@ -507,6 +507,148 @@ void f(uint c, uint d, uint l) {
 CELL_LOOP(f, uint(pcs.pb))
 """
 
+## The fused field pass: the feed and the diffusion's sub-iterations of both fields in shared-memory tiles with a halo, in place of
+## pool_feed and the ping-pong of pool_diffuse_a/b and pool_diffuse2_a/b (which stay, for the checks that run them alone and for
+## `SimCore.lone_field`). Per cell the arithmetic is the same, in the same order (the feed added to the cell as the first thing the first
+## sub-iteration reads, then left, right, up, down, `v + k * acc`, a cell outside the dish copied); a halo cell is computed again by the
+## tiles that share it from the same words, so its value is the same in each. A tile is FIELD_TILE cells square and a round of m sub-iterations
+## (at most FIELD_HALO) reads a halo of m cells round it and writes only the tile, so a dish takes `field_rounds(iterations)` rounds, the
+## rounds' m adding up to its iterations (`round_steps`). A round reads the A buffers (CONC, CONC2) when it is even and the B buffers (EFF,
+## CONC2B) when it is odd, and writes the other: a dish's rounds are always an odd number, so the diffusion always ends in B, and the
+## kernels that follow read the acetate there (pool_apply, pool_ac_cells, which writes CONC2 again) and pool_dep_land puts the glucose from
+## EFF into CONC with the deposits. A dish without the second food has its acetate copied A to B in its first round (the second food's
+## kernels read B). `TILES` holds a word a tile of the dishes running, those with the most rounds first: the dish's row in the upper 16
+## bits and the tile's number in the dish in the lower; pcs.pa is the round, pcs.pb the tiles that still have a round to run.
+const FIELD_TILE := 16
+const FIELD_HALO := 3
+const FIELD_GROUP := 256
+
+## The rounds a dish of `iterations` (even) sub-iterations takes: the fewest of at most FIELD_HALO each, made odd.
+static func field_rounds(iterations: int) -> int:
+	var r := (iterations + FIELD_HALO - 1) / FIELD_HALO
+	return r if r % 2 == 1 else r + 1
+
+
+## The sub-iterations of round `r` of a dish of `iterations`: an even share of them, 1 to FIELD_HALO.
+static func round_steps(iterations: int, r: int) -> int:
+	var rounds := field_rounds(iterations)
+	return (iterations * (r + 1)) / rounds - (iterations * r) / rounds
+
+
+## The tiles across a dish of `n` cells across.
+static func tiles_across(n: int) -> int:
+	return (n + FIELD_TILE - 1) / FIELD_TILE
+
+
+const K_POOL_FDIFF := """
+#define TW FIELD_TILE_N
+#define HL FIELD_HALO_N
+#define SW (TW + 2 * HL)
+#define SN (SW * SW)
+shared float sg[2 * SN];
+shared float sa[2 * SN];
+shared uint si[SN];
+void main() {
+	if (gl_WorkGroupID.x >= uint(pcs.pb)) return;
+	uint t = TILES[gl_WorkGroupID.x];
+	uint d = t >> 16u, ti = t & 0xFFFFu;
+	uint iters = DPU(d, DP_ITERATIONS);
+	uint rounds = (iters + 2u) / 3u;
+	if ((rounds & 1u) == 0u) rounds += 1u;
+	uint r = uint(pcs.pa);
+	if (r >= rounds) return;
+	uint m = (iters * (r + 1u)) / rounds - (iters * r) / rounds;
+	int n = int(DPU(d, DP_CELLS));
+	uint base = DPU(d, DP_FIELD_BASE);
+	int tpa = (n + TW - 1) / TW;
+	int x0 = (int(ti) % tpa) * TW, y0 = (int(ti) / tpa) * TW;
+	float k = DPF(d, DP_K), feed = DPF(d, DP_FEED);
+	bool ac = ((DPU(d, DP_FLAGS) >> DPF_ACETATE) & 1u) != 0u;
+	bool odd = (r & 1u) != 0u;
+	uint lid = gl_LocalInvocationID.x;
+	for (uint i = lid; i < uint(SN); i += FIELD_GROUP_N) {
+		int gx = x0 + int(i) % SW - HL, gy = y0 + int(i) / SW - HL;
+		float g = 0.0, a = 0.0;
+		uint s = 0u;
+		if (gx >= 0 && gx < n && gy >= 0 && gy < n) {
+			uint c = base + uint(gy * n + gx);
+			s = uint(INSIDE[c]);
+			if (odd) {
+				g = EFF[c];
+				if (ac) a = CONC2B[c];
+			} else {
+				g = CONC[c];
+				g += feed * WGT[c];
+				if (ac) a = CONC2[c];
+			}
+		}
+		sg[i] = g; sa[i] = a; si[i] = s;
+	}
+	barrier();
+	uint p = 0u;
+	for (uint it = 0u; it < m; it++) {
+		uint so = p * uint(SN), dso = (1u - p) * uint(SN);
+		for (uint i = lid; i < uint(SN); i += FIELD_GROUP_N) {
+			int lx = int(i) % SW, ly = int(i) / SW;
+			int gx = x0 + lx - HL, gy = y0 + ly - HL;
+			float v = sg[so + i], va = sa[so + i];
+			float ov = v, ova = va;
+			if (si[i] != 0u) {
+				float acc = 0.0, acca = 0.0;
+				if (gx > 0 && lx > 0 && si[i - 1u] != 0u) { acc += sg[so + i - 1u] - v; acca += sa[so + i - 1u] - va; }
+				if (gx < n - 1 && lx < SW - 1 && si[i + 1u] != 0u) { acc += sg[so + i + 1u] - v; acca += sa[so + i + 1u] - va; }
+				if (gy > 0 && ly > 0 && si[i - uint(SW)] != 0u) { acc += sg[so + i - uint(SW)] - v; acca += sa[so + i - uint(SW)] - va; }
+				if (gy < n - 1 && ly < SW - 1 && si[i + uint(SW)] != 0u) { acc += sg[so + i + uint(SW)] - v; acca += sa[so + i + uint(SW)] - va; }
+				ov = v + k * acc;
+				ova = va + k * acca;
+			}
+			sg[dso + i] = ov; sa[dso + i] = ova;
+		}
+		barrier();
+		p = 1u - p;
+	}
+	for (uint o = lid; o < uint(TW * TW); o += FIELD_GROUP_N) {
+		int gx = x0 + int(o) % TW, gy = y0 + int(o) / TW;
+		if (gx < n && gy < n) {
+			uint c = base + uint(gy * n + gx);
+			uint i = uint(HL + int(o) / TW) * uint(SW) + uint(HL + int(o) % TW) + p * uint(SN);
+			if (odd) {
+				CONC[c] = sg[i];
+				if (ac) CONC2[c] = sa[i];
+			} else {
+				EFF[c] = sg[i];
+				if (ac) CONC2B[c] = sa[i];
+				else CONC2B[c] = CONC2[c];
+			}
+		}
+	}
+}
+"""
+
+## The glucose that the diffusion left in EFF, with the deposits waiting added, into CONC (pool_dep_apply when the glucose was left in CONC),
+## and the deposits cleared (a pair of words already zero is not written).
+const K_POOL_DEP_LAND := """
+void f(uint c, uint d, uint l) {
+	float v = EFF[c];
+	uint lo = DPLO[c], hi = DPHI[c];
+	if (lo != 0u || hi != 0u) {
+		float m = FIX20(hi, lo);
+		float sp = DPF(d, DP_SPACING);
+		if (m > 0.0) v += m / (sp * sp);
+		DPLO[c] = 0u; DPHI[c] = 0u;
+	}
+	CONC[c] = v;
+}
+CELL_LOOP(f, WORLD[WD_CELLS])
+"""
+
+## What the lone diffusion passes (SimCore.lone_field, for checks) do to leave the pool where the fused pass does: both fields' B buffers hold
+## the diffused values.
+const K_POOL_LAND_COPY := """
+void f(uint c, uint d, uint l) { EFF[c] = CONC[c]; CONC2B[c] = CONC2[c]; }
+CELL_LOOP(f, WORLD[WD_CELLS])
+"""
+
 const K_POOL_DEMAND := """
 void add_fixed(uint cell, float w, int which) { // what is wanted (0), what is read (1) and the own cell's share of it (2), summed per cell
 	if (which == 0) ADD_FIXED30(DLO, DHI, cell, w)
@@ -563,8 +705,7 @@ float neglog1m(float x) { // -ln(1 - x)
 	if (x < 0.01) return x * (1.0 + x * (0.5 + x * (0.33333333 + x * 0.25)));
 	return -log(1.0 - x);
 }
-void f(uint i, uint d, uint l) {
-	if (OWNER[i] != int(i)) return;
+void share(uint i, uint d) {
 	float dm = FIX30(DHI[i], DLO[i]); // what the bups there wanted
 	SCALE[i] = 0.0;
 	float c0 = CONC[i];
@@ -588,6 +729,18 @@ void f(uint i, uint d, uint l) {
 	}
 	SCALE[i] = lo * area / dm;
 	CONC[i] = c0 - lo;
+}
+// only an owner cell holds sums (a bup's cell is always its owner), so this is where they are left at zero for the next step's demand
+// (a step's pool_clear is no longer a pass of its own); a word already zero is not written
+void f(uint i, uint d, uint l) {
+	if (OWNER[i] != int(i)) return;
+	share(i, d);
+	if (DLO[i] != 0u) DLO[i] = 0u;
+	if (DHI[i] != 0u) DHI[i] = 0u;
+	if (RLO[i] != 0u) RLO[i] = 0u;
+	if (RHI[i] != 0u) RHI[i] = 0u;
+	if (ALO[i] != 0u) ALO[i] = 0u;
+	if (AHI[i] != 0u) AHI[i] = 0u;
 }
 CELL_LOOP(f, WORLD[WD_CELLS])
 """
@@ -635,8 +788,8 @@ void f(uint i, uint d, uint l) {
 		LEDGER(d, LG_MADE, let_go)
 	}
 	float room = max_e - energy;
-	if (o >= 0 && room > 0.0 && CONC2[o] > 0.0) {
-		float ca = CONC2[o], cg = max(CONC[o], 0.0);
+	if (o >= 0 && room > 0.0 && CONC2B[o] > 0.0) {
+		float ca = CONC2B[o], cg = max(CONC[o], 0.0);
 		float rate = P[P_ACETATE_UPTAKE] * (((int(BUPS[b + R_REACH] + 0.5) >> 8) & 3) == 2 ? P[P_KEY_FACTOR] : 1.0) * P[P_UPTAKE_PER_SIZE] * sqrt(mass) * BUPS[b + R_METABOLISM];
 		float w2 = min(rate * ca / (P[P_HALF_SATURATION] + ca) * (P[P_HALF_SATURATION] / (P[P_HALF_SATURATION] + cg)) * P[P_DELTA], room / yld);
 		if (w2 > 0.0) {
@@ -655,7 +808,7 @@ void f(uint i, uint d, uint l) {
 	float dep = FIX30(ADHI[i], ADLO[i]);
 	float sp = DPF(d, DP_SPACING);
 	float area = sp * sp;
-	float c = CONC2[i];
+	float c = CONC2B[i];
 	float s = 0.0;
 	if (dm > 0.0 && c > 0.0) {
 		s = min(1.0, c * area / dm);
@@ -744,9 +897,13 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "pool_swim_demand", pool_swim_demand(), bup_b + ["BUPS", "EFF", "TABLE", "OWNER", "CONC", "WANT", "WANTC", "CLOUDC", "CELLOF", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "ENTD", "BINS", "BINC", "PDLO", "PDHI"],
 		fixed + POOL_READF + POOL_READC + LOOKUP_FUNCS + GpuKernelsClouds.POOL_CLOUD_FUNCS)
 	GpuKernels.add(out, "pool_cells", K_POOL_CELLS, cell_b + ["CONC", "OWNER", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "SCALE"], fixed)
-	GpuKernels.add(out, "pool_apply", K_POOL_APPLY, bup_b + ["BUPS", "EFF", "WANT", "WANTC", "CELLOF", "SCALE", "ENTD", "BINS", "BINC", "PSCALE", "OWNER", "CONC", "CONC2", "WANT2", "CELL2", "AWLO", "AWHI", "ADLO", "ADHI"], fixed + POOL_READF + GpuKernelsClouds.POOL_CLOUD_FUNCS)
-	GpuKernels.add(out, "pool_ac_cells", K_POOL_AC_CELLS, cell_b + ["CONC2", "AWLO", "AWHI", "ADLO", "ADHI", "SCALE2"], fixed)
+	GpuKernels.add(out, "pool_apply", K_POOL_APPLY, bup_b + ["BUPS", "EFF", "WANT", "WANTC", "CELLOF", "SCALE", "ENTD", "BINS", "BINC", "PSCALE", "OWNER", "CONC", "CONC2B", "WANT2", "CELL2", "AWLO", "AWHI", "ADLO", "ADHI"], fixed + POOL_READF + GpuKernelsClouds.POOL_CLOUD_FUNCS)
+	GpuKernels.add(out, "pool_ac_cells", K_POOL_AC_CELLS, cell_b + ["CONC2", "CONC2B", "AWLO", "AWHI", "ADLO", "ADHI", "SCALE2"], fixed)
 	GpuKernels.add(out, "pool_ac_apply", K_POOL_AC_APPLY, bup_b + ["BUPS", "WANT2", "CELL2", "SCALE2"])
+	GpuKernels.add(out, "pool_dep_land", K_POOL_DEP_LAND, cell_b + ["EFF", "CONC", "DPLO", "DPHI"], fixed)
+	GpuKernels.add(out, "pool_land_copy", K_POOL_LAND_COPY, cell_b + ["CONC", "EFF", "CONC2", "CONC2B"])
+	var fdiff := K_POOL_FDIFF.replace("FIELD_TILE_N", str(FIELD_TILE)).replace("FIELD_HALO_N", str(FIELD_HALO)).replace("FIELD_GROUP_N", str(FIELD_GROUP) + "u")
+	GpuKernels.add(out, "pool_fdiff", fdiff, ["DISHP", "TILES", "INSIDE", "CONC", "EFF", "WGT", "CONC2", "CONC2B"], "", FIELD_GROUP)
 	var no_skip := ""
 	var ac_skip := "if (((DPU(d, DP_FLAGS) >> DPF_ACETATE) & 1u) == 0u) return;"
 	for pass_kind in [["pool_diffuse_a", "CONC", "EFF", no_skip], ["pool_diffuse_b", "EFF", "CONC", no_skip], ["pool_diffuse2_a", "CONC2", "CONC2B", ac_skip], ["pool_diffuse2_b", "CONC2B", "CONC2", ac_skip]]:

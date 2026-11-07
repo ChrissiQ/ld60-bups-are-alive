@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://fsr6hnclq3w8"
+path="res://.godot/imported/pool_dep_land.glsl-184601e4ae0907866b301d9f23e49c64.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_dep_land.glsl"
+dest_files=["res://.godot/imported/pool_dep_land.glsl-184601e4ae0907866b301d9f23e49c64.res"]
+
+[params]
+

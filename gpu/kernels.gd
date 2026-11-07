@@ -35,6 +35,8 @@ const TYPES := {
 	"WORLD": "uint", "DISHP": "uint", "DSTATE": "uint", "BLKDISH": "uint", "BLKDISH2": "uint", "CELLDISH": "uint", "PIPDST": "uint",
 	# the clouds' concentration a bup read in the pooled demand, which the pooled uptake reads again (CLOUDC)
 	"CLOUDC": "float",
+	# the fused field pass's tiles (GpuKernelsField.K_POOL_FDIFF): the dish row and tile number of each
+	"TILES": "uint",
 }
 
 ## Buffers that are another type's view of a buffer: a binding of the view's name binds the buffer named here.

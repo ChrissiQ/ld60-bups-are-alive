@@ -12,6 +12,8 @@ const SHRINK_BELOW := 0.25
 const SHRINK_EVERY_MSEC := 60000
 const SCAN_SCRATCH := 4096  ## words of a grid scan's group sums (GpuKernels.scan_groups' most)
 const D_MAX := GpuLayout.D_MAX
+const TILES_ACROSS_MOST := (StartConditions.MAX_NUTRIENT_RESOLUTION + GpuKernelsField.FIELD_TILE - 1) / GpuKernelsField.FIELD_TILE
+const TILES_MOST := TILES_ACROSS_MOST * TILES_ACROSS_MOST  ## the field tiles of the biggest grid a dish has (pool_fdiff's TILES: a word a tile)
 
 ## name -> [class, bytes a unit, kept when it grows, fill (0 or 0xFF)]. A class's units: slots, blocks (slots / 256 + 1), buckets
 ## (GpuKernelsLife.conj_buckets(slots)), cells, bins, clouds, husks, events, or 1 for a fixed buffer (its bytes).
@@ -44,6 +46,7 @@ const BUFFERS := {
 	"HSUM": ["fixed", SCAN_SCRATCH * 4, false, 0], "HOFF": ["fixed", SCAN_SCRATCH * 4, false, 0],
 	"EVR": ["fixed", GpuLayout.MAX_STEPS_PER_BATCH * 16, false, 0], "EVP": ["fixed", GpuLayout.EV_PUFFS_CAPACITY * GpuLayout.EV_PUFF_FLOATS * 4, false, 0],
 	"EVCC": ["fixed", GpuLayout.EV_CELLS_CAPACITY * 4, false, 0], "EVCA": ["fixed", GpuLayout.EV_CELLS_CAPACITY * 4, false, 0],
+	"TILES": ["fixed", D_MAX * TILES_MOST * 4, false, 0],
 	"EDC": ["fixed", 16, false, 0], "EDA": ["fixed", 16, false, 0], "FRQ": ["fixed", 16, false, 0],
 	"TQ": ["fixed", (1 + 2 * GpuLayout.TRACKED) * 4, false, 0], "TR": ["fixed", GpuLayout.TRACKED * GpuLayout.ANSWER_WORDS * 4, false, 0],
 	"SPQ": ["fixed", SimCore.PROBES_MOST * 16, false, 0], "SPR": ["fixed", SimCore.PROBES_MOST * GpuLayout.PROBE_FLOATS * 4, false, 0],

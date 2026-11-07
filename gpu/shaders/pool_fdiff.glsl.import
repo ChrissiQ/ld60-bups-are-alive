@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://4jsbratcv8l5"
+path="res://.godot/imported/pool_fdiff.glsl-4656f7a3281d1f2c2c23bfe619efa2bc.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_fdiff.glsl"
+dest_files=["res://.godot/imported/pool_fdiff.glsl-4656f7a3281d1f2c2c23bfe619efa2bc.res"]
+
+[params]
+

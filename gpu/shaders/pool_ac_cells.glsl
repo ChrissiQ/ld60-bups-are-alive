@@ -8,11 +8,12 @@ layout(set = 0, binding = 1, std430) buffer B_WORLD { uint WORLD[]; };
 layout(set = 0, binding = 2, std430) buffer B_CELLDISH { uint CELLDISH[]; };
 layout(set = 0, binding = 3, std430) buffer B_DISHP { uint DISHP[]; };
 layout(set = 0, binding = 4, std430) buffer B_CONC2 { float CONC2[]; };
-layout(set = 0, binding = 5, std430) buffer B_AWLO { uint AWLO[]; };
-layout(set = 0, binding = 6, std430) buffer B_AWHI { uint AWHI[]; };
-layout(set = 0, binding = 7, std430) buffer B_ADLO { uint ADLO[]; };
-layout(set = 0, binding = 8, std430) buffer B_ADHI { uint ADHI[]; };
-layout(set = 0, binding = 9, std430) buffer B_SCALE2 { float SCALE2[]; };
+layout(set = 0, binding = 5, std430) buffer B_CONC2B { float CONC2B[]; };
+layout(set = 0, binding = 6, std430) buffer B_AWLO { uint AWLO[]; };
+layout(set = 0, binding = 7, std430) buffer B_AWHI { uint AWHI[]; };
+layout(set = 0, binding = 8, std430) buffer B_ADLO { uint ADLO[]; };
+layout(set = 0, binding = 9, std430) buffer B_ADHI { uint ADHI[]; };
+layout(set = 0, binding = 10, std430) buffer B_SCALE2 { float SCALE2[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -65,7 +66,7 @@ void f(uint i, uint d, uint l) {
 	float dep = FIX30(ADHI[i], ADLO[i]);
 	float sp = DPF(d, DP_SPACING);
 	float area = sp * sp;
-	float c = CONC2[i];
+	float c = CONC2B[i];
 	float s = 0.0;
 	if (dm > 0.0 && c > 0.0) {
 		s = min(1.0, c * area / dm);

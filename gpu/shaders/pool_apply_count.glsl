@@ -20,7 +20,7 @@ layout(set = 0, binding = 13, std430) buffer B_BINC { uint BINC[]; };
 layout(set = 0, binding = 14, std430) buffer B_PSCALE { float PSCALE[]; };
 layout(set = 0, binding = 15, std430) buffer B_OWNER { int OWNER[]; };
 layout(set = 0, binding = 16, std430) buffer B_CONC { float CONC[]; };
-layout(set = 0, binding = 17, std430) buffer B_CONC2 { float CONC2[]; };
+layout(set = 0, binding = 17, std430) buffer B_CONC2B { float CONC2B[]; };
 layout(set = 0, binding = 18, std430) buffer B_WANT2 { float WANT2[]; };
 layout(set = 0, binding = 19, std430) buffer B_CELL2 { int CELL2[]; };
 layout(set = 0, binding = 20, std430) buffer B_AWLO { uint AWLO[]; };
@@ -212,8 +212,8 @@ void apply_bup(uint i, uint d, uint l) {
 		LEDGER(d, LG_MADE, let_go)
 	}
 	float room = max_e - energy;
-	if (o >= 0 && room > 0.0 && CONC2[o] > 0.0) {
-		float ca = CONC2[o], cg = max(CONC[o], 0.0);
+	if (o >= 0 && room > 0.0 && CONC2B[o] > 0.0) {
+		float ca = CONC2B[o], cg = max(CONC[o], 0.0);
 		float rate = P[P_ACETATE_UPTAKE] * (((int(BUPS[b + R_REACH] + 0.5) >> 8) & 3) == 2 ? P[P_KEY_FACTOR] : 1.0) * P[P_UPTAKE_PER_SIZE] * sqrt(mass) * BUPS[b + R_METABOLISM];
 		float w2 = min(rate * ca / (P[P_HALF_SATURATION] + ca) * (P[P_HALF_SATURATION] / (P[P_HALF_SATURATION] + cg)) * P[P_DELTA], room / yld);
 		if (w2 > 0.0) {

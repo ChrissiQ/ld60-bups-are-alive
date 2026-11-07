@@ -14,6 +14,11 @@ extends SceneTree
 ## kernels have none; it is not compared). The one known way they could part is the compiler contracting the same arithmetic differently in
 ## the two texts (seen in pool_puff_advance): that would show as a few ulps and is reported, not allowed. To show the check can see
 ## an error, the donors' state run with pool_life before pool_conj_apply must differ.
+##
+## The fused field pass (pool_fdiff, SimCore.lone_field) is compared the same way against pool_feed, the ping-pong of pool_diffuse_a/b and
+## pool_diffuse2_a/b and pool_land_copy, in a pool of dishes with 2, 4 and 62 iterations (3000 µm at 100 cells across, 3000 µm at 400, 150 µm
+## at 100) one of them without the second food: 0 differing words at every BATCH-th step of STEPS, as the same arithmetic in the same order
+## gives the same words ("fields" in the output). GPU_FROM_SOURCE=1 compiles the kernels from source.
 
 const STEPS := 360
 const BATCH := 60
@@ -32,6 +37,7 @@ func _initialize() -> void:
 	stationary.nutrient_density = 2.0
 	for pair in [["donors", donors], ["clouds", clouds], ["stationary", stationary]]:
 		_compare(pair[0], pair[1])
+	_compare_fields()
 	var fused := _made(donors)
 	var wrong := _made(donors)
 	wrong.core.lone_passes = true
@@ -49,7 +55,7 @@ func _initialize() -> void:
 ## The harness of one dish of `s`; when its founders carry the F factor, the donors' genes are set apart from the others' (speed x 1.5,
 ## sense x 0.6, metabolism x 1.2) before the first step, so that a transfer changes what the recipient is.
 static func _made(s: Scenario) -> SimHarness:
-	var h := SimHarness.make([s])
+	var h := SimHarness.make([s], {"from_source": OS.get_environment("GPU_FROM_SOURCE") == "1"})
 	if not s.flag("conjugation"):
 		return h
 	var core: SimCore = h.core
@@ -85,6 +91,36 @@ func _compare(label: String, s: Scenario) -> void:
 			(a["husks"] as PackedByteArray).size() / 32, _hash(a), _hash(z)])
 		_ok(line == "", "%s, %d steps: the fused passes equal the lone kernels%s" % [label, (b + 1) * BATCH, ": " + line if line != "" else ""])
 	_ok(fused.core.overflow() == 0 and lone.core.overflow() == 0, "%s: no overflow" % label)
+	fused.core.release()
+	lone.core.release()
+
+
+func _compare_fields() -> void:
+	var mix := []
+	for i in 2:
+		mix.append(Scenario.small(300, 3000.0).seed(70 + i))
+	var small := Scenario.small(300, 150.0).seed(72)
+	small.nutrient_density = 40.0
+	mix.append(small)
+	mix.append(Scenario.small(300, 3000.0).with_flags({"resolution": 400}).seed(73))
+	var blooms := Scenario.small(300, 3000.0).seed(74)
+	blooms.bloom_density = StartConditions.MAX_BLOOM_DENSITY
+	mix.append(blooms)
+	var fused := SimHarness.make(mix, {"from_source": OS.get_environment("GPU_FROM_SOURCE") == "1"})
+	var lone := SimHarness.make(mix, {"from_source": OS.get_environment("GPU_FROM_SOURCE") == "1"})
+	lone.core.lone_field = true
+	for b in STEPS / BATCH:
+		for c in BATCH / SimHarness.CHUNK:
+			fused.step(SimHarness.CHUNK)
+			lone.step(SimHarness.CHUNK)
+		for row in mix.size():
+			var line := SimHarness.diff(fused.dump(row), lone.dump(row))
+			_ok(line == "", "fields, dish %d, %d steps: the fused field pass equals the lone passes%s" % [row, (b + 1) * BATCH, ": " + line if line != "" else ""])
+	var its := []
+	for row in fused.core._dishes:
+		its.append(fused.core._dishes[row].iterations)
+	print("fields: iterations of the dishes ", its)
+	_ok(fused.core.overflow() == 0 and lone.core.overflow() == 0, "fields: no overflow")
 	fused.core.release()
 	lone.core.release()
 
