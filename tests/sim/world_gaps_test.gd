@@ -457,7 +457,8 @@ func _numbers_and_clock() -> void:
 	var info: Dictionary = store.info(founder)
 	TestUtil.show(not info.is_empty() and int(info["born"]) == 0, "N a new game's founders are born at minute 0 of its clock (born %s; the world's clock at %.0f s)" % [info.get("born", "none"), t])
 	var pip := SimReply.new()
-	thread.submit(SimCommand.new(SimCommand.KIND_PIPETTE, {"row": 0, "centre": Vector2.ZERO, "radius": 600.0, "new_row": 1}, pip))
+	# (30 founders lie in the game's disc, 40 + 40 sqrt(26) = 244 µm across: a pipette of 600 takes all of them and leaves dish 1 empty; 150 takes about 38% and leaves the rest)
+	thread.submit(SimCommand.new(SimCommand.KIND_PIPETTE, {"row": 0, "centre": Vector2.ZERO, "radius": 150.0, "new_row": 1}, pip))
 	_frames(thread, 5, 600.0, true)
 	_wait(pip)
 	var number := int((pip.value() as Dictionary).get("number", -1)) if pip.value() is Dictionary else -1
