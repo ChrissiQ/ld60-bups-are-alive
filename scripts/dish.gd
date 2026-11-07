@@ -446,7 +446,7 @@ func strike(start: StartConditions = null) -> void:
 
 
 ## The founders' records (GpuLayout's bup record, as SimCore.add_dish takes them): the founder's genome in the colour the player chose for
-## each, a newborn's mass grown by up to as much again (not all at the same point in the cycle), FOUNDER_ENERGY, in a disc that grows with
+## each, a newborn's mass grown by up to as much again (not all at the same point in the cycle), FOUNDER_ENERGY (no more than the body can hold), in a disc that grows with
 ## their number (4 in a spot 40 µm across, 100 across about 430 µm); the world gives them their ids when the dish is added.
 func _founder_records(start: StartConditions, count: int) -> PackedByteArray:
 	var w := GpuLayout.RECORD_WORDS
@@ -467,8 +467,9 @@ func _founder_records(start: StartConditions, count: int) -> PackedByteArray:
 		all[o + GpuLayout.R_SAT] = founder["sat"]
 		all[o + GpuLayout.R_VAL] = founder["val"]
 		all[o + GpuLayout.R_BIRTH_MASS] = born
-		all[o + GpuLayout.R_MASS] = born * (1.0 + _rng.randf())
-		all[o + GpuLayout.R_ENERGY] = FOUNDER_ENERGY
+		var mass := born * (1.0 + _rng.randf())
+		all[o + GpuLayout.R_MASS] = mass
+		all[o + GpuLayout.R_ENERGY] = minf(FOUNDER_ENERGY, Cell.RESERVE_PER_MASS * mass)  # a body holds at most this
 		var at := Vector2.from_angle(_rng.randf() * TAU) * (spread * sqrt(_rng.randf()))
 		all[o + GpuLayout.R_X] = at.x
 		all[o + GpuLayout.R_Y] = at.y
