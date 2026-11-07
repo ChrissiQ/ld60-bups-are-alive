@@ -55,6 +55,7 @@ func _init() -> void:
 	_refused()
 	_refused_through_thread()
 	_memory_fraction()
+	_pipette_room()
 	_through_thread()
 	TestUtil.finish(self, "OK core_calls_test")
 
@@ -340,6 +341,46 @@ func _memory_fraction() -> void:
 	core.limits.memory_budget_bytes = held
 	TestUtil.show(is_equal_approx(core.arena.memory_fraction(), 1.0) and core.arena.next_growth_bytes() > 0 and not core.arena.fits(core.arena.slot_cap * 2, 0, 0, 0, 0), "M at the whole budget the fraction is 1 and the next growth (%d bytes) does not fit" % core.arena.next_growth_bytes())
 	core.release()
+
+
+## Room made ahead for a pipette, and the warm-up pass: once the slots in use pass 0.7 of the capacity the capacity grows for the largest
+## dish's pipette (what the pipette itself would ask for), unless the result would pass 0.9 of the budget (then nothing changes); a core
+## warmed up before its first dish runs as one that was not (the same canonical dump after the same steps).
+func _pipette_room() -> void:
+	var limits := PoolLimits.new()
+	limits.world_slots = 4096
+	var core := SimCore.new(limits)
+	var s := Scenario.small(3000, 3000.0).seed(7)
+	s.limit = 3000
+	var row := core.add_dish(_spec(1, s))
+	var used := core.world_word(GpuLayout.WD_SLOTS)
+	var cap := core.arena.slot_cap
+	var need := used + SimCore._align(core.count(row)) + SimCore.BLK
+	print("P pre-grow: used %d of %d slots, a pipette would need %d" % [used, cap, need])
+	TestUtil.show(used >= SimCore.PRE_GROW_USE * cap and need > int(SimArena.FILL * cap), "P the scene is past 0.7 and a pipette would need to grow it")
+	var budget := limits.memory_budget_bytes
+	limits.memory_budget_bytes = core.arena.bytes_now()
+	TestUtil.show(not core.prepare_pipette_room() and core.arena.slot_cap == cap and core.errors.is_empty(), "P with no room under the budget nothing is done and nothing is said (cap %d)" % core.arena.slot_cap)
+	limits.memory_budget_bytes = int(core.arena.estimate_bytes(core.arena.slot_cap_for(need), core.arena.cell_cap, core.arena.bin_cap, core.arena.cloud_cap, core.arena.husk_cap) / 0.95)
+	TestUtil.show(not core.prepare_pipette_room() and core.arena.slot_cap == cap, "P when the growth would leave over 0.9 of the budget held nothing is done")
+	limits.memory_budget_bytes = budget
+	TestUtil.show(core.prepare_pipette_room() and core.arena.slot_cap >= int(need / SimArena.FILL), "P with room it grows to what the pipette asks for (%d -> %d)" % [cap, core.arena.slot_cap])
+	var again := core.arena.slot_cap
+	var moved := core.pipette(row, Vector2.ZERO, 1500.0)
+	TestUtil.show(not moved.is_empty() and core.arena.slot_cap == again and not core.prepare_pipette_room(), "P the pipette then finds the room (cap stays %d) and nothing more grows" % core.arena.slot_cap)
+	core.release()
+	var plain := SimCore.new(PoolLimits.new())
+	var warmed := SimCore.new(PoolLimits.new())
+	warmed.warm_up_pipette()
+	var small := Scenario.small(400, 1500.0).seed(9)
+	var a := plain.add_dish(_spec(1, small))
+	var b := warmed.add_dish(_spec(1, small))
+	plain.run(40, 20.0)
+	warmed.run(40, 20.0)
+	var line := SimHarness.diff(CanonicalDump.coerce(plain.canonical_dump(a)), CanonicalDump.coerce(warmed.canonical_dump(b)))
+	TestUtil.show(line == "" and warmed.errors.is_empty(), "P a core warmed up for the pipette runs 40 steps as one that was not%s" % (": " + line if line != "" else ""))
+	plain.release()
+	warmed.release()
 
 
 func _spec_small() -> DishSpec:

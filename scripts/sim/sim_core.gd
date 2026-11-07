@@ -28,6 +28,7 @@ const RB := GpuLayout.RECORD_BYTES
 const BLK := GpuLayout.BLK_SLOTS
 const CLOUD_COMPACT_EVERY := 16  ## world steps between compactions of the clouds (a dish's own cadence is DS_STEP % 16)
 const HUSK_CULL_EVERY := 32  ## world steps between culls of the husks (any cadence: a cull changes no dish)
+const PRE_GROW_USE := 0.7  ## the share of the record slots in use at which pipette room is made ahead (`prepare_pipette_room`)
 const EVENT_FLOOR := 32768  ## the event ring's least size (births, and as many deaths)
 const EVENT_EXACT_MOST := 1 << 21  ## past this bound of an iteration's births the ring is sized from what the last iterations had
 const MAX_STEPS := GpuLayout.MAX_STEPS_PER_BATCH
@@ -353,22 +354,57 @@ func pipette(row: int, centre: Vector2, radius: float, dest: Variant = null, gri
 	var before := _ds(dst, GpuLayout.DS_COUNT)
 	var pd := float(row + dst * D_MAX)
 	var bg := _bup_groups()
-	_run_list(func(cl: int) -> void:
-		_disp(cl, "pool_ev_begin", D_MAX / 64)
-		_disp(cl, "pool_pip_mark", bg, centre.x, centre.y, radius, pd)
-		_scan(cl, "pool_scan_s", _wd(GpuLayout.WD_SLOTS))
-		_disp(cl, "pool_pip_final", 1, centre.x, centre.y, radius, pd)
-		_disp(cl, "pool_slot_check", 1)
-		_disp(cl, "pool_pip_scatter", bg, centre.x, centre.y, radius, pd)
-		_disp(cl, "pool_blk_fill", maxi(1, bg / 64))
-		_disp(cl, "pool_setcount", D_MAX / 64, 0.0)
-		_flipped = not _flipped
-		_record_stats(cl, 0, 0))
+	_run_list(func(cl: int) -> void: _record_pipette(cl, bg, centre, radius, pd))
 	_read_back()
 	_event_rows.clear()
 	_stats_fresh = true
 	var moved := _ds(dst, GpuLayout.DS_MOVED_IN)
 	return {"new_row": dst, "moved": moved, "ids": _ids_from(_ds(dst, GpuLayout.DS_START) + before, moved)}
+
+
+## The pipette's retarget pass as one list's dispatches.
+func _record_pipette(cl: int, bg: int, centre: Vector2, radius: float, pd: float) -> void:
+	_disp(cl, "pool_ev_begin", D_MAX / 64)
+	_disp(cl, "pool_pip_mark", bg, centre.x, centre.y, radius, pd)
+	_scan(cl, "pool_scan_s", _wd(GpuLayout.WD_SLOTS))
+	_disp(cl, "pool_pip_final", 1, centre.x, centre.y, radius, pd)
+	_disp(cl, "pool_slot_check", 1)
+	_disp(cl, "pool_pip_scatter", bg, centre.x, centre.y, radius, pd)
+	_disp(cl, "pool_blk_fill", maxi(1, bg / 64))
+	_disp(cl, "pool_setcount", D_MAX / 64, 0.0)
+	_flipped = not _flipped
+	_record_stats(cl, 0, 0)
+
+
+## Runs the pipette's pass (twice, so each half of the records has been bound) on a world with no dish, so its first real use builds no
+## pipeline, uniform set or buffer binding (a first dispatch of a kernel costs far more than the rest). Only for a core with no dish: with
+## none there is no bup to mark and no row to change, and the pair of flips leaves the halves as they were.
+func warm_up_pipette() -> void:
+	if not _dishes.is_empty():
+		return
+	for half in 2:
+		_run_list(func(cl: int) -> void: _record_pipette(cl, _bup_groups(), Vector2.ZERO, 0.0, 0.0))
+
+
+## Pipette room made ahead (called between iterations, never inside a pipette). A pipette needs the world's slots plus a whole copy of
+## the dish it takes from, which is up to twice what the dish needs to run, and growing the pool inside it cost ~40 ms of a ~55 ms pass
+## [measured]. Rule: once the world's slots are at PRE_GROW_USE (0.7) of the capacity, the capacity is grown (the
+## same `ensure_slots` path and its sizes) for the largest dish's pipette, but only when that fits the budget and leaves the buffers at
+## no more than PoolLimits.WARN_FRACTION of it (so it neither reaches the warning nor takes room later growths may need); otherwise
+## nothing is done and nothing is said: the pipette then grows it itself, or is refused, as before. A growth the running of the dishes
+## needs anyway (`_ensure_room`) is not changed: this only grows the same class earlier, so a refusal of the running cannot come from it
+## sooner than by the room it holds, which the share keeps under the warning. Returns whether it grew.
+func prepare_pipette_room() -> bool:
+	var used := _wd(GpuLayout.WD_SLOTS)
+	if used < PRE_GROW_USE * arena.slot_cap:
+		return false
+	var biggest := 0
+	for row: int in _dishes:
+		biggest = maxi(biggest, _align(_ds(row, GpuLayout.DS_COUNT)))
+	if not arena.pre_grow_slots(used + biggest + BLK, PoolLimits.WARN_FRACTION):
+		return false
+	_after_growth()
+	return true
 
 
 ## Changes a running dish's settings from its next step: `params` may hold feed_density (units to each mm² an hour), upkeep,

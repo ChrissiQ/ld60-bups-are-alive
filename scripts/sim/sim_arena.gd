@@ -175,19 +175,40 @@ func _remake(classes: Array) -> void:
 			_make(nm, _bytes_of(nm), false)
 
 
-## Room for `slots` record slots; false when that would pass the budget.
-func ensure_slots(slots: int) -> bool:
+## The slot capacity `ensure_slots(slots)` would make: the one now when `slots` are within FILL of it, the grown one when that fits the
+## budget (by GROW or what is asked, else just what is asked), 0 when none does.
+func slot_cap_for(slots: int) -> int:
 	if slots <= int(FILL * slot_cap):
-		return true
+		return slot_cap
 	var want := _align(maxi(ceili(slots / FILL), int(slot_cap * GROW)))
 	if not fits(want, 0, 0, 0, 0):
 		want = _align(slots)
 		if not fits(want, 0, 0, 0, 0):
-			return false
-	slot_cap = want
-	_grew("slot")
-	_remake(["slot", "block", "bucket", "bucketbits"])
+			return 0
+	return want
+
+
+## Room for `slots` record slots; false when that would pass the budget.
+func ensure_slots(slots: int) -> bool:
+	var want := slot_cap_for(slots)
+	if want == 0:
+		return false
+	if want != slot_cap:
+		slot_cap = want
+		_grew("slot")
+		_remake(["slot", "block", "bucket", "bucketbits"])
 	return true
+
+
+## Room for `slots` record slots made ahead of the need: grown only when the buffers afterwards hold at most `share` of the budget
+## (so the growth never takes the room a later one may need, or reaches the warning), else nothing is done. True when it grew.
+func pre_grow_slots(slots: int, share: float) -> bool:
+	var want := slot_cap_for(slots)
+	if want == 0 or want == slot_cap:
+		return false
+	if estimate_bytes(want, cell_cap, bin_cap, cloud_cap, husk_cap) > share * limits.memory_budget_bytes:
+		return false
+	return ensure_slots(slots)
 
 
 ## Room for `clouds` cloud slots; false when that would pass the budget.

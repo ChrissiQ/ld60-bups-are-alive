@@ -181,6 +181,7 @@ func _run() -> void:
 	_set_status("ready", true)
 	_set_status("alive", true)
 	_mass_um = float(SimConstants.build()["mass_um"])
+	_core.warm_up_pipette()
 	while not _stopping():
 		for cmd in queue.drain():
 			_handle(cmd)
@@ -188,6 +189,8 @@ func _run() -> void:
 		_make_grid_ahead()
 		if _stopping():
 			break
+		if _refusal == "" and _retry_msec < 0:
+			_core.prepare_pipette_room()  # (between iterations and never while a pipette runs: both are this thread's)
 		_give_bound()
 		var k := _plan_steps()
 		if k <= 0:
