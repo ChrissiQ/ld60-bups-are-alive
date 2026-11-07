@@ -15,9 +15,9 @@ const STRIDE_PUFF := 5  ## a row of `puffs`: step, x, y, mass, variance (an emit
 const STRIDE_DEPOSIT := 4  ## a row of `deposits`: step, x, y, mass (an emitter's release straight onto the grid)
 const STRIDE_HUSK := 4  ## a row of `husks`: step, x, y, energy (a plankton's burst when plankton leave husks)
 
-const EMIT_INTERVAL := 60.0  ## s: the longest an emitter keeps what a steady source gives (nutrient_field.cpp)
+const EMIT_INTERVAL := 60.0  ## s: the longest an emitter keeps what a steady source gives
 const EMIT_FIRST := 5.0  ## s: the least it waits, so a new source shows soon
-const MIN_CLOUD_VARIANCE := 100.0  ## µm²: no cloud is thinner than 10 µm across (nutrient_field.cpp)
+const MIN_CLOUD_VARIANCE := 100.0  ## µm²: no cloud is thinner than 10 µm across
 
 var time := 0.0  ## sim seconds: where the last window ended
 var radius := 0.0  ## µm: the dish's

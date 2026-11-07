@@ -80,7 +80,7 @@ void stats_dish(uint d) {
 		for (uint k = ST_SPEED; k <= ST_MUTATIONS; k++) STATS[o + k] = floatBitsToUint(sm[k * 256u]);  // (sums 1 to 6 are in the sample's order)
 		STATS[o + ST_STEP] = floatBitsToUint(pcs.pc);
 		STATS[o + ST_MUTATOR] = floatBitsToUint(sm[7 * 256]);  // (the mutator's sum)
-		STATS[o + ST_DONORS] = uint(sm[10 * 256] + 0.5);  // (the donors' count: of the bups now, as the CPU's population_stats, not of the last step)
+		STATS[o + ST_DONORS] = uint(sm[10 * 256] + 0.5);  // (the donors' count: of the bups now, not of the last step)
 		STATS[o + ST_KEY] = floatBitsToUint(sm[8 * 256]);  // (the key's count)
 		STATS[o + ST_DIVISIONS] = floatBitsToUint(sm[9 * 256]);  // (the divisions' sum)
 		for (uint k = ST_DIVISIONS + 1u; k < STATS_WORDS; k++) STATS[o + k] = 0u;

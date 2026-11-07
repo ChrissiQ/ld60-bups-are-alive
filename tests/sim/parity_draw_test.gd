@@ -1,5 +1,5 @@
 extends SceneTree
-## The nutrient haze and the steering arcs and map on the real pool: the queries_check state as a dish of the
+## The nutrient haze and the steering arcs and map on the real pool: the fixture state (tools/gpu/golden/parity) as a dish of the
 ## game's world (ParityGame.fixture_dish), paused, a Dish node drawing it; the pictures read back from the textures the dish draws (the
 ## world's published haze and steering map, as the main device imported them), the steering read as the selected bup's panel reads it.
 ## Windowed only:
@@ -9,7 +9,7 @@ extends SceneTree
 ## L  The pool holds the fixture word for word.
 ## H  The haze the dish draws (the medium layer shown; Dish's look: DETECTION_FLOOR, 0.5 x 255 / sqrt(10 HALF_SATURATION), 0.45 x 255)
 ##    equals the fixture's haze_bytes: alpha within 1 in every cell, RGB equal wherever either alpha is above 0 (the bound: the float
-##    view against the CPU's doubles moves a truncation by one at most).
+##    view against the fixture's doubles moves a truncation by one at most).
 ## M  With bup 4, 10001 or 20000 selected (the medium hidden, so the map is what is drawn), the steering map the dish draws equals the
 ##    fixture's steer_<id>: alpha within 1, RGB equal where alpha > 0 (the bound).
 ## S  The 40 fixture bups of queries_info.txt, each selected in turn: Dish.bup_steering (the tracked answer's way and chance) within 1e-5

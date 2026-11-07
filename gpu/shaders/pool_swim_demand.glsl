@@ -241,12 +241,12 @@ void swim(uint i, uint d, uint l) {
 	float nw2 = limit > 0.0 ? limit * limit : -1.0;
 	float hx = 0.0, hy = 0.0, hl = 0.0; bool pending = false;
 	float floor_c = P[P_DETECTION_FLOOR], noise_ref = DPF(d, DP_NOISE_REFERENCE);
-	// what it reads at the start, and from the clouds that reach it how finely to cut its step (as the CPU's moves_for_structure)
+	// what it reads at the start, and from the clouds that reach it how finely to cut its step
 	float c0, gx0, gy0; readf_d(d, x, y, c0, gx0, gy0);
 	float pc, pgx, pgy, sig; puffs_at_d(d, x, y, pc, pgx, pgy, sig);
 	c0 += pc; gx0 += pgx; gy0 += pgy;
 	int moves = 0;
-	bool fine = P[P_MOVES] > 0.5 && delta <= P[P_FINE_STEP];  // (a step as short as the fine step: it follows the individual run and tumble, as the CPU's swim_by_runs)
+	bool fine = P[P_MOVES] > 0.5 && delta <= P[P_FINE_STEP];  // (a step as short as the fine step: it follows the individual run and tumble)
 	if (P[P_MOVES] > 0.5 && !fine) {
 		float structure = min(DPF(d, DP_SPACING), 2.0 * sig);
 		float sc = max(1.0, structure / max(P[P_MOTION_STRUCTURE], 1.0));

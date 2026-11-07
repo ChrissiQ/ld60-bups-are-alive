@@ -1,7 +1,7 @@
 class_name Cell
 extends RefCounted
-## What a bup is, as numbers and formulas. The living bups themselves are in the native simulation
-## (native/src/bup_sim.cpp), which reads every constant here through scripts/sim_constants.gd.
+## What a bup is, as numbers and formulas. The living bups themselves are in the pooled GPU world
+## (scripts/sim/sim_core.gd, gpu/kernels_life.gd), which reads every constant here through scripts/sim_constants.gd.
 ##
 ## A bup takes nutrient into an energy reserve, grows exponentially as fast as its metabolism and
 ## reserve allow, and divides once it has added a fixed amount of mass since birth (the "adder":

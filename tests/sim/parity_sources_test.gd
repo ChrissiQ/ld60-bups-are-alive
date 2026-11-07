@@ -7,7 +7,7 @@ extends SceneTree
 ## Expected values, written before the first run [derived unless marked]:
 ## The source gives rate / 60 x delta units a step (DishWorld._source_events). Its emitter keeps what it gave for up to EMIT_INTERVAL
 ## (60 s) and lets it go as a cloud, unless the grid is fine enough to hold the plume (sqrt(D x 60 s) >= half a cell), when it goes onto
-## the grid at once; the single-dish path's NutrientField::total counted what the emitter keeps, so "what the source added" is the pool's gain plus what
+## the grid at once; the fixture's total counted what the emitter keeps, so "what the source added" is the pool's gain plus what
 ## its emitter keeps.
 ## S  On a 3 mm dish (cells of 60 µm: sqrt(24 x 60) = 38 µm >= 30, straight onto the grid), rate 6 a minute, about 600 s at x600: the source
 ##    counts 6 / 60 x the world time that passed (within 1e-9 relative), and the pool gains 16 energy a unit of it within 1e-3 relative

@@ -121,7 +121,7 @@ GRID_LOOP(f, ((DS(uint(pcs.pa), DS_COUNT) + PAYLOAD_TEX_WIDTH - 1u) / PAYLOAD_TE
 """
 
 ## What a cell of dish row `pcs.pa` shows: its concentration, and in a cell inside the dish the clouds' at the
-## cell's centre, a cloud counting where the cell is in the block of cells its reach covers (the CPU's picture rule: a square, one cell wider
+## cell's centre, a cloud counting where the cell is in the block of cells its reach covers (a square, one cell wider
 ## than the reach, where the bups' reads use the circle). The block's cells can lie three squares from a cloud's listed ones, so each cell
 ## looks at 7 x 7 squares and takes a cloud from the first of them that it and the cloud's squares share. VIEW is indexed by pool cell.
 const K_POOL_VIEW := """

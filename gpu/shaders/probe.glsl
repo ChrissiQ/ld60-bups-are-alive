@@ -25,7 +25,7 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define BUP_RECORD_THREAD BUP_THREAD uint b = i * RECORD_WORDS;
 #define CELL_THREAD uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
 
-// the clouds' concentration and gradient where a bup is, and the smallest sigma among the clouds that reach it (as the CPU's puff_probe)
+// the clouds' concentration and gradient where a bup is, and the smallest sigma among the clouds that reach it 
 void puffs_at(float x, float y, out float c, out float gx, out float gy, out float sigma) {
 	c = 0.0; gx = 0.0; gy = 0.0; sigma = 1e18;
 	int nb = int(P[P_BINS_ACROSS]); float bs = P[P_BIN_SIZE];

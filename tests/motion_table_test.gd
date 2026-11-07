@@ -30,7 +30,7 @@ func _check_constants_are_classed() -> void:
 		var other: bool = key in SimConstants.OTHER_CONSTANTS
 		if motion == other:
 			unclassed.append(key)
-	TestUtil.check(unclassed.is_empty(), "every constant handed to the native code is in exactly one of SimConstants.MOTION_INPUTS and OTHER_CONSTANTS (decide whether the real swimming reads it): %s" % [unclassed])
+	TestUtil.check(unclassed.is_empty(), "every constant handed to the simulation is in exactly one of SimConstants.MOTION_INPUTS and OTHER_CONSTANTS (decide whether the real swimming reads it): %s" % [unclassed])
 	var unknown := []
 	for key: String in SimConstants.MOTION_INPUTS + SimConstants.OTHER_CONSTANTS:
 		if not built.has(key):
@@ -57,7 +57,7 @@ func _check_table_shape() -> void:
 		var even := true
 		for i in range(1, axis.size()):
 			even = even and absf(log(axis[i] / axis[i - 1]) - step) < 0.01 * step
-		TestUtil.check(even and step > 0.0, "an axis of the table is even in its logarithm (the native lookup counts on it)")
+		TestUtil.check(even and step > 0.0, "an axis of the table is even in its logarithm (the kernel's lookup counts on it)")
 	var rising := true
 	var bounded := true
 	for i in ns:

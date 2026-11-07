@@ -1,6 +1,6 @@
 extends SceneTree
 ## Run: godot --headless --path . -s tests/dish_world_test.gd
-## Checks DishWorld against a port of the old per-step path (Dish._step_plankton, NutrientField::emit_xy), run step by step.
+## Checks DishWorld against a step-by-step reference written in this test (plankton and emitters advanced one step at a time).
 ##
 ## Expected values, written before the first run (derived unless marked):
 ## - Setup: radius 20,000 um, bloom density 1 per mm2 a day = 1256.6 a day, so one arrival every 68.75 s, the first at t = 0.

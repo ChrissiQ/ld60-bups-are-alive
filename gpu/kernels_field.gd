@@ -5,7 +5,7 @@ extends RefCounted
 ## the cells' shares, and what each bup takes and lets go.
 
 const FIELD_FUNCS := """
-// the field's concentration (and its gradient) at a point, bilinear in the snapshot, as the CPU's read_snapshot_xy
+// the field's concentration (and its gradient) at a point, bilinear in the snapshot
 void readf(float x, float y, out float c, out float gx, out float gy) {
 	int n = int(P[P_CELLS]); float sp = P[P_SPACING];
 	float fx = clamp((x + P[P_ORIGIN]) / sp - 0.5, 0.0, float(n) - 1.001);
@@ -73,12 +73,12 @@ void main() {
 	float nw2 = limit > 0.0 ? limit * limit : -1.0;
 	float hx = 0.0, hy = 0.0, hl = 0.0; bool pending = false;
 	float floor_c = P[P_DETECTION_FLOOR], noise_ref = P[P_NOISE_REFERENCE];
-	// what it reads at the start, and from the clouds that reach it how finely to cut its step (as the CPU's moves_for_structure)
+	// what it reads at the start, and from the clouds that reach it how finely to cut its step
 	float c0, gx0, gy0; readf(x, y, c0, gx0, gy0);
 	float pc, pgx, pgy, sig; puffs_at(x, y, pc, pgx, pgy, sig);
 	c0 += pc; gx0 += pgx; gy0 += pgy;
 	int moves = 0;
-	bool fine = P[P_MOVES] > 0.5 && delta <= P[P_FINE_STEP];  // (a step as short as the fine step: it follows the individual run and tumble, as the CPU's swim_by_runs)
+	bool fine = P[P_MOVES] > 0.5 && delta <= P[P_FINE_STEP];  // (a step as short as the fine step: it follows the individual run and tumble)
 	if (P[P_MOVES] > 0.5 && !fine) {
 		float structure = min(P[P_SPACING], 2.0 * sig);
 		float sc = max(1.0, structure / max(P[P_MOTION_STRUCTURE], 1.0));
@@ -306,7 +306,7 @@ void main() {
 """
 
 const K_APPLY := """
-// A bup that takes in more than its growth can use lets go of acetate besides (the CPU's `acetate_share`; its own gain is the same), and a bup with room then takes up acetate (`take_acetate`).
+// A bup that takes in more than its growth can use lets go of acetate besides (its own gain is the same), and a bup with room then takes up acetate (`take_acetate`).
 void add_fixed2(uint cell, float w, int which) { // the acetate wanted (0) and let go (1), summed per cell
 	if (which == 0) ADD_FIXED30(AWLO, AWHI, cell, w)
 	else ADD_FIXED30(ADLO, ADHI, cell, w)
@@ -394,8 +394,8 @@ void main() {
 """
 
 ## Diffusion by explicit sub-steps (each moves a cell's share k of the difference with every inside neighbour; stable for k <= 0.25, here at most 0.2):
-## the same operator as the CPU's (no flux through the rim), exact in what it conserves, and a thousand times cheaper on a GPU than the CPU's
-## line solves, which are one long chain of dependent steps per line. SRC and DST are the two copies of the field, swapped each time.
+## no flux through the rim, exact in what it conserves, and cheap on a GPU, where an implicit line solve would be one long chain of
+## dependent steps per line. SRC and DST are the two copies of the field, swapped each time.
 const K_DIFFUSE := """
 void main() {
 	uint i = gl_GlobalInvocationID.x;

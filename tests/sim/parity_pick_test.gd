@@ -1,5 +1,5 @@
 extends SceneTree
-## The select tool's pick on the real pool, and the picking: the queries_check state loaded as a dish of
+## The select tool's pick on the real pool, and the picking: the fixture state (tools/gpu/golden/parity) loaded as a dish of
 ## the game's world (ParityGame.fixture_dish), paused, a Dish node at ParityGame.PLACE drawing it. Windowed only:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_pick_test.gd
 ##
@@ -8,11 +8,11 @@ extends SceneTree
 ## F  The fixture's 300 picks (queries_pick_near.txt: point, slack, pixel -> id), asked of the dish's picture (ViewRenderer.pick, the
 ##    question Dish.cell_at sends, with the fixture's pixel): every answer is the fixture's id (or none where it found none). The payload's
 ##    x and y are the records' floats, its length a half float of the record's (within one half-float ulp), and the kernel's
-##    rule is BupSim.pick_bup's (within half the drawn length at that pixel plus the slack, the nearest, a tie to the lowest index, which
+##    rule is the pick's (within half the drawn length at that pixel plus the slack, the nearest, a tie to the lowest index, which
 ##    in this state is the lowest id): an answer may differ only where the fixture's bup lies within 1e-3 µm of the reach. Such cases are
 ##    counted and named; none is expected.
 ## N  The fixture's 1,200 nearest-and-count questions (the same answers' `nearest` and `near`): the nearest distance within 1e-5 relative
-##    (the kernel's float d² against the CPU's), the count exact except a bup within 1e-3 µm of the radius (none expected).
+##    (the kernel's float d² against the fixture's), the count exact except a bup within 1e-3 µm of the radius (none expected).
 ## R  A check of its own: 200 points (100 on bups, 100 anywhere in the dish) clicked through Dish.cell_at with the camera at 0.25 px a
 ##    µm and the select tool's slack (4 px), each answered by the brute force over the gathered records (nearest within half the drawn
 ##    length at that pixel plus the slack, ties to the lowest index): 200 of 200, boundary cases as in F.
@@ -65,7 +65,7 @@ func _ask(local: Vector2, slack: float, pixel: float, near := 0.0) -> Dictionary
 	return view.answer(false)
 
 
-## The bup a pick at `local` finds by BupSim.pick_bup's rule over the records (in their order: the payload's), and how near the reach the
+## The bup a pick at `local` finds by the pick's rule over the records (in their order: the payload's), and how near the reach the
 ## fixture's or this build's answer lies: [index or -1, distance of the answer's bup minus its reach].
 func _brute(records: PackedByteArray, local: Vector2, slack: float, pixel: float) -> int:
 	var w := GpuLayout.RECORD_WORDS

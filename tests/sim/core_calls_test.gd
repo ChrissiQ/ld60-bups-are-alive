@@ -11,7 +11,7 @@ extends SceneTree
 ##    (records, field, clouds, husks, DSTATE but the start, events, stats) [derived: the same DISHP words, the cap the limit's since the
 ##    count is far below it]; Y left alone differs (so the comparison can see it); giving X's own values again after 20 steps changes
 ##    nothing (0 words after 40); `gather`'s spec has X's values; bloom_density is handed back as not the core's.
-## Z  resize (NutrientField::resize, BupSim::grow and shrink): growing a 3 mm dish of 200 founders (20 steps run) to 4.5 mm keeps every
+## Z  resize (a dish's grid and bodies): growing a 3 mm dish of 200 founders (20 steps run) to 4.5 mm keeps every
 ##    record byte for byte and the field's total (sum x spacing², the waiting deposits folded in) to within 1e-6 of itself, and the
 ##    diffusion's passes become max(2, 2 ceil(k_total / 0.4)) of the new spacing; shrinking it to 1.5 mm removes exactly the bups whose
 ##    centre lies past 1.5 mm (one death event of 56 bytes each), keeps the others (those inside 1.5 mm less half their length byte

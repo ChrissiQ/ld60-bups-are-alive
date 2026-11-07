@@ -2,10 +2,10 @@ class_name DishGrid
 extends RefCounted
 ## A dish's nutrient grid as the host builds it for the pooled world: the host's part of the field's setup (build, the patchy landscape,
 ## fill, export_fill_weights) and of what turns the dish's world events into cells and clouds (accepts, deposit_xy, deposit_disc,
-## add_cloud's choice). Arithmetic in doubles and stored as float32, as the C++ does, so a dish starts with the field the single-dish path's would.
+## add_cloud's choice). Arithmetic in doubles and stored as float32.
 
-const MIN_CLOUD_VARIANCE := 100.0  ## µm²: no cloud is thinner than 10 µm across (nutrient_field.cpp)
-const K_IX := -7046029254386353131  ## 0x9E3779B97F4A7C15 as a signed 64-bit int (GDScript ints wrap as the C++ uint64 does)
+const MIN_CLOUD_VARIANCE := 100.0  ## µm²: no cloud is thinner than 10 µm across
+const K_IX := -7046029254386353131  ## 0x9E3779B97F4A7C15 as a signed 64-bit int (GDScript ints wrap as a uint64 does)
 const K_IY := -4417276706812531889  ## 0xC2B2AE3D27D4EB4F
 const K_M1 := -4658895280553007687  ## 0xBF58476D1CE4E5B9
 const K_M2 := -7723592293110705685  ## 0x94D049BB133111EB

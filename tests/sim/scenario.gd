@@ -153,7 +153,7 @@ func founder_records(dish_number: int) -> PackedByteArray:
 		out.encode_float(o + GpuLayout.R_DX * 4, dir.x)
 		out.encode_float(o + GpuLayout.R_DY * 4, dir.y)
 		var mass := born * (1.0 + rng.randf())  # (not all at the same point in the cycle, as the game's founders)
-		out.encode_float(o + GpuLayout.R_ENERGY * 4, minf(founder_energy, Cell.RESERVE_PER_MASS * mass))  # (a body holds at most this: BupSim::add_bup's clamp, which the pre-pool founders went through)
+		out.encode_float(o + GpuLayout.R_ENERGY * 4, minf(founder_energy, Cell.RESERVE_PER_MASS * mass))  # (a body holds at most this)
 		out.encode_float(o + GpuLayout.R_MASS * 4, mass)
 		out.encode_float(o + GpuLayout.R_BIRTH_MASS * 4, born)
 		for g in GpuLayout.GENE_NAMES.size():

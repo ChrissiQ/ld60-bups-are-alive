@@ -74,7 +74,7 @@ bool accepts_d(uint d, float x, float y) {
 }
 
 uint slots_g, cap_g;
-// a point's nutrient onto the four cells about it (the CPU's deposit_xy), at once: one thread adds, in the events' order
+// a point's nutrient onto the four cells about it at once: one thread adds, in the events' order
 void deposit_now_d(uint d, float x, float y, float mass) {
 	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS); uint base = DPU(d, DP_FIELD_BASE); float area = sp * sp;
 	float fx = (x + org) / sp - 0.5, fy = (y + org) / sp - 0.5;
@@ -132,7 +132,7 @@ void main() {
 		if (EVP[q + 4] < 0.0) {  // a plankton husk
 			uint hv = DS(d, DS_HUSKS), hs = WORLD[WD_HUSK_SLOTS];
 			bool quota_full = hv >= DPU(d, DP_HUSK_QUOTA);
-			if (quota_full || hs >= husk_cap) {  // (as the CPU's add_cloud of radius 0: a cloud of variance 100, or onto the grid)
+			if (quota_full || hs >= husk_cap) {  // (a cloud of variance 100, or onto the grid)
 				if (!quota_full) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; }
 				if (accepts_d(d, EVP[q], EVP[q + 1]) && 10.0 < DPF(d, DP_HANDOVER)) put_cloud(d, EVP[q], EVP[q + 1], EVP[q + 2], 100.0, 1.0);
 				else deposit_now_d(d, EVP[q], EVP[q + 1], EVP[q + 2]);

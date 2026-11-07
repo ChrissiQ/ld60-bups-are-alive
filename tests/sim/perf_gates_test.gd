@@ -12,7 +12,7 @@ extends SceneTree
 ##   two backends' + 1 SD, and speed >= 10,000. x1: payload advances in >= 99% of display frames.
 ## - The speed column of gates E, F, G and x1 is measured windowed through the real sim thread (GpuSimBackend, WorldClient; no game
 ##   stack: the main thread only sends set_time each frame, tells the sim which payload texture it bound, and reads snapshots.
-##   The dishes are those of the scenarios (tools/gpu/bench_scenarios.gd): filled to their limit at once (the founder's genes, reserves from none to full,
+##   The dishes are filled to their limit at once (the founder's genes, reserves from none to full,
 ##   masses 1 to 2 birth masses, spread inside 95% of the rim), nutrient and feed at the setup maxima, 100 cells across; 12 s of settling,
 ##   then the window. Achieved speed = the snapshots' world clock over the wall clock. Written before the first run:
 ##   E: 100,000 bups, 45 mm, x10,000, 600 s: every sliding 60 s window (1 s apart) >= x9,500 and the whole run >= baseline E's mean

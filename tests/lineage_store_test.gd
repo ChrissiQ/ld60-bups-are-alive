@@ -1,6 +1,6 @@
 extends SceneTree
 ## Run: godot --headless --path . -s tests/lineage_store_test.gd
-## LineageStore (native/src/lineage_store.cpp), the family tree on its own, apart from any BupSim:
+## LineageStore (native/src/lineage_store.cpp), the family tree on its own, with no simulation:
 ##  - the two event streams captured at pre-pool (tools/gpu/golden/lineage_*), replayed into a store that starts from the stream's
 ##    initial records, give the final records of the capture, compared by id (the order of an export's records is not stable);
 ##  - a pre-pool export (golden/parity/lineage_export.bin.gz) imported into an empty store exports the same records;
@@ -95,8 +95,8 @@ static func _living_ids(bytes: PackedByteArray) -> PackedInt64Array:
 
 # ---- the pre-pool streams -----------------------------------------------------------------------------------------
 
-## The stream of `name`, applied to a store that starts from its initial records. Expected [derived]: the capture's BupSim applied
-## these births, deaths, pins and names with the code that LineageStore keeps, so every record of the final export is the capture's,
+## The stream of `name`, applied to a store that starts from its initial records. Expected [derived]: the captured run's own
+## store applied these births, deaths, pins and names with the code that LineageStore keeps, so every record of the final export is the capture's,
 ## byte for byte by id, with the same names; and the record, living and pinned counts of the _final.txt.
 func _replay(stem: String) -> void:
 	var path := GOLDEN + stem

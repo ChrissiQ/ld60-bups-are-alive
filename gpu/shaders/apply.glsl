@@ -62,7 +62,7 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define FIX30(HI, LO) (float(HI) * 4.0 + float(LO) * 9.313225746154785e-10)
 #define FIX20(HI, LO) (float(HI) * 4096.0 + float(LO) * 9.5367431640625e-7)
 
-// the clouds' concentration and gradient where a bup is, and the smallest sigma among the clouds that reach it (as the CPU's puff_probe)
+// the clouds' concentration and gradient where a bup is, and the smallest sigma among the clouds that reach it 
 void puffs_at(float x, float y, out float c, out float gx, out float gy, out float sigma) {
 	c = 0.0; gx = 0.0; gy = 0.0; sigma = 1e18;
 	int nb = int(P[P_BINS_ACROSS]); float bs = P[P_BIN_SIZE];
@@ -81,7 +81,7 @@ void puffs_at(float x, float y, out float c, out float gx, out float gy, out flo
 	}
 }
 
-// A bup that takes in more than its growth can use lets go of acetate besides (the CPU's `acetate_share`; its own gain is the same), and a bup with room then takes up acetate (`take_acetate`).
+// A bup that takes in more than its growth can use lets go of acetate besides (its own gain is the same), and a bup with room then takes up acetate (`take_acetate`).
 void add_fixed2(uint cell, float w, int which) { // the acetate wanted (0) and let go (1), summed per cell
 	if (which == 0) ADD_FIXED30(AWLO, AWHI, cell, w)
 	else ADD_FIXED30(ADLO, ADHI, cell, w)

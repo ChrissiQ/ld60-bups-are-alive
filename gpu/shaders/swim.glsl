@@ -86,7 +86,7 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define BUP_RECORD_THREAD BUP_THREAD uint b = i * RECORD_WORDS;
 #define CELL_THREAD uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
 
-// the field's concentration (and its gradient) at a point, bilinear in the snapshot, as the CPU's read_snapshot_xy
+// the field's concentration (and its gradient) at a point, bilinear in the snapshot
 void readf(float x, float y, out float c, out float gx, out float gy) {
 	int n = int(P[P_CELLS]); float sp = P[P_SPACING];
 	float fx = clamp((x + P[P_ORIGIN]) / sp - 0.5, 0.0, float(n) - 1.001);
@@ -123,7 +123,7 @@ void lookup(float s, float eps, out float f, out float along, out float across) 
 	}
 }
 
-// the clouds' concentration and gradient where a bup is, and the smallest sigma among the clouds that reach it (as the CPU's puff_probe)
+// the clouds' concentration and gradient where a bup is, and the smallest sigma among the clouds that reach it 
 void puffs_at(float x, float y, out float c, out float gx, out float gy, out float sigma) {
 	c = 0.0; gx = 0.0; gy = 0.0; sigma = 1e18;
 	int nb = int(P[P_BINS_ACROSS]); float bs = P[P_BIN_SIZE];
@@ -157,12 +157,12 @@ void main() {
 	float nw2 = limit > 0.0 ? limit * limit : -1.0;
 	float hx = 0.0, hy = 0.0, hl = 0.0; bool pending = false;
 	float floor_c = P[P_DETECTION_FLOOR], noise_ref = P[P_NOISE_REFERENCE];
-	// what it reads at the start, and from the clouds that reach it how finely to cut its step (as the CPU's moves_for_structure)
+	// what it reads at the start, and from the clouds that reach it how finely to cut its step
 	float c0, gx0, gy0; readf(x, y, c0, gx0, gy0);
 	float pc, pgx, pgy, sig; puffs_at(x, y, pc, pgx, pgy, sig);
 	c0 += pc; gx0 += pgx; gy0 += pgy;
 	int moves = 0;
-	bool fine = P[P_MOVES] > 0.5 && delta <= P[P_FINE_STEP];  // (a step as short as the fine step: it follows the individual run and tumble, as the CPU's swim_by_runs)
+	bool fine = P[P_MOVES] > 0.5 && delta <= P[P_FINE_STEP];  // (a step as short as the fine step: it follows the individual run and tumble)
 	if (P[P_MOVES] > 0.5 && !fine) {
 		float structure = min(P[P_SPACING], 2.0 * sig);
 		float sc = max(1.0, structure / max(P[P_MOTION_STRUCTURE], 1.0));

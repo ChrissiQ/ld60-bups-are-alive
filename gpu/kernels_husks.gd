@@ -1,13 +1,13 @@
 class_name GpuKernelsHusks
 extends RefCounted
-## The pooled world's husks (the CPU's are native/src/bup_husks.cpp): what a death leaves with the dish's death husks on,
+## The pooled world's husks: what a death leaves with the dish's death husks on,
 ## and what a plankton leaves with plankton husks on, and their slow leak. A husk is 8 floats in HUSK (every dish's together): x, y, the
 ## nutrient it holds, its age, the pieces already let go, the dish's row word (PUFF_ROW_BASE + row, as a cloud's), alive (1.0 or 0.0), 0.
 ## WORLD[WD_HUSK_SLOTS] is the physical top; a dish's own count is DS_HUSKS, which the dish's husk quota (DP_HUSK_QUOTA) bounds.
 ## The spawn of a plankton husk is in `pool_ev_puffs` (kernels_clouds.gd), the husks of deaths in `pool_husk_spawn` below. The leak makes
 ## the dish's clouds, in slots the step reserves after the deaths': `pool_husk_age` finds how many pieces each husk lets go, the scan `hl`
 ## orders them, `pool_husk_leak` writes them. A piece is a cloud of variance 100 and cut 1 where the husk is (a deposit on the grid when the
-## dish hands over below that width or does not accept a cloud there, as the CPU's add_cloud); it raises its dish's cloud counter but is
+## dish hands over below that width or does not accept a cloud there, as for a cloud); it raises its dish's cloud counter but is
 ## not held back by the cloud quota, as the husk quota already bounds what leaks. A dish's DS_HUSKS is virtual, as its cloud counter:
 ## raised by every husk slot its deaths and plankton take, and set to its live husks at its own cadence (`pool_husk_live`, then
 ## `pool_cloud_cadence`), so the cull (mark, scan `hc`, copy, copy back, the new top), which the host runs when it likes, frees slots
@@ -79,7 +79,7 @@ void main() {
 """
 
 ## The husks of this step's deaths: a dish's first `husk_room` deaths (by rank, as in `pool_death_clouds`) take the slots its base gives. A
-## husk holds what the death gives back (P_DEATH_GIVE x its mass, as the CPU's release_deaths); a trimmed bup (its record's y is not -2)
+## husk holds what the death gives back (P_DEATH_GIVE x its mass); a trimmed bup (its record's y is not -2)
 ## leaves an empty slot. A death whose slot lies past the pool's husk slots raises the overflow flag and gives its nutrient to the grid.
 const K_SPAWN := """
 void f(uint i, uint d, uint l) {

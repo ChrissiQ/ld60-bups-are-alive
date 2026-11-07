@@ -3,9 +3,9 @@ extends RefCounted
 ## The bups' lives (see gpu/kernels.gd for how a kernel is made and registered): conjugation, then division, death and mutation, the
 ## scans that give the kept bups and the newborns their places, the trim at the limit, and the move into those places.
 
-## Division, death and mutation (the CPU's `step` after uptake and `mutate`), per bup. A bup dies of an empty reserve or by chance; one
+## Division, death and mutation (after uptake), per bup. A bup dies of an empty reserve or by chance; one
 ## that has grown enough divides: the daughter, if not lethally mutated, is written into CHILD at the parent's index; SURV and KID mark
-## who is kept and who has a child. A population that would pass the limit loses a random share each step (the CPU replaces a random bup at
+## who is kept and who has a child. A population that would pass the limit loses a random share each step (a random bup is replaced at
 ## each birth: the same). The share is what the step's growth is expected to carry over the limit: the last step's growth (CNT_GROWTH)
 ## added to the count now. Trimming only what is already over leaves the count a step's births above the limit.
 const K_LIFE := """
@@ -30,7 +30,7 @@ int poisson(float mean, inout uint s) {
 	while (p > lim && count < 400) { count++; p *= u01(s); }
 	return count;
 }
-void drift(inout float hue, inout float sat, inout float val, inout uint s) {  // (the colour is a neutral marker: every counted mutation moves it, as the CPU's note_mutation)
+void drift(inout float hue, inout float sat, inout float val, inout uint s) {  // (the colour is a neutral marker: every counted mutation moves it)
 	hue = fract(hue + gauss(s) * P[P_HUE_STEP]); sat = clamp(sat + gauss(s) * P[P_SAT_STEP], 0.0, 1.0); val = clamp(val + gauss(s) * P[P_VAL_STEP], P[P_VAL_MIN], 1.0);
 }
 void main() {
@@ -91,7 +91,7 @@ void main() {
 				drift(hue, sat, val, s);
 			}
 		}
-		// The mutation rate itself changes in jumps (see the CPU's mutate): a new mutator allele sets it to one of three folds, an antimutator halves it.
+		// The mutation rate itself changes in jumps (see `mutate`): a new mutator allele sets it to one of three folds, an antimutator halves it.
 		float mutator = rate, allele = u01(s);
 		if (allele < P[P_MUTATOR_RATE]) {
 			float pick = u01(s);

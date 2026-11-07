@@ -2,7 +2,7 @@ class_name Genome
 extends RefCounted
 ## Heritable traits of one bup, as a plain dictionary (speed, sense, metabolism, size, hue, harm,
 ## mutations). Inherited clonally (no recombination) with mutation. The mutation itself runs in the
-## native simulation (native/src/bup_sim.cpp); this file holds the numbers it uses and the helpers
+## pooled GPU world (the `pool_life` kernel, gpu/kernels_life.gd); this file holds the numbers it uses and the helpers
 ## that make and show genomes.
 ##
 ## Mutation follows the shape of real distributions of fitness effects (Eyre-Walker & Keightley
@@ -79,7 +79,7 @@ const DONOR_LOSS := 1.0e-3  ## the chance that a donor's daughter loses it [choi
 ## How fast a touching donor and recipient transfer, per second. Real conjugation completes in minutes (a plasmid-sized piece in about 3 minutes at 620
 ## nucleotides a second; Couturier et al. 2023); 0.1 a second is about eighteen times faster, so that a touch of a few seconds, which is all that swimming
 ## bups have, can transfer [choice: scaled for playability]. It is not what limits the number of transfers: how often a donor touches a bup is (measured
-## in scenario D, tools/gpu/game_dynamics.gd: with about 0.1% of the bups donors, one transfer per 480 divisions at 0.1, only 1.4 times as many at 0.6).
+## in a dish with about 0.1% of the bups donors, one transfer per 480 divisions at 0.1, only 1.4 times as many at 0.6).
 ## In life chromosomal genes move at about 1e-4 per cell per generation (Cooper 2007), 3% of the mutation rate; here it is about 0.5% of it.
 const CONJ_RATE := 0.1
 

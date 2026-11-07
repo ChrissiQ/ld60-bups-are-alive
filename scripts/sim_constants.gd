@@ -1,9 +1,9 @@
 class_name SimConstants
 extends RefCounted
-## The native simulation (native/src) defines no numbers of its own. Every constant it uses is
+## The simulation defines no numbers of its own. Every constant the pooled world's kernels use is
 ## gathered here from the scripts that document it (biology.gd, cell.gd, genome.gd, dish.gd) and
-## handed over once. Add a constant to the native code by adding it to this dictionary and to
-## native/src/params.h, never by writing the value in C++.
+## handed over once (SimCore loads it into the P slots and tables named in gpu/gpu_layout.gd). Add a
+## constant by adding it to this dictionary and to the layout's P table, never by writing the value in a kernel.
 
 ## Every constant in build() is one of these two lists, and the test (tests/motion_table_test.gd) fails for one that is in
 ## neither. This is how a new constant gets a decision: does the real run-and-tumble swimming read it? The coarse motion of
@@ -37,7 +37,7 @@ static func apply() -> void:
 	if _applied:
 		return
 	_applied = true
-	if OS.is_debug_build() and not MotionFingerprint.constants_current():  # (the full check, with the native sources, is in the tests)
+	if OS.is_debug_build() and not MotionFingerprint.constants_current():  # (the full check is in the tests)
 		push_error("the motion table is stale: a constant of the real swimming has changed since it was measured (run tools/gen_motion_table.gd)")
 
 
@@ -45,7 +45,7 @@ static func build() -> Dictionary:
 	var gene_min := []
 	var gene_max := []
 	var gene_step := []
-	for gene in Genome.GENES:  # the native code indexes genes in this order
+	for gene in Genome.GENES:  # the kernels index genes in this order
 		gene_min.append(Genome.GENES[gene][0])
 		gene_max.append(Genome.GENES[gene][1])
 		gene_step.append(Genome.GENES[gene][2])

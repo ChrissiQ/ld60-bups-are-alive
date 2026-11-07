@@ -1292,7 +1292,7 @@ func husk_details(local: Vector2) -> Dictionary:
 		return {}
 	_husks_seen[local] = found
 	var details := _spot_details(local)
-	var left := exp(-0.25 * found[4])  # (what is left after the pieces already let go: see husk_share in bup_husks.cpp)
+	var left := exp(-0.25 * found[4])  # (what is left after the pieces already let go: see husk_share in gpu/kernels_husks.gd)
 	details["age"] = found[3]
 	details["units"] = found[2] * left / NUTRIENT_ENERGY
 	details["left"] = left

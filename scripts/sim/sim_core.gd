@@ -8,7 +8,7 @@ extends RefCounted
 ## The arena (SimArena) holds the buffers and grows them by 1.5 when an iteration's bound would pass 90% of one; a dish takes a row of
 ## the dish tables (DISHP, DSTATE), a segment of record slots (256-aligned, appended at the end and put in row order by the next step's
 ## compaction), a 256-aligned block of field cells and a run of cloud-list squares. An iteration (`run`) uploads the dishes' world events,
-## records its steps in one compute list in the order of tools/gpu/pool_rig.gd's header (life's `pool_*` kernels in kernels_life.gd's
+## records its steps in one compute list in the order of `_record_step` (life's `pool_*` kernels in kernels_life.gd's
 ## order), submits, syncs and reads back DSTATE and WORLD. The pipette is its own zero-step pass (`pipette`, a retarget); a dish leaves by
 ## `remove_dish` (its blocks become padding at once, its clouds and husks empty slots) and comes back by `load_dish` from what `gather`
 ## read; `resize` and `set_params` change a running dish. `publish` writes the main dish's pictures into the next free shared texture after
@@ -570,7 +570,7 @@ static func _resample(values: PackedFloat32Array, old: DishGrid, grid: DishGrid,
 
 
 ## A bup straddling the edge moved inside: to `limit` from the middle along its own line, facing along the wall.
-## Where it faced straight at the wall, it turns the way its id's lowest bit says (the C++ draws it from the dish's stream).
+## Where it faced straight at the wall, it turns the way its id's lowest bit says (drawn from the dish's stream).
 static func _keep_inside(rec: PackedByteArray, limit: float, dist: float) -> void:
 	if dist <= limit:
 		return
@@ -718,7 +718,7 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 	return {"steps": steps, "overflow": _overflow, "record_usec": t1 - t0, "gpu_usec": t2 - t1}
 
 
-## For timing (tools/gpu/core_perf.gd): `steps` steps as `run` records them, but each dispatch in a submit of its own, timed by the wall
+## For timing (tools/gpu/gpu_lab.gd): `steps` steps as `run` records them, but each dispatch in a submit of its own, timed by the wall
 ## clock around its submit and sync. Returns kernel name -> Array of µs (one entry a dispatch) and "_noop" -> the same for a one-thread
 ## kernel (the round trip to take off). The results are the same as `run`'s; only the time differs.
 func profile_steps(steps: int, delta: float, plan: Variant = null) -> Dictionary:
@@ -748,7 +748,7 @@ func profile_steps(steps: int, delta: float, plan: Variant = null) -> Dictionary
 	return out
 
 
-## The step `s` of a batch, in the order of tools/gpu/pool_rig.gd's header.
+## The step `s` of a batch, in the order of kernels_life.gd's header.
 func _record_step(cl: int, s: int) -> void:
 	var bg := _bup_groups()
 	var cg := _groups(arena.cell_top)

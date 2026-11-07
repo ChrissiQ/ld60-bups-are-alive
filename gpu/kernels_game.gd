@@ -103,7 +103,7 @@ void main() {
 		for (uint k = ST_SPEED; k <= ST_MUTATIONS; k++) OUT[o + k] = floatBitsToUint(sm[k * 256u]);  // (sums 1 to 6 are in the sample's order)
 		OUT[o + ST_STEP] = floatBitsToUint(pcs.pc);
 		OUT[o + ST_MUTATOR] = floatBitsToUint(sm[7 * 256]);  // (the mutator's sum)
-		OUT[o + ST_DONORS] = uint(sm[10 * 256] + 0.5);  // (the donors' count: of the bups now, as the CPU's population_stats, not of the last step)
+		OUT[o + ST_DONORS] = uint(sm[10 * 256] + 0.5);  // (the donors' count: of the bups now, not of the last step)
 		OUT[o + ST_KEY] = floatBitsToUint(sm[8 * 256]);  // (the key's count)
 		OUT[o + ST_DIVISIONS] = floatBitsToUint(sm[9 * 256]);  // (the divisions' sum)
 		for (uint k = ST_DIVISIONS + 1u; k < STATS_WORDS; k++) OUT[o + k] = 0u;

@@ -5,7 +5,7 @@ extends SceneTree
 ##  - every member of `Snapshot` (read from the script) is present in a canned snapshot with the declared type: seq/sim_time/
 ##    achieved_speed/paused: int/float/float/bool, dishes/history/answers/worlds/timing/totals: Dictionary, payloads: Array, husk_view: Dictionary, payload/field_view/thumbs: objects of
 ##    PayloadInfo/FieldViewInfo/ThumbsInfo; `Snapshot` has exactly 15 members;
-##  - a DishState's stats keys equal `BupSim.population_stats()`'s keys, in order (measured once: count, speed, sense, metabolism, size,
+##  - a DishState's stats keys equal the keys of the population statistics the game reads, in order (measured once: count, speed, sense, metabolism, size,
 ##    harm, mutations, mutator, donor, key, generation = 11);
 ##  - a tracked answer is GpuLayout.ANSWER_BYTES (96) bytes; a record GpuLayout.RECORD_BYTES (112); records(3) is 336 bytes with ids 1..3;
 ##  - serve: latest() is the served snapshot (same object); before serve it is an empty Snapshot;
@@ -57,9 +57,9 @@ func _shape() -> void:
 
 
 func _stats_keys() -> void:
-	var real: Array = ["count", "speed", "sense", "metabolism", "size", "harm", "mutations", "mutator", "donor", "key", "generation"]  # population_stats' keys, measured once
-	TestUtil.check(real.size() == 11, "population_stats has 11 keys (got %d)" % real.size())
-	TestUtil.check(DishState.STATS_KEYS == Array(real, TYPE_STRING, "", null), "DishState.STATS_KEYS equal BupSim.population_stats' keys in order")
+	var real: Array = ["count", "speed", "sense", "metabolism", "size", "harm", "mutations", "mutator", "donor", "key", "generation"]  # the population statistics' keys, measured once
+	TestUtil.check(real.size() == 11, "the population statistics have 11 keys (got %d)" % real.size())
+	TestUtil.check(DishState.STATS_KEYS == Array(real, TYPE_STRING, "", null), "DishState.STATS_KEYS equal the population statistics' keys in order")
 	var s := FakeScenes.stats(7)
 	TestUtil.check(Array(s.keys()) == real and s["count"] == 7, "FakeScenes.stats has the real keys")
 	var snap := FakeScenes.snapshot(2, 5)

@@ -11,9 +11,9 @@ extends RefCounted
 ## - `frame` tells the world the speed and pause each frame with the frame's real length (Main._advance_world's call).
 ## - `settle` waits until the sim thread has drained what was sent and the result worker has done what that queued (the LineageStore lags
 ##   the pool by the worker's queue): a check of the store against the pool is made paused and settled.
-## - `fixture_dish` loads the queries_check state (tools/gpu/golden/parity: 20,000 bups, its nutrient grid and 60 clouds, radius 3000,
+## - `fixture_dish` loads the fixture state (tools/gpu/golden/parity: 20,000 bups, its nutrient grid and 60 clouds, radius 3000,
 ##   100 cells across) as a dish of the world, paused, and checks that the pool holds it word for word before any test reads it.
-## - `total` is the dish's nutrient as NutrientField::total counted it: the grid and the deposits waiting for it (energy: concentration
+## - `total` is the dish's nutrient as the fixture counted it: the grid and the deposits waiting for it (energy: concentration
 ##   times the cell's area) and the live clouds' mass.
 
 const FIXTURES := "res://tools/gpu/golden/parity/"
@@ -202,7 +202,7 @@ func core_row(d: Dish) -> int:
 
 
 ## The nutrient in a gathered dish, in energy: the grid and the deposits waiting for it (each cell's concentration times its area) and
-## the live clouds' mass (NutrientField::total).
+## the live clouds' mass.
 static func total(blob: DishBlob) -> float:
 	return grid_total(blob) + clouds_total(blob)
 

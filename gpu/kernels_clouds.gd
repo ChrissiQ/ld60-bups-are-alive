@@ -5,7 +5,7 @@ extends RefCounted
 ## and the clouds of the dead.
 
 const CLOUD_FUNCS := """
-// the clouds' concentration and gradient where a bup is, and the smallest sigma among the clouds that reach it (as the CPU's puff_probe)
+// the clouds' concentration and gradient where a bup is, and the smallest sigma among the clouds that reach it 
 void puffs_at(float x, float y, out float c, out float gx, out float gy, out float sigma) {
 	c = 0.0; gx = 0.0; gy = 0.0; sigma = 1e18;
 	int nb = int(P[P_BINS_ACROSS]); float bs = P[P_BIN_SIZE];
@@ -25,9 +25,8 @@ void puffs_at(float x, float y, out float c, out float gx, out float gy, out flo
 }
 """
 
-## New clouds and deposits come from the CPU (plankton bursts, sources) as events with the step they belong to.
-## One thread, so the slots are taken in the events' order. A cloud that finds every slot taken goes onto the grid at once, as the CPU's
-## add_puff does past MAX_CLOUDS (its deposit_gaussian, and deposit_xy if no cell takes any of it), and is counted in PCNT_TO_GRID.
+## New clouds and deposits come from the host (plankton bursts, sources) as events with the step they belong to.
+## One thread, so the slots are taken in the events' order. A cloud that finds every slot taken goes onto the grid at once (spread as a Gaussian over the cells, or put on the nearest cell if no cell takes any of it), and is counted in PCNT_TO_GRID.
 const K_EV_PUFFS := """
 void to_grid(float x, float y, float mass, float v) {
 	int n = int(P[P_CELLS]); float sp = P[P_SPACING]; float area = sp * sp; float reach = 4.0 * sqrt(v);
@@ -113,7 +112,7 @@ void deposit_xy(float x, float y, float mass) {
 }
 """
 
-## The clouds spread (as the CPU's advance_puffs): a cloud that has spread to about a cell is given to the grid, its nutrient over the cells
+## The clouds spread: a cloud that has spread to about a cell is given to the grid, its nutrient over the cells
 ## it covers, and an eaten one is dropped. What goes to the grid is summed in fixed point (an exact sum whatever the order), then added.
 const K_PUFF_ADVANCE := """
 void main() {
@@ -181,7 +180,7 @@ void main() {
 }
 """
 
-## The clouds filed by place, so that a read looks at one short list (the CPU's rebuild_hash): the dish is cut into squares half a cell across and
+## The clouds filed by place, so that a read looks at one short list (the lookup lists): the dish is cut into squares half a cell across and
 ## each cloud is listed in every square its reach touches. Counted, summed, filled, and each list put in order (the order the threads ran in must
 ## not show in the sums of a read).
 const K_BIN_CLEAR := """
@@ -284,11 +283,10 @@ void main() {
 }
 """
 
-## What a bup that died of starvation or chance gives back (not one the trim displaced at the limit, as the CPU's step does not for its Moran
-## displacement): a cloud of P_DEATH_PUFF (death_release x cost_per_mass) per unit of its mass at its place, as the CPU's add_cloud of radius 0 does:
+## What a bup that died of starvation or chance gives back (not one the trim displaced at the limit, which gives nothing back): a cloud of P_DEATH_PUFF (death_release x cost_per_mass) per unit of its mass at its place, as a cloud of radius 0:
 ## a cloud of variance 100 µm² in the next free slots (slot = the number of slots in use + the number of bups that died before it, trimmed or not,
 ## so a trimmed one's slot is left empty, `alive` 0, until a compaction), a deposit on the grid if the grid is too fine for a cloud, the bup is in
-## a rim cell (one whose centre is outside the dish: the CPU's `accepts`) or the slots are taken. After `finalize`, before `copy`: the dead bups' records are still where they were. `death_count` then takes the slots.
+## a rim cell (one whose centre is outside the dish) or the slots are taken. After `finalize`, before `copy`: the dead bups' records are still where they were. `death_count` then takes the slots.
 const K_DEATH_CLOUDS := """
 void main() {
 	uint i = gl_GlobalInvocationID.x;
@@ -359,7 +357,7 @@ void puffs_at_d(uint d, float x, float y, out float c, out float gx, out float g
 }
 """
 
-## Whether a point of dish d may hold a cloud, as the CPU's `accepts`: inside the dish, in a cell whose centre is inside.
+## Whether a point of dish d may hold a cloud: inside the dish, in a cell whose centre is inside.
 const POOL_ACCEPT_FUNCS := """
 bool accepts_d(uint d, float x, float y) {
 	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS);
@@ -393,11 +391,11 @@ void deposit_xy_d(uint d, float x, float y, float mass) {
 ## pool and of its dish's counter; one past its dish's quota goes onto the grid (as the single dish's past its capacity), and one that the
 ## pool's physical slots cannot hold goes onto the grid too and raises the overflow flag (the host sizes the slots so that it does not
 ## happen; when it does, the dish's run is no longer its run alone, and the flag stays). A plankton husk takes the next husk slot; past the
-## dish's husk quota, or past the pool's husk slots (the overflow flag), its energy is given back at once, as the CPU's add_cloud would (a
+## dish's husk quota, or past the pool's husk slots (the overflow flag), its energy is given back at once, as a death's is (a
 ## cloud of variance 100, or onto the grid where the dish does not accept one).
 const K_POOL_EV_PUFFS := """
 uint slots_g, cap_g;
-// a point's nutrient onto the four cells about it (the CPU's deposit_xy), at once: one thread adds, in the events' order
+// a point's nutrient onto the four cells about it at once: one thread adds, in the events' order
 void deposit_now_d(uint d, float x, float y, float mass) {
 	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS); uint base = DPU(d, DP_FIELD_BASE); float area = sp * sp;
 	float fx = (x + org) / sp - 0.5, fy = (y + org) / sp - 0.5;
@@ -455,7 +453,7 @@ void main() {
 		if (EVP[q + 4] < 0.0) {  // a plankton husk
 			uint hv = DS(d, DS_HUSKS), hs = WORLD[WD_HUSK_SLOTS];
 			bool quota_full = hv >= DPU(d, DP_HUSK_QUOTA);
-			if (quota_full || hs >= husk_cap) {  // (as the CPU's add_cloud of radius 0: a cloud of variance 100, or onto the grid)
+			if (quota_full || hs >= husk_cap) {  // (a cloud of variance 100, or onto the grid)
 				if (!quota_full) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; }
 				if (accepts_d(d, EVP[q], EVP[q + 1]) && 10.0 < DPF(d, DP_HANDOVER)) put_cloud(d, EVP[q], EVP[q + 1], EVP[q + 2], 100.0, 1.0);
 				else deposit_now_d(d, EVP[q], EVP[q + 1], EVP[q + 2]);
@@ -706,7 +704,7 @@ void f(uint i) {
 GRID_LOOP(f, uint(pcs.pa))
 """
 
-## The chance of steering up a slope (params.h `steering_chance`), for dish `d` (its receptor-noise scale is its own): from the motion table
+## The chance of steering up a slope (`steering_chance`), for dish `d` (its receptor-noise scale is its own): from the motion table
 ## (LOOKUP_FUNCS must come with it, and the buffers P and TABLE). `window` is the steering window in seconds, which is a constant of
 ## SimConstants and no slot of P: the caller passes it. erf by the Chebyshev fit of Numerical Recipes' erfc (fractional error under 1.2e-7).
 const POOL_STEER_FUNCS := """

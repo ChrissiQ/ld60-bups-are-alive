@@ -82,7 +82,7 @@ const EV_REACH_MASK := 0x3FF  ## the reach word's ten bits, above the low 20
 const EV_DONOR_SHIFT := 30  ## the F factor's bit
 const EV_PUFF_FLOATS := 6  ## a cloud among the clouds the dish's own world sends (EVP): x, y, mass, variance, cut, a spare 0
 const EVENT_SETS := 4  ## the family events of this many batches can be held at once (each batch writes set seq % EVENT_SETS; a set is
-## written again only once its batch's events are in the CPU's records: about 4 frames after it ran)
+## written again only once its batch's events are in the lineage records: about 4 frames after it ran)
 const MAX_STEPS_PER_BATCH := 1024  ## the steps of one batch (EVR: four ints a step)
 const EV_PUFFS_CAPACITY := 65536  ## the clouds the dish's own world can send in one batch (EVP)
 const EV_CELLS_CAPACITY := 1048576  ## the deposits on cells it can send in one batch (EVCC, EVCA)

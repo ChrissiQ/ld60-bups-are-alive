@@ -147,7 +147,7 @@ int poisson(float mean, inout uint s) {
 	while (p > lim && count < 400) { count++; p *= u01(s); }
 	return count;
 }
-void drift(inout float hue, inout float sat, inout float val, inout uint s) {  // (the colour is a neutral marker: every counted mutation moves it, as the CPU's note_mutation)
+void drift(inout float hue, inout float sat, inout float val, inout uint s) {  // (the colour is a neutral marker: every counted mutation moves it)
 	hue = fract(hue + gauss(s) * P[P_HUE_STEP]); sat = clamp(sat + gauss(s) * P[P_SAT_STEP], 0.0, 1.0); val = clamp(val + gauss(s) * P[P_VAL_STEP], P[P_VAL_MIN], 1.0);
 }
 void life_slot(uint i, uint d, uint l) {
@@ -210,7 +210,7 @@ void life_slot(uint i, uint d, uint l) {
 				drift(hue, sat, val, s);
 			}
 		}
-		// The mutation rate itself changes in jumps (see the CPU's mutate): a new mutator allele sets it to one of three folds, an antimutator halves it.
+		// The mutation rate itself changes in jumps (see `mutate`): a new mutator allele sets it to one of three folds, an antimutator halves it.
 		float mutator = rate, allele = u01(s);
 		if (allele < P[P_MUTATOR_RATE]) {
 			float pick = u01(s);
