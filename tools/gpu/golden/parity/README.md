@@ -8,7 +8,7 @@ Files are text (`var_to_str` for vectors and dicts) or gzip (read with `FileAcce
 
 | mode | file | what | stable? |
 |---|---|---|---|
-| state | `state_records.bin.gz` | `BupSim.export_state_bytes()` of the queries_check state: 20,000 bups (28-word records), radius 3000, seed 5, the last 50 on the spots of others (ties) | deterministic; reproduced byte for byte by a second run |
+| state | `state_records.bin.gz` | the processor engine's exported state (28-word record layout) of the queries_check state: 20,000 bups (28-word records), radius 3000, seed 5, the last 50 on the spots of others (ties) | deterministic; reproduced byte for byte by a second run |
 | state | `state_field_conc.bin.gz`, `state_field_puffs.bin.gz` | the nutrient grid (float32, conc) and the 60 clouds (5 floats each) as `export_packed()` | deterministic |
 | state | `queries_pick_near.txt` | 300 rounds of `pick_bup(point, slack, pixel)` and 4 `nearest_and_count` each (the rounds of queries_check, rng seed 7) | deterministic |
 | state | `queries_stats.txt` | `population_stats()` (full dict) and four `fraction_with_gene_at_least` answers | deterministic |
