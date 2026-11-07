@@ -1,28 +1,55 @@
 extends SceneTree
-## The pooled world reproduces the old path's goldens.
+## The pooled world reproduces its own goldens.
 ##
 ## Expected values, written before the first run:
-## - `tools/gpu/validate_dynamics.gd gpu <scenario> 1 6` run on the pooled world matches `tools/gpu/golden/` byte for byte, for the
-##   scenarios that have a golden on this machine [derived: equality at one dish and one seed]. The goldens were
-##   made on Apple Silicon with Metal: on another GPU the comparison is against a golden made there before the change.
-## - this file compares only; it makes no golden. The goldens of the pooled path are made separately, and until then the test is a
-##   stub. Enabled by a later change.
+## - For every `tools/gpu/golden/dynamics_pooled_<scenario>_seed1_6h.txt`, one dish of that scenario at seed 1 run for 6 sim-hours in steps
+##   of 20 s (what `tools/gpu/validate_dynamics.gd gpu <scenario> 1 6` does) gives the same six SAMPLE lines, byte for byte [derived: the
+##   run is deterministic per seed on one machine; equality is asked at one dish and one seed].
+## - The goldens were made on Apple Silicon with Metal. On another GPU or driver the comparison is against a golden made there before the
+##   change, so a mismatch on a new machine is a reason to regenerate the goldens there, not a failure of the code.
+## - `tools/gpu/golden/pre_pool/` holds the earlier path's files: references for the ensemble test only, never compared byte for byte.
 ## Windowed only (GPU).
 
+const Tools := preload("res://tools/gpu/world_tools.gd")
+const Lab := preload("res://tools/gpu/gpu_lab.gd")
 const GOLDEN_DIR := "res://tools/gpu/golden/"
+const PREFIX := "dynamics_pooled_"
+const BATCH := 9  ## steps a call of the core runs, as validate_dynamics.gd does
+const STEP := 20.0
+const HOURS := 6
 
 
 func _init() -> void:
 	if not SimHarness.begin(self, "goldens_test", "pooled goldens"):
 		return
-	var pooled: Array = Array(DirAccess.get_files_at(GOLDEN_DIR)).filter(func(f): return f.begins_with("dynamics_pooled_"))
-	if pooled.is_empty():
-		SimHarness.skip(self, "goldens_test", "no pooled goldens in %s yet" % GOLDEN_DIR, "a later change")
+	var files: Array = Array(DirAccess.get_files_at(GOLDEN_DIR)).filter(func(f): return f.begins_with(PREFIX) and f.ends_with(".txt"))
+	files.sort()
+	if files.is_empty():
+		SimHarness.skip(self, "goldens_test", "no %s*.txt in %s" % [PREFIX, GOLDEN_DIR], "a later change")
 		return
-	for f in pooled:
+	SimConstants.apply()
+	for f in files:
 		var scenario: String = f.get_basename().split("_")[2]
-		var old_name: String = f.replace("dynamics_pooled_", "dynamics_gpu_")
-		var a := FileAccess.get_file_as_bytes(GOLDEN_DIR + old_name)
-		var b := FileAccess.get_file_as_bytes(GOLDEN_DIR + f)
-		TestUtil.show(not a.is_empty() and a == b, "scenario %s: the pooled golden equals the old golden byte for byte" % scenario)
+		var golden := FileAccess.get_file_as_string(GOLDEN_DIR + f)
+		var got := _run(scenario)
+		TestUtil.show(not golden.is_empty() and got == golden,"scenario %s: the run equals %s byte for byte" % [scenario, f])
 	TestUtil.finish(self, "OK goldens_test")
+
+
+## The SAMPLE lines of a run, as validate_dynamics.gd prints them.
+func _run(scenario: String) -> String:
+	var per_hour := roundi(3600.0 / STEP)
+	var h := SimHarness.make([Tools.scenario(scenario, 1)], {"delta": STEP})
+	var text := ""
+	var done := 0
+	for hour in range(1, HOURS + 1):
+		while done < hour * per_hour:
+			var n := mini(BATCH, hour * per_hour - done)
+			h.step(n)
+			done += n
+		var got := Lab.sample(h, 0)
+		text += Tools.sample_text("gpu", scenario, 1, hour, got["count"], got["means"], got["energy"], got["nutrient"]) + "\n"
+		if got["count"] == 0:
+			break
+	h.core.release()
+	return text
