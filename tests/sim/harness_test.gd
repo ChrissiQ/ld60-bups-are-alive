@@ -6,7 +6,7 @@ extends SceneTree
 ##   "R_ENERGY"; with DS_MOVED_IN changed it names "DS_MOVED_IN"; with the picture words (R_PX, R_PY) changed and nothing else it is "".
 ## - a dump whose records are longer than the other's says "length".
 ## - `Scenario.small(10, 500)`: 10 records of RECORD_BYTES, ids 1..10, every bup inside 0.9 x 500 µm, genes the founder's
-##   (speed 20, sense 50, metabolism 1, size 4), birth mass = Cell.mass_to_add(founder) = 0.5 x 4 x 4 = 8, mass = birth mass x (1 + u), u in [0, 1) (the game's random phase: 8 to 16, below the division mass 16), reserve Dish.FOUNDER_ENERGY, no donors.
+##   (speed 20, sense 50, metabolism 1, size 4), birth mass = Cell.mass_to_add(founder) = 0.5 x 4 x 4 = 8, mass = birth mass x (1 + u), u in [0, 1) (the game's random phase: 8 to 16, below the division mass 16), reserve Dish.FOUNDER_ENERGY but no more than the body holds (Cell.RESERVE_PER_MASS x mass), no donors.
 ## - `with_flags({"conjugation": true})`: records 0, 5 are donors (R_DONOR 1.0), 1 is not; `{"key": true}`: record 2 has reach 2<<8.
 ## - `dish_flags` sets exactly the DPF bits of the flags given (stationary -> bit DPF_STATIONARY...).
 ## - two scenarios with the same layout_seed and different seeds have identical positions; with different layout seeds, not.
@@ -69,7 +69,7 @@ func _scenario_checks() -> void:
 		TestUtil.check(r.decode_float(o + GpuLayout.R_SPEED * 4) == 20.0 and r.decode_float(o + GpuLayout.R_SENSE * 4) == 50.0, "founder %d's genes" % i)
 		var m := r.decode_float(o + GpuLayout.R_MASS * 4)
 		TestUtil.check(m >= 8.0 and m < 16.0 and is_equal_approx(r.decode_float(o + GpuLayout.R_BIRTH_MASS * 4), 8.0), "founder %d's mass" % i)
-		TestUtil.check(r.decode_float(o + GpuLayout.R_ENERGY * 4) == Dish.FOUNDER_ENERGY, "founder %d's reserve" % i)
+		TestUtil.check(r.decode_float(o + GpuLayout.R_ENERGY * 4) == minf(Dish.FOUNDER_ENERGY, Cell.RESERVE_PER_MASS * r.decode_float(o + GpuLayout.R_MASS * 4)), "founder %d's reserve" % i)
 		TestUtil.check(r.decode_float(o + GpuLayout.R_DONOR * 4) == 0.0, "founder %d is no donor" % i)
 	TestUtil.check(rim_ok, "founders lie inside 0.9 of the radius")
 	var conj := Scenario.small(10, 500.0).with_flags({"conjugation": true, "key": true}).founder_records(1)
