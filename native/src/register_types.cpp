@@ -1,8 +1,6 @@
 #include "register_types.h"
 
-#include "bup_sim.h"
 #include "lineage_store.h"
-#include "nutrient_field.h"
 
 #include <gdextension_interface.h>
 #include <godot_cpp/core/defs.hpp>
@@ -14,8 +12,6 @@ void initialize_bups_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
 	}
-	GDREGISTER_CLASS(NutrientField);
-	GDREGISTER_CLASS(BupSim);
 	GDREGISTER_CLASS(LineageStore);
 }
 
