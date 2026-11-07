@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Every hour and quantity where the GPU's mean differs from the CPU's by more than a threshold (default 2 s.e.), from the SAMPLE lines
-of tools/gpu/game_dynamics.gd (or validate_dynamics.gd): python3 game_dynamics_flags.py file [threshold] [cap].
+of tools/gpu/validate_dynamics.gd: python3 game_dynamics_flags.py file [threshold] [cap].
 With `cap` (the scenario's bup limit), a population flag where the CPU holds exactly the cap with zero s.e. and the GPU is above it is
 listed apart as the soft-limit artefact."""
 import sys, math, collections

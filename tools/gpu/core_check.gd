@@ -14,7 +14,7 @@ extends SceneTree
 ##    expected footprint after a 3 GiB buffer was freed].
 ## C3 edits: a drop of 1,000 units of energy at the centre of an empty dish raises its grid's total (concentration x cell area) by 1,000
 ##    within 1e-5 relative (float32 sums) [derived]; an eraser of radius 200 µm and strength 1 at the centre takes the share 1 - d / r of
-##    the cell under the centre, leaving d / r of what it held (d its centre's distance) [derived, NutrientField::erase_disc].
+##    the cell under the centre, leaving d / r of what it held (d its centre's distance) [derived].
 ## C4 publish: the payload, id, haze, steering and thumbnail textures read back equal the storage buffers the kernels wrote, word for word
 ##    [derived]. The reuse rule [derived: a texture never written is free; a written one is free once the main side has told of a newer
 ##    publish in use, on a frame more than frame_queue_size + 1 frames before the newest frame it told of]: with no use told, TEXTURES

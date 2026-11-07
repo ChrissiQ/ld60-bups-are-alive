@@ -2,7 +2,7 @@
 
 [measured] on the CPU simulation the pooled world replaced, Apple M1 Pro, Metal, Godot 4.7.2. These are what the CPU engine answered before the pooled GPU world; later tests compare against them.
 
-Reproduce: `tools/gpu/capture_parity.sh [outdir]` (windowed, through the lock; it runs the four modes of `tools/gpu/capture_parity.gd`). It must be run on the CPU simulation the pooled world replaced (in a worktree) to give these numbers; the scripts are committed on `pooled-gpu` only. `state`, `husks` and `goal` are CPU-only and also run headless: `godot --headless --path . -s tools/gpu/capture_parity.gd -- <mode> <outdir>`. `screens` needs `--resolution 1920x1080` (the script and the wrapper pass it).
+Reproduce: the capture scripts (`capture_parity.sh`, `capture_parity.gd` in tools/gpu) need the deleted processor engine and are no longer in the tree; they are in the history of those paths up to their deletion, and ran on that engine (windowed, through the lock; four modes: `state`, `husks`, `goal`, `screens`).
 
 Files are text (`var_to_str` for vectors and dicts) or gzip (read with `FileAccess.open_compressed(path, READ, COMPRESSION_GZIP)`).
 
