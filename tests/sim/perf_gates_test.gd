@@ -30,7 +30,21 @@ extends SceneTree
 ##     visible (paused, a source placed, 8 times): frames until a snapshot shows it, <= 2 frames + one iteration [derived], the single-dish path's 1 frame
 ##     [measured baseline, a pixel hash].
 ##   The interface column (frame p95 and worst on the game screen) is measured in the interface gate on the final tree; the main frames printed here are
-##   this script's (no game screen), for reference only. Gates C, D and the 1,000-dish interface stay stubs.
+##   this script's (no game screen), for reference only.
+## - Gates C and D, written before the first run. Both ask x10,000 (20 s steps: min(20, speed/120)) and the speed reached is the figure; the
+##   step's cost is the sum of the window's iterations' busy time over their steps (each iteration once), and the reference world is measured
+##   first in the same process (the GPU is bimodal between processes), each world with 12 s of settling.
+##   C: 1,000 dishes of 100 bups at the limit, 300 um dishes (48 x 48 grids, checked), against one 45 mm dish of 100,000 bups (gate E's).
+##   Floor x4,000 [placeholder: x4,760 derived from 20 s over 3.7 ms of field and 0.5 ms of bups]; per-bup cost = step ms / bups in
+##   the world (both worlds hold 100,000, so it is a step ratio) <= 1.5 x the reference's. Reference [measured, 100k, 10 steps a submit]:
+##   1.18 ms = 11.8 ns a bup. Expected for C [derived, before the fused pass]: 4.2 ms a step, x4,760, 3.5 x the reference's cost
+##   a bup: the speed passes and the 1.5 x cost ratio is expected to fail, since 1,000 dishes' field cost (2.3M cells, not bups) is not in
+##   the reference's step; the fusion cuts the field's share, how far is what the run says.
+##   D: 100 dishes of 10,000 bups (45 mm, 100 cells across), against one 90 mm dish of 1,000,000: step <= 1.2 x. Expected about 1.0 x [derived: the
+##   same 1M bups, the same 100 x 100 grid per dish, 100 dishes' field 1M cells (a tenth of the bups' work); the reference's step is
+##   about 11.4 ms [derived: half of the 22.75 ms at 2M]].
+##   The 1,000-dish interface is tests/sim/interface_gate.gd (the game screen on the real pool: this script has none), whose bounds are the
+##   static `gate_interface` here.
 ## - The pipette on a 1M dish, through WorldClient as Dish.pipette sends it, the world running at x10,000 (the
 ##   filled dish: 1,000,000 bups, 90 mm, limit 1,000,000), a circle of 20 mm at the middle. Written before the first run:
 ##   the main thread's part of the call (WorldClient.pipette: a command queued) < 1 ms [derived: no read, no wait]; no frame of the wait
@@ -55,6 +69,18 @@ const E_FRAME_SHARE := 1.15
 const F_STEP_COST_SHARE := 0.85
 const G_SPEED_FLOOR := 10000.0
 const X1_SHARE := 0.99
+const C_SPEED_FLOOR := 4000.0  ## [placeholder: x4,760 derived (20 s over a 3.7 ms field step and 0.5 ms of bups)]
+const C_DERIVED_SPEED := 4760.0
+const C_PER_BUP_SHARE := 1.5  ## gate C: per-bup cost within 1.5 x one dish of 100,000's
+const C_DISHES := 1000
+const C_BUPS := 100
+const C_RADIUS := 300.0  ## µm: a 48 x 48 grid (DishGrid.cells_across clamps at FIELD_MIN_ACROSS for any radius up to 600 µm), the baseline's scenario C48
+const C_SECONDS := 30.0
+const D_STEP_SHARE := 1.2  ## gate D: 100 dishes of 10,000 within 1.2 x one dish of 1,000,000's step
+const D_DISHES := 100
+const D_BUPS := 10000
+const D_SECONDS := 30.0
+const INTERFACE_FRAME_SHARE := 1.15  ## the 1,000-dish interface: p95 <= 1.15 x the display frame [placeholder: fixed by the 20-dish figure]
 const G_SPEED_TOLERANCE := 10.0  ## [derived] what the measurement cannot see of x10,000 over a 30 s window (one iteration's lag, frame capping)
 const SETTLE_SECONDS := 12.0  ## the settling before a window
 const E_SECONDS := 600.0
@@ -70,6 +96,7 @@ const REQUIRED := [
 	["scenarios", "A", "frame_ms_p95_mean_of_runs"], ["scenarios", "A", "achieved_speed_mean_of_runs"],
 	["scenarios", "B", "frame_ms_p95_mean_of_runs"], ["scenarios", "B", "achieved_speed_mean_of_runs"],
 	["scenarios", "C100", "frame_ms_p95_mean_of_runs"], ["scenarios", "C48", "frame_ms_p95_mean_of_runs"],
+	["scenarios", "C100", "frame_ms_mean_of_runs"], ["scenarios", "C48", "frame_ms_mean_of_runs"], ["scenarios", "C48", "frame_ms_max_of_runs"],
 	["scenarios", "D", "frame_ms_p95_mean_of_runs"], ["scenarios", "E", "frame_ms_p95_mean_of_runs"],
 	["scenarios", "E", "achieved_speed_mean_of_runs"], ["scenarios", "F", "frame_ms_p95_mean_of_runs"],
 	["scenarios", "F", "achieved_speed_mean_of_runs"],
@@ -90,18 +117,21 @@ func _initialize() -> void:
 	for path: Array in REQUIRED:
 		TestUtil.show(lookup(baseline, path) != null, "baseline has %s" % "/".join(path))
 	_gate_checks()
-	print("SKIP perf_gates_test: gates C, D and the 1,000-dish interface, enabled by a later change")
 	if not SimHarness.device_available():
-		print("SKIP perf_gates_test: gates E, F, G, x1 measurements need a local GPU (not available headless), enabled by a later change")
+		print("SKIP perf_gates_test: gates C, D, E, F, G, x1 measurements need a local GPU (not available headless)")
 		TestUtil.finish(self, "OK perf_gates_test (static part; measurements skipped: headless)")
 		return
 	var which := "all"
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("gate="):
 			which = a.substr(5)
-	var gates: Array = ["G", "x1", "55", "F", "E"] if which == "all" else [which]
+	var gates: Array = ["G", "x1", "55", "F", "C", "D", "E"] if which == "all" else [which]
 	for g: String in gates:
 		match g:
+			"C":
+				await _gate_c_speed()
+			"D":
+				await _gate_d_step()
 			"E":
 				await _gate_e_speed(baseline)
 			"F":
@@ -114,7 +144,7 @@ func _initialize() -> void:
 				await _row_55()
 			_:
 				TestUtil.show(false, "no gate named %s" % g)
-	TestUtil.finish(self, "OK perf_gates_test (gates %s: the speed column and the 1M pipette)" % ", ".join(gates))
+	TestUtil.finish(self, "OK perf_gates_test (gates %s: the speed column, gates C and D and the 1M pipette; the 1,000-dish interface is tests/sim/interface_gate.gd)" % ", ".join(gates))
 
 
 static func load_baseline() -> Dictionary:
@@ -152,6 +182,24 @@ static func gate_x1(share_advanced: float) -> bool:
 	return share_advanced >= X1_SHARE
 
 
+## Gate C (1,000 dishes of 100 bups, 48 x 48 grids): the speed reached >= x4,000 [placeholder] and the cost of a step for each bup (step ms /
+## bups in the world) within 1.5 x one dish of 100,000 bups', measured in the same process. Both worlds hold 100,000 bups, so the second
+## is, as the gate is written, a step cost within 1.5 x.
+static func gate_c(speed: float, step_ms: float, bups: int, ref_step_ms: float, ref_bups: int) -> bool:
+	return speed >= C_SPEED_FLOOR and step_ms / bups <= C_PER_BUP_SHARE * ref_step_ms / ref_bups
+
+
+## Gate D (100 dishes of 10,000 bups): a step within 1.2 x one dish of 1,000,000 bups' (the same process).
+static func gate_d(step_ms: float, ref_step_ms: float) -> bool:
+	return step_ms <= D_STEP_SHARE * ref_step_ms
+
+
+## The 1,000-dish interface: p95 frame <= min(1.15 x the display frame [placeholder], the 20-dish baseline's p95), and the mean no worse
+## than the 20-dish baseline's. (The worst frame is printed, not gated: no bound is set for it.)
+static func gate_interface(p95_ms: float, mean_ms: float, display_frame_ms: float, baseline_p95_ms: float, baseline_mean_ms: float) -> bool:
+	return p95_ms <= minf(INTERFACE_FRAME_SHARE * display_frame_ms, baseline_p95_ms) and mean_ms <= baseline_mean_ms
+
+
 func _gate_checks() -> void:
 	var cap := minf(10.18, E_FRAME_SHARE * DISPLAY_FRAME_MS)
 	TestUtil.show(gate_e(cap, 9500.0, 10.18), "gate E passes at its limits")
@@ -164,6 +212,11 @@ func _gate_checks() -> void:
 	TestUtil.show(gate_g(8.4, 10000.0, 8.33, 8.33, 0.1) and not gate_g(8.6, 10000.0, 8.33, 8.33, 0.1), "gate G: the best of the two plus 1 SD")
 	TestUtil.show(not gate_g(8.3, 9999.0, 8.33, 8.33, 0.1), "gate G fails a speed under x10,000")
 	TestUtil.show(gate_x1(0.99) and not gate_x1(0.9899), "gate x1: 99% of frames")
+	TestUtil.show(gate_c(4000.0, 1.5, 100000, 1.0, 100000) and not gate_c(3999.0, 1.5, 100000, 1.0, 100000), "gate C: speed >= x4,000 [placeholder]")
+	TestUtil.show(not gate_c(5000.0, 1.51, 100000, 1.0, 100000) and gate_c(5000.0, 3.0, 200000, 1.0, 100000), "gate C: the cost of a bup within 1.5 x the 100k dish's")
+	TestUtil.show(gate_d(1.2, 1.0) and not gate_d(1.21, 1.0), "gate D: a step within 1.2 x the 1M dish's")
+	TestUtil.show(gate_interface(9.58, 9.3, 8.333, 10.33, 9.31) and not gate_interface(9.6, 9.3, 8.333, 10.33, 9.31), "interface: p95 within 1.15 x the display frame")
+	TestUtil.show(not gate_interface(9.0, 9.32, 8.333, 10.33, 9.31) and gate_interface(10.0, 9.0, 10.0, 10.0, 9.31), "interface: the mean and the 20-dish p95 bound too")
 	_playout_checks()
 
 
@@ -294,12 +347,19 @@ static func filled_records(n: int, radius: float, number: int, seed_value: int) 
 ## A world with one dish of `spec` in the main view, run at `speed`: settles, then measures `seconds`. Returns {samples: [[wall s, world s]],
 ## frames: [ms], payload_frames (frames in which a new payload was shown), timing (the last snapshot's), steps, ok, note}; `edits` > 0 then
 ## pauses and times that many source placements to the snapshot that shows them.
-func _measure(label: String, spec: DishSpec, speed: float, seconds: float, edits := 0) -> Dictionary:
+func _measure(label: String, one_or_many: Variant, speed: float, seconds: float, edits := 0) -> Dictionary:
 	var t_setup := Time.get_ticks_msec()
+	var specs: Array = one_or_many if one_or_many is Array else [one_or_many]
+	var spec: DishSpec = specs[0]
 	var backend := GpuSimBackend.new()
 	backend.start(PoolLimits.from_settings())
 	var w := WorldClient.new(backend)
-	var row := w.add_dish(spec)
+	var row := -1
+	var last_row := -1
+	for s: DishSpec in specs:
+		last_row = w.add_dish(s)
+		if row < 0:
+			row = last_row
 	var view := ViewRequest.new()
 	view.camera = Rect2(-spec.radius, -spec.radius, 2.0 * spec.radius, 2.0 * spec.radius)
 	view.pixel_um = 2.0 * spec.radius / 1000.0
@@ -307,7 +367,7 @@ func _measure(label: String, spec: DishSpec, speed: float, seconds: float, edits
 	w.set_view(row, view)
 	var out := {"ok": false, "label": label}
 	var t0 := Time.get_ticks_msec()
-	while not w.latest().dishes.has(row):
+	while not w.latest().dishes.has(row) or not w.latest().dishes.has(last_row):
 		var st := backend.status()
 		if Time.get_ticks_msec() - t0 > WAIT_MSEC or (st.get("ready", false) and not st.get("alive", false)):
 			out["note"] = "the dish never appeared: %s" % [backend.status()]
@@ -325,6 +385,9 @@ func _measure(label: String, spec: DishSpec, speed: float, seconds: float, edits
 	var payload_frames := 0
 	var last_payload := -1
 	var started := -1
+	var last_iteration := -1
+	var busy_ms := 0.0  ## the window's iterations' busy time and steps (each iteration once): the step's cost is their ratio
+	var busy_steps := 0
 	while true:
 		await process_frame
 		frame += 1
@@ -344,6 +407,11 @@ func _measure(label: String, spec: DishSpec, speed: float, seconds: float, edits
 			started = now
 		frames.append(dt * 1000.0)
 		samples.append([(now - started) / 1e6, snap.sim_time])
+		var iteration := int(snap.timing.get("iterations", -1))
+		if iteration != last_iteration:
+			last_iteration = iteration
+			busy_ms += float(snap.timing.get("iteration_ms", 0.0))
+			busy_steps += int(snap.timing.get("steps", 0))
 		var pseq := shown.seq if shown != null else -1
 		if pseq != last_payload:
 			payload_frames += 1
@@ -354,6 +422,7 @@ func _measure(label: String, spec: DishSpec, speed: float, seconds: float, edits
 	out["frames"] = frames
 	out["payload_frames"] = payload_frames
 	out["timing"] = w.latest().timing
+	out["step_cost_ms"] = busy_ms / busy_steps if busy_steps > 0 else INF
 	out["status"] = backend.status()
 	if edits > 0:
 		out["edit_frames"] = await _edit_latency(w, row, edits)
@@ -493,6 +562,57 @@ func _gate_g_speed(baseline: Dictionary) -> void:
 		print("GATE G%d speed [measured]: run x%.1f; the single-dish path's best (%s) x%s" % [n, speed, best.get("backend"), lookup(baseline, ["scenarios", "G", str(n), String(best.get("backend")), "achieved_speed_mean_of_runs"])])
 		TestUtil.show(m["ok"], "gate G (%d bups): the run was clean" % n)
 		TestUtil.show(speed >= G_SPEED_FLOOR - G_SPEED_TOLERANCE, "gate G (%d bups): x10,000 sustained (>= x%.0f)" % [n, G_SPEED_FLOOR - G_SPEED_TOLERANCE])
+
+
+## Gate C: 1,000 dishes of 100 bups on 48 x 48 grids at an asked x10,000 (the speed it reaches is the figure), against one dish of 100,000
+## bups (gate E's dish) measured first in this process, for the cost of a bup.
+func _gate_c_speed() -> void:
+	var secs := C_SECONDS
+	var dishes := C_DISHES
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("seconds="):
+			secs = float(a.substr(8))
+		if a.begins_with("dishes="):  ## a diagnosis (the dish count's slope), not the gate
+			dishes = int(a.substr(7))
+	TestUtil.show(DishGrid.cells_across(C_RADIUS, StartConditions.MIN_NUTRIENT_RESOLUTION) == 48, "gate C: a %.0f um dish has a 48 x 48 grid" % C_RADIUS)
+	var ref := await _measure("C-ref 1x100k", filled_spec(100000, DISH_45MM), 10000.0, secs)
+	_print_run(ref)
+	var specs: Array = []
+	for i in dishes:
+		specs.append(filled_spec(C_BUPS, C_RADIUS, i + 1, 3 + i))
+	var m := await _measure("C %dx%d" % [dishes, C_BUPS], specs, 10000.0, secs)
+	_print_run(m)
+	var speed := run_speed(m.get("samples", []))
+	var bups := dishes * C_BUPS
+	var step: float = m["step_cost_ms"]
+	var ref_step: float = ref["step_cost_ms"]
+	print("GATE C [measured]: %d dishes x %d bups, 48 x 48: x%.1f reached (floor x%.0f [placeholder], x%.0f derived); step %.3f ms = %.1f ns a bup; one dish of 100,000: step %.3f ms = %.1f ns a bup (x%.1f); the ratio %.2f (gate <= %.1f)" % [
+		dishes, C_BUPS, speed, C_SPEED_FLOOR, C_DERIVED_SPEED, step, step / bups * 1e6, ref_step, ref_step / 100000.0 * 1e6, run_speed(ref.get("samples", [])), (step / bups) / (ref_step / 100000.0), C_PER_BUP_SHARE])
+	TestUtil.show(m["ok"] and ref["ok"], "gate C: the runs were clean (no error, no overflow)")
+	TestUtil.show(speed >= C_SPEED_FLOOR, "gate C: >= x%.0f [placeholder] reached (x%.1f)" % [C_SPEED_FLOOR, speed])
+	TestUtil.show(step / bups <= C_PER_BUP_SHARE * ref_step / 100000.0, "gate C: the cost of a bup within 1.5 x one dish of 100,000's (%.1f ns against %.1f ns)" % [step / bups * 1e6, ref_step / 100000.0 * 1e6])
+
+
+## Gate D: 100 dishes of 10,000 bups (45 mm, 100 cells across) at an asked x10,000, step cost within 1.2 x one dish of 1,000,000 bups'
+## (90 mm), the 1M dish measured first in this process.
+func _gate_d_step() -> void:
+	var secs := D_SECONDS
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("seconds="):
+			secs = float(a.substr(8))
+	var ref := await _measure("D-ref 1x1M", filled_spec(1000000, DISH_90MM), 10000.0, secs)
+	_print_run(ref)
+	var specs: Array = []
+	for i in D_DISHES:
+		specs.append(filled_spec(D_BUPS, DISH_45MM, i + 1, 3 + i))
+	var m := await _measure("D %dx%d" % [D_DISHES, D_BUPS], specs, 10000.0, secs)
+	_print_run(m)
+	var step: float = m["step_cost_ms"]
+	var ref_step: float = ref["step_cost_ms"]
+	print("GATE D [measured]: %d dishes x %d bups: step %.3f ms, x%.1f reached; one dish of 1,000,000: step %.3f ms, x%.1f; the ratio %.3f (gate <= %.1f)" % [
+		D_DISHES, D_BUPS, step, run_speed(m.get("samples", [])), ref_step, run_speed(ref.get("samples", [])), step / ref_step, D_STEP_SHARE])
+	TestUtil.show(m["ok"] and ref["ok"], "gate D: the runs were clean (no error, no overflow)")
+	TestUtil.show(gate_d(step, ref_step), "gate D: a step of 100 x 10,000 within 1.2 x one dish of 1,000,000's (%.3f ms against %.3f ms)" % [step, ref_step])
 
 
 func _gate_x1_speed() -> void:
