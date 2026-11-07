@@ -10,7 +10,7 @@ extends RefCounted
 
 const FLAG_NAMES := ["stationary", "death_husks", "plankton_husks", "key", "conjugation", "acetate"]
 const RESOLUTIONS := [100, 200, 400]
-const FOUNDER_ENERGY := 50.0  ## a founder's reserve (model_test's `_cell` default)
+const FOUNDER_ENERGY := 50.0  ## a founder's reserve
 const KEY_LEVEL_2_REACH := 2 << 8  ## the acetate key in the reach word (bits 8-9)
 
 var label := ""

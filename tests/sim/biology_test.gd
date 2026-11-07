@@ -1,5 +1,5 @@
 extends SceneTree
-## The pooled world reproduces the known biology (the aggregate assertions of tests/model_test.gd and tests/cloud_test.gd).
+## The pooled world reproduces the known biology.
 ##
 ## Expected values, written before the first run:
 ## - Doubling time (derived from Biology.DOUBLING_SECONDS = 2400 s, which holds for a bup that is fed to saturation): one unit of nutrient
@@ -18,7 +18,7 @@ extends SceneTree
 ##   the birth mass 8). The death rate is 0.22/day x exp(0.95 x 1.04 x metabolism 1) = 0.59/day, so 1 - exp(-0.296) = 26% of the 40 die in
 ##   12 h (30 of 40 left, +-4 for chance).
 ## - Checks that need more than the harness can read are stubs naming what each needs:
-##   keen-bup drift 2.4-3.6 µm/s in a 0.5%/um gradient with a dull bup below 0.8 x keen (measured about 3.0 in model_test): needs
+##   keen-bup drift 2.4-3.6 µm/s in a 0.5%/um gradient with a dull bup below 0.8 x keen (measured about 3.0): needs
 ##   `SimHarness.set_field` and the questions; mutation rate near TRAIT_MUTATIONS + HARMFUL_MUTATIONS per daughter:
 ##   needs the births events in the dump; cloud variance 2Dt with D = 600 / 25 = 24 µm2/s, within 3%: needs the
 ##   clouds' dump layout; DEATH_RELEASE 0.25 of a body returned as a cloud; acetate excretion and
