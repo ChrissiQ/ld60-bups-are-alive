@@ -3,27 +3,29 @@ extends SceneTree
 ##
 ## Expected values, written before the first run:
 ## - Comparator (derived): for each scenario, each of the hours 1-6 and each of the seven per-seed metrics
-##   (count, speed, sense, metabolism, size, mass, nutrient) the two ensembles' means differ by at most 3 SE, SE = sqrt(s_old^2/n +
-##   s_new^2/n); the end-of-run gene samples (four genes, pooled over seeds) pass a two-sample Kolmogorov-Smirnov test at alpha = 0.01
+##   (count, speed, sense, metabolism, size, mass, nutrient) the two ensembles' means differ by at most 3.62 SE, SE = sqrt(s_old^2/n +
+##   s_new^2/n) (3.62: the two-sided normal bound for 0.05 over the 168 comparisons, 0.05 / 168 = 0.0003); the end-of-run gene samples (four genes, pooled over seeds) pass a two-sample Kolmogorov-Smirnov test at alpha = 0.01
 ##   Bonferroni-divided by the number of tests (4 genes x scenarios), with critical D = sqrt(-0.5 ln(alpha/2)) sqrt((n+m)/(n m)).
 ## - Self-check on synthetic ensembles (16 seeds, 6 hours, unit-variance normal metrics): two samples of one distribution give 0 mean
-##   failures [placeholder: each pair has 42 comparisons at 3 SE, so a chance of about 11% that a pair fails by luck (42 x 0.0027); the seeds
+##   failures [placeholder: each pair has 42 comparisons at 3.62 SE, so a chance of about 4% that a pair fails by luck (42 x 0.001, Student's t with about
+##   30 degrees of freedom); the seeds
 ##   below were chosen so this pair does not]; one shifted by 4 SE (4 x sqrt(2/16) = 1.41 sigma) gives at least one failure [derived: each
-##   comparison fails with probability about 84%]. Gene samples (500 each): the same distribution passes KS; a shift of 1 sigma
+##   comparison fails with probability about 65%]. Gene samples (500 each): the same distribution passes KS; a shift of 1 sigma
 ##   fails it (D = 2 Phi(0.5) - 1 = 0.38 against a critical 0.20 at alpha 0.0025 [derived]).
 ## - Parser self-check on the old file ensemble_cpu_B.txt [measured by counting the file]: 96 ENS lines (16 seeds x 6 hours), 7050 GENE lines;
 ##   compared with itself it gives 0 failures.
 ## - The real comparison reads `tools/gpu/golden/ensemble_pooled_<S>.txt` (a name chosen here; the files are made elsewhere) against
 ##   `ensemble_cpu_<S>.txt` for S in B, D, E, F, and is a SKIP when they are absent. Enabled by a later change.
-## False-alarm rate of the design (derived): 7 metrics x 6 hours x 4 scenarios = 168 comparisons at 3 SE expect 0.45 false failures
-## (about a 37% chance of at least one) even when the two paths are the same, plus the gene tests; the rule is kept, and
-## the number is left open (a Bonferroni-corrected bound, or a count of allowed failures).
+## False-alarm rate of the design (derived): 7 metrics x 6 hours x 4 scenarios = 168 comparisons. With 16 seeds a side the statistic is
+## Student's t with about 30 degrees of freedom, so 3.62 SE is exceeded by luck about once in 1,000 comparisons: 0.18 false failures
+## expected, at most a 16% chance of one when the two paths are the same (less in fact: the scenarios share seeds and the hours of a seed
+## are correlated), plus the gene tests.
 
 const GOLDEN_DIR := "res://tools/gpu/golden/"
 const SCENARIOS := ["B", "D", "E", "F"]
 const METRICS := ["count", "speed", "sense", "metabolism", "size", "mass", "nutrient"]
 const GENES := ["speed", "sense", "metabolism", "size"]
-const MEAN_SE := 3.0
+const MEAN_SE := 3.62
 const ALPHA := 0.01
 
 
@@ -68,7 +70,7 @@ static func _mean_sd(v: Array) -> Vector2:
 	return Vector2(m, sqrt(s / maxf(n - 1.0, 1.0)))
 
 
-## The metrics and hours whose means differ by more than 3 SE, as lines (empty: all within).
+## The metrics and hours whose means differ by more than MEAN_SE standard errors, as lines (empty: all within).
 static func compare_means(old: Dictionary, new: Dictionary, label := "") -> PackedStringArray:
 	var bad := PackedStringArray()
 	for hour in old["ens"]:
