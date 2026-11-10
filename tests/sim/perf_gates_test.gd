@@ -24,9 +24,9 @@ extends SceneTree
 ##     T_ITER of steps leaves unmeasured over 30 s and frame capping) [derived]; the single-dish path's best is x10,000 at each size [measured baseline].
 ##   x1: 1,000 and 100,000 bups, 45 mm, x1, 60 s: the share of display frames in which a new payload is shown; >= 0.99 is the gate. The
 ##     sim steps Governor.STEPS_PER_SECOND (120) times a simulated second, so on a 120 Hz display every frame can have a new one [derived];
-##     this script shows the payload WorldClient's playout gives each frame (one publish a frame in order, at most one waiting: two that
-##     land in one frame are shown on two), as the game does: 0.9997 at 1,000 and 0.9989 at 100,000 [measured: a replay of 7,200 frames'
-##     arrivals recorded in a run of this script; showing the newest gave 0.978 and 0.867 on the same frames]. Edit to
+##     this script shows the payload WorldClient's playout gives each frame (one publish a frame in order, at most WAITING_MOST (2) waiting:
+##     publishes that land together are shown on the frames after), as the game does: 0.9997 at 1,000 and 0.9989 at 100,000 with one waiting [measured:
+##     a replay of 7,200 frames' arrivals recorded in a run of this script; showing the newest gave 0.978 and 0.867 on the same frames]. Edit to
 ##     visible (paused, a source placed, 8 times): frames until a snapshot shows it, <= 2 frames + one iteration [derived], the single-dish path's 1 frame
 ##     [measured baseline, a pixel hash].
 ##   The interface column (frame p95 and worst on the game screen) is measured in the interface gate on the final tree; the main frames printed here are
@@ -219,13 +219,16 @@ func _gate_checks() -> void:
 	_playout_checks()
 
 
-## WorldClient.playout on synthetic arrivals (publishes per frame), expected values derived from the rule before the first run:
+## WorldClient.playout on synthetic arrivals (publishes per frame), expected values derived from the rule (the oldest is shown, at most two wait,
+## the oldest of more are skipped) before the first run:
 ## - [1, 1, 0, 2] x 25 (an iteration ending just after a poll every fourth frame): showing the newest changes the picture in 75 of 100
 ##   frames; the playout misses only the first empty frame (nothing was waiting yet; from the first double on one always is): 99 of 100.
 ## - [1, 0, 1, 1, 2] x 20 (the empty frame some frames before the double): the newest 80 of 100; the playout 99 (the first empty frame).
 ## - [1, 1, 0, 1] x 25 (a publish truly missing every fourth frame): 75 of 100 either way (no publish is there to show).
-## - [3]: the second newest is shown, the oldest skipped, the newest waits.
-## - Every publish shown is shown at most one frame after the frame it arrived in, and the picture never goes back to an older one.
+## - [2, 2, 0, 0] x 25 (two doubles, then two empty frames): the newest changes in 50 of 100 frames; two waiting cover both empty frames, so
+##   the playout changes the picture in all 100 (with one waiting the second double skips a publish and the second empty frame is a miss: 75).
+## - [3]: the oldest is shown, the other two wait; [4]: the second is shown, the oldest skipped, the newest two wait.
+## - Every publish shown is shown at most WAITING_MOST frames after the frame it arrived in, and the picture never goes back to an older one.
 func _playout_checks() -> void:
 	var late := _played_out([1, 1, 0, 2], 25)
 	TestUtil.show(late["newest"] == 75 and late["shown"] == 99, "playout: late iterations [1,1,0,2]: newest 75, playout 99 of 100 (got %d, %d)" % [late["newest"], late["shown"]])
@@ -233,10 +236,14 @@ func _playout_checks() -> void:
 	TestUtil.show(apart["newest"] == 80 and apart["shown"] == 99, "playout: [1,0,1,1,2]: newest 80, playout 99 of 100 (got %d, %d)" % [apart["newest"], apart["shown"]])
 	var gaps := _played_out([1, 1, 0, 1], 25)
 	TestUtil.show(gaps["newest"] == 75 and gaps["shown"] == 75, "playout: missing publishes [1,1,0,1]: 75 of 100 either way (got %d, %d)" % [gaps["newest"], gaps["shown"]])
-	var all_runs: Array = [late, apart, gaps]
-	TestUtil.show(all_runs.all(func(r: Dictionary) -> bool: return r["late"] == 0 and r["back"] == 0), "playout: no publish shown more than a frame after it came, never an older one")
+	var pairs := _played_out([2, 2, 0, 0], 25)
+	TestUtil.show(pairs["newest"] == 50 and pairs["shown"] == 100, "playout: two doubles then two empty frames [2,2,0,0]: newest 50, playout 100 of 100 (got %d, %d)" % [pairs["newest"], pairs["shown"]])
+	var all_runs: Array = [late, apart, gaps, pairs]
+	TestUtil.show(all_runs.all(func(r: Dictionary) -> bool: return r["late"] == 0 and r["back"] == 0), "playout: no publish shown more than %d frames after it came, never an older one" % WorldClient.WAITING_MOST)
 	var three := WorldClient.playout([], [_publish(1), _publish(2), _publish(3)])
-	TestUtil.show(three[0] != null and (three[0] as PayloadInfo).seq == 2 and three[1].size() == 1 and (three[1][0] as PayloadInfo).seq == 3, "playout: three at once show the second newest, the newest waits")
+	TestUtil.show(three[0] != null and (three[0] as PayloadInfo).seq == 1 and three[1].size() == 2 and (three[1][0] as PayloadInfo).seq == 2 and (three[1][1] as PayloadInfo).seq == 3, "playout: three at once show the oldest, the other two wait")
+	var four := WorldClient.playout([], [_publish(1), _publish(2), _publish(3), _publish(4)])
+	TestUtil.show(four[0] != null and (four[0] as PayloadInfo).seq == 2 and four[1].size() == 2 and (four[1][0] as PayloadInfo).seq == 3 and (four[1][1] as PayloadInfo).seq == 4, "playout: four at once show the second, the oldest is skipped, the newest two wait")
 
 
 static func _publish(seq: int) -> PayloadInfo:
@@ -246,7 +253,7 @@ static func _publish(seq: int) -> PayloadInfo:
 
 
 ## `pattern` (publishes arriving each frame) repeated `times`: {newest: frames whose newest publish changed, shown: frames whose shown
-## publish changed, late: publishes shown more than a frame after they came, back: frames that showed an older publish}.
+## publish changed, late: publishes shown more than WAITING_MOST frames after they came, back: frames that showed an older publish}.
 static func _played_out(pattern: Array, times: int) -> Dictionary:
 	var seq := 0
 	var came := {}  ## seq -> frame it arrived
@@ -271,7 +278,7 @@ static func _played_out(pattern: Array, times: int) -> Dictionary:
 					out["back"] += 1
 				if s != shown:
 					out["shown"] += 1
-					if frame - int(came[s]) > 1:
+					if frame - int(came[s]) > WorldClient.WAITING_MOST:
 						out["late"] += 1
 				shown = s
 			frame += 1
@@ -387,6 +394,10 @@ func _measure(label: String, one_or_many: Variant, speed: float, seconds: float,
 	var last_iteration := -1
 	var busy_ms := 0.0  ## the window's iterations' busy time and steps (each iteration once): the step's cost is their ratio
 	var busy_steps := 0
+	var step_ms: Array = []
+	var long_iterations: Array = []
+	var miss_frames: Array = []
+	var miss_times: Array = []
 	while true:
 		await process_frame
 		frame += 1
@@ -411,15 +422,26 @@ func _measure(label: String, one_or_many: Variant, speed: float, seconds: float,
 			last_iteration = iteration
 			busy_ms += float(snap.timing.get("iteration_ms", 0.0))
 			busy_steps += int(snap.timing.get("steps", 0))
+			if int(snap.timing.get("steps", 0)) > 0:
+				step_ms.append(float(snap.timing.get("run_ms", 0.0)) / int(snap.timing.get("steps", 1)))
+			if float(snap.timing.get("iteration_ms", 0.0)) > 14.0:
+				long_iterations.append(snappedf((now - started) / 1e6, 0.1))
 		var pseq := shown.seq if shown != null else -1
 		if pseq != last_payload:
 			payload_frames += 1
+		else:
+			miss_frames.append(frames.size())
+			miss_times.append((now - started) / 1e6)
 		last_payload = pseq
 		if (now - started) / 1e6 >= seconds:
 			break
 	out["samples"] = samples
 	out["frames"] = frames
 	out["payload_frames"] = payload_frames
+	out["miss_frames"] = miss_frames
+	out["miss_times"] = miss_times
+	out["step_ms"] = step_ms
+	out["long_iterations"] = long_iterations
 	out["timing"] = w.latest().timing
 	out["step_cost_ms"] = busy_ms / busy_steps if busy_steps > 0 else INF
 	out["status"] = backend.status()
@@ -432,6 +454,34 @@ func _measure(label: String, one_or_many: Variant, speed: float, seconds: float,
 	backend.shutdown()
 	out["ok"] = (out["status"] as Dictionary).get("alive", false) and ((out["status"] as Dictionary).get("errors", []) as Array).is_empty() and int(out["overflow"]) == 0
 	return out
+
+
+## The misses of an x1 run by kind: frames whose payload did not change, as singles (one frame between two that did) and runs of two or more,
+## the step's median (the run's own time over its steps, the level the GPU is in) and the misses and the longest iterations seen in the
+## seconds around the arena's shrink (60 s after the world starts: about 48 s into a window after the settling).
+static func _print_misses(m: Dictionary) -> void:
+	var misses: Array = m.get("miss_frames", [])
+	var times: Array = m.get("miss_times", [])
+	var singles := 0
+	var runs: Array = []
+	var k := 0
+	while k < misses.size():
+		var j := k
+		while j + 1 < misses.size() and int(misses[j + 1]) == int(misses[j]) + 1:
+			j += 1
+		if j == k:
+			singles += 1
+		else:
+			runs.append(j - k + 1)
+		k = j + 1
+	var near := times.filter(func(t: float) -> bool: return t >= 46.0 and t <= 50.5).size()
+	var steps: Array = m.get("step_ms", [])
+	steps.sort()
+	var median: float = steps[steps.size() / 2] if not steps.is_empty() else 0.0
+	var longest: Array = m.get("long_iterations", [])
+	var pool: Dictionary = (m.get("timing", {}) as Dictionary).get("pool", {})
+	print("X1POOL %s: slots %s clouds %s husks %s bytes %s of budget %s (fraction %.4f), growths %s" % [m["label"], pool.get("slots"), pool.get("clouds"), pool.get("husks"), pool.get("bytes"), pool.get("budget_bytes"), float(pool.get("fraction", 0.0)), pool.get("growths")])
+	print("X1MISSES %s: step median %.2f ms (run_ms per step, %d iterations seen); misses %d: single %d, runs of 2+ %s; within 46-50.5 s of the window %d; iterations over 14 ms seen at window s %s" % [m["label"], median, steps.size(), misses.size(), singles, runs, near, longest])
 
 
 ## Paused, `n` sources placed one at a time: the frames from the call to the first snapshot whose copy of the dish's world has it.
@@ -619,7 +669,11 @@ func _gate_d_step() -> void:
 
 
 func _gate_x1_speed() -> void:
-	for n in [1000, 100000]:
+	var sizes: Array = [1000, 100000]
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("bups="):
+			sizes = [int(a.substr(5))]
+	for n: int in sizes:
 		var m := await _measure("x1/%d" % n, filled_spec(n, DISH_45MM), 1.0, X1_SECONDS, X1_EDITS)
 		_print_run(m)
 		var frames: Array = m.get("frames", [])
@@ -627,6 +681,7 @@ func _gate_x1_speed() -> void:
 		var edit_frames: Array = m.get("edit_frames", [])
 		var hz := DisplayServer.screen_get_refresh_rate()
 		print("GATE x1/%d [measured]: a new payload in %.3f of %d display frames (display %.0f Hz; derived most %.2f); edit to visible (frames) %s" % [n, share, frames.size(), hz, minf(1.0, Governor.STEPS_PER_SECOND / maxf(hz, 1.0)), edit_frames])
+		_print_misses(m)
 		TestUtil.show(m["ok"], "gate x1 (%d bups): the run was clean" % n)
 		TestUtil.show(gate_x1(share), "gate x1 (%d bups): a new payload in >= 99%% of display frames (at most STEPS_PER_SECOND / display Hz)" % n)
 		TestUtil.show(not edit_frames.is_empty() and edit_frames.max() <= 3, "gate x1 (%d bups): edit to visible <= 2 frames + one iteration (%s)" % [n, edit_frames])
