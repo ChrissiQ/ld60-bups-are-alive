@@ -11,9 +11,13 @@ extends RefCounted
 ## `refused` once for it, by the snapshot that first carried it (timing["refused_seq"]; a backend without that key carries each refusal once).
 ##
 ## The main view's picture is played out one publish a frame (`shown_payload`): each frame shows the oldest publish not yet shown, and at
-## most one is kept waiting, so when two land in one frame (an iteration ended just after the last poll) the second is shown on the next,
-## and a frame that then brings none still gets a new picture. A publish waits at most one frame; one overtaken by two more in a frame is
-## skipped; the picture never goes back to an older publish.
+## most WAITING_MOST are kept waiting, so when two land in one frame (an iteration ended just after the last poll) the second is shown on
+## the next, and a frame that then brings none still gets a new picture; two such doubles in a row leave two waiting, so two late
+## iterations in a row are both covered. A publish waits at most WAITING_MOST frames; one overtaken by more than that in a frame is
+## skipped; the picture never goes back to an older publish. Each frame with no arrival shows a waiting publish, so the buffer empties
+## as fast as it filled, and when iterations are longer than a frame (above x1) it does not fill.
+
+const WAITING_MOST := 2  ## publishes seen and not yet shown that the playout keeps (SimCore.TEXTURES holds their textures)
 
 signal snapshot_changed(snap: Snapshot)
 signal refused(row: int, why: String)
@@ -22,7 +26,7 @@ var backend: SimBackend
 var _used := {}  ## client row -> true
 var _last_seq := -1
 var _display_ms := 0.0
-var _waiting: Array = []  ## publishes seen and not yet shown, oldest first (at most one after a frame)
+var _waiting: Array = []  ## publishes seen and not yet shown, oldest first (at most WAITING_MOST after a frame)
 var _shown: PayloadInfo = null
 var _known_publish := -1  ## the newest publish seen
 var _refusals_taken := {}  ## row -> the snapshot that first carried the last refusal of it that was taken (timing["refused_seq"])
@@ -185,13 +189,14 @@ func shown_payload() -> PayloadInfo:
 
 
 ## One frame of the playout: `waiting` (publishes seen and not shown, oldest first) with the publishes that `arrived` this frame. Returns
-## [the publish to show now (null: none waits, keep the one shown), what waits after]: the oldest is shown, and at most one is left
-## waiting (with three or more, the oldest are skipped).
+## [the publish to show now (null: none waits, keep the one shown), what waits after]: the oldest is shown, and at most WAITING_MOST are
+## left waiting (with more, the oldest are skipped).
 static func playout(waiting: Array, arrived: Array) -> Array:
 	var all := waiting + arrived
 	if all.is_empty():
 		return [null, []]
-	return [all[-2] if all.size() >= 2 else all[0], [all[-1]] if all.size() >= 2 else []]
+	var keep := mini(all.size() - 1, WAITING_MOST)
+	return [all[all.size() - 1 - keep], all.slice(all.size() - keep)]
 
 
 ## Once a frame on the main thread: a newer snapshot is acknowledged and emitted, the rows of refused dishes are freed, and the playout
