@@ -25,6 +25,11 @@ extends SceneTree
 ##    same frames with no display known leave some frames with no step [derived: the owed fraction starts on a whole step, so a frame
 ##    shorter than the one before steps 0]; 600 frames 0.8% longer than the display's run within one step of the real time's steps and
 ##    owe it within half a display frame [derived: a frame of two display frames every 63].
+##  - the split, on a display of 8.333 ms (a frame owes 1 step at x1: round(120 x 0.008333)), step cost (slow mean) 6 ms: 1 owed gives 1; 2 owed
+##    give 1 (the iteration takes one frame's worth); 3 give 1; 4 give 4 (past SPLIT_OWED_MOST = 3, merged: T_ITER / 6 ms = 4 allows 4);
+##    a 9 ms step (a 9 ms mean, over 8.333 ms) with 2 owed gives 2 (merged); a 6 ms mean at duty 0.7 (6 / 0.7 = 8.6 ms, over a frame) gives 2; at x10,000
+##    (steps of 20 s) 2 owed with 6 ms steps give 2; on a display of 16.667 ms (a frame owes 2) 4 owed give 2, 2 owed give 2, 7 owed give 4
+##    (7 > 3 x 2: merged, within T_ITER / 6 = 4); with no display known 2 owed give 2.
 ##  - history samples (interval 120 s): from 0 with 10 steps of 20 s, one sample after step index 5; from 100 s with 3 steps, after index 0;
 ##    at most 16 an iteration: from 0, steps of 20 s allow 101 steps (the 17th sample would fall after step index 101).
 
@@ -36,6 +41,7 @@ func _init() -> void:
 	_owed()
 	_steps()
 	_cap()
+	_split()
 	_advanced()
 	_duty()
 	_samples()
@@ -107,6 +113,50 @@ func _steps() -> void:
 	TestUtil.check(g.steps() == Governor.MAX_STEPS, "a step of 1 µs: MAX_STEPS (got %d)" % g.steps())
 	TestUtil.check(g.steps(3) == 3, "room for 3 steps: 3")
 	TestUtil.check(g.steps(Governor.MAX_STEPS, 2) == 2, "samples allow 2 steps: 2")
+
+
+func _split() -> void:
+	var g := Governor.new()
+	g.display_ms = 1000.0 / 120.0
+	g.step_ms_mean = 6.0
+	g.step_ms_ema = 6.0
+	g.speed = 1.0
+	g.paused = false
+	for pair in [[1, 1], [2, 1], [3, 1], [4, 4]]:
+		g.target = float(pair[0]) * g.delta() + 1e-6
+		TestUtil.check(g.steps() == pair[1], "split: %d owed at 6 ms give %d (got %d)" % [pair[0], pair[1], g.steps()])
+	g.step_ms_mean = 9.0
+	g.step_ms_ema = 9.0
+	g.target = 2.0 * g.delta() + 1e-6
+	TestUtil.check(g.steps() == 2, "split: 2 owed at 9 ms (not keeping up) merge (got %d)" % g.steps())
+	g.step_ms_mean = 6.0
+	g.step_ms_ema = 6.0
+	g.duty = 0.7
+	TestUtil.check(g.steps() == 2, "split: 2 owed at 6 ms and duty 0.7 merge (got %d)" % g.steps())
+	var fast := Governor.new()
+	fast.display_ms = 1000.0 / 120.0
+	fast.step_ms_mean = 6.0
+	fast.step_ms_ema = 6.0
+	fast.speed = 10000.0
+	fast.paused = false
+	fast.target = 2.0 * fast.delta() + 1e-6
+	TestUtil.check(fast.steps() == 2, "split: x10,000 is never split (got %d)" % fast.steps())
+	var slow := Governor.new()
+	slow.display_ms = 1000.0 / 60.0
+	slow.step_ms_mean = 6.0
+	slow.step_ms_ema = 6.0
+	slow.speed = 1.0
+	slow.paused = false
+	for pair in [[2, 2], [4, 2], [7, 4]]:
+		slow.target = float(pair[0]) * slow.delta() + 1e-6
+		TestUtil.check(slow.steps() == pair[1], "split: 60 Hz, %d owed give %d (got %d)" % [pair[0], pair[1], slow.steps()])
+	var none := Governor.new()
+	none.step_ms_mean = 6.0
+	none.step_ms_ema = 6.0
+	none.speed = 1.0
+	none.paused = false
+	none.target = 2.0 * none.delta() + 1e-6
+	TestUtil.check(none.steps() == 2, "split: no display known, 2 owed give 2 (got %d)" % none.steps())
 
 
 func _cap() -> void:

@@ -14,6 +14,13 @@ extends RefCounted
 ##   frame and 2 in the next whenever the owed time's fraction of a step sits near a whole step, and those frames show no new picture.
 ## - Steps of an iteration: as many as are owed, at most what fits T_ITER_MS at the measured cost of a step, MAX_STEPS, and the bounds
 ##   the caller gives (the room the pool can grow to, the history samples an iteration can hold).
+## - Catch-up in single frames' worth: below MAX_STEP a display frame owes `frame_steps()` steps (1 at 120 Hz) and every iteration publishes
+##   one picture the display shows for a frame. After a late iteration k > 1 frames' worth are owed; run as one merged iteration they give
+##   one publish for k frames, so k - 1 frames show nothing new for good. When the sim keeps up (a frame's steps cost, on the slow mean, within a display frame,
+##   resting included; one late iteration must not turn the split off just when it is needed, so this is not the fast EMA) and at most SPLIT_OWED_MOST frames' worth are owed (the pictures the display keeps: one shown and
+##   WorldClient.WAITING_MOST waiting; more would be dropped there), an iteration takes one frame's worth, so each frame owed has its own
+##   publish. Past either bound, or at MAX_STEP and above (a frame owes more than one iteration's worth anyway), the owed steps merge as before
+##   and a world that cannot keep up slows together. The steps' arithmetic does not depend on how they are grouped.
 ## - Duty: three frames in a row longer than SLOW_FRAME x the display's frame lower it by DUTY_DOWN; each frame within FAST_FRAME of it
 ##   raises it by DUTY_UP; after an iteration that kept the thread busy `busy` ms it rests `busy x (1 / duty - 1)` ms.
 
@@ -23,6 +30,9 @@ const MAX_FRAME_SECONDS := 0.1  ## the longest frame the sim catches up on (Main
 const T_ITER_MS := 25.0  ## [placeholder, fixed by a soak on the real sim] the longest an iteration's steps should take
 const MAX_STEPS := GpuLayout.MAX_STEPS_PER_BATCH
 const OWED_ITERATIONS := 2.0  ## the most time owed, in iterations of the most steps the governor allows now
+const MEAN_WEIGHT := 0.02  ## the newest iteration's weight in the slow mean of a step's cost (about 50 iterations)
+const KEEP_UP_SHARE := 1.0  ## of a display frame: the most a frame's steps may cost on average (with rest) for the sim to count as keeping up
+const SPLIT_OWED_MOST := 3  ## frames' worth owed up to which catch-up runs frame by frame (the display keeps one shown and two waiting)
 const OWED_TOLERANCE := 1e-6  ## of a step: what a sum of frame lengths may miss a whole step by and still owe it
 const EMA_WEIGHT := 0.25  ## the newest iteration's weight in the cost of a step
 const SLOW_FRAME := 1.15
@@ -38,6 +48,7 @@ var target := 0.0  ## s: the world time the frames have asked for
 var clock := 0.0  ## s: the world time the steps have reached
 var steps_total := 0  ## the world steps run so far
 var step_ms_ema := T_ITER_MS  ## ms: the cost of a step, as the iterations measured it (starts at one step an iteration)
+var step_ms_mean := T_ITER_MS  ## ms: the cost of a step on a slow mean (MEAN_WEIGHT): what `keeping_up` reads
 var duty := 1.0
 var dropped := 0.0  ## s of owed time dropped by the cap, in all
 var display_ms := 0.0  ## the display's frame (ms), as `frame` was last told; 0: not known (no pacing)
@@ -105,7 +116,23 @@ func steps(room: int = MAX_STEPS, samples: int = MAX_STEPS) -> int:
 	var k := owed_steps()
 	if k <= 0:
 		return 0
+	var each := frame_steps()
+	if each > 0 and k > each and k <= SPLIT_OWED_MOST * each and keeping_up(each):
+		k = each
 	return maxi(1, mini(mini(k, steps_by_time()), mini(room, samples)))
+
+
+## The steps a display frame owes while steps are shorter than MAX_STEP (STEPS_PER_SECOND x the frame, at least 1); 0 when that does not hold
+## or the display's frame is not known.
+func frame_steps() -> int:
+	if display_ms <= 0.0 or delta() >= MAX_STEP or delta() <= 0.0:
+		return 0
+	return maxi(1, roundi(STEPS_PER_SECOND * display_ms / 1000.0))
+
+
+## Whether `n` steps, on the slow mean of what the iterations measured and with the duty's rest, cost within KEEP_UP_SHARE of a display frame.
+func keeping_up(n: int) -> bool:
+	return float(n) * step_ms_mean / maxf(duty, DUTY_MIN) <= KEEP_UP_SHARE * display_ms
 
 
 ## An iteration ran `k` steps of `step_delta` seconds and took `busy_ms` (record, submit, sync): the clock moves on and the cost of a
@@ -119,6 +146,7 @@ func advanced(k: int, step_delta: float, busy_ms: float) -> void:
 		target = clock
 	var per := busy_ms / k
 	step_ms_ema = per if step_ms_ema <= 0.0 else step_ms_ema + EMA_WEIGHT * (per - step_ms_ema)
+	step_ms_mean += MEAN_WEIGHT * (per - step_ms_mean)
 
 
 ## The clock moves on `k` steps with nothing run (a world with no dish): nothing is learned about a step's cost.
