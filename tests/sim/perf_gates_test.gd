@@ -398,6 +398,8 @@ func _measure(label: String, one_or_many: Variant, speed: float, seconds: float,
 	var long_iterations: Array = []
 	var miss_frames: Array = []
 	var miss_times: Array = []
+	var arrivals := ""  ## per frame, the publishes that were new at its poll (a digit each)
+	var max_seq := 0
 	while true:
 		await process_frame
 		frame += 1
@@ -408,6 +410,11 @@ func _measure(label: String, one_or_many: Variant, speed: float, seconds: float,
 		w.poll()
 		var snap := w.latest()
 		var shown := w.shown_payload()
+		var fresh := 0
+		for q: PayloadInfo in (snap.payloads if not snap.payloads.is_empty() else ([snap.payload] if snap.payload != null else [])):
+			if q.seq > max_seq:
+				max_seq = q.seq
+				fresh += 1
 		if shown != null:
 			w.texture_bound("payload", shown.texture_index, frame, shown.seq)
 		if now < settle_until:
@@ -415,6 +422,7 @@ func _measure(label: String, one_or_many: Variant, speed: float, seconds: float,
 			continue
 		if started < 0:
 			started = now
+		arrivals += str(mini(fresh, 9))
 		frames.append(dt * 1000.0)
 		samples.append([(now - started) / 1e6, snap.sim_time])
 		var iteration := int(snap.timing.get("iterations", -1))
@@ -440,6 +448,7 @@ func _measure(label: String, one_or_many: Variant, speed: float, seconds: float,
 	out["payload_frames"] = payload_frames
 	out["miss_frames"] = miss_frames
 	out["miss_times"] = miss_times
+	out["arrivals"] = arrivals
 	out["step_ms"] = step_ms
 	out["long_iterations"] = long_iterations
 	out["timing"] = w.latest().timing
@@ -481,6 +490,7 @@ static func _print_misses(m: Dictionary) -> void:
 	var longest: Array = m.get("long_iterations", [])
 	var pool: Dictionary = (m.get("timing", {}) as Dictionary).get("pool", {})
 	print("X1POOL %s: slots %s clouds %s husks %s bytes %s of budget %s (fraction %.4f), growths %s" % [m["label"], pool.get("slots"), pool.get("clouds"), pool.get("husks"), pool.get("bytes"), pool.get("budget_bytes"), float(pool.get("fraction", 0.0)), pool.get("growths")])
+	print("X1ARR %s: %s" % [m["label"], m.get("arrivals", "")])
 	print("X1MISSES %s: step median %.2f ms (run_ms per step, %d iterations seen); misses %d: single %d, runs of 2+ %s; within 46-50.5 s of the window %d; iterations over 14 ms seen at window s %s" % [m["label"], median, steps.size(), misses.size(), singles, runs, near, longest])
 
 
