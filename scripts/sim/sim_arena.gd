@@ -3,8 +3,8 @@ extends RefCounted
 ## The pooled world's buffers, by the unit each grows with: record slots, field cells, cloud-list squares, cloud slots,
 ## husk slots, family events; and the fixed ones (the tables, the scans' scratch, the world's events). A class grows by 1.5 (or to what
 ## is asked, if more) by copying what it holds into new buffers on the device; it shrinks, at most once a minute, when it has used less
-## than a quarter of its slots for that long, and never below what was last asked of it (`asked`), so room made ahead for the next
-## iteration's worst case is kept and a class shrinks only when the need itself has fallen. `changed` tells the core to make its
+## than a quarter of its slots for that long, and never below the most that was asked of it while it was little used (`asked`), so room made ahead
+## for the next iterations' worst case is kept and a class shrinks only when the need itself has fallen. `changed` tells the core to make its
 ## uniform sets again. The field cells and squares are handed out in blocks from first-fit free lists.
 
 const GROW := 1.5
@@ -83,7 +83,7 @@ var _low_since := {}  ## class -> msec since which it has used less than SHRINK_
 var _texels := 0
 var _pixels := 0
 var growths := {}  ## class -> how many times it grew (the debug log's pool figures)
-var asked := {}  ## class ("slot", "cloud", "husk") -> what `ensure_*` was last asked for it: a shrink never goes below room for it
+var asked := {}  ## class ("slot", "cloud", "husk") -> the most `ensure_*` was asked for it since it was last busy or shrunk: a shrink never goes below room for it
 
 
 func _init(device: RenderingDevice, p_limits: PoolLimits) -> void:
@@ -195,7 +195,7 @@ func slot_cap_for(slots: int) -> int:
 
 ## Room for `slots` record slots; false when that would pass the budget.
 func ensure_slots(slots: int) -> bool:
-	asked["slot"] = slots
+	asked["slot"] = maxi(int(asked.get("slot", 0)), slots)
 	var want := slot_cap_for(slots)
 	if want == 0:
 		return false
@@ -219,7 +219,7 @@ func pre_grow_slots(slots: int, share: float) -> bool:
 
 ## Room for `clouds` cloud slots; false when that would pass the budget.
 func ensure_clouds(clouds: int) -> bool:
-	asked["cloud"] = clouds
+	asked["cloud"] = maxi(int(asked.get("cloud", 0)), clouds)
 	if clouds <= int(FILL * cloud_cap):
 		return true
 	var want := maxi(ceili(clouds / FILL), int(cloud_cap * GROW))
@@ -235,7 +235,7 @@ func ensure_clouds(clouds: int) -> bool:
 
 ## Room for `husks` husk slots; false when that would pass the budget.
 func ensure_husks(husks: int) -> bool:
-	asked["husk"] = husks
+	asked["husk"] = maxi(int(asked.get("husk", 0)), husks)
 	if husks <= int(FILL * husk_cap):
 		return true
 	var want := maxi(ceili(husks / FILL), int(husk_cap * GROW))
@@ -421,7 +421,7 @@ func _grew(klass: String) -> void:
 
 
 ## Shrinks a class that has used less than a quarter of its slots for a minute (at least to the limits' size and to the room for what
-## `ensure_*` last asked of it, so the next iteration does not grow it back; at most once a minute).
+## most `ensure_*` asked of it in that time, so the next iteration does not grow it back; at most once a minute).
 func maybe_shrink(slots: int, clouds: int, husks: int) -> void:
 	var now := Time.get_ticks_msec()
 	for pair in [["slot", slots, slot_cap, limits.world_slots], ["cloud", clouds, cloud_cap, limits.cloud_slots], ["husk", husks, husk_cap, limits.husk_slots]]:
@@ -433,13 +433,16 @@ func maybe_shrink(slots: int, clouds: int, husks: int) -> void:
 			least = _align(least)
 		if used >= SHRINK_BELOW * cap or cap <= least:
 			_low_since.erase(cls)
+			asked[cls] = 0
 			continue
 		if not _low_since.has(cls):
 			_low_since[cls] = now
+			asked[cls] = 0
 			continue
 		if now - int(_low_since[cls]) < shrink_after_msec:
 			continue
 		_low_since[cls] = now
+		asked[cls] = 0
 		var to := maxi(least, used * 2)
 		match cls:
 			"slot":
