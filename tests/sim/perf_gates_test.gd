@@ -80,7 +80,6 @@ const D_STEP_SHARE := 1.2  ## gate D: 100 dishes of 10,000 within 1.2 x one dish
 const D_DISHES := 100
 const D_BUPS := 10000
 const D_SECONDS := 30.0
-const INTERFACE_FRAME_SHARE := 1.15  ## the 1,000-dish interface: p95 <= 1.15 x the display frame [placeholder: fixed by the 20-dish figure]
 const G_SPEED_TOLERANCE := 10.0  ## [derived] what the measurement cannot see of x10,000 over a 30 s window (one iteration's lag, frame capping)
 const SETTLE_SECONDS := 12.0  ## the settling before a window
 const E_SECONDS := 600.0
@@ -194,10 +193,10 @@ static func gate_d(step_ms: float, ref_step_ms: float) -> bool:
 	return step_ms <= D_STEP_SHARE * ref_step_ms
 
 
-## The 1,000-dish interface: p95 frame <= min(1.15 x the display frame [placeholder], the 20-dish baseline's p95), and the mean no worse
-## than the 20-dish baseline's. (The worst frame is printed, not gated: no bound is set for it.)
-static func gate_interface(p95_ms: float, mean_ms: float, display_frame_ms: float, baseline_p95_ms: float, baseline_mean_ms: float) -> bool:
-	return p95_ms <= minf(INTERFACE_FRAME_SHARE * display_frame_ms, baseline_p95_ms) and mean_ms <= baseline_mean_ms
+## The 1,000-dish interface: the p95 frame and the mean no worse than the 20-dish baseline's. (The worst frame is printed, not gated:
+## no bound is set for it.)
+static func gate_interface(p95_ms: float, mean_ms: float, baseline_p95_ms: float, baseline_mean_ms: float) -> bool:
+	return p95_ms <= baseline_p95_ms and mean_ms <= baseline_mean_ms
 
 
 func _gate_checks() -> void:
@@ -215,8 +214,8 @@ func _gate_checks() -> void:
 	TestUtil.show(gate_c(4000.0, 1.5, 100000, 1.0, 100000) and not gate_c(3999.0, 1.5, 100000, 1.0, 100000), "gate C: speed >= x4,000 [placeholder]")
 	TestUtil.show(not gate_c(5000.0, 1.51, 100000, 1.0, 100000) and gate_c(5000.0, 3.0, 200000, 1.0, 100000), "gate C: the cost of a bup within 1.5 x the 100k dish's")
 	TestUtil.show(gate_d(1.2, 1.0) and not gate_d(1.21, 1.0), "gate D: a step within 1.2 x the 1M dish's")
-	TestUtil.show(gate_interface(9.58, 9.3, 8.333, 10.33, 9.31) and not gate_interface(9.6, 9.3, 8.333, 10.33, 9.31), "interface: p95 within 1.15 x the display frame")
-	TestUtil.show(not gate_interface(9.0, 9.32, 8.333, 10.33, 9.31) and gate_interface(10.0, 9.0, 10.0, 10.0, 9.31), "interface: the mean and the 20-dish p95 bound too")
+	TestUtil.show(gate_interface(10.33, 9.3, 10.33, 9.31) and not gate_interface(10.34, 9.3, 10.33, 9.31), "interface: p95 no worse than the 20-dish baseline's")
+	TestUtil.show(not gate_interface(9.0, 9.32, 10.33, 9.31), "interface: the mean no worse than the 20-dish baseline's")
 	_playout_checks()
 
 

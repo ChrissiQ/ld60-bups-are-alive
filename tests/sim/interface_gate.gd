@@ -7,11 +7,10 @@ extends SceneTree
 ## Args (after --): `dishes=N` (default 999), `seconds=N` (the window, default 30).
 ##
 ## Expected values, written before the first run:
-## - The bound is `gate_interface` of perf_gates_test.gd: p95 <= min(1.15 x the display frame [placeholder], the 20-dish baseline's p95) and the
-##   mean no worse than the baseline's. The 20-dish baseline is scenario C48 (the same 48 x 48 grids; perf_pre_pool.json: mean 9.31 ms, p95 10.33,
-##   max 14.48), so on a 120 Hz display (8.333 ms) the 9.58 ms cap binds on p95 and 9.31 ms on the mean. This screen's frames at 994 dishes
-##   were p50 8.34, p95 8.96-9.10, worst 11.1-11.35 ms [measured, asked x100]; at x10,000 asked the main thread's part is the same
-##   (the sim is on its own thread), so p95 about 9 ms is expected [derived]: inside both bounds when the display runs at 120 Hz.
+## - The bound is `gate_interface` of perf_gates_test.gd: the p95 and the mean no worse than the 20-dish baseline's, scenario C48 (the same
+##   48 x 48 grids; perf_pre_pool.json: mean 9.31 ms, p95 10.33, max 14.48). This screen's frames at 994 dishes were p50 8.34, p95 8.96-9.10,
+##   worst 11.1-11.35 ms [measured, asked x100]; at x10,000 asked the main thread's part is the same (the sim is on its own
+##   thread), so p95 about 9 ms is expected [derived]: inside both bounds.
 ## - The dishes are 300 um with 100 bups at their limit (gate C's dishes). The speed reached is printed (gate C's own figure is perf_gates_test's).
 
 const BASELINE_KEY := "C48"
@@ -102,10 +101,10 @@ func _run() -> void:
 	var worst: float = sorted[-1]
 	var hz := DisplayServer.screen_get_refresh_rate()
 	var display_ms: float = 1000.0 / hz if hz > 0.0 else float(_perf.DISPLAY_FRAME_MS)
-	print("IFACE [measured] %d dishes running (%d in the snapshot), %d frames over %.1f s: mean %.2f ms, p50 %.2f, p95 %.2f, worst %.2f; speed reached x%.0f (asked x10,000); display %.1f Hz (%.3f ms; cap 1.15 x 8.333 = %.2f ms)" % [m.dishes.size(), in_world, frames.size(), wall, mean, p50, p95, worst, reached, hz, display_ms, 1.15 * _perf.DISPLAY_FRAME_MS])
-	print("IFACE baseline (20 dishes, %s, 2560 x 1440): mean %.2f ms, p95 %.2f, worst %.2f [measured]; this run's bound: p95 <= %.2f ms, mean <= %.2f ms" % [BASELINE_KEY, base_mean, base_p95, base_max, minf(1.15 * display_ms, base_p95), base_mean])
+	print("IFACE [measured] %d dishes running (%d in the snapshot), %d frames over %.1f s: mean %.2f ms, p50 %.2f, p95 %.2f, worst %.2f; speed reached x%.0f (asked x10,000); display %.1f Hz (%.3f ms)" % [m.dishes.size(), in_world, frames.size(), wall, mean, p50, p95, worst, reached, hz, display_ms])
+	print("IFACE baseline (20 dishes, %s, 2560 x 1440): mean %.2f ms, p95 %.2f, worst %.2f [measured]; this run's bound: p95 <= %.2f ms, mean <= %.2f ms" % [BASELINE_KEY, base_mean, base_p95, base_max, base_p95, base_mean])
 	var status: Dictionary = WorldClient.shared().backend.status()
 	TestUtil.show(in_world >= m.dishes.size() and m.dishes.size() >= count, "interface gate: %d dishes running in the world (%d asked)" % [in_world, count])
 	TestUtil.show((status.get("errors", []) as Array).is_empty() and status.get("alive", false), "interface gate: the world is clean (%s)" % [status])
-	TestUtil.show(_perf.gate_interface(p95, mean, display_ms, base_p95, base_mean), "interface gate: p95 %.2f ms <= min(1.15 x %.3f = %.2f [placeholder], baseline %.2f) and mean %.2f ms <= %.2f" % [p95, display_ms, 1.15 * display_ms, base_p95, mean, base_mean])
+	TestUtil.show(_perf.gate_interface(p95, mean, base_p95, base_mean), "interface gate: p95 %.2f ms <= the 20-dish baseline's %.2f and mean %.2f ms <= %.2f" % [p95, base_p95, mean, base_mean])
 	TestUtil.finish(self, "OK interface_gate (%d dishes: p95 %.2f ms, mean %.2f ms, worst %.2f ms, x%.0f reached)" % [m.dishes.size(), p95, mean, worst, reached])
