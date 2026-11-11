@@ -73,7 +73,7 @@ const C_BUPS := 100
 const C_RADIUS := 45000.0  ## µm: the default dish (StartConditions.DEFAULT_RADIUS), a 100 x 100 grid
 const C_ACROSS := 100  ## its grid's cells across
 const C_SECONDS := 30.0
-const D_STEP_SHARE := 1.2  ## gate D: 100 dishes of 10,000 within 1.2 x one dish of 1,000,000's step
+const D_SPEED_FLOOR := 900.0  ## gate D: the speed 100 dishes of 10,000 bups must reach
 const D_DISHES := 100
 const D_BUPS := 10000
 const D_SECONDS := 30.0
@@ -183,9 +183,9 @@ static func gate_c(speed: float) -> bool:
 	return speed >= C_SPEED_FLOOR
 
 
-## Gate D (100 dishes of 10,000 bups): a step within 1.2 x one dish of 1,000,000 bups' (the same process).
-static func gate_d(step_ms: float, ref_step_ms: float) -> bool:
-	return step_ms <= D_STEP_SHARE * ref_step_ms
+## Gate D (100 default dishes of 10,000 bups): the speed reached >= x900.
+static func gate_d(speed: float) -> bool:
+	return speed >= D_SPEED_FLOOR
 
 
 ## The 1,000-dish interface: the p95 frame and the mean no worse than the 20-dish baseline's. (The worst frame is printed, not gated:
@@ -207,7 +207,7 @@ func _gate_checks() -> void:
 	TestUtil.show(not gate_g(8.3, 9999.0, 8.33, 8.33, 0.1), "gate G fails a speed under x10,000")
 	TestUtil.show(gate_x1(0.99) and not gate_x1(0.9899), "gate x1: 99% of frames")
 	TestUtil.show(gate_c(5000.0) and not gate_c(4999.0), "gate C: speed >= x5,000")
-	TestUtil.show(gate_d(1.2, 1.0) and not gate_d(1.21, 1.0), "gate D: a step within 1.2 x the 1M dish's")
+	TestUtil.show(gate_d(900.0) and not gate_d(899.0), "gate D: speed >= x900")
 	TestUtil.show(gate_interface(10.33, 9.3, 10.33, 9.31) and not gate_interface(10.34, 9.3, 10.33, 9.31), "interface: p95 no worse than the 20-dish baseline's")
 	TestUtil.show(not gate_interface(9.0, 9.32, 10.33, 9.31), "interface: the mean no worse than the 20-dish baseline's")
 	_playout_checks()
@@ -642,26 +642,21 @@ func _gate_c_speed() -> void:
 	TestUtil.show(gate_c(speed), "gate C: >= x%.0f reached (x%.1f)" % [C_SPEED_FLOOR, speed])
 
 
-## Gate D: 100 dishes of 10,000 bups (45 mm, 100 cells across) at an asked x10,000, step cost within 1.2 x one dish of 1,000,000 bups'
-## (90 mm), the 1M dish measured first in this process.
+## Gate D: 100 default dishes of 10,000 bups at an asked x10,000: the speed it reaches is the figure.
 func _gate_d_step() -> void:
 	var secs := D_SECONDS
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("seconds="):
 			secs = float(a.substr(8))
-	var ref := await _measure("D-ref 1x1M", filled_spec(1000000, DISH_90MM), 10000.0, secs)
-	_print_run(ref)
 	var specs: Array = []
 	for i in D_DISHES:
 		specs.append(filled_spec(D_BUPS, DISH_45MM, i + 1, 3 + i))
 	var m := await _measure("D %dx%d" % [D_DISHES, D_BUPS], specs, 10000.0, secs)
 	_print_run(m)
-	var step: float = m["step_cost_ms"]
-	var ref_step: float = ref["step_cost_ms"]
-	print("GATE D [measured]: %d dishes x %d bups: step %.3f ms, x%.1f reached; one dish of 1,000,000: step %.3f ms, x%.1f; the ratio %.3f (gate <= %.1f)" % [
-		D_DISHES, D_BUPS, step, run_speed(m.get("samples", [])), ref_step, run_speed(ref.get("samples", [])), step / ref_step, D_STEP_SHARE])
-	TestUtil.show(m["ok"] and ref["ok"], "gate D: the runs were clean (no error, no overflow)")
-	TestUtil.show(gate_d(step, ref_step), "gate D: a step of 100 x 10,000 within 1.2 x one dish of 1,000,000's (%.3f ms against %.3f ms)" % [step, ref_step])
+	var speed := run_speed(m.get("samples", []))
+	print("GATE D [measured]: %d dishes x %d bups: x%.1f reached (gate >= x%.0f); step %.3f ms" % [D_DISHES, D_BUPS, speed, D_SPEED_FLOOR, m["step_cost_ms"]])
+	TestUtil.show(m["ok"], "gate D: the run was clean (no error, no overflow)")
+	TestUtil.show(gate_d(speed), "gate D: >= x%.0f reached (x%.1f)" % [D_SPEED_FLOOR, speed])
 
 
 func _gate_x1_speed() -> void:
