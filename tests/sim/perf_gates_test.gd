@@ -568,25 +568,29 @@ func _gate_g_speed(baseline: Dictionary) -> void:
 func _gate_c_speed() -> void:
 	var secs := C_SECONDS
 	var dishes := C_DISHES
+	var radius := C_RADIUS
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("seconds="):
 			secs = float(a.substr(8))
 		if a.begins_with("dishes="):  ## a diagnosis (the dish count's slope), not the gate
 			dishes = int(a.substr(7))
-	TestUtil.show(DishGrid.cells_across(C_RADIUS, StartConditions.MIN_NUTRIENT_RESOLUTION) == 48, "gate C: a %.0f um dish has a 48 x 48 grid" % C_RADIUS)
+		if a.begins_with("radius="):  ## a diagnosis (the grid's size: 45000 gives the default dish's 100 x 100), not the gate
+			radius = float(a.substr(7))
+	var across := DishGrid.cells_across(radius, StartConditions.MIN_NUTRIENT_RESOLUTION)
+	TestUtil.show(radius != C_RADIUS or across == 48, "gate C: a %.0f um dish has a 48 x 48 grid" % C_RADIUS)
 	var ref := await _measure("C-ref 1x100k", filled_spec(100000, DISH_45MM), 10000.0, secs)
 	_print_run(ref)
 	var specs: Array = []
 	for i in dishes:
-		specs.append(filled_spec(C_BUPS, C_RADIUS, i + 1, 3 + i))
+		specs.append(filled_spec(C_BUPS, radius, i + 1, 3 + i))
 	var m := await _measure("C %dx%d" % [dishes, C_BUPS], specs, 10000.0, secs)
 	_print_run(m)
 	var speed := run_speed(m.get("samples", []))
 	var bups := dishes * C_BUPS
 	var step: float = m["step_cost_ms"]
 	var ref_step: float = ref["step_cost_ms"]
-	print("GATE C [measured]: %d dishes x %d bups, 48 x 48: x%.1f reached (floor x%.0f [placeholder], x%.0f derived); step %.3f ms = %.1f ns a bup; one dish of 100,000: step %.3f ms = %.1f ns a bup (x%.1f); the ratio %.2f (gate <= %.1f)" % [
-		dishes, C_BUPS, speed, C_SPEED_FLOOR, C_DERIVED_SPEED, step, step / bups * 1e6, ref_step, ref_step / 100000.0 * 1e6, run_speed(ref.get("samples", [])), (step / bups) / (ref_step / 100000.0), C_PER_BUP_SHARE])
+	print("GATE C [measured]: %d dishes x %d bups, %d x %d: x%.1f reached (floor x%.0f [placeholder], x%.0f derived); step %.3f ms = %.1f ns a bup; one dish of 100,000: step %.3f ms = %.1f ns a bup (x%.1f); the ratio %.2f (gate <= %.1f)" % [
+		dishes, C_BUPS, across, across, speed, C_SPEED_FLOOR, C_DERIVED_SPEED, step, step / bups * 1e6, ref_step, ref_step / 100000.0 * 1e6, run_speed(ref.get("samples", [])), (step / bups) / (ref_step / 100000.0), C_PER_BUP_SHARE])
 	TestUtil.show(m["ok"] and ref["ok"], "gate C: the runs were clean (no error, no overflow)")
 	TestUtil.show(speed >= C_SPEED_FLOOR, "gate C: >= x%.0f [placeholder] reached (x%.1f)" % [C_SPEED_FLOOR, speed])
 	TestUtil.show(step / bups <= C_PER_BUP_SHARE * ref_step / 100000.0, "gate C: the cost of a bup within 1.5 x one dish of 100,000's (%.1f ns against %.1f ns)" % [step / bups * 1e6, ref_step / 100000.0 * 1e6])
