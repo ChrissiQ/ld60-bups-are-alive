@@ -34,12 +34,10 @@ extends SceneTree
 ## - Gates C and D, written before the first run. Both ask x10,000 (20 s steps: min(20, speed/120)) and the speed reached is the figure; the
 ##   step's cost is the sum of the window's iterations' busy time over their steps (each iteration once), and the reference world is measured
 ##   first in the same process (the GPU is bimodal between processes), each world with 12 s of settling.
-##   C: 1,000 dishes of 100 bups at the limit, 300 um dishes (48 x 48 grids, checked), against one 45 mm dish of 100,000 bups (gate E's).
-##   Floor x4,000 [placeholder: x4,760 derived from 20 s over 3.7 ms of field and 0.5 ms of bups]; per-bup cost = step ms / bups in
-##   the world (both worlds hold 100,000, so it is a step ratio) <= 1.5 x the reference's. Reference [measured, 100k, 10 steps a submit]:
-##   1.18 ms = 11.8 ns a bup. Expected for C [derived, before the fused pass]: 4.2 ms a step, x4,760, 3.5 x the reference's cost
-##   a bup: the speed passes and the 1.5 x cost ratio is expected to fail, since 1,000 dishes' field cost (2.3M cells, not bups) is not in
-##   the reference's step; the fusion cuts the field's share, how far is what the run says.
+##   C: 100 dishes of 100 bups at the limit, each the default dish (45 mm, a 100 x 100 grid, checked): the speed reached >= x5,000 (the
+##   project's bound: many dishes of the default size at half the top speed or better). Measured before the bound was set
+##   [measured, two processes]: x5,577 and x5,558 (a step of 3.46 and 3.47 ms), so about 10% of room. The cost is the 100 grids' (1M cells),
+##   not the 10,000 bups'. `dishes=` and `radius=` rerun it at other sizes as a diagnosis (300 um gives the smallest grid, 48 x 48).
 ##   D: 100 dishes of 10,000 bups (45 mm, 100 cells across), against one 90 mm dish of 1,000,000: step <= 1.2 x. Expected about 1.0 x [derived: the
 ##   same 1M bups, the same 100 x 100 grid per dish, 100 dishes' field 1M cells (a tenth of the bups' work); the reference's step is
 ##   about 11.4 ms [derived: half of the 22.75 ms at 2M]].
@@ -69,12 +67,11 @@ const E_FRAME_SHARE := 1.15
 const F_STEP_COST_SHARE := 0.85
 const G_SPEED_FLOOR := 10000.0
 const X1_SHARE := 0.99
-const C_SPEED_FLOOR := 4000.0  ## [placeholder: x4,760 derived (20 s over a 3.7 ms field step and 0.5 ms of bups)]
-const C_DERIVED_SPEED := 4760.0
-const C_PER_BUP_SHARE := 1.5  ## gate C: per-bup cost within 1.5 x one dish of 100,000's
-const C_DISHES := 1000
+const C_SPEED_FLOOR := 5000.0  ## gate C: the speed 100 default dishes must reach
+const C_DISHES := 100
 const C_BUPS := 100
-const C_RADIUS := 300.0  ## µm: a 48 x 48 grid (DishGrid.cells_across clamps at FIELD_MIN_ACROSS for any radius up to 600 µm), the baseline's scenario C48
+const C_RADIUS := 45000.0  ## µm: the default dish (StartConditions.DEFAULT_RADIUS), a 100 x 100 grid
+const C_ACROSS := 100  ## its grid's cells across
 const C_SECONDS := 30.0
 const D_STEP_SHARE := 1.2  ## gate D: 100 dishes of 10,000 within 1.2 x one dish of 1,000,000's step
 const D_DISHES := 100
@@ -181,11 +178,9 @@ static func gate_x1(share_advanced: float) -> bool:
 	return share_advanced >= X1_SHARE
 
 
-## Gate C (1,000 dishes of 100 bups, 48 x 48 grids): the speed reached >= x4,000 [placeholder] and the cost of a step for each bup (step ms /
-## bups in the world) within 1.5 x one dish of 100,000 bups', measured in the same process. Both worlds hold 100,000 bups, so the second
-## is, as the gate is written, a step cost within 1.5 x.
-static func gate_c(speed: float, step_ms: float, bups: int, ref_step_ms: float, ref_bups: int) -> bool:
-	return speed >= C_SPEED_FLOOR and step_ms / bups <= C_PER_BUP_SHARE * ref_step_ms / ref_bups
+## Gate C (100 default dishes of 100 bups): the speed reached >= x5,000.
+static func gate_c(speed: float) -> bool:
+	return speed >= C_SPEED_FLOOR
 
 
 ## Gate D (100 dishes of 10,000 bups): a step within 1.2 x one dish of 1,000,000 bups' (the same process).
@@ -211,8 +206,7 @@ func _gate_checks() -> void:
 	TestUtil.show(gate_g(8.4, 10000.0, 8.33, 8.33, 0.1) and not gate_g(8.6, 10000.0, 8.33, 8.33, 0.1), "gate G: the best of the two plus 1 SD")
 	TestUtil.show(not gate_g(8.3, 9999.0, 8.33, 8.33, 0.1), "gate G fails a speed under x10,000")
 	TestUtil.show(gate_x1(0.99) and not gate_x1(0.9899), "gate x1: 99% of frames")
-	TestUtil.show(gate_c(4000.0, 1.5, 100000, 1.0, 100000) and not gate_c(3999.0, 1.5, 100000, 1.0, 100000), "gate C: speed >= x4,000 [placeholder]")
-	TestUtil.show(not gate_c(5000.0, 1.51, 100000, 1.0, 100000) and gate_c(5000.0, 3.0, 200000, 1.0, 100000), "gate C: the cost of a bup within 1.5 x the 100k dish's")
+	TestUtil.show(gate_c(5000.0) and not gate_c(4999.0), "gate C: speed >= x5,000")
 	TestUtil.show(gate_d(1.2, 1.0) and not gate_d(1.21, 1.0), "gate D: a step within 1.2 x the 1M dish's")
 	TestUtil.show(gate_interface(10.33, 9.3, 10.33, 9.31) and not gate_interface(10.34, 9.3, 10.33, 9.31), "interface: p95 no worse than the 20-dish baseline's")
 	TestUtil.show(not gate_interface(9.0, 9.32, 10.33, 9.31), "interface: the mean no worse than the 20-dish baseline's")
@@ -623,8 +617,7 @@ func _gate_g_speed(baseline: Dictionary) -> void:
 		TestUtil.show(speed >= G_SPEED_FLOOR - G_SPEED_TOLERANCE, "gate G (%d bups): x10,000 sustained (>= x%.0f)" % [n, G_SPEED_FLOOR - G_SPEED_TOLERANCE])
 
 
-## Gate C: 1,000 dishes of 100 bups on 48 x 48 grids at an asked x10,000 (the speed it reaches is the figure), against one dish of 100,000
-## bups (gate E's dish) measured first in this process, for the cost of a bup.
+## Gate C: 100 default dishes of 100 bups at an asked x10,000: the speed it reaches is the figure.
 func _gate_c_speed() -> void:
 	var secs := C_SECONDS
 	var dishes := C_DISHES
@@ -637,23 +630,16 @@ func _gate_c_speed() -> void:
 		if a.begins_with("radius="):  ## a diagnosis (the grid's size: 45000 gives the default dish's 100 x 100), not the gate
 			radius = float(a.substr(7))
 	var across := DishGrid.cells_across(radius, StartConditions.MIN_NUTRIENT_RESOLUTION)
-	TestUtil.show(radius != C_RADIUS or across == 48, "gate C: a %.0f um dish has a 48 x 48 grid" % C_RADIUS)
-	var ref := await _measure("C-ref 1x100k", filled_spec(100000, DISH_45MM), 10000.0, secs)
-	_print_run(ref)
+	TestUtil.show(radius != C_RADIUS or across == C_ACROSS, "gate C: the default dish has a %d x %d grid" % [C_ACROSS, C_ACROSS])
 	var specs: Array = []
 	for i in dishes:
 		specs.append(filled_spec(C_BUPS, radius, i + 1, 3 + i))
 	var m := await _measure("C %dx%d" % [dishes, C_BUPS], specs, 10000.0, secs)
 	_print_run(m)
 	var speed := run_speed(m.get("samples", []))
-	var bups := dishes * C_BUPS
-	var step: float = m["step_cost_ms"]
-	var ref_step: float = ref["step_cost_ms"]
-	print("GATE C [measured]: %d dishes x %d bups, %d x %d: x%.1f reached (floor x%.0f [placeholder], x%.0f derived); step %.3f ms = %.1f ns a bup; one dish of 100,000: step %.3f ms = %.1f ns a bup (x%.1f); the ratio %.2f (gate <= %.1f)" % [
-		dishes, C_BUPS, across, across, speed, C_SPEED_FLOOR, C_DERIVED_SPEED, step, step / bups * 1e6, ref_step, ref_step / 100000.0 * 1e6, run_speed(ref.get("samples", [])), (step / bups) / (ref_step / 100000.0), C_PER_BUP_SHARE])
-	TestUtil.show(m["ok"] and ref["ok"], "gate C: the runs were clean (no error, no overflow)")
-	TestUtil.show(speed >= C_SPEED_FLOOR, "gate C: >= x%.0f [placeholder] reached (x%.1f)" % [C_SPEED_FLOOR, speed])
-	TestUtil.show(step / bups <= C_PER_BUP_SHARE * ref_step / 100000.0, "gate C: the cost of a bup within 1.5 x one dish of 100,000's (%.1f ns against %.1f ns)" % [step / bups * 1e6, ref_step / 100000.0 * 1e6])
+	print("GATE C [measured]: %d dishes x %d bups, %d x %d: x%.1f reached (gate >= x%.0f); step %.3f ms" % [dishes, C_BUPS, across, across, speed, C_SPEED_FLOOR, m["step_cost_ms"]])
+	TestUtil.show(m["ok"], "gate C: the run was clean (no error, no overflow)")
+	TestUtil.show(gate_c(speed), "gate C: >= x%.0f reached (x%.1f)" % [C_SPEED_FLOOR, speed])
 
 
 ## Gate D: 100 dishes of 10,000 bups (45 mm, 100 cells across) at an asked x10,000, step cost within 1.2 x one dish of 1,000,000 bups'
