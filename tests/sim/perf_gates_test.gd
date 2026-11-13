@@ -115,7 +115,7 @@ func _initialize() -> void:
 	_gate_checks()
 	if not SimHarness.device_available():
 		print("SKIP perf_gates_test: gates C, D, E, F, G, x1 measurements need a local GPU (not available headless)")
-		TestUtil.finish(self, "OK perf_gates_test (static part; measurements skipped: headless)")
+		TestUtil.finish(self, "OK perf_gates_test (static part; measurements skipped: headless; gates A and B are tests/sim/interface_gate.gd's scenario=A and scenario=B)")
 		return
 	var which := "all"
 	for a in OS.get_cmdline_user_args():
@@ -140,7 +140,7 @@ func _initialize() -> void:
 				await _row_55()
 			_:
 				TestUtil.show(false, "no gate named %s" % g)
-	TestUtil.finish(self, "OK perf_gates_test (gates %s: the speed column, gates C and D and the 1M pipette; the 1,000-dish interface is tests/sim/interface_gate.gd)" % ", ".join(gates))
+	TestUtil.finish(self, "OK perf_gates_test (gates %s: the speed column, gates C and D and the 1M pipette; the 1,000-dish interface and gates A and B are tests/sim/interface_gate.gd)" % ", ".join(gates))
 
 
 static func load_baseline() -> Dictionary:
