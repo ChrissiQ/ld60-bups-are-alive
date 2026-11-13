@@ -43,42 +43,42 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define BLOCK_LOOP(F) void main() { uint nb_ = (WORLD[WD_SLOTS] + BLK_SLOTS - 1u) >> BLK_SHIFT; for (uint k_ = gl_WorkGroupID.x; k_ < nb_; k_ += gl_NumWorkGroups.x) { F(k_, BLKDISH[k_]); barrier(); } }
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
 #define LEDGER(d, t, amount) { if (WORLD[WD_LEDGER] != 0u) { float rest_ = (amount); uint lo_ = (d) * DS_WORDS + DS_LEDGER + 2u * (t), hi_ = lo_ + 1u; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); uint old_ = atomicAdd(DSTATE[lo_], q_); if (old_ + q_ < old_) atomicAdd(DSTATE[hi_], 1u); } } }
-const uint DENSITY_WORDS = 6u;
 const uint DENSITY_ALPHA_SCALE = 1024u;
-const uint DENSITY_ROD = 3u;
 const uint DENSITY_BILINEAR = 2u;
 const uint DENSITY_NEAREST = 1u;
-const uint VO_WORDS = 23u;
-const uint VO_LARGE = 22u;
-const uint VO_PLACES = 12u;
-const uint VO_PLACE_WORDS = 5u;
-const uint VO_PICKED = 7u;
+const uint DENSITY_ROD = 3u;
+const uint DENSITY_WORDS = 6u;
+const uint FINDS = 2u;
+const uint VO_D2 = 1u;
 const uint VO_FOUND = 5u;
+const uint VO_INDEX = 2u;
+const uint VO_LARGE = 22u;
 const uint VO_NEAR = 4u;
 const uint VO_NEAREST = 3u;
-const uint VO_INDEX = 2u;
-const uint VO_D2 = 1u;
+const uint VO_PICKED = 7u;
+const uint VO_PLACES = 12u;
+const uint VO_PLACE_WORDS = 5u;
 const uint VO_VISIBLE = 0u;
-const uint VW_WORDS = 21u;
+const uint VO_WORDS = 23u;
+const uint VW_CAPACITY = 7u;
+const uint VW_COUNT = 0u;
+const uint VW_DENSITY = 18u;
 const uint VW_DEN_H = 20u;
 const uint VW_DEN_W = 19u;
-const uint VW_DENSITY = 18u;
-const uint FINDS = 2u;
 const uint VW_FIND = 14u;
 const uint VW_FINDS = 13u;
 const uint VW_NEAR = 12u;
-const uint VW_SLACK = 11u;
-const uint VW_PICK_Y = 10u;
-const uint VW_PICK_X = 9u;
 const uint VW_PICK = 8u;
-const uint VW_CAPACITY = 7u;
-const uint VW_SLOTS = 6u;
+const uint VW_PICK_X = 9u;
+const uint VW_PICK_Y = 10u;
 const uint VW_PIXEL = 5u;
-const uint VW_Y1 = 4u;
+const uint VW_SLACK = 11u;
+const uint VW_SLOTS = 6u;
+const uint VW_WORDS = 21u;
+const uint VW_X0 = 1u;
 const uint VW_X1 = 3u;
 const uint VW_Y0 = 2u;
-const uint VW_X0 = 1u;
-const uint VW_COUNT = 0u;
+const uint VW_Y1 = 4u;
 layout(set = 0, binding = 2, rgba8) uniform restrict writeonly image2D DENTEX;
 
 void f(uint k) {

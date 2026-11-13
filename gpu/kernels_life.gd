@@ -131,25 +131,6 @@ void main() {
 }
 """
 
-const K_FINALIZE := """
-const float CAP_SIGMAS = 4.0;  // (how far short of the limit the trim aims, in standard deviations: 4 is over it about once in 30,000 steps)
-void main() {
-	if (gl_GlobalInvocationID.x != 0u) return;  // (one thread: a dispatch of 1 runs a whole group of 64)
-	uint n = CNT[CNT_BUPS];
-	uint c = uint(P[P_CAPACITY]);
-	uint surv = n > 0u ? EXCS[n - 1u] + SURV[n - 1u] : 0u;
-	uint kids = n > 0u ? EXCK[n - 1u] + KID[n - 1u] : 0u;
-	CNT[CNT_SURVIVORS] = surv; CNT[CNT_NEWBORN] = kids; CNT[CNT_NEXT_COUNT] = min(surv + kids, c);
-	int natural = int(n - surv) - int(CNT[CNT_TRIMMED]);  // (the deaths that were not a trim)
-	int growth = int(kids) - natural;
-	// The count after a step is the limit plus (births - deaths) less what was expected of them: two independent counts of about
-	// kids and natural, each Poisson, so the margin is CAP_SIGMAS of sqrt(2 (kids + natural)) and the count is not expected to reach the limit.
-	float margin = CAP_SIGMAS * sqrt(2.0 * float(kids + uint(max(natural, 0))));
-	CNT[CNT_GROWTH] = uint(max(float(growth), 0.0) + ceil(margin));
-	CNT[CNT_TRIMMED] = 0u;
-}
-"""
-
 const K_COMPACT := """
 // One thread per 16 bytes (a bup is RECORD_VEC4 of them): a kept bup is copied to its new place, a newborn written after the kept ones, with
 // its id (the next id plus the number of newborns before it: 64 bits in words R_ID_LO and R_ID_HI, with the carry).
@@ -180,12 +161,6 @@ void main() {
 }
 """
 
-const K_SETCOUNT := """
-void main() {
-	if (gl_GlobalInvocationID.x != 0u) return;  // (one thread: a dispatch of 1 runs a whole group of 64)
-	uint lo = CNT[CNT_NEXT_ID_LO] + CNT[CNT_NEWBORN]; if (lo < CNT[CNT_NEXT_ID_LO]) CNT[CNT_NEXT_ID_HI] += 1u; CNT[CNT_NEXT_ID_LO] = lo; CNT[CNT_BUPS] = CNT[CNT_NEXT_COUNT]; CNT[CNT_STEP] += 1u; }
-"""
-
 ## Conjugation. The donors (R_DONOR) go into a hashed table of the 20 µm cells they stand in, four slots a cell, and the
 ## largest donor's half length is kept (CNT_DONOR_REACH); then each bup that is not a donor looks in the cells round it as far as a donor can be and still touch
 ## it (its own half length, the largest donor's and contact_um: 3 x 3 cells or fewer for the usual sizes) for a donor it touches (centres no farther apart than the
@@ -197,64 +172,6 @@ const uint DMASK = 65535u;
 const float DCELL = 20.0;
 uint dhash(int cx, int cy) { return hash(uint(cx) * 73856093u ^ uint(cy) * 19349663u) & DMASK; }
 float keyed01(uint a, uint b, uint c) { uint h = hash(hash(hash(a ^ 0x9E3779B9u) + b * 0x85EBCA6Bu) ^ (c * 0xC2B2AE35u)); return (float(h >> 8) + 0.5) / 16777216.0; }
-"""
-
-const K_CONJ_CLEAR := """
-void main() {
-	uint t = gl_GlobalInvocationID.x;
-	if (t < (DMASK + 1u) * 4u) DTAB[t] = 0xFFFFFFFFu;
-	else if (t < (DMASK + 1u) * 4u + 2048u) DTAB[t] = 0u;  // (the bitmap of the buckets in use)
-	if (t == 0u) { CNT[CNT_DONORS] = 0u; CNT[CNT_DONOR_REACH] = 0u; }
-}
-"""
-
-const K_CONJ_INSERT := """
-void main() {
-	BUP_RECORD_THREAD
-	if (BUPS[b + R_DONOR] < 0.5) return;
-	atomicAdd(CNT[CNT_DONORS], 1u);
-	atomicMax(CNT[CNT_DONOR_REACH], floatBitsToUint(0.5 * BUPS[b + R_MASS] * P[P_MASS_UM]));  // (a positive float's bits order as the float does)
-	uint h = dhash(int(floor(BUPS[b + R_X] / DCELL)), int(floor(BUPS[b + R_Y] / DCELL)));
-	atomicOr(DTAB[(DMASK + 1u) * 4u + (h >> 5u)], 1u << (h & 31u));
-	for (uint s = 0u; s < 4u; s++) {
-		if (atomicCompSwap(DTAB[h * 4u + s], 0xFFFFFFFFu, i) == 0xFFFFFFFFu) break;
-	}
-}
-"""
-
-const K_CONJ_APPLY := """
-void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS] || CNT[CNT_DONORS] == 0u) return;
-	uint b = i * RECORD_WORDS;
-	if (BUPS[b + R_DONOR] > 0.5) return;
-	float x = BUPS[b + R_X], y = BUPS[b + R_Y];
-	float rr = 0.5 * BUPS[b + R_MASS] * P[P_MASS_UM];
-	float reach = uintBitsToFloat(CNT[CNT_DONOR_REACH]) + rr + P[P_CONTACT_UM];  // (the farthest a donor's centre can be and touch it)
-	int x0 = int(floor((x - reach) / DCELL)), x1 = int(floor((x + reach) / DCELL)), y0 = int(floor((y - reach) / DCELL)), y1 = int(floor((y + reach) / DCELL));
-	uint best = 0xFFFFFFFFu;
-	for (int gx = x0; gx <= x1; gx++) for (int gy = y0; gy <= y1; gy++) {
-		uint h = dhash(gx, gy);
-		if ((DTAB[(DMASK + 1u) * 4u + (h >> 5u)] & (1u << (h & 31u))) == 0u) continue;  // (no donor in this bucket: the bitmap is small enough to stay in cache)
-		for (uint s = 0u; s < 4u; s++) {
-			uint d = DTAB[h * 4u + s];
-			if (d == 0xFFFFFFFFu || d >= best) continue;
-			uint db = d * RECORD_WORDS;
-			float dx = BUPS[db + R_X] - x, dy = BUPS[db + R_Y] - y;
-			float range = 0.5 * BUPS[db + R_MASS] * P[P_MASS_UM] + rr + P[P_CONTACT_UM];
-			if (dx * dx + dy * dy > range * range) continue;
-			if (keyed01(CNT[CNT_SEED] ^ CNT[CNT_STEP], i, d) < P[P_CONJ_CHANCE]) best = d;
-		}
-	}
-	if (best == 0xFFFFFFFFu) return;
-	int run = 1;
-	for (int k = 0; k < 3; k++) {
-		if (keyed01(CNT[CNT_SEED] ^ CNT[CNT_STEP] ^ 0x5bd1e995u, i * 4u + uint(k), best) < P[P_CONJ_CONTINUE]) run++; else break;
-	}
-	uint db = best * RECORD_WORDS;
-	for (int g = 0; g < run; g++) BUPS[b + R_SPEED + uint(g)] = BUPS[db + R_SPEED + uint(g)];
-	int mask = (1 << (2 * run)) - 1;  // (the raised ceilings of the genes that moved go with them)
-	BUPS[b + R_REACH] = float((int(BUPS[b + R_REACH] + 0.5) & ~mask) | (int(BUPS[db + R_REACH] + 0.5) & mask));
-}
 """
 
 
@@ -705,21 +622,6 @@ GRID_LOOP(pip_piece, WORLD[WD_SLOTS] * RECORD_VEC4)
 
 ## Adds these kernels to `out` (see GpuKernels.all()).
 static func register(out: Dictionary) -> void:
-	GpuKernels.add(out, "life", K_LIFE, ["P", "CNT", "BUPS", "CHILD", "SURV", "KID"])
-	GpuKernels.add(out, "scan0_s", GpuKernels.K_SCAN.replace("SRC", "SURV").replace("DST", "EXCS").replace("SUMS", "S1"), ["SURV", "EXCS", "S1"], "", 256)
-	GpuKernels.add(out, "scan0_k", GpuKernels.K_SCAN.replace("SRC", "KID").replace("DST", "EXCK").replace("SUMS", "S1"), ["KID", "EXCK", "S1"], "", 256)
-	GpuKernels.add(out, "scan1", GpuKernels.K_SCAN.replace("SRC", "S1").replace("DST", "S1X").replace("SUMS", "S2"), ["S1", "S1X", "S2"], "", 256)
-	GpuKernels.add(out, "scan2", GpuKernels.K_SCAN.replace("SRC", "S2").replace("DST", "S2X").replace("SUMS", "S3"), ["S2", "S2X", "S3"], "", 256)
-	GpuKernels.add(out, "add2", GpuKernels.K_ADD.replace("DST", "S1X").replace("ADDEND", "S2X"), ["S1X", "S2X"], "", 256)
-	GpuKernels.add(out, "add1_s", GpuKernels.K_ADD.replace("DST", "EXCS").replace("ADDEND", "S1X"), ["EXCS", "S1X"], "", 256)
-	GpuKernels.add(out, "add1_k", GpuKernels.K_ADD.replace("DST", "EXCK").replace("ADDEND", "S1X"), ["EXCK", "S1X"], "", 256)
-	GpuKernels.add(out, "finalize", K_FINALIZE, ["P", "CNT", "SURV", "KID", "EXCS", "EXCK"])
-	GpuKernels.add(out, "compact", K_COMPACT, ["P", "CNT", "BUPS_V4U", "BUPS2_V4U", "CHILD_V4U", "SURV", "KID", "EXCS", "EXCK"])
-	GpuKernels.add(out, "copy", K_COPY, ["CNT", "BUPS_V4U", "BUPS2_V4U"])
-	GpuKernels.add(out, "setcount", K_SETCOUNT, ["CNT"])
-	GpuKernels.add(out, "conj_clear", K_CONJ_CLEAR, ["CNT", "DTAB"], CONJ_FUNCS)
-	GpuKernels.add(out, "conj_insert", K_CONJ_INSERT, ["P", "CNT", "BUPS", "DTAB"], CONJ_FUNCS)
-	GpuKernels.add(out, "conj_apply", K_CONJ_APPLY, ["P", "CNT", "BUPS", "DTAB"], CONJ_FUNCS)
 	_register_pool(out)
 
 

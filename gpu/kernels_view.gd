@@ -332,7 +332,9 @@ GRID_LOOP(f, VP[VW_DEN_W] * VP[VW_DEN_H])
 static func declarations() -> String:
 	var text := ""
 	var constants: Dictionary = (load("res://gpu/kernels_view.gd") as Script).get_script_constant_map()
-	var names: Array = constants.keys()
+	var names: Array[String] = []
+	for key: StringName in constants.keys():
+		names.append(String(key))
 	names.sort()
 	for name: String in names:
 		if (name.begins_with("VW_") or name.begins_with("VO_") or name == "FINDS" or name in ["DENSITY_NEAREST", "DENSITY_BILINEAR", "DENSITY_ROD", "DENSITY_ALPHA_SCALE", "DENSITY_WORDS"]) and constants[name] is int:

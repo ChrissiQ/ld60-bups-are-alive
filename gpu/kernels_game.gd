@@ -3,11 +3,6 @@ extends RefCounted
 ## The game's side (see gpu/kernels.gd for how a kernel is made and registered): the family events, the stats, the frame's questions
 ## and answers, the eraser and the field's copy. The words of the frame's questions (QIN) and answers (OUT) are in gpu/gpu_layout.gd.
 
-## Before a batch: its counts of births and deaths start from 0.
-const K_EV_BEGIN := """
-void main() { if (gl_GlobalInvocationID.x == 0u) { CNT[CNT_BIRTHS] = 0u; CNT[CNT_DEATHS] = 0u; } }
-"""
-
 ## The family events of a step (after `finalize`, before `compact`, which places the newborns: the same rule), one thread per bup, into
 ## event set `pcs.pb`, the step's place in the batch `pcs.pa`: each kept newborn is a birth at CNT_BIRTHS + its place among the newborns,
 ## each bup not kept a death at CNT_DEATHS + its place among those; so the order is the bups' order, whatever order the threads run in.
@@ -40,17 +35,6 @@ void main() {
 			EVD[o + ED_SPEED] = BUPS_U[b + R_SPEED]; EVD[o + ED_SENSE] = BUPS_U[b + R_SENSE]; EVD[o + ED_METABOLISM] = BUPS_U[b + R_METABOLISM]; EVD[o + ED_SIZE] = BUPS_U[b + R_SIZE];  // (its genes as it died)
 		} else atomicAdd(CNT[CNT_DEATHS_LOST], 1u);
 	}
-}
-"""
-
-## After `copy`, before `setcount`: the step's births (those placed: CNT_NEXT_COUNT - CNT_SURVIVORS) and deaths (CNT_BUPS - CNT_SURVIVORS) are added to the batch's
-## counts, which are kept for event set `pcs.pb` too.
-const K_EV_COUNT := """
-void main() {
-	if (gl_GlobalInvocationID.x != 0u) return;
-	CNT[CNT_BIRTHS] += CNT[CNT_NEXT_COUNT] - CNT[CNT_SURVIVORS]; CNT[CNT_DEATHS] += CNT[CNT_BUPS] - CNT[CNT_SURVIVORS];
-	uint s = uint(pcs.pb);
-	EVN[s * 2u] = CNT[CNT_BIRTHS]; EVN[s * 2u + 1u] = CNT[CNT_DEATHS];
 }
 """
 
@@ -111,113 +95,6 @@ void main() {
 }
 """
 
-## The frame's answers start empty, and CNT and PCNT are copied (one thread per word of QOUT, and of the head).
-const K_Q_CLEAR := """
-void main() {
-	uint t = gl_GlobalInvocationID.x;
-	if (t < CNT_WORDS) OUT[OUT_CNT + t] = CNT[t];
-	else if (t < CNT_WORDS + PCNT_WORDS) OUT[OUT_PCNT + t - CNT_WORDS] = PCNT[t - CNT_WORDS];
-	if (t >= QOUT_WORDS) return;
-	uint q = OUT_Q + t;
-	uint v = 0u;
-	if (t == QO_INDEX || t == QO_D2 || t == QO_NEAR) v = 0xFFFFFFFFu;  // (no pick; d² past any, for atomicMin)
-	if (t >= QO_TRACKED && t < QO_TRACKED + TRACKED * ANSWER_WORDS) { uint w = (t - QO_TRACKED) % ANSWER_WORDS; if (w == R_ID_LO || w == R_ID_HI) v = 0xFFFFFFFFu; }  // (a tracked bup not found)
-	if (t >= QO_NEAR_MORE && t < QO_NEAR_MORE + 2u * (NEAR_SLOTS - 1u) && (t - QO_NEAR_MORE) % 2u == 0u) v = 0xFFFFFFFFu;
-	OUT[q] = v;
-}
-"""
-
-## The pick (within half its drawn length plus the slack, the nearest; ties to the smaller index): the least d²
-## by atomicMin on its bits (they order as the floats do, for d² >= 0), each bup's own kept in QD for the second pass.
-const K_Q_PICK := """
-void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS] || QIN[Q_PICK] == 0u) return;
-	uint b = i * RECORD_WORDS;
-	float px = uintBitsToFloat(QIN[Q_PICK_X]), py = uintBitsToFloat(QIN[Q_PICK_Y]), slack = uintBitsToFloat(QIN[Q_SLACK]), pixel = uintBitsToFloat(QIN[Q_PIXEL]);
-	float reach = 0.5 * max(BUPS[b + R_MASS] * P[P_MASS_UM], P[P_MIN_LENGTH_PX] * pixel) + slack;
-	float dx = BUPS[b + R_X] - px, dy = BUPS[b + R_Y] - py;
-	float d2 = dx * dx + dy * dy;
-	uint bits = 0xFFFFFFFFu;
-	if (d2 <= reach * reach) { bits = floatBitsToUint(d2); atomicMin(OUT[OUT_Q + QO_D2], bits); }
-	QD[i] = bits;
-}
-"""
-
-const K_Q_PICK2 := """
-void main() {
-	uint i = gl_GlobalInvocationID.x; if (i >= CNT[CNT_BUPS] || QIN[Q_PICK] == 0u) return;
-	if (QD[i] != 0xFFFFFFFFu && QD[i] == OUT[OUT_Q + QO_D2]) atomicMin(OUT[OUT_Q + QO_INDEX], i);
-}
-"""
-
-## The picked bup's record (ANSWER_WORDS threads), and every tracked bup's (one thread per bup: the one with that id copies its record).
-const K_Q_RECORD := """
-void main() {
-	uint t = gl_GlobalInvocationID.x; if (t >= ANSWER_WORDS) return;
-	uint k = OUT[OUT_Q + QO_INDEX];
-	if (k != 0xFFFFFFFFu) OUT[OUT_Q + QO_RECORD + t] = BUPS_U[k * RECORD_WORDS + t];
-}
-"""
-
-const K_Q_TRACK := """
-void main() {
-	BUP_THREAD
-	uint n = QIN[Q_TRACK]; if (n == 0u) return;
-	uint b = i * RECORD_WORDS, lo = BUPS_U[b + R_ID_LO], hi = BUPS_U[b + R_ID_HI];
-	for (uint t = 0u; t < n; t++) {
-		if (QIN[Q_TRACK_FIRST + 2u * t] == lo && QIN[Q_TRACK_FIRST + 1u + 2u * t] == hi) {
-			uint o = OUT_Q + QO_TRACKED + t * ANSWER_WORDS;
-			for (uint w = 0u; w < ANSWER_WORDS; w++) OUT[o + w] = BUPS_U[b + w];
-		}
-	}
-}
-"""
-
-## The nearest bup and the count within `near` for each nearest slot, and the count at or above each fraction's threshold: summed (and the
-## least found) in each group of 256 first, then one atomic per group.
-const K_Q_SCAN := """
-shared uint smin[NEAR_SLOTS * 256u];
-shared uint scnt[(NEAR_SLOTS + FRACTIONS) * 256u];
-void main() {
-	uint i = gl_GlobalInvocationID.x, l = gl_LocalInvocationID.x;
-	uint nn = QIN[Q_NEAR], nf = QIN[Q_FRAC];
-	bool live = i < CNT[CNT_BUPS];
-	uint b = i * RECORD_WORDS;
-	float x = live ? BUPS[b + R_X] : 0.0, y = live ? BUPS[b + R_Y] : 0.0;
-	for (uint s = 0u; s < NEAR_SLOTS; s++) {
-		uint m = 0xFFFFFFFFu, c = 0u;
-		if (live && s < nn) {
-			float qx = uintBitsToFloat(QIN[Q_NEAR_FIRST + 3u * s]), qy = uintBitsToFloat(QIN[Q_NEAR_FIRST + 1u + 3u * s]), near = uintBitsToFloat(QIN[Q_NEAR_FIRST + 2u + 3u * s]);
-			float dx = x - qx, dy = y - qy, d2 = dx * dx + dy * dy;
-			m = floatBitsToUint(d2);
-			c = d2 <= near * near ? 1u : 0u;
-		}
-		smin[s * 256u + l] = m; scnt[s * 256u + l] = c;
-	}
-	for (uint f = 0u; f < FRACTIONS; f++) {
-		uint c = 0u;
-		if (live && f < nf) c = BUPS[b + R_SPEED + QIN[Q_FRAC_FIRST + 2u * f]] >= uintBitsToFloat(QIN[Q_FRAC_FIRST + 1u + 2u * f]) ? 1u : 0u;
-		scnt[(NEAR_SLOTS + f) * 256u + l] = c;
-	}
-	barrier();
-	for (uint half_ = 128u; half_ > 0u; half_ >>= 1u) {
-		if (l < half_) {
-			for (uint s = 0u; s < NEAR_SLOTS; s++) smin[s * 256u + l] = min(smin[s * 256u + l], smin[s * 256u + l + half_]);
-			for (uint k = 0u; k < NEAR_SLOTS + FRACTIONS; k++) scnt[k * 256u + l] += scnt[k * 256u + l + half_];
-		}
-		barrier();
-	}
-	if (l == 0u) {
-		for (uint s = 0u; s < nn; s++) {
-			uint od = s == 0u ? OUT_Q + QO_NEAR : OUT_Q + QO_NEAR_MORE + 2u * (s - 1u);
-			if (smin[s * 256u] != 0xFFFFFFFFu) atomicMin(OUT[od], smin[s * 256u]);
-			if (scnt[s * 256u] > 0u) atomicAdd(OUT[od + 1u], scnt[s * 256u]);
-		}
-		for (uint f = 0u; f < nf; f++) if (scnt[(NEAR_SLOTS + f) * 256u] > 0u) atomicAdd(OUT[OUT_Q + QO_FRAC + f], scnt[(NEAR_SLOTS + f) * 256u]);
-	}
-}
-"""
-
 ## The eraser: each disc of ERASE (x, y, radius, strength; `pcs.pa` of them, in order) takes from the cells
 ## inside the dish whose centres lie within it, and from the clouds whose centres do, the share strength * (1 - d / radius).
 const K_ERASE_CELLS := """
@@ -247,24 +124,6 @@ void main() {
 		if (dist < d.z) m -= m * d.w * (1.0 - dist / d.z);
 	}
 	PUFF[o + 2u] = m;
-}
-"""
-
-## A copy of OUT's first `pcs.pa` words to OUTK from word `pcs.pb` (the batch's event set's copy).
-const K_OUT_KEEP := """
-void main() { uint t = gl_GlobalInvocationID.x; if (t >= uint(pcs.pa)) return; OUTK[uint(pcs.pb) + t] = OUT[t]; }
-"""
-
-## The field's copy for the host: MIRROR[0] the slots in use, then 5 floats per slot for the first `pcs.pa`
-## slots (x, y, mass, variance, cut; all 0 for a slot that holds no cloud, which import_packed passes over).
-const K_MIRROR := """
-void main() {
-	uint k = gl_GlobalInvocationID.x; if (k >= uint(pcs.pa)) return;
-	if (k == 0u) MIRROR[0] = float(PCNT[PCNT_SLOTS]);
-	uint o = 1u + k * 5u, q = k * 8u;
-	bool live = k < PCNT[PCNT_SLOTS] && PUFF[q + 5u] > 0.5;
-	MIRROR[o] = live ? PUFF[q] : 0.0; MIRROR[o + 1u] = live ? PUFF[q + 1u] : 0.0; MIRROR[o + 2u] = live ? PUFF[q + 2u] : 0.0;
-	MIRROR[o + 3u] = live ? PUFF[q + 3u] : 0.0; MIRROR[o + 4u] = live ? PUFF[q + 4u] : 0.0;
 }
 """
 
@@ -320,21 +179,6 @@ static func pool_stats2() -> String:
 
 ## Adds these kernels to `out` (see GpuKernels.all()).
 static func register(out: Dictionary) -> void:
-	GpuKernels.add(out, "ev_begin", K_EV_BEGIN, ["CNT"])
-	GpuKernels.add(out, "events", K_EVENTS, ["P", "CNT", "BUPS_U", "CHILD_U", "SURV", "KID", "EXCS", "EXCK", "EVB", "EVD"])
-	GpuKernels.add(out, "ev_count", K_EV_COUNT, ["CNT", "EVN"])
-	GpuKernels.add(out, "stats1", K_STATS1, ["CNT", "BUPS", "SPART"], "", 256)
-	GpuKernels.add(out, "stats2", K_STATS2, ["CNT", "SPART", "OUT"], "", 256)
-	GpuKernels.add(out, "q_clear", K_Q_CLEAR, ["CNT", "PCNT", "OUT"])
-	GpuKernels.add(out, "q_pick", K_Q_PICK, ["P", "CNT", "BUPS", "QIN", "QD", "OUT"])
-	GpuKernels.add(out, "q_pick2", K_Q_PICK2, ["CNT", "QIN", "QD", "OUT"])
-	GpuKernels.add(out, "q_record", K_Q_RECORD, ["BUPS_U", "OUT"])
-	GpuKernels.add(out, "q_track", K_Q_TRACK, ["CNT", "BUPS_U", "QIN", "OUT"])
-	GpuKernels.add(out, "q_scan", K_Q_SCAN, ["CNT", "BUPS", "QIN", "OUT"], "", 256)
-	GpuKernels.add(out, "erase_cells", K_ERASE_CELLS, ["P", "INSIDE", "CONC", "ERASE"])
-	GpuKernels.add(out, "erase_puffs", K_ERASE_PUFFS, ["PCNT", "PUFF", "ERASE"])
-	GpuKernels.add(out, "mirror", K_MIRROR, ["PCNT", "PUFF", "MIRROR"])
-	GpuKernels.add(out, "out_keep", K_OUT_KEEP, ["OUT", "OUTK"])
 	var dn := GpuKernelsLife.dn_funcs() + GpuKernelsLife.FLAG_FUNC
 	GpuKernels.add(out, "pool_ev_begin", K_POOL_EV_BEGIN, ["DSTATE"])
 	GpuKernels.add(out, "pool_events", pool_events(), ["P", "BUPS_U", "CHILD_U", "SURV", "KID", "EXCS", "EXCK", "EVB", "EVD", "WORLD", "BLKDISH", "DSTATE", "DISHP", "DNEXT"], dn, 64, GpuKernelsLife.POOL_TYPES)
