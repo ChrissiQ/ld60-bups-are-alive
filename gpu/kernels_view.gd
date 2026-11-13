@@ -36,7 +36,7 @@ const VW_NEAR := 12
 const VW_FINDS := 13  ## 1: find the bups VW_FIND (FINDS ids, the low word then the high; an unused one all ones)
 const VW_FIND := 14
 const FINDS := 2  ## the bups whose place is looked up a frame (the selected and the hovered: their rings)
-const VW_DENSITY := VW_FIND + 2 * FINDS  ## 0: the single-dish path's capsules for every bup; DENSITY_NEAREST, DENSITY_BILINEAR or DENSITY_ROD: the bups under their least footprint are splatted (below), not drawn
+const VW_DENSITY := VW_FIND + 2 * FINDS  ## 0: the capsules for every bup; DENSITY_NEAREST, DENSITY_BILINEAR or DENSITY_ROD: the bups under their least footprint are splatted (below), not drawn
 const VW_DEN_W := VW_DENSITY + 1  ## the density picture's size in pixels (the camera's rectangle over the pixel)
 const VW_DEN_H := VW_DENSITY + 2
 const VW_WORDS := VW_DEN_H + 1
@@ -55,7 +55,7 @@ const VO_LARGE := VO_PLACES + FINDS * VO_PLACE_WORDS  ## density mode: the bups 
 const VO_WORDS := VO_LARGE + 1
 
 ## Density mode: a bup under its least footprint (its length below Cell.MIN_VISIBLE_LENGTH_PX
-## screen pixels: the single-dish path's capsule is then the least footprint, a rod of that length and width) adds its coverage to the pixels it lies on
+## screen pixels: the capsule is then the least footprint, a rod of that length and width) adds its coverage to the pixels it lies on
 ## instead of being drawn. A pixel's coverage is what the single-dish path's blending leaves: 1 - the product of what each footprint leaves uncovered of
 ## it, so each footprint adds L = -ln(1 - its share of the pixel) to a sum, and the pixel's coverage is 1 - exp(-sum L): one bup on a
 ## pixel covers what its share is, and a crowd saturates. Two uint words a pixel are used in DEN: the L sum (word 4, in 1/DENSITY_ALPHA_SCALE;

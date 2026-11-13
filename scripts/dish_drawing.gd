@@ -1,7 +1,8 @@
 class_name DishDrawing
 extends RefCounted
 ## How a dish is drawn: the bups (one multimesh whose buffer the main view's ViewRenderer writes from the picture the simulation publishes,
-## never through `multimesh.buffer`), the husks (a multimesh of their own, under the bups, every live husk one instance, from the list the
+## never through `multimesh.buffer`, for the bups at or over their least footprint on screen; the smaller ones, a zoomed-out crowd, are the
+## view's density picture, the colour of one covering bup a pixel, which `density_sprite` shows under the capsules), the husks (a multimesh of their own, under the bups, every live husk one instance, from the list the
 ## simulation reads for the main view: SimCore.husk_view), the dish itself with the nutrient haze, the steering map, the sources and the
 ## plankton (`draw`, for Dish._draw), and the rings, the placement preview and the flash above the bups (`draw_overlay`, for the dish's
 ## DishOverlay). Nothing here changes the simulation. It is a part of its Dish and holds the nodes it draws with.
@@ -22,7 +23,8 @@ const MIN_INSTANCES := 1024  ## the fewest instances the bups' multimesh is made
 
 var dish: Dish
 var view: ViewRenderer = null  ## the main view's picture of this dish (made when the dish is first in the main view and the world publishes)
-var bups_mesh: MultiMeshInstance2D = null  ## all the bups, drawn in one go
+var bups_mesh: MultiMeshInstance2D = null  ## the bups at or over their least footprint, drawn in one go
+var density_sprite: Sprite2D = null  ## the bups under it, as the view's density picture (one texel a screen pixel), under the capsules
 var husks_mesh: MultiMeshInstance2D = null  ## every live husk, as one instance each
 var overlay: Node2D = null  ## the selection and hover rings, drawn above the bups
 var _no_view := false  ## a view was tried and cannot draw here (no main device, or its kernels did not build)
@@ -50,6 +52,7 @@ func layer_changed(layer: Dish.Layer, shown: bool) -> void:
 	match layer:
 		Dish.Layer.BUPS:
 			bups_mesh.visible = shown
+			density_sprite.visible = shown and density_sprite.texture != null
 			if view != null:
 				view.forget_build()  # (what was not drawn while hidden is drawn afresh)
 		Dish.Layer.HUSKS:
@@ -81,6 +84,11 @@ func build_children() -> void:
 	husks_mesh.self_modulate = Dish.HUSK_COLOR
 	husks_mesh.visible = dish.layer_shown(Dish.Layer.HUSKS) and dish.has_husks()
 	dish.add_child(husks_mesh)
+	density_sprite = Sprite2D.new()  # (under the capsules; its place and size follow the camera each frame, `draw_bups_view`)
+	density_sprite.centered = false
+	density_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	density_sprite.visible = false
+	dish.add_child(density_sprite)
 	bups_mesh = MultiMeshInstance2D.new()
 	bups_mesh.multimesh = multimesh
 	bups_mesh.material = material
@@ -93,6 +101,9 @@ func build_children() -> void:
 
 ## Gives back the view's buffers and imported textures (the dish is leaving the screen).
 func release() -> void:
+	if density_sprite != null:
+		density_sprite.texture = null  # (the picture's texture is freed with the view)
+		density_sprite.visible = false
 	if view != null:
 		view.release()
 		view = null
@@ -181,6 +192,8 @@ func _send_view(w: WorldClient) -> void:
 ## the pictures it holds (ViewRenderer.let_go: the textures it drew from will hold the other dishes' pictures), its last uses told first.
 func forget_view() -> void:
 	_view_sent = []
+	if density_sprite != null:
+		density_sprite.visible = false  # (shown again by the first build, the picture holding another dish's bups until then)
 	if view != null:
 		if dish.world != null:
 			for b: Array in view.take_bound():
@@ -201,6 +214,7 @@ func _ensure_view(w: WorldClient) -> bool:
 		return false
 	view = ViewRenderer.new(PoolLimits.from_settings().frame_queue_size)
 	_asked = {true: [], false: []}  # (a new view numbers its questions afresh)
+	view.set_density(true)  # (if its kernels do not build, `density_ready` stays false and every bup is a capsule)
 	if not view.can_draw():
 		view.release()
 		view = null
@@ -275,9 +289,17 @@ func draw_bups_view() -> void:
 	multimesh.custom_aabb = AABB(Vector3(-dish.radius, -dish.radius, -1.0), Vector3(2.0 * dish.radius, 2.0 * dish.radius, 2.0))  # (the renderer culls by these bounds: the whole dish)
 	view.follow([dish.selected.bup, dish.hovered.bup].filter(func(id: int) -> bool: return id >= 0))
 	if not bups_mesh.visible:
+		density_sprite.visible = false
 		return
 	var camera := dish.get_global_transform_with_canvas().affine_inverse() * dish.get_viewport_rect()
 	view.draw_frame(camera, dish.pixel(), multimesh.get_rid())
+	var picture := view.density_texture() if view.density_ready() else null
+	density_sprite.visible = picture != null
+	if picture != null:
+		if density_sprite.texture != picture:
+			density_sprite.texture = picture
+		density_sprite.position = camera.position
+		density_sprite.scale = Vector2.ONE * dish.pixel()
 
 
 ## Asks which bup is at `local` (dish-local µm) within `slack`, and how many lie within Dish.SOURCE_NEARBY of it (ViewRenderer.pick).

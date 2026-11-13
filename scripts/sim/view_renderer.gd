@@ -40,10 +40,11 @@ var errors: Array[String] = []
 var profile := {}  ## on a local device with `profiling`: kernel name -> µs of its last dispatch (each its own submit, wall clock)
 var profiling := false
 
-## Density mode (off unless it is switched on): the bups under
-## their least footprint are not drawn as instances but added into per-pixel sums (GpuKernelsView.K_DENSITY_SPLAT), resolved into a
-## picture (`density_texture`) that a quad the size of the camera's rectangle shows over the dish; a bup at or over its least footprint is
-## drawn as today, so there is no jump where a bup crosses. Set with `set_density`.
+## Density mode: the bups under their least footprint are not drawn as instances but
+## added into per-pixel sums (GpuKernelsView.K_DENSITY_SPLAT), resolved into a picture (`density_texture`, each pixel the colour of one
+## bup that covers it, the winner) that a quad the size of the camera's rectangle shows over the dish; a bup at or over its least
+## footprint is drawn as a capsule, so there is no jump where a bup crosses. Set with `set_density`: the game's main view turns it on
+## (DishDrawing._ensure_view); a view made for a tool or a test has it off, which draws every bup as a capsule.
 var density := false
 var density_taps := GpuKernelsView.DENSITY_BILINEAR  ## GpuKernelsView.DENSITY_NEAREST, DENSITY_BILINEAR or DENSITY_ROD (a footprint on one pixel, shared by four, or as a rod of two such)
 
@@ -52,6 +53,7 @@ var _den_made := {}  ## the density kernels, made the first time density mode is
 var _den_buf := RID()  ## the per-pixel sums
 var _den_tex := RID()  ## the resolved picture (RGBA8, straight alpha)
 var _den_size := Vector2i.ZERO
+var _den_valid := false  ## the picture holds a build made since the last `let_go` (before it, it holds some other dish's bups or nothing)
 var _den_picture: Texture2DRD = null
 var _large := {}  ## density mode: the last count read back of the bups the capsule path must draw: {count, key}
 var _skipped_last := false  ## the last build left the capsule count out (`draw_into`: the next one counts them, so a bup that has grown large is found again)
@@ -79,6 +81,7 @@ var _follow_asked := false  ## the list changed since the last look-up
 var _places := {}  ## id -> Vector3(x, y, length) from the last answer
 var _epoch := 0  ## counts `let_go`s: an answer to a build from before the last one is dropped
 static var _defs := {}  ## KERNELS' definitions (GpuKernels.all's), taken by the first view made
+static var _den_defs := {}  ## GpuKernelsView.DENSITY_KERNELS' definitions, taken by the first view that switches density mode on
 
 
 ## `device`: a local device to run on instead of the main one (tools: `build` there is submitted and waited for).
@@ -115,11 +118,11 @@ func set_density(on: bool, taps := GpuKernelsView.DENSITY_BILINEAR) -> void:
 	density_taps = taps
 	if not on or rd == null or not _den_made.is_empty():
 		return
-	var defs := {}
-	var all := GpuKernels.all()
-	for kname: String in GpuKernelsView.DENSITY_KERNELS:
-		defs[kname] = all[kname]
-	var shaders := ShaderSet.imported(defs)
+	if _den_defs.is_empty():
+		var all := GpuKernels.all()
+		for kname: String in GpuKernelsView.DENSITY_KERNELS:
+			_den_defs[kname] = all[kname]
+	var shaders := ShaderSet.imported(_den_defs)
 	_on_device(func() -> void: _den_made = shaders.create(rd))
 	errors.append_array(shaders.errors)
 	if _den_made.size() != GpuKernelsView.DENSITY_KERNELS.size():
@@ -140,7 +143,7 @@ func density_size() -> Vector2i:
 ## rectangle's top left, so a quad of `density_size()` texels scaled by the pixel at the rectangle's position shows it as drawn. Straight
 ## alpha, over the dish and under the capsules.
 func density_texture() -> Texture2DRD:
-	if not _den_tex.is_valid():
+	if not _den_valid or not _den_tex.is_valid():
 		return null
 	if _den_picture == null:
 		_den_picture = Texture2DRD.new()
@@ -286,6 +289,7 @@ func draw_into(camera: Rect2, pixel_um: float, target: RID, capacity: int, multi
 	_last_build = build
 	if rebuild:
 		_skipped_last = skip
+		_den_valid = _den_valid or dens
 	if rebuild and multimesh.is_valid():
 		RenderingServer.multimesh_set_visible_instances(multimesh, slots)
 	var pick: Variant = _pick_request
@@ -635,6 +639,7 @@ func let_go() -> void:
 	_last_build = []
 	_visible = {}
 	_large = {}
+	_den_valid = false
 	_answers.clear()
 	_places.clear()
 	_pick_request = null
