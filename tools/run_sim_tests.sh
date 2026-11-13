@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs the windowed tests (tests/sim/*_test.gd: windowed) one after another,
+# Runs the windowed tests (tests/sim/*_test.gd: windowed, needing a GPU) one after another,
 # each through tools/run_windowed.sh (the run lock) with a timeout each.
 # Usage: tools/run_sim_tests.sh
 # Env: RUN_SIM_TIMEOUT (seconds per test, default 1800), RUN_SIM_OUT (output folder,
