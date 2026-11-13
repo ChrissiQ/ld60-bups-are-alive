@@ -2,7 +2,7 @@ extends SceneTree
 ## A screenshot pack of the pooled world, windowed, on the real game stack, saved at interface sizes
 ## 100%, 150% and 250% for a look: the title backdrop, the free-setup preview, the game screen with feeders (sources layer), a bup at close zoom,
 ## and the busy state (several dishes, frozen dishes, a picked bup, a full watch list, the pipette open). It prints the counts.
-## tools/run_windowed.sh <log> -- --path . --rendering-driver metal --resolution 1920x1080 --position 6000,6000 -s tools/parity_pack.gd -- <out_dir> [dishes] [frozen] [sections: title,setup,game,busy]
+## tools/run_windowed.sh <log> -- --path . --rendering-driver metal --resolution 1920x1080 --position 6000,6000 -s tools/screenshot_pack.gd -- <out_dir> [dishes] [frozen] [sections: title,setup,game,busy]
 
 const WATCHED := 12  ## bups put on the watch list in the busy state
 const WAIT_MSEC := 300000  ## the longest the busy world is waited for
@@ -40,7 +40,7 @@ func _leave(screen: Node) -> void:
 func _run() -> void:
 	SimConstants.apply()
 	var args := OS.get_cmdline_user_args()
-	var out: String = args[0] if args.size() > 0 else "user://parity_pack"
+	var out: String = args[0] if args.size() > 0 else "user://screenshot_pack"
 	var count := int(args[1]) if args.size() > 1 else 12
 	var frozen := int(args[2]) if args.size() > 2 else 3
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(out))
