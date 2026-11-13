@@ -32,6 +32,7 @@ var _still: StillBups  ## the founders as a still picture, when the world has no
 @onready var plankton_husks_toggle: ToggleRow = $Panel/Box/Scroll/Rows/Advanced/Options/PlanktonHusksToggle  ## whether a plankton that dies leaves a husk that leaks its nutrient slowly
 @onready var husks_toggle: ToggleRow = $Panel/Box/Scroll/Rows/Advanced/Options/HusksToggle  ## whether a dead bup leaves a husk that leaks its nutrient slowly
 @onready var limit_row: SettingRow = $Panel/Box/Scroll/Rows/LimitGroup/LimitRow
+@onready var low_note: Label = $Panel/Box/Scroll/Rows/LimitGroup/LowNote  ## says what low-memory mode limits, while it is on
 @onready var back_button: Button = $Panel/Box/Actions/BackButton
 @onready var go_button: Button = $Panel/Box/Actions/GoButton
 @onready var reset_button: Button = $Panel/Box/Actions/ResetButton
@@ -45,15 +46,21 @@ func _ready() -> void:
 	UserSettings.ensure_applied()
 	_start = Session.free_start.copy()
 	var defaults := StartConditions.new()
+	var most_limit := MemoryMode.max_bup_limit()
+	var most_detail := MemoryMode.max_resolution()
+	_start.bup_limit = mini(_start.bup_limit, most_limit)  # (what low-memory mode allows: a setting kept from before is brought inside it)
+	_start.nutrient_resolution = mini(_start.nutrient_resolution, most_detail)
+	low_note.visible = MemoryMode.is_low()
+	low_note.text = MemoryMode.low_text()
 
 	bups_row.configure(StartConditions.MIN_BUPS, StartConditions.MAX_BUPS, 1, defaults.bups)
 	nutrients_row.configure(0, StartConditions.MAX_NUTRIENT_DENSITY, 1, defaults.nutrient_density, Strings.t("free_setup.unit_nutrient"))
 	rate_row.configure(0, StartConditions.MAX_FEED_DENSITY, 0.1, defaults.feed_density, Strings.t("free_setup.unit_feed"))
 	bloom_row.configure(0, StartConditions.MAX_BLOOM_DENSITY, Dish.BLOOM_DENSITY_STEP, defaults.bloom_density, Strings.t("free_setup.unit_bloom"))
 	dish_row.configure(StartConditions.MIN_DISH_RADIUS / StartConditions.UM_PER_MM, StartConditions.MAX_DISH_RADIUS / StartConditions.UM_PER_MM, 0.1, defaults.dish_radius / StartConditions.UM_PER_MM, Strings.t("ui.mm_unit"))  # the dish is chosen in mm; the simulation works in µm
-	detail_row.configure(StartConditions.MIN_NUTRIENT_RESOLUTION, StartConditions.MAX_NUTRIENT_RESOLUTION, StartConditions.NUTRIENT_RESOLUTION_STEP, defaults.nutrient_resolution, Strings.t("free_setup.unit_detail"))
+	detail_row.configure(StartConditions.MIN_NUTRIENT_RESOLUTION, most_detail, StartConditions.NUTRIENT_RESOLUTION_STEP, defaults.nutrient_resolution, Strings.t("free_setup.unit_detail"))
 	thickness_row.configure(StartConditions.MIN_MEDIUM_THICKNESS, StartConditions.MAX_MEDIUM_THICKNESS, 1, defaults.medium_thickness, Strings.t("free_setup.unit_thickness"))
-	limit_row.configure(StartConditions.MIN_BUP_LIMIT, StartConditions.MAX_BUP_LIMIT, 1, defaults.bup_limit)
+	limit_row.configure(StartConditions.MIN_BUP_LIMIT, most_limit, 1, defaults.bup_limit)
 	bups_row.value = _start.bups
 	nutrients_row.value = _start.nutrient_density
 	rate_row.value = _start.feed_density
@@ -113,7 +120,7 @@ func _ready() -> void:
 func _sync_limit_floor() -> void:
 	var floor_limit := maxi(StartConditions.MIN_BUP_LIMIT, _start.bups)
 	var wanted := maxi(int(limit_row.value), floor_limit)
-	limit_row.configure(floor_limit, StartConditions.MAX_BUP_LIMIT, 1, maxi(StartConditions.new().bup_limit, floor_limit))
+	limit_row.configure(floor_limit, maxi(floor_limit, MemoryMode.max_bup_limit()), 1, maxi(StartConditions.new().bup_limit, floor_limit))
 	limit_row.value = wanted
 	_start.bup_limit = int(limit_row.value)
 

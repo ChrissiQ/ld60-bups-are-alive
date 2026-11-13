@@ -989,3 +989,11 @@ dialog_text = "@hud.end_text"
 cancel_button_text = "@hud.end_quit"
 dialog_autowrap = true
 dialog_close_on_escape = false
+
+[node name="MemoryNoticeDialog" type="AcceptDialog" parent="MenuLayer"]
+title = "@hud.memory_notice_title"
+initial_position = 2
+size = Vector2i(580, 130)
+visible = false
+ok_button_text = "@hud.memory_notice_ok"
+dialog_autowrap = true

@@ -14,6 +14,7 @@ const WARNING_ICON_SHARE := 0.64  ## the warning icon's width as a share of a te
 @onready var limit_row: HBoxContainer = $Limit  ## the warning that no dish can be added
 @onready var limit_icon: Button = $Limit/WarningIcon
 @onready var limit_note: Label = $Limit/Note
+var _usual_limit_text := ""  ## what the warning says when no dish number is free (as the scene has it)
 
 
 func _ready() -> void:
@@ -33,9 +34,12 @@ func set_available(available: bool) -> void:
 	trash_button.tooltip_text = Strings.t("hud.trash_tip" if available else "hud.trash_last_tip")
 
 
-## The warning shows while no dish can be added.
-func set_at_limit(at_limit: bool) -> void:
+## The warning shows while no dish can be added; `text` says why when it is not the usual reason (empty: the usual).
+func set_at_limit(at_limit: bool, text := "") -> void:
 	limit_row.visible = at_limit
+	if _usual_limit_text.is_empty():
+		_usual_limit_text = limit_note.text
+	limit_note.text = text if not text.is_empty() else _usual_limit_text
 
 
 ## The icon is as tall as a line of the note beside it, so it grows with the text and sits on its first line.

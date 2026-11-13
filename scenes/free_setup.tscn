@@ -150,6 +150,13 @@ theme_type_variation = &"Note"
 text = "@free_setup.limit_hint"
 autowrap_mode = 3
 
+[node name="LowNote" type="Label" parent="Panel/Box/Scroll/Rows/LimitGroup"]
+visible = false
+custom_minimum_size = Vector2(1, 0)
+layout_mode = 2
+theme_type_variation = &"Note"
+autowrap_mode = 3
+
 [node name="TutorialToggle" parent="Panel/Box/Scroll/Rows" instance=ExtResource("toggle_row")]
 layout_mode = 2
 label_text = "@free_setup.tutorial_name"

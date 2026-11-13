@@ -54,6 +54,7 @@ const LONGEST_CLOCK_HOURS := 999999  ## the top bar keeps room for the clock up 
 @onready var hud_layer: CanvasLayer = $HUD
 @onready var pause_menu: PauseMenu = $MenuLayer/PauseMenu
 @onready var end_dialog: ConfirmationDialog = $MenuLayer/EndDialog
+@onready var memory_notice: AcceptDialog = $MenuLayer/MemoryNoticeDialog  ## says what the computer's memory means for this game (`MemoryMode.start_notices`)
 @onready var pause_ring: Panel = %PauseRing
 
 ## The two modes share everything (dish, evolution, HUD, controls). Free mode differs in
@@ -230,6 +231,20 @@ func _ready() -> void:
 	if Session.tutorial_wanted:
 		Session.tutorial_wanted = false
 		_start_tutorial.call_deferred()  # (once the screen has been laid out, so the tour can point at it)
+	else:
+		_show_memory_notices.call_deferred()
+
+
+## Tells what low-memory mode is, once per notice text (a new game on the same computer does not repeat it). The notices are one dialog the
+## player closes; they wait for the tutorial when it runs.
+func _show_memory_notices() -> void:
+	var notices := MemoryMode.start_notices()
+	var text := "\n\n".join(notices)
+	if text.is_empty() or text == MemoryMode.last_notice:
+		return
+	MemoryMode.last_notice = text
+	memory_notice.dialog_text = text
+	memory_notice.popup_centered()
 
 
 ## Puts the tray's sections in the order the player chose (Options' reset puts them back as the scene has them).
@@ -672,7 +687,7 @@ func _on_refused(row: int, _why: String) -> void:
 	_by_row_count = -1  # (the rows' table is made again)
 	if dishes.has(d) and dishes.size() > 1:
 		_remove_dish(d)
-	_show_banner(Strings.t("banner.memory_budget"), BANNER_SECONDS)
+	_show_banner(Strings.t("banner.memory_budget"), BANNER_SECONDS, true)
 	_sync_reply_hold()
 
 
@@ -735,7 +750,7 @@ func _finish_pipette() -> void:
 	_sync_reply_hold()
 	if got == null:
 		if dishes.has(source) and reply.error() != "":  # (the processor's stub answers with nothing and no error: nothing ran)
-			_show_banner(Strings.t("banner.memory_budget"), BANNER_SECONDS)
+			_show_banner(Strings.t("banner.memory_budget"), BANNER_SECONDS, true)
 		return
 	if int(got["moved"]) == 0 or not dishes.has(source):
 		WorldClient.shared().remove_dish(int(got["new_row"]))
@@ -823,8 +838,25 @@ func _at_dish_limit() -> bool:
 		_show_banner(Strings.t("banner.dish_numbers"), BANNER_BRIEF_SECONDS)
 		return true
 	if _labels_held() < MAX_DISHES:
-		return false
+		return _too_many_running()
 	_show_banner(Strings.t("banner.dish_limit"), BANNER_BRIEF_SECONDS)
+	return true
+
+
+## How many dishes run now or are about to (a pipette's dish not made yet counts; an unfrozen dish is among `dishes` already).
+func _running_held() -> int:
+	return dishes.size() + (0 if _pipette_pending.is_empty() else 1)
+
+
+## Whether low-memory mode allows no more running dishes (goal mode keeps one dish and has no such limit); the banner says why.
+func _running_full() -> bool:
+	return free_mode and _running_held() >= MemoryMode.max_dishes()
+
+
+func _too_many_running() -> bool:
+	if not _running_full():
+		return false
+	_show_banner(Strings.t("banner.low_dish_limit", [MemoryMode.max_dishes()]), BANNER_SECONDS, true)
 	return true
 
 
@@ -955,6 +987,8 @@ func trash_dish(d: Dish) -> void:
 func thaw(entry: Dictionary) -> void:
 	if not freezer_shelf.entries.has(entry) or entry.get("thawing", false):
 		return
+	if _too_many_running():
+		return
 	if _waits(entry):
 		entry["then"] = "thaw"
 		return
@@ -973,7 +1007,7 @@ func thaw(entry: Dictionary) -> void:
 	d.load_blob(blob)
 	if d.row < 0:  # (no row at all: as the graphics memory refusing it)
 		d.queue_free()
-		_show_banner(Strings.t("banner.memory_budget"), BANNER_SECONDS)
+		_show_banner(Strings.t("banner.memory_budget"), BANNER_SECONDS, true)
 		return
 	for layer: int in Dish.Layer.values():
 		d.show_layer(layer, dish.layer_shown(layer))
@@ -1042,8 +1076,9 @@ func _show_graph_choices() -> void:
 	freezer_shelf.actions.set_available(dishes.size() > 1)  # (the last running dish stays)
 	card_actions.set_available(dishes.size() > 1)
 	var full := _labels_held() >= MAX_DISHES
-	freezer_shelf.actions.set_at_limit(full)
-	card_actions.set_at_limit(full)
+	var low_text := Strings.t("banner.low_dish_limit", [MemoryMode.max_dishes()]) if _running_full() and not full else ""
+	freezer_shelf.actions.set_at_limit(full or low_text != "", low_text)
+	card_actions.set_at_limit(full or low_text != "", low_text)
 
 
 ## Brings the dish `by` places along the tabs (wrapping round) into the main view.
@@ -1350,6 +1385,7 @@ func _tutorial_bup_rect() -> Rect2:
 
 ## The tour ended, finished or skipped: whatever it set up goes back, so the screen looks as it did before it.
 func _on_tutorial_closed(_completed: bool) -> void:
+	_show_memory_notices.call_deferred()
 	if _tutorial_bup >= 0:
 		for id in dish.watched.duplicate():
 			if not id in _tutorial_watched_before:

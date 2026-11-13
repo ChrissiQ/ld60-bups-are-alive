@@ -111,7 +111,7 @@ func open(dish: Dish, free_mode: bool, started_as: StartConditions = null) -> vo
 		var floor_limit := maxi(StartConditions.MIN_BUP_LIMIT, dish.population())
 		limit_row.disabled_reason = Strings.t("pause.at_max")
 		dish_row.configure(StartConditions.MIN_DISH_RADIUS / StartConditions.UM_PER_MM, StartConditions.MAX_DISH_RADIUS / StartConditions.UM_PER_MM, 0.1, dish.radius / StartConditions.UM_PER_MM, Strings.t("ui.mm_unit"))
-		limit_row.configure(floor_limit, StartConditions.MAX_BUP_LIMIT, 1, dish.bup_limit)
+		limit_row.configure(floor_limit, maxi(floor_limit, MemoryMode.max_bup_limit(dish.bup_limit)), 1, dish.bup_limit)
 		dish_row.value = dish.radius / StartConditions.UM_PER_MM
 		limit_row.value = maxi(dish.bup_limit, floor_limit)
 		_opening = false

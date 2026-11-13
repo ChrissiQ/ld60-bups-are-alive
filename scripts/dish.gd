@@ -414,9 +414,9 @@ func strike(start: StartConditions = null) -> void:
 	_edited()
 	nutrients_placed = 0
 	radius = clampf(start.dish_radius, StartConditions.MIN_SIM_RADIUS, StartConditions.MAX_DISH_RADIUS)
-	resolution = clampi(start.nutrient_resolution, StartConditions.MIN_NUTRIENT_RESOLUTION, StartConditions.MAX_NUTRIENT_RESOLUTION)
+	resolution = clampi(start.nutrient_resolution, StartConditions.MIN_NUTRIENT_RESOLUTION, MemoryMode.max_resolution())  # (a dish is never made over low-memory mode's limits)
 	medium_thickness = start.medium_thickness
-	bup_limit = start.bup_limit
+	bup_limit = mini(start.bup_limit, MemoryMode.max_bup_limit())
 	feed_density = start.feed_density
 	bloom_density = start.bloom_density
 	upkeep_factor = 1.0
@@ -723,9 +723,10 @@ func _take_resizes() -> void:
 		queue_redraw()
 
 
-## Changes how many bups the dish holds, without ever going below how many there are now.
+## Changes how many bups the dish holds, without ever going below how many there are now, and not above low-memory mode's most (a dish that
+## already holds more keeps what it has).
 func change_limit(value: int) -> void:
-	bup_limit = maxi(value, population())
+	bup_limit = maxi(mini(value, MemoryMode.max_bup_limit(bup_limit)), population())
 
 
 ## Moves the dish. Bups and plankton are held relative to the dish centre, so only the sources (global) shift.
