@@ -85,7 +85,7 @@ var _last_events: Array = [0, 0]  ## the last iteration's births and deaths
 var _refusal := ""  ## why the iterations are being refused (the memory budget), while they are; "" once one runs
 var _refused_k := 0  ## the steps of the last iteration if it was refused (0: it ran)
 var _retry_msec := -1  ## after a refused iteration of one step: when the next is tried (-1: not waiting to try)
-var _pipettes: Array = []  ## pipettes waiting for their new dish's grid, made on the worker pool: {client, centre, radius, dest, reply, spec, made, task}
+var _pipettes: Array = []  ## pipettes waiting for their new dish's grid, made on the worker pool: {client, number, centre, radius, dest, reply, spec, made, task}
 var _tick_usec := 0  ## when the last set_time command was drained
 var _busy_ema := 0.0  ## ms: the iterations' busy time, smoothed
 var _grids := {}  ## the grid a pipette from the main view's dish would give its new dish, made ahead on the worker pool (`_make_grid_ahead`): key (`_grid_key`) -> {task, made}
@@ -827,7 +827,7 @@ func _pipette(client: int, centre: Vector2, radius: float, dest: int, reply: Sim
 	_grids.erase(key)
 	if ahead.is_empty():
 		ahead = _grid_task(spec)
-	_pipettes.append({"client": client, "centre": centre, "radius": radius, "dest": dest, "reply": reply, "spec": spec, "made": ahead["made"], "task": ahead["task"]})
+	_pipettes.append({"client": client, "number": _numbers[client], "centre": centre, "radius": radius, "dest": dest, "reply": reply, "spec": spec, "made": ahead["made"], "task": ahead["task"]})
 
 
 static func _grid_key(s: DishSpec) -> Array:
@@ -869,12 +869,13 @@ func _finish_pipettes() -> void:
 	while not _pipettes.is_empty() and WorkerThreadPool.is_task_completed(_pipettes[0]["task"]):
 		var p: Dictionary = _pipettes.pop_front()
 		WorkerThreadPool.wait_for_task_completion(p["task"])
-		_retarget(p["client"], p["centre"], p["radius"], p["dest"], p["reply"], p["spec"], p["made"]["grid"])
+		_retarget(p["client"], p["number"], p["centre"], p["radius"], p["dest"], p["reply"], p["spec"], p["made"]["grid"])
 		_changed = true
 
 
-func _retarget(client: int, centre: Vector2, radius: float, dest: int, reply: SimReply, spec: DishSpec, grid: DishGrid) -> void:
-	if not _rows.has(client):
+func _retarget(client: int, asked_number: int, centre: Vector2, radius: float, dest: int, reply: SimReply, spec: DishSpec, grid: DishGrid) -> void:
+	# The client row can have been freed and given to another dish while the grid was made: the pipette is of the dish it was asked of.
+	if not _rows.has(client) or _numbers.get(client, -1) != asked_number:
 		_refused[dest] = "no such dish"
 		if reply != null:
 			reply.complete(null, "no such dish")
