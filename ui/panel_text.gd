@@ -90,7 +90,8 @@ static func tail(b: Dictionary) -> String:
 static func deceased(b: Dictionary, dish_number: int) -> String:
 	var text := Strings.t("panel.deceased", [SimClock.format_minutes(b["born"]), SimClock.format_minutes(b["died"]), b["divisions"]])
 	if b.has("moved_to"):
-		text += Strings.t("panel.moved_line", [b["moved_to"]]).substr(1) + "\n"
+		var line := Strings.t("panel.moved_line", [b["moved_to"]]) if int(b["moved_to"]) > 0 else Strings.t("panel.moved_gone_line")
+		text += line.substr(1) + "\n"
 	else:
 		text += Strings.t("panel.dish_line", [dish_number]).substr(1) + "\n"
 	return text.rstrip("\n")

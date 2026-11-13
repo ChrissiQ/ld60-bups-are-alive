@@ -796,9 +796,18 @@ func _take_label() -> int:
 	return 0
 
 
-## The number a dish of this game was shown by, from its world number (as a bup's family record has it); the world number itself for one never shown.
+## The number a dish of this game was shown by, from its world number (as a bup's family record has it); the world number itself for one never shown;
+## 0 for one that is gone (trashed, or retired when it died out), as its number may since be another dish's.
 func _label_for(world_number: int) -> int:
-	return int(_label_of.get(world_number, world_number))
+	if not _label_of.has(world_number):
+		return world_number
+	for d: Dish in dishes:
+		if d.number == world_number:
+			return int(_label_of[world_number])
+	for entry: Dictionary in freezer_shelf.entries:
+		if int(entry["number"]) == world_number:
+			return int(_label_of[world_number])
+	return 0
 
 
 ## How many shown numbers are held: by the running dishes, the frozen ones (one on its way back out of the freezer is among the running already)

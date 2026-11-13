@@ -256,8 +256,13 @@ func _limit(fake: FakeWorld, chosen: StartConditions) -> void:
 	for row: int in fake.rows():
 		for id in fake.ids_in(row):
 			ids_before[id] = true
+	var gone_world: int = gone.number
+	var frozen_world: int = int(m.freezer_shelf.entries[0]["number"])
+	TestUtil.check(m._label_for(gone_world) == freed and m._label_for(frozen_world) == frozen_label, "a bup moved to a running or a frozen dish names it by its shown number")
 	m.trash_dish(gone)
 	await process_frame
+	TestUtil.check(m._label_for(gone_world) == 0, "a bup moved to a trashed dish names no number (its number may go to another dish)")
+	TestUtil.check(PanelText.deceased({"born": 0.0, "died": 60.0, "divisions": 1, "moved_to": 0}, 1).contains("gone"), "a dead bup's panel says its dish is gone")
 	TestUtil.check(not m.card_actions.limit_row.visible, "with a number free the warning goes")
 	var again: Dish = m.add_dish(chosen)
 	await process_frame
