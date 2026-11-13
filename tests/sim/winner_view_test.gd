@@ -3,11 +3,11 @@ extends SceneTree
 ## A bare Dish on the screen over the real world, paused, 3 mm across (1,500 um radius: 150 texels at 0.1 px/um, inside the picture's half height), 100 founders in four colours, the camera at 0.1 px/um: every bup is
 ## far under its least footprint (Cell.MIN_VISIBLE_LENGTH_PX = 2 px; a founder is 2 to 4 um = 0.2 to 0.4 px), so every bup is in the picture
 ## and none is a capsule. Windowed only:
-##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 1280x720 -s tests/sim/winner_view_test.gd
+##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/winner_view_test.gd
 ##
 ## Expected values, written before the first run [derived from the splat's rules, GpuKernelsView.K_DENSITY_SPLAT and its header]:
 ## W  The view is made with density on and ready; the sprite shows a picture the size of the camera's rectangle (`density_size`, one texel a pixel,
-##    at least 300 high so that the dish lies inside it; run with --windowed --resolution 1280x720; checked here); the last count of bups
+##    at least 300 high so that the dish lies inside it; the test sets its window to 1280 x 720; checked here); the last count of bups
 ##    the capsule path must draw is 0 (`_large`: every bup is under its footprint).
 ## L  Lit texels (alpha > 0). A bup covers 1.8 px^2 (2 x 1 pixels less the capsule's rounded ends, as the density header says) spread by
 ##    bilinear taps over up to four texels. The dish is 300 texels across with 100 bups, so two bups meet in a texel rarely and every bup lights
@@ -23,6 +23,7 @@ extends SceneTree
 ##    hidden, and the view's visible bups (`_visible`: what the capsule path draws) are all N.
 
 const BUPS := 100
+const WINDOW := Vector2i(1280, 720)  ## the window the expectations are worked out for
 const COLORS := ["e03030", "30c050", "3060e0", "e0c030"]
 
 
@@ -51,6 +52,7 @@ func _run() -> void:
 	SimConstants.apply()
 	while not root.is_node_ready():  # (the autoloads' _ready is still running: a window change pumps frames inside it)
 		await process_frame
+	DisplayServer.window_set_size(WINDOW)  # (the expectations are for this window, whatever size the run was started with)
 	for i in 10:
 		await process_frame
 	print("window: mode %d size %s viewport %s" % [DisplayServer.window_get_mode(), DisplayServer.window_get_size(), root.size])
@@ -80,7 +82,7 @@ func _run() -> void:
 	var v: ViewRenderer = d.drawing.view
 	var n := d.population()
 	var size := v.density_size() if v != null else Vector2i.ZERO
-	TestUtil.show(v != null and v.density_ready() and d.drawing.density_sprite.visible and n == BUPS and size.y >= 300 and root.size == Vector2i(1280, 720) and int(v._large.get("count", -1)) == 0, "W density ready %s, sprite shown %s, %d bups, picture %s (want a height of at least the dish's 300 texels) in a %s window, capsule-path bups %s (want 0)" % [v != null and v.density_ready(), d.drawing.density_sprite.visible, n, size, root.size, v._large.get("count", "none") if v != null else "-"])
+	TestUtil.show(v != null and v.density_ready() and d.drawing.density_sprite.visible and n == BUPS and size.y >= 300 and root.size == WINDOW and int(v._large.get("count", -1)) == 0, "W density ready %s, sprite shown %s, %d bups, picture %s (want a height of at least the dish's 300 texels) in a %s window, capsule-path bups %s (want 0)" % [v != null and v.density_ready(), d.drawing.density_sprite.visible, n, size, root.size, v._large.get("count", "none") if v != null else "-"])
 	if v == null or not v.density_ready():
 		d.queue_free()
 		TestUtil.finish(self, "OK winner_view_test")
