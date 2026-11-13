@@ -22,17 +22,24 @@ var dishes: Array[Dish] = []  ## every dish: the list is one for all of them (a 
 var _version := -1  ## what this was built from: the dishes and each one's watch_version (as a number)
 var _entries_list: Array = []  ## [dish, id] for each entry, youngest first
 var _looked_msec := 0
+var _stamp: Array = []  ## the dishes' count and Dish.watch_epoch when the dishes were last looked at
+var _count := 0  ## bups watched, as of then
 var _buttons := {}  ## [dish, bup id] -> its button, for the second look
 var _waiting := false  ## a watched bup was left out for want of its family record: the next look builds the list again
 
 
 ## Called every frame by the screen that shows the list.
 func refresh() -> void:
-	var count := 0
-	var version := dishes.size()
-	for d in dishes:
-		count += d.watched.size()
-		version = version * 1000003 + d.get_instance_id() + d.watch_version * 7919  # (wraps: only a change of it matters)
+	var stamp := [dishes.size(), Dish.watch_epoch]  # (any dish's list changing bumps the epoch, so the dishes are looked at only then)
+	var version := _version
+	if stamp != _stamp:
+		_stamp = stamp
+		_count = 0
+		version = dishes.size()
+		for d in dishes:
+			_count += d.watched.size()
+			version = version * 1000003 + d.get_instance_id() + d.watch_version * 7919  # (wraps: only a change of it matters)
+	var count := _count
 	empty_note.visible = count == 0  # (it says so when there is nothing in it)
 	scroll.visible = count > 0
 	if count == 0:

@@ -193,6 +193,7 @@ var patch_seed := 0  ## which landscape of richer and poorer patches the nutrien
 var watched: Array[int] = []  ## the bups the player is watching, newest first (see watch_bup); each holds a pin of this dish's number
 var view_zoom := 0.0  ## where the screen was looking at this dish when it last looked away: the camera's zoom (0: never looked yet) ...
 var view_position := Vector2.ZERO  ## ... and its position
+static var watch_epoch := 0  ## bumped with every dish's watch_version: the watch list looks at every dish only when it has changed
 var watch_version := 0  ## bumped whenever the list changes, so its panel can rebuild only then
 
 var _state: DishState = null  ## what the newest snapshot says of the dish (null until one has it)
@@ -361,6 +362,7 @@ func _reset_runtime_state() -> void:
 		unpin_bup(id)
 	watched.clear()
 	watch_version += 1
+	watch_epoch += 1
 	clear_selection()
 	clear_hover()
 	_click_at = Vector2.INF
@@ -514,6 +516,7 @@ func load_blob(blob: DishBlob) -> bool:
 		if not watched.has(id):
 			watched.append(id)
 	watch_version += 1
+	watch_epoch += 1
 	_edited()
 	return true
 
@@ -961,6 +964,7 @@ func watch_bup(id: int) -> bool:
 	pin_bup(id)
 	watched.push_front(id)
 	watch_version += 1
+	watch_epoch += 1
 	return true
 
 
@@ -969,6 +973,7 @@ func unwatch_bup(id: int) -> void:
 		watched.erase(id)
 		unpin_bup(id)  # (that may drop its record, if nothing else needs it now)
 		watch_version += 1
+		watch_epoch += 1
 
 
 ## The count and averages the readouts show (DishState.STATS_KEYS: each gene, "harm", "mutations", and "generation", the population's: the

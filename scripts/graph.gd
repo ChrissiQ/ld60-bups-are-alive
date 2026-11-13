@@ -38,6 +38,7 @@ var span := Span.LAST_24  ## the mode the player has chosen with G (it counts on
 var chosen := false  ## whether G has been pressed: until then the graph moves up a mode by itself (see `shown_span`)
 var _drawn_key := []  ## what the graph was last drawn from (see `refresh`)
 var _drawn_msec := 0  ## when it was
+var _checked_msec := 0  ## when `refresh` last looked at every dish together
 var _plot := Rect2()  ## the plot area, the window and the series as last drawn (what the pointer reads)
 var _x_min := 0.0
 var _window := 1.0
@@ -51,6 +52,12 @@ var _pinned := NAN  ## the time a click pinned the readout to, or NAN
 ## simulation time, so at normal speed most frames have nothing new to draw. At top speed a sample arrives
 ## every frame, so a new sample alone waits for the next redraw tenth of a second.
 func refresh() -> void:
+	if not is_visible_in_tree():
+		return  # (a graph that is not on screen is drawn when it is shown)
+	var looked := Time.get_ticks_msec()
+	if combined() and looked - _checked_msec < Dish.HAZE_REFRESH_MSEC:
+		return  # (with every dish together each look is a pass over all of them: ten a second is enough)
+	_checked_msec = looked
 	var version := 0
 	if combined():
 		for d: Dish in dishes:
