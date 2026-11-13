@@ -1,6 +1,6 @@
 extends SceneTree
 ## The interface stays unfrozen while the sim runs, and the shutdown is clean. A world of one 2,000,000-bup dish (scenario F's
-## dish) and a small one runs at x10,000 for 10 minutes through the real sim thread (GpuSimBackend, WorldClient), while the main
+## dish, tools/gpu/world_tools.gd, tests/sim/perf_gates_test.gd) and a small one runs at x10,000 for 10 minutes through the real sim thread (GpuSimBackend, WorldClient), while the main
 ## thread drives every kind of command on a schedule and checks every reply; then the world is shut down and both threads joined.
 ## Windowed, through the lock (a run of about 11 minutes):
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/soak_test.gd [-- seconds=600]
@@ -15,7 +15,7 @@ extends SceneTree
 ##   in flight (about 20 ms) and, for a freeze or a save, a whole read of the dish (a 2M save reads about 230 MB, under a second)].
 ## - no overflow and no error from the sim at the end (inspect: SimCore.overflow() 0; status errors empty).
 ## - the interface unfrozen: no main frame over FROZEN_MS = 250 ms after the set-up [placeholder: an unfrozen bound, not smoothness; the
-##   interface's smoothness is measured in the interface gate on the game screen].
+##   interface's smoothness is measured by tests/sim/interface_gate.gd].
 ## - shutdown: the sim thread stops, frees its device, the worker drains, and both threads are joined within JOIN_MS = 5,000 ms
 ##   [derived: the loop checks its stop flag between iterations]; status alive false afterwards.
 

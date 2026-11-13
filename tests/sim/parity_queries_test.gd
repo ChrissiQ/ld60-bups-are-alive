@@ -8,7 +8,7 @@ extends SceneTree
 ## L  The pool holds the fixture word for word.
 ## Q  At the fixture's 50 medium points (medium_points.txt: field.read's concentration and gradient), Dish.nutrient_at's concentration is
 ##    the fixture's within 1e-4 relative (the bound; the probe sums the grid's bilinear read and the clouds in float32 where the
-##    CPU summed in doubles: found 1e-5), and its gradient's size within 1e-4 relative of the fixture's, or within 1e-12 /µm where
+##    fixture was computed in doubles: the difference measured 1e-5), and its gradient's size within 1e-4 relative of the fixture's, or within 1e-12 /µm where
 ##    the fixture's is below 1e-8 (flat: a central difference of float rounding).
 ## Paused, each point's answer is waited for with ParityGame.answer_now.
 

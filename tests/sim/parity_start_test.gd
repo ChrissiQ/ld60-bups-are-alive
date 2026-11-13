@@ -8,7 +8,7 @@ extends SceneTree
 ## N  A 3 mm dish struck with 32 units/mm² (100 cells of 60 µm), paused: the grid holds 32 x Dish.CONCENTRATION_PER_DENSITY x (the cells
 ##    inside the rim) x the cell's area in energy, within 1e-4 relative (DishGrid.filled: the landscape's weights average 1 over the
 ##    inside cells, each cell rounded to float32). "Area" is the inside cells', not pi R² (they differ by 0.3% here). The game's dish is
-##    always patchy (Dish.NUTRIENT_PATCHINESS; there is no even setting any more), so "the patchy total the same" is this same check.
+##    always patchy (Dish.NUTRIENT_PATCHINESS; there is no even setting), so the patchy total is this same check.
 ## P  Two dishes struck with the same seed hold the same grid cell for cell; one with another seed holds another landscape (cells differ)
 ##    with the same total within 1e-4.
 ## G  45 mm dishes struck with nutrient detail 100, 200 and 400 have grids of 100², 200² and 400² cells (cells_across: 3,600 wanted,

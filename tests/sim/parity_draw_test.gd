@@ -11,9 +11,9 @@ extends SceneTree
 ##    equals the fixture's haze_bytes: alpha within 1 in every cell, RGB equal wherever either alpha is above 0 (the bound: the float
 ##    view against the fixture's doubles moves a truncation by one at most).
 ## M  With bup 4, 10001 or 20000 selected (the medium hidden, so the map is what is drawn), the steering map the dish draws equals the
-##    fixture's steer_<id>: alpha within STEER_ALPHA_TOLERANCE, RGB equal where alpha > 0. The fixture's maps were drawn with the motion table
-##    measured on the engine that made them; the table the game ships is a fresh measurement on the pooled GPU, and the chance of steering
-##    (the alpha) is read from it, so the alpha differs by the two tables' difference (11 at most, measured).
+##    fixture's steer_<id>: alpha within STEER_ALPHA_TOLERANCE, RGB equal where alpha > 0. The fixture's maps were made with a different motion
+##    table from the one the game ships, and the chance of steering (the alpha) is read from the table, so the alpha differs by the two
+##    tables' difference (11 at most, measured).
 ## S  The 40 fixture bups of queries_info.txt, each selected in turn: Dish.bup_steering (the tracked answer's way and chance) within 1e-5
 ##    of the fixture's bup_steering in each of x, y and the chance.
 ## Paused, each answer is waited for with ParityGame.answer_now.

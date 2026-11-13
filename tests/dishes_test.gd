@@ -179,7 +179,7 @@ func _run() -> void:
 
 
 ## The all-dishes figures are every bup of every dish averaged (a dish counts by its bups), read from the snapshot. And the source tool
-## selects the source it placed once the world's copy has it (it used to read the list before the copy came).
+## selects the source it placed once the world's copy has it (not before the copy has come).
 func _all_dishes_and_source(fake: FakeWorld) -> void:
 	var start := TestUtil.small_start()
 	start.bups = 100

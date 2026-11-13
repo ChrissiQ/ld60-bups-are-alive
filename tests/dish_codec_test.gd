@@ -3,24 +3,25 @@ extends SceneTree
 ## DishCodec's blob format, on blobs built here (no device).
 ##
 ## Expected values, written before the first run:
-## - a blob with records, device blocks, clouds, husks, a world, history, watch list and lineage bytes, written, put through JSON text
+## - Round trip: a blob with records, device blocks, clouds, husks, a world, history, watch list and lineage bytes, written, put through JSON text
 ##   and read back, is the same blob: every block byte for byte, the spec and the world as dictionaries (equal and equal in hash), the
 ##   host's history keys, watch list (order kept), lineage bytes and nutrients_placed [derived: the blocks are bytes and the spec and
 ##   world are binary variants, so nothing is rounded]. The lineage bytes imported into an empty LineageStore give the family tree the
 ##   source store exported: the same record count, the same `info` for every id [derived: import_bytes inserts every id of an export].
-## - a dict that is of another format, lacks a block, has a block that does not decompress to its size or of the wrong size for
+## - Malformed blobs refused: a dict that is of another format, lacks a block, has a block that does not decompress to its size or of the wrong size for
 ##   its part (a record, the dish's state, a grid, a slot, the lineage), a spec out of range in its radius, a world with a missing or
 ##   non-finite number: read_blob returns null each time, and the dictionary it was given is as it was (nothing is built on it). A limit,
 ##   upkeep, feed or medium out of range is made safe, not refused: limit 0 with 5 bups reads as 5, upkeep 1000 as 100, a feed of -3 as 0,
 ##   a medium of 1000 as 100. Lineage bytes LineageStore.import_bytes cannot read whole are refused: a count with no count of names
 ##   after it (4 bytes, and a record with none), a name cut short by a byte, a byte past the names; read are none at all, a lineage of
 ##   no records (8 bytes) and one of two records and two names, which the store then holds (the second named "Ada").
-## - a save in the format before this one (a dictionary with "cells", "lineage" as a block, "moved_out") is refused, as is a file
-##   at SaveGame's old version 2: SaveGame.read gives {} for it.
-## - a tracker at index 2 holding 1234.5678 seconds, and a dish, written with SaveGame.write to a scratch file and read back: the
+## - Save in a format this reader does not know: a dictionary with "cells", "lineage" as a block and "moved_out" is refused, as is a file
+##   of version 2: SaveGame.read gives {} for it.
+## - Save file round trip: a tracker at index 2 holding 1234.5678 seconds, and a dish, written with SaveGame.write to a scratch file and read back: the
 ##   tracker's index is 2 and its held time within 0.001 of 1234.5678, and the dish blob reads back equal to the one written.
 
 const SCRATCH := "user://dish_codec_test_save.json"
+## A lineage export recorded from the CPU simulation the pooled world replaced.
 const LINEAGE_GOLDEN := "res://tools/gpu/golden/parity/lineage_export.bin.gz"
 const NUMBER := 7
 
@@ -42,7 +43,7 @@ func _init() -> void:
 # ---- a blob made by hand ------------------------------------------------------------------------------------------------
 
 ## {blob, store}: five bups, a grid, clouds and husks of made-up numbers (the floats not exactly representable in decimal), a world with
-## a source and plankton, a history, a watch list and the lineage of the golden export (its living bups the dish's).
+## a source and plankton, a history, a watch list and the lineage of the recorded export (its living bups the dish's).
 func _blob() -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 12345
@@ -121,7 +122,7 @@ static func _living_ids(export: PackedByteArray) -> PackedInt64Array:
 	return out
 
 
-# ----------------------------------------------------------------------------------------------------------------------
+# ---- round trip ----------------------------------------------------------------------------------------------------------------
 
 func _round_trip(original: DishBlob, parsed: Variant, store: LineageStore) -> void:
 	var back := DishCodec.read_blob(parsed)
@@ -173,7 +174,7 @@ static func written_has_moved_out(d: Dictionary) -> bool:
 	return d.has("moved_out")
 
 
-# ----------------------------------------------------------------------------------------------------------------------
+# ---- malformed blobs refused ----------------------------------------------------------------------------------------------------------------
 
 func _refusals(written: Dictionary) -> void:
 	var cases := {
@@ -250,18 +251,18 @@ func _safe_values(original: DishBlob) -> void:
 	TestUtil.check(back.spec["medium_thickness"] == StartConditions.MAX_MEDIUM_THICKNESS, "a medium of 1000 reads as %s (%s)" % [StartConditions.MAX_MEDIUM_THICKNESS, back.spec["medium_thickness"]])
 
 
-# ----------------------------------------------------------------------------------------------------------------------
+# ---- unknown save format ----------------------------------------------------------------------------------------------------------------
 
 func _old_formats(written: Dictionary) -> void:
 	var old := {"next_id": 5, "radius": 300.0, "cells": written["records"], "lineage": written["lineage"], "moved_out": [], "time": 0.0}
-	TestUtil.check(DishCodec.read_blob(old) == null, "refused: a dish save of the format before this one")
+	TestUtil.check(DishCodec.read_blob(old) == null, "refused: a dish save in a format this reader does not know")
 	var file := FileAccess.open(SCRATCH, FileAccess.WRITE)
 	file.store_string(JSON.stringify({"version": 2, "dish": old, "goals": {}}))
 	file.close()
 	TestUtil.check(SaveGame.read(SCRATCH).is_empty() and not SaveGame.has_save(SCRATCH), "refused: a save file of version 2")
 
 
-# ----------------------------------------------------------------------------------------------------------------------
+# ---- save file round trip ----------------------------------------------------------------------------------------------------------------
 
 func _goal_tracker_through_a_save(original: DishBlob, written: Dictionary) -> void:
 	var tracker := GoalTracker.new()

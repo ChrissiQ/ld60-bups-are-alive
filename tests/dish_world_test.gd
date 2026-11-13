@@ -34,7 +34,7 @@ func check(ok: bool, what: String) -> void:
 		print("FAIL: ", what)
 
 
-## The old per-step path, in the dish's own order: the clock moves, the bloom and the burst check (_step_plankton), then the sources.
+## The per-step reference, in the dish's own order: the clock moves, the bloom and the burst check (_step_plankton), then the sources.
 class Reference:
 	var rng := RandomNumberGenerator.new()
 	var time := 0.0

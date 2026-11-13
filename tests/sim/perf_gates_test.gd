@@ -1,15 +1,23 @@
 extends SceneTree
-## The performance gates, against the pre-pool baseline `tools/gpu/baseline/perf_pre_pool.json`.
+## The performance gates, against the baseline `tools/gpu/baseline/perf_pre_pool.json` (figures measured before the pooled world; the file's
+## `environment` says on what).
+##
+## Scenario letters (the baseline's keys, the gates' names): A, one 90 mm dish of 1,000,000 bups on the game screen; B, that dish with 940,000
+## bups and six more dishes of 12,000; C100 and C48, 20 dishes of 100 bups with grids of 100 x 100 and 48 x 48 cells; C (the gate), 100 dishes
+## of 100 bups; D, 100 dishes of 10,000 bups against one dish of 1,000,000; E, one 45 mm dish of 100,000 bups; F, one 90 mm dish of 2,000,000
+## bups; G, 50, 200 or 1,000 bups in one 45 mm dish; x1, the share of display frames in which a new picture is shown at playback speed x1.
+## A, B and the interface are measured by tests/sim/interface_gate.gd, the others here.
 ##
 ## Expected values, written before the first run:
 ## - Static part (runs headless): the baseline holds every key the gates read, so a missing key fails with its path [derived from the
 ##   gates]: scenarios A, B, C100, C48, D, E, F each with frame_ms_p95_mean_of_runs and achieved_speed_mean_of_runs; G "50", "200",
-##   "1000" each with cpu and gpu and best_of_the_two; x1 by_bups "1000" and "100000" with runs[].share_frames_picture_changed.
+##   "1000" each with cpu and gpu (the figures of the two backends the baseline was measured with: a simulation on the processor, the CPU
+##   simulation the pooled world replaced, and one on the GPU) and best_of_the_two; x1 by_bups "1000" and "100000" with runs[].share_frames_picture_changed.
 ## - The gate functions (`gate_*`), checked on synthetic numbers [derived from the gate text]:
 ##   E: p95 <= min(baseline E p95, 1.15 x display frame) and speed >= 9,500 (measured baseline: p95 10.18 ms, speed 9,994; display frame
 ##   8.33 ms [measured] so the cap is 9.58 ms). F: p95 and speed no worse than the baseline's (p95 64.66 ms, speed 309 [measured]) and
 ##   per-step cost at 2M <= 0.85 x the baseline's. A and B: p95 <= the baseline's (A: 32.0 ms [measured]). G: frame mean <= the best of the
-##   two backends' + 1 SD, and speed >= 10,000. x1: payload advances in >= 99% of display frames.
+##   baseline's two backends' + 1 SD, and speed >= 10,000. x1: payload advances in >= 99% of display frames.
 ## - The speed column of gates E, F, G and x1 is measured windowed through the real sim thread (GpuSimBackend, WorldClient; no game
 ##   stack): the main thread only sends set_time each frame, tells the sim which payload texture it bound, and reads snapshots.
 ##   The dishes are filled to their limit at once (the founder's genes, reserves from none to full,
@@ -29,14 +37,13 @@ extends SceneTree
 ##     a replay of 7,200 frames' arrivals recorded in a run of this script; showing the newest gave 0.978 and 0.867 on the same frames]. Edit to
 ##     visible (paused, a source placed, 8 times): frames until a snapshot shows it, <= 2 frames + one iteration [derived], the baseline's 1 frame
 ##     [measured baseline, a pixel hash].
-##   The interface column (frame p95 and worst on the game screen) is measured in the interface gate on the final tree; the main frames printed here are
-##   this script's (no game screen), for reference only.
+##   The interface column (frame p95 and worst on the game screen) is measured by tests/sim/interface_gate.gd; the main frames printed here
+##   are this script's (no game screen), for reference only.
 ## - Gates C and D, written before the first run. Both ask x10,000 (20 s steps: min(20, speed/120)) and the speed reached is the figure; the
 ##   step's cost is the sum of the window's iterations' busy time over their steps (each iteration once), and the reference world is measured
 ##   first in the same process (the GPU is bimodal between processes), each world with 12 s of settling.
 ##   C: 100 dishes of 100 bups at the limit, each the default dish (45 mm, a 100 x 100 grid, checked): the speed reached >= x5,000 (the
-##   project's bound: many dishes of the default size at half the top speed or better). Measured before the bound was set
-##   [measured, two processes]: x5,577 and x5,558 (a step of 3.46 and 3.47 ms), so about 10% of room. The cost is the 100 grids' (1M cells),
+##   bound: many dishes of the default size at half the top speed or better). Measured [two processes]: x5,577 and x5,558 (a step of 3.46 and 3.47 ms), so about 10% of room. The cost is the 100 grids' (1M cells),
 ##   not the 10,000 bups'. `dishes=` and `radius=` rerun it at other sizes as a diagnosis (300 um gives the smallest grid, 48 x 48).
 ##   D: 100 dishes of 10,000 bups (45 mm, 100 cells across), against one 90 mm dish of 1,000,000: step <= 1.2 x. Expected about 1.0 x [derived: the
 ##   same 1M bups, the same 100 x 100 grid per dish, 100 dishes' field 1M cells (a tenth of the bups' work); the reference's step is
@@ -57,7 +64,7 @@ extends SceneTree
 ##   twice the payload's count, at most the limit's): adopt < one display frame and no frame of the 20 after it over 3 display frames
 ##   [derived: adopt only sets fields and sends commands; the drawing makes its instance buffer once, for the moved bups, and its view
 ##   (ViewRenderer) from kernel text the first view of the run took].
-##   Args (windowed): `-- gate=E|F|G|x1|55|all` (default all; E alone takes about 11 minutes); `seconds=N` shortens E's window (a diagnosis,
+##   Args (windowed): `-- gate=E|F|G|x1|55|C|D|all` (55 is the 1M pipette check) (default all; E alone takes about 11 minutes); `seconds=N` shortens E's window (a diagnosis,
 ##   not the gate).
 
 const BASELINE := "res://tools/gpu/baseline/perf_pre_pool.json"
@@ -603,7 +610,7 @@ func _gate_f_speed(baseline: Dictionary) -> void:
 	var spread := float(lookup(baseline, ["scenarios", "F", "achieved_speed_spread"]))
 	print("GATE F speed [measured]: run x%.1f; baseline x%.1f less %.1f" % [speed, mean, spread])
 	TestUtil.show(m["ok"], "gate F: the run was clean (no error, no overflow)")
-	TestUtil.show(gate_speed_kept(speed, mean, spread), "gate F: 2,000,000 bups no slower than today (>= x%.1f)" % (mean - spread))
+	TestUtil.show(gate_speed_kept(speed, mean, spread), "gate F: 2,000,000 bups no slower than the baseline (>= x%.1f)" % (mean - spread))
 
 
 func _gate_g_speed(baseline: Dictionary) -> void:

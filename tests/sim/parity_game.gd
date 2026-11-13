@@ -1,6 +1,7 @@
 class_name ParityGame
 extends RefCounted
-## The game's own stack on the real pooled world, for the windowed parity tests (tests/sim/parity_*_test.gd):
+## The game's own stack on the real pooled world, for the windowed parity tests (tests/sim/parity_*_test.gd: each runs the game's screen on the pool and checks it against a
+## recorded fixture, tools/gpu/golden/parity, made by the CPU simulation the pooled world replaced):
 ## SimService's world (GpuSimBackend, its sim thread and LineageStore), Dish nodes in the tree drawing from the shared
 ## textures, a camera, and the frames the game's Main would give them. A test drives a Dish as the screen does (strike, edits, picks) and
 ## reads the pool behind it through `inspect` (a call on the sim thread between iterations).
@@ -250,7 +251,7 @@ static func text(file: String) -> String:
 static var _fixture_ids := PackedInt64Array()
 
 
-## The fixture's id `id` (the CPU dish's, a bare counter) as the id it has in the pool: the fixture's dish is the first one of a fresh
+## The fixture's id `id` (the fixture's own ids, a bare counter) as the id it has in the pool: the fixture's dish is the first one of a fresh
 ## world, whose founders take the world's ids 1, 2, ... in record order.
 static func pooled_id(_number: int, id: int) -> int:
 	if _fixture_ids.is_empty():

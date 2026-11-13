@@ -56,7 +56,7 @@ func _evenly_spaced(hues: Array) -> bool:
 
 func _initialize() -> void:
 	fake = TestUtil.use_fake_world(self)
-	# --- Defaults must equal the old hard-coded goal-mode start.
+	# --- Defaults must equal goal mode's start (a dish struck with null).
 	var d := _make_dish()
 	d.strike()
 	await _settle()

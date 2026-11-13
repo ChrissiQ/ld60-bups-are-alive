@@ -46,7 +46,7 @@ static func use_fake_world(tree: SceneTree) -> FakeWorld:
 	return fake
 
 
-## A dish of the old 300 µm size: tests that place things by hand count on a small, fine grid.
+## A dish of 300 µm radius: tests that place things by hand count on a small, fine grid.
 static func small_start() -> StartConditions:
 	var start := StartConditions.new()
 	start.dish_radius = 300.0

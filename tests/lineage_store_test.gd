@@ -1,9 +1,9 @@
 extends SceneTree
 ## Run: godot --headless --path . -s tests/lineage_store_test.gd
 ## LineageStore (native/src/lineage_store.cpp), the family tree on its own, with no simulation:
-##  - the two event streams captured at pre-pool (tools/gpu/golden/lineage_*), replayed into a store that starts from the stream's
+##  - the two event streams recorded from the CPU simulation the pooled world replaced (tools/gpu/golden/lineage_*), replayed into a store that starts from the stream's
 ##    initial records, give the final records of the capture, compared by id (the order of an export's records is not stable);
-##  - a pre-pool export (golden/parity/lineage_export.bin.gz) imported into an empty store exports the same records;
+##  - an export recorded from that simulation (golden/parity/lineage_export.bin.gz) imported into an empty store exports the same records;
 ##  - the cases of a pipette, freeze, thaw and trash on a store holding two or three dishes (cases (a)-(g), and (h):
 ##    the running dish that holds a frozen dish's shared bup leaves): export_dish, release_dish, discard_frozen, the idempotent
 ##    import_bytes, the tombstones.
@@ -93,7 +93,7 @@ static func _living_ids(bytes: PackedByteArray) -> PackedInt64Array:
 	return out
 
 
-# ---- the pre-pool streams -----------------------------------------------------------------------------------------
+# ---- the recorded streams -----------------------------------------------------------------------------------------
 
 ## The stream of `name`, applied to a store that starts from its initial records. Expected [derived]: the captured run's own
 ## store applied these births, deaths, pins and names with the code that LineageStore keeps, so every record of the final export is the capture's,
@@ -150,8 +150,8 @@ func _parity_import() -> void:
 	var store := _new_store()
 	var living := _living_ids(bytes)
 	store.import_bytes(bytes, PackedInt64Array(), living, 0)
-	TestUtil.check(living.size() == 250 and store.record_count() == 254, "the parity export imports to 254 records, 250 alive (%d, %d)" % [store.record_count(), living.size()])
-	TestUtil.check(_same_by_id(store.export_bytes(), bytes) == "", "the parity export comes back the same by id")
+	TestUtil.check(living.size() == 250 and store.record_count() == 254, "the recorded export imports to 254 records, 250 alive (%d, %d)" % [store.record_count(), living.size()])
+	TestUtil.check(_same_by_id(store.export_bytes(), bytes) == "", "the recorded export comes back the same by id")
 
 
 # ---- the events and the queries -------------------------------------------------------------------------------------

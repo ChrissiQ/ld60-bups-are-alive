@@ -847,7 +847,7 @@ func _initialize() -> void:
 	TestUtil.check(m.dish.bup_limit == int(m.pause_menu.limit_row.slider.min_value) + 500, "choosing a limit changes it")
 	await _key(KEY_ESCAPE)
 	TestUtil.check(not m.menu_open, "Escape closes the free-mode menu too")
-	m.dish.resize_to(StartConditions.MIN_DISH_RADIUS)  # (the smallest a dish can be: the 300 µm the tests began with is not a size a menu or a resize gives)
+	m.dish.resize_to(StartConditions.MIN_DISH_RADIUS)  # (the smallest a dish can be: 300 µm, the radius the tests use, is below the smallest size a menu or a resize gives)
 	await _settle()
 	m.camera.zoom = Vector2.ONE
 	m.camera.position = m.dish.global_position
@@ -869,7 +869,7 @@ func _initialize() -> void:
 	TestUtil.check(m.tool == Toolbar.Tool.PAN, "H key selects the pan tool")
 	await _key(KEY_I)
 	TestUtil.check(m.tool == Toolbar.Tool.SELECT, "I key selects the select tool")
-	# W, A, S and D pan the view while held (and S no longer picks a tool).
+	# W, A, S and D pan the view while held (and S does not pick a tool).
 	var pan_before: Vector2 = m.camera.position
 	m.camera.zoom = Vector2.ONE
 	for pressed in [true, false]:
@@ -887,7 +887,7 @@ func _initialize() -> void:
 	await _key(KEY_SPACE)
 	TestUtil.check(m.paused and m.pause_ring.visible and _exclusive(m.toolbar) and m.toolbar.pause_button.button_pressed, "Space pauses, shows the ring, and only Pause is lit")
 	await _key(KEY_SPACE)
-	TestUtil.check(not m.paused and not m.pause_ring.visible and _exclusive(m.toolbar) and not m.toolbar.pause_button.button_pressed, "Space resumes, hides the ring, and Pause is no longer lit")
+	TestUtil.check(not m.paused and not m.pause_ring.visible and _exclusive(m.toolbar) and not m.toolbar.pause_button.button_pressed, "Space resumes, hides the ring, and Pause is not lit")
 	m.toolbar.speed_100_button.button_pressed = true
 	TestUtil.check(m.sim_speed == 100.0 and not m.paused and _exclusive(m.toolbar), "x100 plays at 100x")
 	m.toolbar.pause_button.button_pressed = true

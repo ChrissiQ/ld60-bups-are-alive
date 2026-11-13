@@ -7,7 +7,7 @@ extends SceneTree
 ##  - CommandQueue: three pushes drain as a, b, c, and the queue is empty after; two writer threads of 1,000 commands each arrive all
 ##    2,000, each writer's in its own order; a reader waiting in `wait` wakes on a push. After 10,000 pushes drained with no wait (a
 ##    running sim thread drains between iterations without waiting), one `wait` returns at once and the next sleeps until a push 60 ms
-##    later (40 ms or more) [derived: a push posts only when no post is waiting; before, each push posted and 9,999 waits returned at once].
+##    later (40 ms or more) [derived: a push posts only when no post is waiting, so 9,999 earlier pushes leave one post and one wait returns at once].
 ##  - SimReply: not done and null at first; `complete(v)` makes it done with v; a second complete changes nothing; an error comes back.
 ##  - CpuSimBackend: cannot simulate; no device name (""); a command's reply is done at once with null and no error; the snapshot is empty
 ##    (seq 0, no dishes); no view source.

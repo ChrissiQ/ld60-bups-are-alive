@@ -66,7 +66,7 @@ func _ask(local: Vector2, slack: float, pixel: float, near := 0.0) -> Dictionary
 
 
 ## The bup a pick at `local` finds by the pick's rule over the records (in their order: the payload's), and how near the reach the
-## fixture's or this build's answer lies: [index or -1, distance of the answer's bup minus its reach].
+## fixture's or the pool's answer lies: [index or -1, distance of the answer's bup minus its reach].
 func _brute(records: PackedByteArray, local: Vector2, slack: float, pixel: float) -> int:
 	var w := GpuLayout.RECORD_WORDS
 	var f := records.to_float32_array()
