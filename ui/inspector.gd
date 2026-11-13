@@ -124,6 +124,8 @@ func _show_info(following: bool) -> void:
 	var alive_info: Dictionary = dish.bup_info(bup_id) if bup_id >= 0 else {}  # (fetched once: the panels below are built from it)
 	if bup_id >= 0 and alive_info.is_empty() and dish.has_bup(bup_id):
 		alive_info = dish.lineage_info(bup_id)  # (alive, but its record has not been answered yet: its family record stands in, rather than showing it as deceased)
+	if bup_id >= 0 and alive_info.is_empty() and dish.lineage_info(bup_id).is_empty():
+		bup_id = -1  # (nothing is known of it yet: neither its record nor its place in the family tree has come back)
 	var dead := bup_id >= 0 and alive_info.is_empty()  # a selected bup that has died stays up, as a record
 	var lineage_open := lineage.is_open_on(bup_id)
 	var something := bup_id >= 0 or source != null or floating != null or not husk.is_empty()
@@ -194,6 +196,8 @@ func _show_hover(hover_point: Variant) -> void:
 	var alive_info: Dictionary = dish.bup_info(bup_id) if bup_id >= 0 else {}
 	if bup_id >= 0 and alive_info.is_empty() and dish.has_bup(bup_id):
 		alive_info = dish.lineage_info(bup_id)
+	if bup_id >= 0 and alive_info.is_empty() and dish.lineage_info(bup_id).is_empty():
+		bup_id = -1  # (nothing is known of it yet, as in `update`)
 	var dead := bup_id >= 0 and alive_info.is_empty()
 	var something := bup_id >= 0 or source != null or floating != null or not husk.is_empty()
 	hover_card.visible = something or hover_point != null
