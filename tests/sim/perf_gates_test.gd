@@ -1,5 +1,5 @@
 extends SceneTree
-## The performance gates against the pre-pool baseline `tools/gpu/baseline/perf_pre_pool.json`.
+## The performance gates, against the pre-pool baseline `tools/gpu/baseline/perf_pre_pool.json`.
 ##
 ## Expected values, written before the first run:
 ## - Static part (runs headless): the baseline holds every key the gates read, so a missing key fails with its path [derived from the
@@ -8,26 +8,26 @@ extends SceneTree
 ## - The gate functions (`gate_*`), checked on synthetic numbers [derived from the gate text]:
 ##   E: p95 <= min(baseline E p95, 1.15 x display frame) and speed >= 9,500 (measured baseline: p95 10.18 ms, speed 9,994; display frame
 ##   8.33 ms [measured] so the cap is 9.58 ms). F: p95 and speed no worse than the baseline's (p95 64.66 ms, speed 309 [measured]) and
-##   per-step cost at 2M <= 0.85 x the single-dish path's. A and B: p95 <= the baseline's (A: 32.0 ms [measured]). G: frame mean <= the best of the
+##   per-step cost at 2M <= 0.85 x the baseline's. A and B: p95 <= the baseline's (A: 32.0 ms [measured]). G: frame mean <= the best of the
 ##   two backends' + 1 SD, and speed >= 10,000. x1: payload advances in >= 99% of display frames.
 ## - The speed column of gates E, F, G and x1 is measured windowed through the real sim thread (GpuSimBackend, WorldClient; no game
-##   stack: the main thread only sends set_time each frame, tells the sim which payload texture it bound, and reads snapshots.
+##   stack): the main thread only sends set_time each frame, tells the sim which payload texture it bound, and reads snapshots.
 ##   The dishes are filled to their limit at once (the founder's genes, reserves from none to full,
 ##   masses 1 to 2 birth masses, spread inside 95% of the rim), nutrient and feed at the setup maxima, 100 cells across; 12 s of settling,
 ##   then the window. Achieved speed = the snapshots' world clock over the wall clock. Written before the first run:
 ##   E: 100,000 bups, 45 mm, x10,000, 600 s: every sliding 60 s window (1 s apart) >= x9,500 and the whole run >= baseline E's mean
 ##     minus its spread, 9,994 - 8.3 = x9,985.7 [measured baseline]; expected to pass: a 100k step is about 0.9 ms of GPU plus about 0.5 ms
-##     fixed [derived from the 18 ms 2M step and the per-step dispatches], so x10,000 (500 steps a second) keeps the device about 70% busy.
+##     fixed [derived from the measured 18 ms 2M step and the per-step dispatches], so x10,000 (500 steps a second) keeps the device about 70% busy.
 ##   F: 2,000,000 bups, 90 mm, x10,000, 60 s: >= baseline F's mean minus its spread, 309 - 0.5 = x308.5 [measured baseline]; expected
 ##     about x800 (a step about 20 ms [measured] plus the iteration's readback and publish, one step an iteration) [derived].
 ##   G: 50, 200 and 1,000 bups (limit = count), 45 mm, x10,000, 30 s each: >= x9,990 (x10,000 less what one iteration's lag of at most
-##     T_ITER of steps leaves unmeasured over 30 s and frame capping) [derived]; the single-dish path's best is x10,000 at each size [measured baseline].
+##     T_ITER of steps leaves unmeasured over 30 s and frame capping) [derived]; the baseline's best is x10,000 at each size [measured baseline].
 ##   x1: 1,000 and 100,000 bups, 45 mm, x1, 60 s: the share of display frames in which a new payload is shown; >= 0.99 is the gate. The
 ##     sim steps Governor.STEPS_PER_SECOND (120) times a simulated second, so on a 120 Hz display every frame can have a new one [derived];
 ##     this script shows the payload WorldClient's playout gives each frame (one publish a frame in order, at most WAITING_MOST (2) waiting:
 ##     publishes that land together are shown on the frames after), as the game does: 0.9997 at 1,000 and 0.9989 at 100,000 with one waiting [measured:
 ##     a replay of 7,200 frames' arrivals recorded in a run of this script; showing the newest gave 0.978 and 0.867 on the same frames]. Edit to
-##     visible (paused, a source placed, 8 times): frames until a snapshot shows it, <= 2 frames + one iteration [derived], the single-dish path's 1 frame
+##     visible (paused, a source placed, 8 times): frames until a snapshot shows it, <= 2 frames + one iteration [derived], the baseline's 1 frame
 ##     [measured baseline, a pixel hash].
 ##   The interface column (frame p95 and worst on the game screen) is measured in the interface gate on the final tree; the main frames printed here are
 ##   this script's (no game screen), for reference only.
@@ -43,7 +43,7 @@ extends SceneTree
 ##   about 11.4 ms [derived: half of the 22.75 ms at 2M]].
 ##   The 1,000-dish interface is tests/sim/interface_gate.gd (the game screen on the real pool: this script has none), whose bounds are the
 ##   static `gate_interface` here.
-## - The pipette on a 1M dish, through WorldClient as Dish.pipette sends it, the world running at x10,000 (the
+## - The pipette on a dish of 1,000,000 bups, through WorldClient as Dish.pipette sends it, the world running at x10,000 (the
 ##   filled dish: 1,000,000 bups, 90 mm, limit 1,000,000), a circle of 20 mm at the middle. Written before the first run:
 ##   the main thread's part of the call (WorldClient.pipette: a command queued) < 1 ms [derived: no read, no wait]; no frame of the wait
 ##   longer than 3 display frames [derived: the main thread only polls]; no whole-dish readback and no lineage export or import [derived,
@@ -52,7 +52,7 @@ extends SceneTree
 ##   iteration and the rest after it; the new dish's grid was made ahead for the main view's dish (SimThread._make_grid_ahead), so the
 ##   retarget is done at once, one pipette pass; the worker answers after the iteration it holds (its lineage), and the main thread sees
 ##   the reply at its next frame: <= the longest iteration seen + its rest + the pass + the worker's lineage + a display frame]. The
-##   T_ITER + sync is a placeholder (Governor.T_ITER_MS 25 ms is a target for an iteration's steps, not a bound on one: a 1M
+##   bound of T_ITER + sync is a placeholder (Governor.T_ITER_MS 25 ms is a target for an iteration's steps, not a bound on one: a 1M
 ##   step alone is longer) and is printed beside it. The screen's side of the reply (a Dish adopting the receiver, as Main._finish_pipette does, and drawing it: its MultiMesh made for
 ##   twice the payload's count, at most the limit's): adopt < one display frame and no frame of the 20 after it over 3 display frames
 ##   [derived: adopt only sets fields and sends commands; the drawing makes its instance buffer once, for the moved bups, and its view
@@ -612,7 +612,7 @@ func _gate_g_speed(baseline: Dictionary) -> void:
 		_print_run(m)
 		var speed := run_speed(m.get("samples", []))
 		var best: Dictionary = lookup(baseline, ["scenarios", "G", str(n), "best_of_the_two"])
-		print("GATE G%d speed [measured]: run x%.1f; the single-dish path's best (%s) x%s" % [n, speed, best.get("backend"), lookup(baseline, ["scenarios", "G", str(n), String(best.get("backend")), "achieved_speed_mean_of_runs"])])
+		print("GATE G%d speed [measured]: run x%.1f; the baseline's best (%s) x%s" % [n, speed, best.get("backend"), lookup(baseline, ["scenarios", "G", str(n), String(best.get("backend")), "achieved_speed_mean_of_runs"])])
 		TestUtil.show(m["ok"], "gate G (%d bups): the run was clean" % n)
 		TestUtil.show(speed >= G_SPEED_FLOOR - G_SPEED_TOLERANCE, "gate G (%d bups): x10,000 sustained (>= x%.0f)" % [n, G_SPEED_FLOOR - G_SPEED_TOLERANCE])
 
@@ -678,7 +678,7 @@ func _gate_x1_speed() -> void:
 		TestUtil.show(not edit_frames.is_empty() and edit_frames.max() <= 3, "gate x1 (%d bups): edit to visible <= 2 frames + one iteration (%s)" % [n, edit_frames])
 
 
-# ---- The pipette on a 1M dish -------------------------------------------------------------------------------------
+# ---- the pipette on a dish of 1,000,000 bups -------------------------------------------------------------------------------------
 
 func _row_55() -> void:
 	var backend := GpuSimBackend.new()
@@ -750,10 +750,10 @@ func _row_55() -> void:
 	grid_ms.sort()
 	var bound := most_iteration + most_rest + own_pass + most_lineage + DISPLAY_FRAME_MS
 	print("PIPETTE1M [measured] 1M dish at x10,000: %d bups moved; the call %d us on the main thread; reply after %.1f ms (%d iterations ended meanwhile; the longest iteration seen %.2f ms, rest %.2f ms; its retarget pass %.2f ms; the worker's longest lineage %.2f ms; last sync %.2f ms); the worst frame of the wait %.1f ms; a new dish's grid (DishGrid.make, 100 cells, on this thread: made ahead, so not waited for) %.1f ms median of 3; a second pipette's pass alone (SimCore.pipette with its grid made, %d bups) %.1f ms" % [moved, call_us, reply_ms, iterations, most_iteration, most_rest, own_pass, most_lineage, float(t.get("sync_ms", 0.0)), worst_ms, grid_ms[1], timed.value()[1], pass_ms])
-	TestUtil.show(moved > 0 and call_us < 1000 and worst_ms <= 3.0 * DISPLAY_FRAME_MS, "the pipette of a 1M dish moved %d bups; the main thread's call %d us (< 1 ms), no frame of the wait over 3 display frames (worst %.1f ms)" % [moved, call_us, worst_ms])
+	TestUtil.show(moved > 0 and call_us < 1000 and worst_ms <= 3.0 * DISPLAY_FRAME_MS, "1M pipette: the pipette of a 1M dish moved %d bups; the main thread's call %d us (< 1 ms), no frame of the wait over 3 display frames (worst %.1f ms)" % [moved, call_us, worst_ms])
 	print("PIPETTE1M [measured] the screen's side of the reply: Dish.adopt of the receiver (the source's 1M limit) %.2f ms; the worst of the 20 frames after it, the receiver drawn in the main view (its picture made for its count), %.1f ms; Main's own part (_finish_pipette: the strip, the dish set) not measured here" % [adopt[0], adopt[1]])
-	TestUtil.show(adopt[0] < DISPLAY_FRAME_MS and adopt[1] <= 3.0 * DISPLAY_FRAME_MS, "taking the reply stalls no frame (adopt %.2f ms, then the worst frame %.1f ms)" % [adopt[0], adopt[1]])
-	TestUtil.show(reply_ms <= bound, "the reply within one iteration of the command (<= the longest iteration %.1f + its rest %.1f + its pass %.1f + the worker's lineage %.1f + a display frame = %.1f ms [derived]): %.1f ms (T_ITER %.0f ms + sync %.1f = %.1f ms, the placeholder)" % [most_iteration, most_rest, own_pass, most_lineage, bound, reply_ms, Governor.T_ITER_MS, float(t.get("sync_ms", 0.0)), Governor.T_ITER_MS + float(t.get("sync_ms", 0.0))])
+	TestUtil.show(adopt[0] < DISPLAY_FRAME_MS and adopt[1] <= 3.0 * DISPLAY_FRAME_MS, "1M pipette: taking the reply stalls no frame (adopt %.2f ms, then the worst frame %.1f ms)" % [adopt[0], adopt[1]])
+	TestUtil.show(reply_ms <= bound, "1M pipette: the reply within one iteration of the command (<= the longest iteration %.1f + its rest %.1f + its pass %.1f + the worker's lineage %.1f + a display frame = %.1f ms [derived]): %.1f ms (T_ITER %.0f ms + sync %.1f = %.1f ms, the placeholder)" % [most_iteration, most_rest, own_pass, most_lineage, bound, reply_ms, Governor.T_ITER_MS, float(t.get("sync_ms", 0.0)), Governor.T_ITER_MS + float(t.get("sync_ms", 0.0))])
 
 
 ## The screen's side of a pipette's reply: Dish nodes for the source (out of the main view) and the receiver (adopted from the reply, in the

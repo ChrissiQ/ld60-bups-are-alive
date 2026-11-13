@@ -1,6 +1,6 @@
 extends SceneTree
-## the interface stays unfrozen while the sim runs, and the shutdown is clean. A world of one 2,000,000-bup dish (the
-## scenario F dish) and a small one runs at x10,000 for 10 minutes through the real sim thread (GpuSimBackend, WorldClient), while the main
+## The interface stays unfrozen while the sim runs, and the shutdown is clean. A world of one 2,000,000-bup dish (scenario F's
+## dish) and a small one runs at x10,000 for 10 minutes through the real sim thread (GpuSimBackend, WorldClient), while the main
 ## thread drives every kind of command on a schedule and checks every reply; then the world is shut down and both threads joined.
 ## Windowed, through the lock (a run of about 11 minutes):
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/soak_test.gd [-- seconds=600]
@@ -37,7 +37,7 @@ var _late := 0
 
 func _initialize() -> void:
 	if not SimHarness.device_available():
-		SimHarness.skip(self, "soak_test", "needs a local GPU (not available headless)", "a later change")
+		SimHarness.skip(self, "soak_test", "needs a local GPU (not available headless)", "the pooled core (SimCore)")
 		return
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("seconds="):

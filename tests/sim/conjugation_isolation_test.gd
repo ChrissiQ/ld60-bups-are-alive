@@ -7,11 +7,11 @@ extends SceneTree
 ##   lone run (diff == "") and Y has 0 donors (ST_DONORS == 0) [derived: the donor table is keyed by dish].
 ## - X gains donors: ST_DONORS after > ST_DONORS before [placeholder: conjugation is stochastic; the direction is expected, the size is
 ##   not derived].
-## Needs a GPU. Windowed only.
+## Needs a GPU (windowed).
 
 
 func _init() -> void:
-	if not SimHarness.begin(self, "conjugation_isolation_test", "SimCore"):
+	if not SimHarness.begin(self, "conjugation_isolation_test", "the pooled core (SimCore)"):
 		return
 	var x := Scenario.small(60, 300.0).seed(41).with_flags({"conjugation": true})
 	x.layout_seed = 4

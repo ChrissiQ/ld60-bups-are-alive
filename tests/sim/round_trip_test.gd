@@ -16,13 +16,13 @@ extends SceneTree
 ##   the freeze, word for word [derived: `gather` reads what `load_dish` writes back].
 ## - the family tree across the pipette, the freeze, the thaw and the trash (no export or import: one shared LineageStore) is checked in
 ##   the game build, where the store is: tools/gpu/game_check.gd `edits`.
-## Needs a GPU. Windowed only.
+## Needs a GPU (windowed).
 
 const COMPARED := ["records", "field", "clouds", "husks", "dstate", "stats"]
 
 
 func _init() -> void:
-	if not SimHarness.begin(self, "round_trip_test", "SimCore"):
+	if not SimHarness.begin(self, "round_trip_test", "the pooled core (SimCore)"):
 		return
 	var s := Scenario.small(40, 600.0).seed(8)
 	var h := SimHarness.make([s, Scenario.small(1, 600.0).seed(9)], {"tally": true}).step(60)

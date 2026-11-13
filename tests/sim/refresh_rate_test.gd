@@ -12,7 +12,7 @@ extends SceneTree
 ##   (each frame waits until the sim has caught up, so what is owed never passes the cap).
 ## - the canonical dumps of the dish (records, field, clouds, husks, DSTATE, the last iteration's events, stats) after N + 1 steps differ
 ##   in 0 words [derived: the same step length, the same steps and the same world events, and a step's result does not depend on how
-##   steps are grouped into iterations].
+##   steps are grouped into iterations (the continuation property)].
 ## - the dish: 200 founders in a 1.5 mm dish, every flag on, a bloom of 2 a mm² a day and a source, seed 21 (the fine path: 1/120 s is under
 ##   FINE_STEP).
 
@@ -22,7 +22,7 @@ const WAIT_MSEC := 60000
 
 func _initialize() -> void:
 	if not SimHarness.device_available():
-		SimHarness.skip(self, "refresh_rate_test", "needs a local GPU (not available headless)", "a later change")
+		SimHarness.skip(self, "refresh_rate_test", "needs a local GPU (not available headless)", "the pooled core (SimCore)")
 		return
 	var a: Dictionary = await _run(1.0 / 120.0)
 	var b: Dictionary = await _run(1.0 / 240.0)

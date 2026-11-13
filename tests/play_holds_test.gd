@@ -1,6 +1,6 @@
 extends SceneTree
 ## Run: godot --headless --path . -s tests/play_holds_test.gd
-## PlayHolds on a real Toolbar (the free-mode game screen's), the single-dish path's behaviour. Expected values are derived from scripts/play_holds.gd.
+## PlayHolds on a real Toolbar (the free-mode game screen's). Expected values are derived from scripts/play_holds.gd.
 ## Holds pause the game; release restores the speed from before the hold; two holds need two releases.
 
 
@@ -17,7 +17,7 @@ func _run() -> void:
 	var tb: Toolbar = m.toolbar
 	var holds := PlayHolds.new(tb)  # (its own, beside the screen's: the screen holds nothing in free mode)
 
-	# a hold pauses and locks; RESTORE gives back the speed from before.
+	# A hold pauses and locks; RESTORE gives back the speed from before.
 	tb.speed_100_button.button_pressed = true
 	TestUtil.check(not tb.is_paused() and tb.speed_100_button.button_pressed, "setup: playing at x100")
 	holds.hold(&"a")

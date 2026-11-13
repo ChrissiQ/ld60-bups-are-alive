@@ -1,7 +1,6 @@
 extends SceneTree
 ## Run: godot --headless --path . -s tests/sim_layout_test.gd
 ## The pooled world's word layouts (gpu/gpu_layout.gd), headless. Expected values, written before the first run:
-## [derived]
 ##  - the record: 28 words, each of R_* named once (0-27), no word or constant naming a dish (a bup's dish is its segment);
 ##  - ids: one world-wide positive 63-bit number (ID_MAX 2^63 - 1), no dish in it; R_ID_HI is its high word; WORLD holds the next id (WD_NEXT_ID_LO/HI);
 ##  - an event's step word (ED_STEP, and a birth's EB_STEP): 13 low bits step, 19 high bits dish number, 13 + 19 = 32; MAX_STEPS_PER_BATCH (1024) fits in 13 bits;
@@ -9,7 +8,7 @@ extends SceneTree
 ##    it names seed, step, k_total, iterations, noise_reference and radius;
 ##  - DSTATE: 32 words; DS_* name 25 distinct words 0-24 (24-31 the energy ledger's four sums), including moved_in and moved_out;
 ##  - WORLD: 16 words, 13 named (the totals the kernels bound their loops by are uints there, not floats in P); payload: 4 words = 16 B, id texture 2 words = 8 B, colour bytes inside the fourth word above its spare low byte;
-##  - STATS per dish: 16 words x (1 + 16) = 272 words; QIN and QOUT pools are D_MAX rows of the single-dish path's QIN_WORDS (44) and QOUT_WORDS (240);
+##  - STATS per dish: 16 words x (1 + 16) = 272 words; QIN and QOUT pools are D_MAX rows of the single-dish QIN_WORDS (44) and QOUT_WORDS (240);
 ##  - D_MAX 1,024 rows: DISHP + DSTATE = 1,024 x 256 B = 256 KB;
 ##  - no kernel reads a dish table by a number, and no layout name is also a kernel's buffer name.
 
@@ -104,7 +103,7 @@ func _payload() -> void:
 
 func _sizes() -> void:
 	TestUtil.check(L.STATS_DISH_WORDS == 272 and L.STATS_ITER_SAMPLES == 16, "a dish's STATS row is 17 samples of 16 words")
-	TestUtil.check(L.QIN_POOL_WORDS == L.D_MAX * 44 and L.QOUT_POOL_WORDS == L.D_MAX * 240, "QIN and QOUT hold a row of the single-dish path's words for each dish")
+	TestUtil.check(L.QIN_POOL_WORDS == L.D_MAX * 44 and L.QOUT_POOL_WORDS == L.D_MAX * 240, "QIN and QOUT hold a row of the single-dish words for each dish")
 	TestUtil.check(L.D_MAX == 1024 and L.BLK_SLOTS == 1 << L.BLK_SHIFT and L.BLK_SLOTS == 256 and L.NO_DISH == 0xFFFFFFFF, "D_MAX, the block size and the no-dish value")
 	TestUtil.check(L.PIPDST_WORDS == 1, "PIPDST is one uint a slot")
 

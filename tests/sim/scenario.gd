@@ -97,7 +97,7 @@ func copy() -> Scenario:
 	return c
 
 
-## Every flag on, resolution as given.
+## Every flag on, resolution as given ("every flag set").
 func with_all_flags(p_resolution := 100) -> Scenario:
 	var all := {"resolution": p_resolution}
 	for f in FLAG_NAMES:
@@ -105,7 +105,7 @@ func with_all_flags(p_resolution := 100) -> Scenario:
 	return with_flags(all)
 
 
-## A random scenario for the "other dishes" of a test, from `rng` (so the others are the same in every run that seeds it alike).
+## A random scenario for the "other dishes" of the isolation and permutation tests, from `rng` (so the others are the same in every run that seeds it alike).
 static func random_other(rng: RandomNumberGenerator, with_flags_on := true) -> Scenario:
 	var s := Scenario.small(rng.randi_range(5, 200), rng.randf_range(300.0, 3000.0))
 	s.label = "other"

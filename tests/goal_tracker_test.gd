@@ -1,7 +1,7 @@
 extends SceneTree
 ## Run: godot --headless --path . -s tests/goal_tracker_test.gd
-## GoalTracker's ladder on a stub dish (population and the sense fraction are set by hand), the single-dish path's behaviour. Expected values are derived from
-## scripts/goal_tracker.gd. Experiment 1 at 1,000 bups, experiment 2 at half the bups with sense >= 70
+## GoalTracker's ladder on a stub dish (population and the sense fraction are set by hand). Expected values are derived from
+## scripts/goal_tracker.gd: experiment 1 at 1,000 bups, experiment 2 at half the bups with sense >= 70
 ## held 1,800 s with at least 15 bups, upkeep x3 from experiment 2, nutrient tools unlocked from experiment 2.
 
 

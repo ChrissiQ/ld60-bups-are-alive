@@ -18,14 +18,14 @@ extends SceneTree
 ##   and the bups' uptake move nutrient between cells and bups]. Tolerance: 1e-5 of E_before plus every amount the ledger counts [the empty
 ##   dish's float32 bound, placeholder], plus 2^-21 a fixed-point add, at most 8 a bup a step [derived: the ledger's four terms and the
 ##   deposits round to 2^-20]. Each dish's upkeep and uptake terms are above 0, and life's in at least one dish (the pool has deaths).
-## Needs a GPU. Windowed only.
+## Needs a GPU (windowed).
 
 const STEPS := 300
 const EMPTY_TOLERANCE := 1e-5  ## placeholder
 
 
 func _init() -> void:
-	if not SimHarness.begin(self, "invariants_test", "SimCore"):
+	if not SimHarness.begin(self, "invariants_test", "the pooled core (SimCore)"):
 		return
 	var dishes: Array = [
 		Scenario.small(50, 600.0).seed(1),

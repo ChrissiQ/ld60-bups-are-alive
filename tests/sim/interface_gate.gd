@@ -1,7 +1,7 @@
 extends SceneTree
 ## The interface at 1,000 dishes: the game screen on the real pool with every dish it allows running (Main.MAX_DISHES,
 ## 999: an interface choice, not the world's 1,024 rows), the dish strip and the sections showing them, measured as the 20-dish
-## C scenarios (bench_scenarios.gd of the replaced CPU simulation: the game screen, the dishes filled at once, an asked x10,000, 12 s of settling, then
+## C scenarios were before the pooled world (the game screen, the dishes filled at once, an asked x10,000, 12 s of settling, then
 ## 30 s of frames between process_frame calls at 2560 x 1440 windowed). Run windowed; it is not a `*_test.gd`, so tools/run_sim_tests.sh skips it:
 ## tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tests/sim/interface_gate.gd
 ## Args (after --): `dishes=N` (default 999), `seconds=N` (the window, default 30), `scenario=E` (gate E's frame p95, below), `scenario=A` or `scenario=B` (gates A and B, at the end of this header).
@@ -9,13 +9,13 @@ extends SceneTree
 ## never over a bup (a hover card and its picks are not in the baseline). A run in a larger window with the pointer over the dish gave
 ## a p95 of 12.3-12.9 ms where this scene gives 9.0 [measured]; such a run fails as void.
 ##
-## `scenario=E`: gate E's frame bound measured the way its baseline was (bench_scenarios.gd `world E 30` of the replaced CPU simulation: the game screen,
+## `scenario=E`: gate E's frame bound measured the way its baseline was (before the pooled world: the game screen,
 ## ONE dish of 45 mm and a 100,000 limit filled to the limit at once (perf_gates_test.filled_spec, put on the screen's own dish through a
 ## DishSpec: StartConditions.bups stops at 250), nutrient and feed at the setup maxima, asked x10,000, 12 s settle, 30 s of frames, three runs in
 ## three processes). The bound is `gate_e` (p95 <= min(the baseline's 10.18 ms, 1.15 x the display frame = 9.58 ms at 120 Hz), speed >= x9,500).
 ## Expected values, written before the first run:
 ## - A frame here is the main thread's part only (the sim runs on its own thread): the snapshot swap and its decode for one 100,000-bup dish,
-##   the view kernels and the draw of 100,000 instances at 2560 x 1440, the tray, graph and history refresh, the strip. The baseline's frames
+##   the view kernels and the draw of 100,000 instances at 2560 x 1440, the tray, graph and history refresh, the strip. The build before the pooled world's frames
 ##   with the same dish were mean 9.06, p95 10.18, worst 55 ms [measured]; the pooled build moved the simulation off the main thread's
 ##   renderer but the draw is the same, so mean about 9.0 ms and p50 about 8.9 are expected [derived], p95 9.6-10.3 ms, worst 20-60 ms
 ##   (a hitch at a snapshot with a large history or a shrink, `SimArena.maybe_shrink`, about 60 s after the start: outside the 12 s + 30 s window).
@@ -26,7 +26,7 @@ extends SceneTree
 ## - Speed reached x9,990-10,000 [measured on the baseline]; population 99,800-99,900 at both ends (the dish holds its limit).
 ##
 ## Expected values, written before the first run:
-## - The bound is `gate_interface` of perf_gates_test.gd: the p95 and the mean no worse than the 20-dish baseline's, scenario C48 (the same
+## - The bound is `gate_interface` of perf_gates_test.gd: the p95 and the mean no worse than the 20-dish baseline's C48 (the same
 ##   48 x 48 grids; perf_pre_pool.json: mean 9.31 ms, p95 10.33, max 14.48). This screen's frames at 994 dishes were p50 8.34, p95 8.96-9.10,
 ##   worst 11.1-11.35 ms [measured, asked x100]; at x10,000 asked the main thread's part is the same (the sim is on its own
 ##   thread), so p95 about 9 ms is expected [derived]: inside both bounds.
@@ -38,7 +38,7 @@ extends SceneTree
 ## view and six more 45 mm dishes of 12,000 running beside it (tabs, strip and tray sections for seven dishes). Each dish is the screen's own
 ## through a DishSpec (perf_gates_test.filled_spec), as for E. The camera is the game's fit of the main dish, so the million bups are drawn
 ## zoomed out, as the winner view draws them. The bound is `gate_ab`: the p95 (mean of the three runs) no worse than the baseline's in
-## tools/gpu/baseline/perf_pre_pool.json (A: p95 32.0 ms, mean 31.45, speed x624; B: p95 31.32, mean 30.64, speed x630 [measured, the baseline]).
+## tools/gpu/baseline/perf_pre_pool.json (A: p95 32.0 ms, mean 31.45, speed x624; B: p95 31.32, mean 30.64, speed x630 [measured, build before the pooled world]).
 ## Speed is not in the coded rule: it is printed and compared with the baseline's.
 ## Expected values, written before the first run:
 ## - A frame is the main thread's part (the sim runs on its own thread). `game_check perf 2000000` with the winner view reached x389 with frame
@@ -211,7 +211,7 @@ func _run() -> void:
 		print("IFACE E the simulation's own times [measured]: step median %.2f ms (p95 %.2f), iteration median %.2f ms (p95 %.2f, worst %.2f)" % [steps_ms[steps_ms.size() / 2], steps_ms[int(0.95 * steps_ms.size())], iter_ms[iter_ms.size() / 2], iter_ms[int(0.95 * iter_ms.size())], iter_ms[-1]])
 		var base_speed := float(_perf.lookup(baseline, ["scenarios", "E", "achieved_speed_mean_of_runs"]))
 		print("IFACE E [measured] p95 %.2f ms, mean %.2f, p50 %.2f, worst %.2f, speed x%.0f, population %d at the start of the window and %d at the end" % [p95, mean, p50, worst, reached, pop_start, m.dish.population()])
-		print("IFACE E baseline (bench_scenarios world E 30) [measured]: p95 %.2f ms, mean %.2f, worst %.2f, speed x%.0f; cap min(%.2f, %.2f x %.3f = %.2f) ms, speed >= x%.0f" % [base_p95, base_mean, base_max, base_speed, base_p95, _perf.E_FRAME_SHARE, _perf.DISPLAY_FRAME_MS, _perf.E_FRAME_SHARE * _perf.DISPLAY_FRAME_MS, _perf.E_SPEED_FLOOR])
+		print("IFACE E baseline (build before the pooled world) [measured]: p95 %.2f ms, mean %.2f, worst %.2f, speed x%.0f; cap min(%.2f, %.2f x %.3f = %.2f) ms, speed >= x%.0f" % [base_p95, base_mean, base_max, base_speed, base_p95, _perf.E_FRAME_SHARE, _perf.DISPLAY_FRAME_MS, _perf.E_FRAME_SHARE * _perf.DISPLAY_FRAME_MS, _perf.E_SPEED_FLOOR])
 		var status_e: Dictionary = WorldClient.shared().backend.status()
 		TestUtil.show((status_e.get("errors", []) as Array).is_empty() and status_e.get("alive", false), "gate E: the world is clean (%s)" % [status_e])
 		TestUtil.show(_perf.gate_e(p95, reached, base_p95), "gate E: p95 %.2f ms <= min(%.2f, %.2f) and speed x%.0f >= x%.0f" % [p95, base_p95, _perf.E_FRAME_SHARE * _perf.DISPLAY_FRAME_MS, reached, _perf.E_SPEED_FLOOR])

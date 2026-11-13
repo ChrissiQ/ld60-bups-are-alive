@@ -9,9 +9,9 @@ extends SceneTree
 ##    is 19 in view, plus one cut at each end and OVERSCAN (4) each side: 19 + 1 + 8 = 28 here, 40 the bound]; each tab made shows the
 ##    dish its place stands for.
 ##  - Bringing dish 700 into view scrolls its tab into view, lit, and no other made tab is lit; a click on a made tab brings its dish in.
-##  - The strip's main-thread cost a frame (`refresh`) at 1,000 dishes is at most 1.5 x the single-dish path's at 20 [placeholder bound: the single-dish path's 2.5 us
+##  - The strip's main-thread cost a frame (`refresh`) at 1,000 dishes is at most 1.5 x its cost at 20 [placeholder bound: 2.5 us
 ##    measured headless with the SubViewport strip at 20 dishes, so at most 3.75 us].
-##  - The all-dishes section reads the snapshot's totals: its update at 1,000 dishes costs no more than 1.5 x the single-dish path's loop at 20 dishes
+##  - The all-dishes section reads the snapshot's totals: its update at 1,000 dishes costs no more than 1.5 x its loop at 20 dishes
 ##    [measured baseline: 68.8 us, so at most 103 us].
 ##  - The top bar's fit (Main._fit_top_bar, every frame) at 999 dishes costs at most 50 us [placeholder: it reads a few sizes and lays nothing
 ##    out again while nothing changed].

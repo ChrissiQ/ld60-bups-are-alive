@@ -30,7 +30,7 @@ const WALL_DISHES := 3
 
 
 func _init() -> void:
-	if not SimHarness.begin(self, "motion_test", "a GPU"):
+	if not SimHarness.begin(self, "motion_test", "the pooled core (SimCore)"):
 		return
 	var h := Gen.new_world()
 	_check_drift(h)

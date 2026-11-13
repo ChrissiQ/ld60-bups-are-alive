@@ -33,7 +33,7 @@ extends SceneTree
 ##    thread reports it once (status errors 1, the snapshot's timing["refused_iteration"] set), and a freeze still replies with its blob.
 ##    Over a second of x600 frames while refused, the world is tried at most 1000 / SimThread.REFUSED_RETRY_MSEC + 1 = 5 times a second
 ##    [derived: after a refusal of one step the thread waits for a command that may make room or the retry time; a frame's set_time is
-##    not such a command]. The rate before the back-off was built was measured separately [measured].
+##    not such a command].
 ## S  through SimThread with a LineageStore (the path WorldClient's calls take): a dish of 20 founders run a few iterations and frozen
 ##    replies with lineage bytes of more than 8 and lineage ids holding every live id of its blob; for a second dish of 40 founders,
 ##    asking for two of its ids and a probe gives, in a later snapshot, their records (ANSWER_BYTES each, the right ids), a steering
@@ -45,7 +45,7 @@ var _store_ok := ClassDB.class_exists("LineageStore")
 
 
 func _init() -> void:
-	if not SimHarness.begin(self, "core_calls_test", "(SimCore's calls)"):
+	if not SimHarness.begin(self, "core_calls_test", "SimCore's calls"):
 		return
 	_reads()
 	_set_params()

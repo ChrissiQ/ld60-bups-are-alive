@@ -1,5 +1,5 @@
 extends SceneTree
-## The windowed part (the info panel's follow keeps the selected bup in the middle of the stage) on the real pool at x10,000:
+## The windowed part of the info panel's follow (it keeps the selected bup in the middle of the stage), on the real pool at x10,000:
 ## the game screen itself (Main, free mode, on SimService's world), a bup selected and followed, and each frame the bup's place in the
 ## picture drawn that frame (the payload the dish's view drew, read back from its shared texture) against the stage's middle, in screen
 ## pixels. Windowed only:

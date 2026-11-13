@@ -14,7 +14,7 @@ const STEPS := 1200
 
 
 func _init() -> void:
-	if not SimHarness.begin(self, "cloud_entries_test", "SimCore"):
+	if not SimHarness.begin(self, "cloud_entries_test", "the pooled core (SimCore)"):
 		return
 	SimConstants.apply()
 	var h := SimHarness.make([Tools.scenario("D", 6)], {"delta": 20.0})

@@ -6,7 +6,7 @@ extends SceneTree
 ##   random other dishes beside it: after every 20 steps of 20 s (200 steps in all) the canonical dumps differ nowhere
 ##   (diff == "") [derived: per-dish segments, RNG and clouds are pooled by dish]. Three seeds for the others.
 ## - the others' own invariants hold in every run (invariants() empty) [derived].
-## Needs the pooled world (SimCore) and its kernels. Windowed only (GPU).
+## Needs a GPU (windowed).
 
 const STEPS := 200
 const CHECK_EVERY := 20
@@ -15,7 +15,7 @@ const SEEDS := [101, 202, 303]
 
 
 func _init() -> void:
-	if not SimHarness.begin(self, "isolation_test", "SimCore"):
+	if not SimHarness.begin(self, "isolation_test", "the pooled core (SimCore)"):
 		return
 	var x := Scenario.small(40, 600.0).seed(11).with_all_flags()
 	x.number = 1

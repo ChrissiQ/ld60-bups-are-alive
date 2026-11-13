@@ -34,8 +34,8 @@ extends SceneTree
 ##    time since the copy's `time` is the world's own count to 1e-6 relative (Dish.source_details' rule), which is past 10 units after about
 ##    144 s at x60 (14.4).
 ## N  Through SimThread with a LineageStore: dish 1, pipettes to 2 and 3; all three trashed: the store keeps no record, claim or tombstone;
-##    begin_game at the world's time T (paused) and dish 1 again: its founders are born at minute 0, and its first pipette makes dish 2
-##    (before the fix: 4). Saved at game time Ts - T, trashed, the world run on, then begin_game(T + T2 - Ts) (Main's carried origin) and
+##    begin_game at the world's time T (paused) and dish 1 again: its founders are born at minute 0, and its first pipette makes dish 2.
+##    Saved at game time Ts - T, trashed, the world run on, then begin_game(T + T2 - Ts) (Main's carried origin) and
 ##    the save thawed at T2: a founder trashed then (pinned by another holder) dies at minute int((Ts - T) / 60) and keeps born 0 (the
 ##    game's clock goes on from the save, though the world's moved on).
 
@@ -43,7 +43,7 @@ var _store_ok := ClassDB.class_exists("LineageStore")
 
 
 func _init() -> void:
-	if not SimHarness.begin(self, "world_gaps_test", "(the dish's answers)"):
+	if not SimHarness.begin(self, "world_gaps_test", "the dish's answers"):
 		return
 	_kernels()
 	_husks()

@@ -7,14 +7,14 @@ extends SceneTree
 ##   words against the dish run N + M = 160 steps straight (diff == "") [derived: the codec keeps every block of the blob byte for byte and
 ##   the world (DishWorld.save()) as a lossless binary variant, so the thawed dish is the one `continuation_test` thaws from memory].
 ## - the blob that comes back has the records, DSTATE, grids, clouds and husks it was written with (equal as packed arrays).
-## Needs a GPU. Windowed only.
+## Needs a GPU (windowed).
 
 const N := 80
 const M := 80
 
 
 func _init() -> void:
-	if not SimHarness.begin(self, "codec_continuation_test", "SimCore"):
+	if not SimHarness.begin(self, "codec_continuation_test", "the pooled core (SimCore)"):
 		return
 	for flags in [{}, {"stationary": true, "death_husks": true, "plankton_husks": true, "acetate": true, "key": true, "conjugation": true}]:
 		var s := Scenario.small(40, 600.0).seed(31).with_flags(flags)

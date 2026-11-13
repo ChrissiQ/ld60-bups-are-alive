@@ -15,7 +15,7 @@ extends SceneTree
 ##    measured on the engine that made them; the table the game ships is a fresh measurement on the pooled GPU, and the chance of steering
 ##    (the alpha) is read from it, so the alpha differs by the two tables' difference (11 at most, measured).
 ## S  The 40 fixture bups of queries_info.txt, each selected in turn: Dish.bup_steering (the tracked answer's way and chance) within 1e-5
-##    of the fixture's bup_steering in each of x, y and the chance (the bound).
+##    of the fixture's bup_steering in each of x, y and the chance.
 ## Paused, each answer is waited for with ParityGame.answer_now.
 
 const STEER_ALPHA_TOLERANCE := 12  ## alpha units of 255: the measured worst 11 of the table difference, and one more

@@ -1,5 +1,5 @@
 extends SceneTree
-## Its windowed part (the thumbnails' atlas the world publishes for the dish strip) on the real pool: a dish of bups in the
+## The windowed part of the thumbnails' atlas the world publishes for the dish strip, on the real pool: a dish of bups in the
 ## main view and a bare dish parked (Dish.park, as Main parks every dish out of the view), the main view's dish asking for thumbnails as the
 ## screen asks while the strip shows (Dish.want_thumbnails), and the atlas taken each frame as the strip takes it (a ThumbAtlas ticked, its
 ## texture drawn from: it tells the world which atlas it used); the atlas read on the sim thread (SimCore's THUMBS, what its publish copies

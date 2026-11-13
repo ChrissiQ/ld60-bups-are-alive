@@ -1,6 +1,6 @@
 extends SceneTree
-## The select tool's pick on the real pool, and the picking: the fixture state (tools/gpu/golden/parity) loaded as a dish of
-## the game's world (ParityGame.fixture_dish), paused, a Dish node at ParityGame.PLACE drawing it. Windowed only:
+## The select tool's pick on the real pool, with the picking that needs the real picture: the fixture state (tools/gpu/golden/parity) loaded as a dish of
+## the game's world (ParityGame.fixture_dish), paused, a Dish node at ParityGame.PLACE drawing it. Needs a GPU (windowed):
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_pick_test.gd
 ##
 ## Expected values, written before the first run [derived unless marked]:
@@ -13,7 +13,7 @@ extends SceneTree
 ##    counted and named; none is expected.
 ## N  The fixture's 1,200 nearest-and-count questions (the same answers' `nearest` and `near`): the nearest distance within 1e-5 relative
 ##    (the kernel's float d² against the fixture's), the count exact except a bup within 1e-3 µm of the radius (none expected).
-## R  A check of its own: 200 points (100 on bups, 100 anywhere in the dish) clicked through Dish.cell_at with the camera at 0.25 px a
+## R  The check: 200 points (100 on bups, 100 anywhere in the dish) clicked through Dish.cell_at with the camera at 0.25 px a
 ##    µm and the select tool's slack (4 px), each answered by the brute force over the gathered records (nearest within half the drawn
 ##    length at that pixel plus the slack, ties to the lowest index): 200 of 200, boundary cases as in F.
 ## S  The select tool (it needs the real picture): the pointer resting on a bup outlines it within 3 frames; a click there

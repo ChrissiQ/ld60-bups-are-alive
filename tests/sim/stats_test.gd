@@ -3,20 +3,20 @@ extends SceneTree
 ##
 ## Expected values, written before the first run:
 ## - ST_COUNT equals the number of records exactly [derived]; the sums of the four genes, mutator, donors and key equal the sums of
-##   the dump's records within 1e-5 relative [placeholder: the fold order of the stats pass is not pinned; if it is pinned the
-##   comparison becomes exact].
-## - the stats of a dish are the same alone and in a pool (checked on the stats words only) [derived].
+##   the dump's records within 1e-5 relative [placeholder: the fold order of the stats pass is not pinned; if it were, the
+##   comparison would be exact].
+## - the stats of a dish are the same alone and in a pool (the isolation guarantee, checked on the stats words only) [derived].
 ## - `fraction_with_gene_at_least` (the goals' question, SimCore's kernel): for each gene and each of four thresholds (the
 ##   median record's own value, so that equal genes count; a value between two floats, 0.3 of the way from the median to the largest;
 ##   0, which every bup passes; past the largest, which none does) it equals the share of the dump's records whose float gene is at least
 ##   the threshold, exactly [derived: an integer count over the same floats, divided on the host in double].
-## Needs a GPU. Windowed only.
+## Needs a GPU (windowed).
 
 const TOLERANCE := 1e-5  ## placeholder
 
 
 func _init() -> void:
-	if not SimHarness.begin(self, "stats_test", "SimCore"):
+	if not SimHarness.begin(self, "stats_test", "the pooled core (SimCore)"):
 		return
 	var s := Scenario.small(60, 600.0).seed(5).with_flags({"conjugation": true, "key": true})
 	var h := SimHarness.make([s.copy(), Scenario.small(40, 400.0).seed(6)]).step(200)

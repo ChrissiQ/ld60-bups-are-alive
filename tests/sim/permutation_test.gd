@@ -7,14 +7,14 @@ extends SceneTree
 ## - a fifth dish added after 40 steps leaves the other four equal to the pool that never had it, and itself equal to its lone run
 ##   started at step 40 (its `step_start` is 0 at its own strike) [derived].
 ## - a dish removed after 40 steps leaves the others equal to the pool that kept it [derived].
-## Needs a GPU. Windowed only.
+## Needs a GPU (windowed).
 
 const STEPS := 100
 const JOIN_AT := 40
 
 
 func _init() -> void:
-	if not SimHarness.begin(self, "permutation_test", "SimCore"):
+	if not SimHarness.begin(self, "permutation_test", "the pooled core (SimCore)"):
 		return
 	var base: Array = []
 	for i in 4:

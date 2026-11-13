@@ -2,7 +2,7 @@ extends SceneTree
 ## The pooled world's ensemble statistics against the old path's.
 ##
 ## Expected values, written before the first run:
-## - Comparator (derived): for each scenario, each of the hours 1-6 and each of the seven per-seed metrics
+## - Comparator: for each scenario, each of the hours 1-6 and each of the seven per-seed metrics
 ##   (count, speed, sense, metabolism, size, mass, nutrient) the two ensembles' means differ by at most 3.62 SE, SE = sqrt(s_old^2/n +
 ##   s_new^2/n) (3.62: the two-sided normal bound for 0.05 over the 168 comparisons, 0.05 / 168 = 0.0003); the end-of-run gene samples (four genes, pooled over seeds) pass a two-sample Kolmogorov-Smirnov test at alpha = 0.01
 ##   Bonferroni-divided by the number of tests (4 genes x scenarios), with critical D = sqrt(-0.5 ln(alpha/2)) sqrt((n+m)/(n m)).
@@ -14,8 +14,8 @@ extends SceneTree
 ##   fails it (D = 2 Phi(0.5) - 1 = 0.38 against a critical 0.20 at alpha 0.0025 [derived]).
 ## - Parser self-check on the old file ensemble_cpu_B.txt [measured by counting the file]: 96 ENS lines (16 seeds x 6 hours), 7050 GENE lines;
 ##   compared with itself it gives 0 failures.
-## - The real comparison reads `tools/gpu/golden/ensemble_pooled_<S>.txt` (a name chosen here; the files are made elsewhere) against
-##   `ensemble_cpu_<S>.txt` for S in B, D, E, F, and is a SKIP when they are absent. Enabled by a later change.
+## - The real comparison reads `tools/gpu/golden/ensemble_pooled_<S>.txt` (a name chosen here) against
+##   `ensemble_cpu_<S>.txt` for S in B, D, E, F, and is a SKIP when they are absent.
 ## False-alarm rate of the design (derived): 7 metrics x 6 hours x 4 scenarios = 168 comparisons. With 16 seeds a side the statistic is
 ## Student's t with about 30 degrees of freedom, so 3.62 SE is exceeded by luck about once in 1,000 comparisons: 0.18 false failures
 ## expected, at most a 16% chance of one when the two paths are the same (less in fact: the scenarios share seeds and the hours of a seed
@@ -33,7 +33,7 @@ func _init() -> void:
 	_synthetic_checks()
 	_parser_checks()
 	_real_comparison()
-	TestUtil.finish(self, "OK ensemble_test (comparator self-checks; the pooled files are made separately)")
+	TestUtil.finish(self, "OK ensemble_test (comparator self-checks)")
 
 
 ## {"ens": {hour: {metric: [value per seed]}}, "gene": {gene: [samples]}} of an ensemble file's text.
@@ -183,7 +183,7 @@ func _real_comparison() -> void:
 		if FileAccess.file_exists(GOLDEN_DIR + "ensemble_pooled_%s.txt" % s):
 			present.append(s)
 	if present.is_empty():
-		print("SKIP ensemble_test: no ensemble_pooled_<S>.txt yet, enabled by a later change")
+		print("SKIP ensemble_test: no ensemble_pooled_<S>.txt")
 		return
 	for s in present:
 		var old := parse(FileAccess.get_file_as_string(GOLDEN_DIR + "ensemble_cpu_%s.txt" % s))

@@ -13,7 +13,7 @@ extends SceneTree
 ## - a dish frozen, stepped past and thawed holds the same ids it had, and the world's next id after the thaw is not below what it was;
 ##   100 steps later invariants() is empty.
 ## - two worlds made alike and run alike hold the same ids in every dish (determinism per seed).
-## Needs the pooled core and a local GPU. Windowed only.
+## Needs a GPU (windowed).
 
 const STEPS := 200
 

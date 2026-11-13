@@ -4,7 +4,7 @@ extends SceneTree
 ##  - the two event streams captured at pre-pool (tools/gpu/golden/lineage_*), replayed into a store that starts from the stream's
 ##    initial records, give the final records of the capture, compared by id (the order of an export's records is not stable);
 ##  - a pre-pool export (golden/parity/lineage_export.bin.gz) imported into an empty store exports the same records;
-##  - the cases of a pipette, freeze, thaw and trash on a store holding two or three dishes:
+##  - the cases of a pipette, freeze, thaw and trash on a store holding two or three dishes (cases (a)-(g), and (h):
 ##    the running dish that holds a frozen dish's shared bup leaves): export_dish, release_dish, discard_frozen, the idempotent
 ##    import_bytes, the tombstones.
 ## Expected values are derived in each function's comment from the rules of the store: a replay applies the very events the capture

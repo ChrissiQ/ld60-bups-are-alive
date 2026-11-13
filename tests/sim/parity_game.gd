@@ -35,7 +35,7 @@ var place := PLACE  ## where the next dish is put
 
 ## The gate (SimHarness.begin: headless prints SKIP and quits) and the world. Null when the test must stop.
 static func start(p_tree: SceneTree, test_name: String) -> ParityGame:
-	if not SimHarness.begin(p_tree, test_name, "the pooled world"):
+	if not SimHarness.begin(p_tree, test_name, "the pooled core (SimCore)"):
 		return null
 	SimConstants.apply()
 	var g := ParityGame.new()

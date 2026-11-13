@@ -17,13 +17,13 @@ extends SceneTree
 ##   founders at reserve 0, each alone in its own dish (in one dish the dead's clouds, DEATH_RELEASE, feed the living: 36 of 50 left and mean mass 7.96, not 7.69): no growth, and the mass pays at once, 8% of itself a day, so over 12 h it falls to 8 x exp(-0.04) = 7.69 (below
 ##   the birth mass 8) for a founder at mass 8; founders now start at a random phase, mass 8 x (1 + u), so each survivor ends at its own start mass x exp(-0.04) = 0.9608 of it (read from `founder_records`). The death rate is 0.22/day x exp(0.95 x 1.04 x metabolism 1) = 0.59/day, so 1 - exp(-0.296) = 26% of the 40 die in
 ##   12 h (30 of 40 left, +-4 for chance).
-## - Checks that need more than the harness can read are stubs naming what each needs:
+## - Rows that need more than the harness can read are stubs naming what each needs:
 ##   keen-bup drift 2.4-3.6 µm/s in a 0.5%/um gradient with a dull bup below 0.8 x keen (measured about 3.0): needs
 ##   `SimHarness.set_field` and the questions; mutation rate near TRAIT_MUTATIONS + HARMFUL_MUTATIONS per daughter:
 ##   needs the births events in the dump; cloud variance 2Dt with D = 600 / 25 = 24 µm2/s, within 3%: needs the
-##   clouds' dump layout; DEATH_RELEASE 0.25 of a body returned as a cloud; acetate excretion and
-##   uptake; conjugation rate.
-## Needs a GPU. Windowed only.
+##   clouds' dump layout; DEATH_RELEASE 0.25 of a body returned as a cloud: the same; acetate excretion and
+##   uptake and conjugation rate: not read by the harness yet.
+## Needs a GPU (windowed).
 
 const DOUBLING := 2400.0  ## Biology.DOUBLING_SECONDS
 const TOLERANCE := 0.05  ## placeholder
@@ -31,7 +31,7 @@ const HOUR_STEPS := 180  ## 3600 s at 20 s
 
 
 func _init() -> void:
-	if not SimHarness.begin(self, "biology_test", "SimCore"):
+	if not SimHarness.begin(self, "biology_test", "the pooled core (SimCore)"):
 		return
 	var rich := Scenario.small(20, 3000.0).seed(51)
 	rich.nutrient_density = 1000.0
@@ -59,12 +59,12 @@ func _init() -> void:
 			mass += recs.decode_float(i * GpuLayout.RECORD_BYTES + GpuLayout.R_MASS * 4) / start.decode_float(GpuLayout.R_MASS * 4)
 	TestUtil.show(n >= 20 and n <= 38 and absf(mass / maxf(n, 1) - exp(-0.04)) < 0.005, "starved bups die and shrink after 12 h: %d of 40 left (expected 30 +-8, binomial), mean mass share %.4f of the start (expected %.4f +-0.005)" % [n, mass / maxf(n, 1), exp(-0.04)])
 	for stub in [
-		["keen-bup drift in a gradient", "set_field and questions"],
-		["mutation rate per daughter", "births events in the dump"],
-		["cloud variance 2Dt", "the cloud kernels and the clouds in the dump"],
-		["DEATH_RELEASE as a cloud", "the cloud kernels and the clouds in the dump"],
-		["acetate excretion and uptake", "the kernels it needs"],
-		["conjugation rate", "the kernels it needs"],
+		["keen-bup drift in a gradient", "set_field and the questions"],
+		["mutation rate per daughter", "the births events in the dump"],
+		["cloud variance 2Dt", "the clouds in the dump"],
+		["DEATH_RELEASE as a cloud", "the clouds in the dump"],
+		["acetate excretion and uptake", "a harness reading of the acetate field"],
+		["conjugation rate", "a harness reading of the donors"],
 	]:
-		print("SKIP biology_test: %s, enabled by %s" % stub)
-	TestUtil.finish(self, "OK biology_test (six checks skipped, each names what it needs)")
+		print("SKIP biology_test: %s, needs %s" % stub)
+	TestUtil.finish(self, "OK biology_test (six rows skipped, each names what it needs)")

@@ -1,7 +1,7 @@
 extends SceneTree
-## A dose of nutrient, the eraser and edits as the world's events on the real pool, with the resize
-## (the field and the bups through a smaller dish and back): a Dish node at ParityGame.PLACE (away from the origin) edited as the screen
-## edits it, paused, the pool read before and after each edit (SimCore.gather). Windowed only:
+## A dose of nutrient, the eraser, edits as the world's events and a resize (the field and the bups through a smaller dish and
+## back) on the real pool: a Dish node at ParityGame.PLACE (away from the origin) edited as the screen
+## edits it, paused, the pool read before and after each edit (SimCore.gather). Needs a GPU (windowed):
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_edits_test.gd
 ##
 ## Expected values, written before the first run [derived unless marked]:

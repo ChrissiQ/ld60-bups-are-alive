@@ -4,7 +4,7 @@ extends SceneTree
 ## Expected values, written before the first run:
 ## - For every `tools/gpu/golden/dynamics_pooled_<scenario>_seed1_6h.txt`, one dish of that scenario at seed 1 run for 6 sim-hours in steps
 ##   of 20 s (what `tools/gpu/validate_dynamics.gd gpu <scenario> 1 6` does) gives the same six SAMPLE lines, byte for byte [derived: the
-##   run is deterministic per seed on one machine; equality is asked at one dish and one seed].
+##   run is deterministic per seed on one machine; the check asks for equality at one dish and one seed].
 ## - The goldens were made on Apple Silicon with Metal. On another GPU or driver the comparison is against a golden made there before the
 ##   change, so a mismatch on a new machine is a reason to regenerate the goldens there, not a failure of the code.
 ## - `tools/gpu/golden/pre_pool/` holds the earlier path's files: references for the ensemble test only, never compared byte for byte.
@@ -20,12 +20,12 @@ const HOURS := 6
 
 
 func _init() -> void:
-	if not SimHarness.begin(self, "goldens_test", "pooled goldens"):
+	if not SimHarness.begin(self, "goldens_test", "the pooled goldens"):
 		return
 	var files: Array = Array(DirAccess.get_files_at(GOLDEN_DIR)).filter(func(f): return f.begins_with(PREFIX) and f.ends_with(".txt"))
 	files.sort()
 	if files.is_empty():
-		SimHarness.skip(self, "goldens_test", "no %s*.txt in %s" % [PREFIX, GOLDEN_DIR], "a later change")
+		SimHarness.skip(self, "goldens_test", "no %s*.txt in %s" % [PREFIX, GOLDEN_DIR], "the pooled goldens")
 		return
 	SimConstants.apply()
 	for f in files:

@@ -6,28 +6,28 @@ extends SceneTree
 ##
 ## Expected values, written before the first run [derived from the rules in main.gd and FakeWorld; the fake's clock starts at 3,661 s and
 ## each frame stands for 1/60 s of real time, times the speed]:
-##  - the last dish's buttons say why they are off; with 3 dishes the freeze and trash buttons are on. A freeze sends one FREEZE for
+##  - The last dish's buttons say why they are off; with 3 dishes the freeze and trash buttons are on. A freeze sends one FREEZE for
 ##    the dish's row; the dish leaves the running set and the world's rows at once, its entry keeps its number and its count, and its row
 ##    is in the freezer. Until the answer comes (one frame) the game waits quietly: the world's next set_time is paused, the tray takes no
 ##    input, and the toolbar is not paused (nothing is shown).
 ##  - The freezer's details line gives the time it was frozen at on the game's clock (the world's less the game's beginning: about 300 s
 ##    after 30 frames at x600), not the world's (3,661 s and more); the dish had at least 2 history samples then (300 s crosses 2 or 3
 ##    multiples of 120 s).
-##  - thawed 40 frames later at x600 (10 s a frame: 400 s away), it is among the running dishes under its old number once a
+##  - Thawed 40 frames later at x600 (10 s a frame: 400 s away), it is among the running dishes under its old number once a
 ##    snapshot shows it, at the world's time, with the bups it was frozen with; its history gains int(400 / 120) = 3 level samples; its
 ##    founders' family records are alive again with the dish as their home. An Unfreeze asked before the freeze has answered is done when
 ##    it answers. A thaw the memory budget refuses leaves the entry in the freezer as it was and shows banner.memory_budget; the next one
 ##    works. DishWorld.load_blob moves what was due on by the time away (100 s saved, loaded at 700 s: bloom due 150 -> 750, a plankton born
 ##    at 100 and bursting at t -> 700 and t + 600); DishHistory.pad from 100 s to 700 s adds a fine sample for each multiple of 120 s
 ##    crossed (120 to 600: 5) and a whole-run one for each multiple of 240 s (240, 480: 2).
-##  - a trash removes the dish and sends one REMOVE_DISH for its row; trashing a frozen dish asks first, and confirmed, releases its
+##  - A trash removes the dish and sends one REMOVE_DISH for its row; trashing a frozen dish asks first, and confirmed, releases its
 ##    claims on the family tree (LineageStore.claim_count back to 0) once its freeze has answered.
-##  - the last running dish dying out with dishes frozen pauses on it and stays, empty, after resuming; an unfreeze takes its place
+##  - The last running dish dying out with dishes frozen pauses on it and stays, empty, after resuming; an unfreeze takes its place
 ##    and comes into view; that one dying out is noticed.
-##  - a goal-mode save written to a scratch file has only the keys dish, goals and version (no freezer); loaded, the shelf is empty,
+##  - A goal-mode save written to a scratch file has only the keys dish, goals and version (no freezer); loaded, the shelf is empty,
 ##    the dish has the bups it was saved with, and the game's clock carries on from what it was (|shown - saved| < 1e-6 s), though the
 ##    world's clock moved on; a save whose dish is of another format is no save.
-##  - the question after a pipette holds the game until a button answers; Freeze is an answer, and play goes on.
+##  - The question after a pipette holds the game until a button answers; Freeze is an answer, and play goes on.
 
 const SCRATCH := "user://freezer_test_save.json"
 
@@ -229,7 +229,7 @@ func _run() -> void:
 	TestUtil.finish(self, "FREEZER TESTS OK")
 
 
-## a goal-mode save has no freezer, and a load shows an empty one; the game's clock carries on across it.
+## A goal-mode save has no freezer, and a load shows an empty one; the game's clock carries on across it.
 func _save(fake: FakeWorld) -> void:
 	SaveGame.delete(SCRATCH)
 	Session.mode = Session.Mode.GOALS

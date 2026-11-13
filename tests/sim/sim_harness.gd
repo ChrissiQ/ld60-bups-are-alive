@@ -2,11 +2,10 @@ class_name SimHarness
 extends RefCounted
 ## The test harness over the pooled GPU world: scenarios in, canonical dumps and invariant failures out.
 ##
-## It reaches another script's classes (`SimCore`, `PoolLimits`, `DishSpec`, `WorldEdit`, `IterationPlan`, `DishBlob`) only through
-## `load()` of their paths after `ResourceLoader.exists`, and holds what they return untyped, so every test parses before the pooled core
-## exists. `begin` is the one gate every sim test calls first:
-##   - headless (no GPU): prints "SKIP <test>: needs a local GPU" and quits 0 (never "OK");
-##   - windowed and no `SimCore` yet: prints "FAIL <test>: no SimCore yet" and quits 1;
+## It reaches the pooled core's classes (`SimCore`, `PoolLimits`, `DishSpec`, `WorldEdit`, `IterationPlan`, `DishBlob`) only through
+## `load()` of their paths after `ResourceLoader.exists`, and holds what they return untyped, so every test parses without them. `begin` is the one gate every sim test calls first:
+##   - headless (no GPU): prints "SKIP <test>: needs a local GPU, enabled by <what it needs>" and quits 0 (never "OK");
+##   - windowed and no `SimCore` yet: prints "FAIL <test>: no SimCore" and quits 1;
 ##   - otherwise returns true and the test runs on a local `RenderingDevice`.
 ## The core's method names below are what the pooled core gives (`add_dish`, `run`, `pipette`, `remove_dish`, `queue_edit`,
 ## `canonical_dump`); `TYPE_PATHS` are the core's files. Every chunk of steps checks that WORLD's overflow flag stayed 0 (a failed check, so
@@ -53,13 +52,13 @@ static func begin(tree: SceneTree, test_name: String, enabled_by: String) -> boo
 		tree.quit(0)
 		return false
 	if not core_exists():
-		print("FAIL %s: no SimCore yet" % test_name)
+		print("FAIL %s: no SimCore" % test_name)
 		tree.quit(1)
 		return false
 	return true
 
 
-## A skipped stub: prints the reason, quits 0.
+## A skipped stub: prints the reason and what enables it, quits 0.
 static func skip(tree: SceneTree, test_name: String, reason: String, enabled_by: String) -> void:
 	print("SKIP %s: %s, enabled by %s" % [test_name, reason, enabled_by])
 	tree.quit(0)
@@ -82,7 +81,7 @@ static func make(p_scenarios: Array, opts := {}) -> SimHarness:
 func _new_type(type_name: String) -> Variant:
 	var path: String = TYPE_PATHS[type_name]
 	if not ResourceLoader.exists(path):
-		push_error("SimHarness: %s is not there yet" % type_name)
+		push_error("SimHarness: %s is not there" % type_name)
 		return null
 	return load(path).new()
 
@@ -248,7 +247,7 @@ func dump_all() -> Dictionary:
 	return out
 
 
-## The checks; empty when all hold: count balance, unique ids across the whole world, bups inside the rim, DSTATE's count equal to a recount of the live records.
+## The invariants checks; empty when all hold: count balance, unique ids across the whole world, bups inside the rim, DSTATE's count equal to a recount of the live records.
 func invariants() -> PackedStringArray:
 	var bad := PackedStringArray()
 	if int(core.overflow()) != 0:

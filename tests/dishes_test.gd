@@ -6,9 +6,9 @@ extends SceneTree
 ##
 ## Expected values, written before the first run [derived from the rules in main.gd and FakeWorld; the fake's clock starts at 3,661 s and
 ## each frame stands for 1/60 s of real time, times the speed]:
-##  - a second dish joins the set and the strip (2 tabs); every dish sits at the origin and only the main view's dish is shown (the
+##  - A second dish joins the set and the strip (2 tabs); every dish sits at the origin and only the main view's dish is shown (the
 ##    other is parked: hidden, not processing, nothing made to draw); the next-dish step wraps.
-##  - dishes of 100 bups (every mean 10) and 300 bups (every mean 20) show a speed of (100 x 10 + 300 x 20) / 400 = 17.5 in the
+##  - Dishes of 100 bups (every mean 10) and 300 bups (every mean 20) show a speed of (100 x 10 + 300 x 20) / 400 = 17.5 in the
 ##    all-dishes section, with 2 dishes and 400 bups [derived].
 ##  - The source tool: a click selects nothing at once (the world's copy has not come), and the source placed once it has (1-2 frames).
 ##  - Dishes are shown by 1 to Main.MAX_DISHES (999) in turn. With 998 running and one frozen every number is held: add and pipette are refused
@@ -17,11 +17,11 @@ extends SceneTree
 ##    before, its world number is its own, and no number is above 999. The frozen dish unfreezes with every number in use (999 running).
 ##    Trashing the 501st dish of the strip frees its number for a pipette: while its answer is awaited no dish can be added, and its new
 ##    dish is shown by that number.
-##  - the dishes have one clock: their times are equal after any frame, and both move while the game runs.
-##  - a dish that dies out (FakeWorld.kill) out of view: the game pauses on it with banner "DISH 2 WENT EXTINCT", one `extinct`
+##  - The dishes have one clock: their times are equal after any frame, and both move while the game runs.
+##  - A dish that dies out (FakeWorld.kill) out of view: the game pauses on it with banner "DISH 2 WENT EXTINCT", one `extinct`
 ##    signal however many snapshots say so; resuming sends one REMOVE_DISH for its row and deletes it; the view goes to the dish before it
 ##    (or back to the one being looked at); number 2 is not reused (not all 999 have been handed out).
-##  - the last dish dying out ends the game: the end dialog, and neither the pause button nor Space resumes; starting again strikes
+##  - The last dish dying out ends the game: the end dialog, and neither the pause button nor Space resumes; starting again strikes
 ##    a dish afresh (bups once a snapshot shows it).
 ##  - The pipette at (18, 0) with radius 30 over 10 bups at (4i, 0), 5 at (200 + i, 100), a parent at (300, 0) and its child
 ##    "Zed" at (12, 0) (watched) moves the 10 and the child: 11 in the new dish, 6 left of 17. Until its answer (one frame) the world waits
@@ -31,7 +31,7 @@ extends SceneTree
 ##    dish's question is up; the panel's line names the new dish; the old dish's lineage says 1 bup of the parent's line lives in dish 2.
 ##    A circle with no bups makes no dish: one REMOVE_DISH for the empty new row and "No bups there". A pipette the memory budget refuses
 ##    shows banner.memory_budget once and makes no dish.
-##  - with the timer at 1 h and 1 s to go, at x100 (1.67 s a frame) the game pauses for the pipette within 20 frames and says so;
+##  - With the timer at 1 h and 1 s to go, at x100 (1.67 s a frame) the game pauses for the pipette within 20 frames and says so;
 ##    Space and a speed button do not resume; an empty pipette does not; one that moves bups holds the game until its question is answered,
 ##    and the answer resumes play.
 ##  - A dish added while a pipette's answer is awaited takes another number than the one the simulation gives the new dish.

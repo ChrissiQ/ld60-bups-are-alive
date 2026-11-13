@@ -14,7 +14,7 @@ extends SceneTree
 ##    7 s the next is at 845 s (past 840). The padding is the multiples crossed, not the gap over 120 s: 119 -> 241 s adds 2 (120, 240),
 ##    121 -> 239 s none, 239 -> 241 s one (240); with a whole-run factor of 2 (multiples of 240 s), 119 -> 241 s adds one whole-run sample
 ##    and 241 -> 479 s none.
-##  - one sample of counts and means comes out as the series: pop the count, each gene's mean, harm, donor and key as percents
+##  - One sample of counts and means comes out as the series: pop the count, each gene's mean, harm, donor and key as percents
 ##    (x100), the mutator and the generation as they are.
 ##  - 6,000 samples keep the fine history at LEN (5,040) and the whole run at 750 samples of 8 each (1,024 at 1, thinned to 512 at
 ##    2; 512 more at 2 (2,048 in all), 512 at 4; 512 more at 4 (4,096), 512 at 8; 1,904 more at 8 are 238: 750, 750 x 8 = 6,000), whose

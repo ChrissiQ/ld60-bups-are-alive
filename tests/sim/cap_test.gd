@@ -10,7 +10,7 @@ extends SceneTree
 ## - after that, stepped as the game steps at x10,000 and 60 frames a second (166.7 s a frame: 8 steps of 20 s), the count read after each
 ##   frame is over the limit in at most 1% of the frames [derived: cap_check's `max_share_over` default 0.01; AGENTS.md "Limits"].
 ##   The trim expects the step's growth plus CAP_SIGMAS standard deviations, so the count stops a little short of the limit.
-## Needs a GPU. Windowed only.
+## Needs a GPU (windowed).
 
 const LIMIT := 600
 const HOURS := 8.0
@@ -20,7 +20,7 @@ const NEAR := 0.98
 
 
 func _init() -> void:
-	if not SimHarness.begin(self, "cap_test", "SimCore"):
+	if not SimHarness.begin(self, "cap_test", "the pooled core (SimCore)"):
 		return
 	var s := Scenario.small(20, 1200.0).seed(71)
 	s.limit = LIMIT
