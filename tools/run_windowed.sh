@@ -6,6 +6,7 @@
 # Env: RUN_LOCK_DIR (lock folder), RUN_LOCK_WAIT (seconds to wait, default 86400),
 #      RUN_WINDOWED_BIN (Godot binary), RUN_TIMEOUT (seconds the run may take; exit 124 when over).
 # Prints the output file's path last on stdout.
+# (Windowed tools are run with `--position 6000,6000`, which puts the window off the display.)
 set -uo pipefail
 
 LOCK_DIR="${RUN_LOCK_DIR:-/tmp/bups-windowed-run.lock}"

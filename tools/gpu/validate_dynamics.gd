@@ -2,7 +2,7 @@ extends SceneTree
 ## A whole run of the pooled world, one dish, one seed: the SAMPLE line of every sim-hour, to compare with tools/gpu/golden/ or with another
 ## run. Windowed, through the lock:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/validate_dynamics.gd -- gpu scenario seed [hours [step]]
-##   mode: gpu (the only one; the processor's simulation is gone)   scenario: A (default dish until 1,000 bups) | B (3 mm dish, 20k cap, feed) |
+##   mode: gpu (the only mode; kept as an argument for the SAMPLE line's format)   scenario: A (default dish until 1,000 bups) | B (3 mm dish, 20k cap, feed) |
 ##   C (90 mm dish, 100k cap, feed) | D-F, L, S, M (tools/gpu/world_tools.gd holds the table)
 ## An optional fourth argument is the number of sim-hours to run (0 or absent: the scenario's own), and an optional fifth the step's
 ## length in seconds, a number or a fraction ("100/60": the game's step at x100 and 60 frames a second; default 20). An hour must be a
@@ -17,7 +17,7 @@ extends SceneTree
 
 const Tools := preload("res://tools/gpu/world_tools.gd")
 const Lab := preload("res://tools/gpu/gpu_lab.gd")
-const BATCH := 9  ## steps a call of the core runs, as the game's batches did
+const BATCH := 9  ## steps a call of the core runs, the game's batch size
 
 var failed := false
 

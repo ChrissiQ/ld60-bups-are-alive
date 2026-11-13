@@ -1,7 +1,7 @@
 extends SceneTree
 ## A screenshot pack of the pooled world, windowed, on the real game stack, saved at interface sizes
 ## 100%, 150% and 250% for a look: the title backdrop, the free-setup preview, the game screen with feeders (sources layer), a bup at close zoom,
-## and the busy state (several dishes, frozen dishes, a picked bup, a full watch list, the pipette open). It prints the counts.
+## and the busy state (several dishes, frozen dishes, a picked bup, a full watch list, the pipette open). It prints the counts it shows (watched bups, frozen dishes, dishes).
 ## tools/run_windowed.sh <log> -- --path . --rendering-driver metal --resolution 1920x1080 --position 6000,6000 -s tools/screenshot_pack.gd -- <out_dir> [dishes] [frozen] [sections: title,setup,game,busy]
 
 const WATCHED := 12  ## bups put on the watch list in the busy state
@@ -183,7 +183,7 @@ func _busy(out: String, count: int, frozen: int) -> void:
 	await _leave(m)
 
 
-## The states the interface fixes are looked at in: a picked bup with the pipette open, the Dish card, the graph, the watch list, and the hover card over the dish.
+## The states shown in the busy-state pictures: a picked bup with the pipette open, the Dish card, the graph, the watch list, and the hover card over the dish.
 func _fix_views(out: String) -> void:
 	var start := StartConditions.new()
 	start.dish_radius = 600.0

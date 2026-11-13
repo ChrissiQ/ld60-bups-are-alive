@@ -10,8 +10,8 @@ extends SceneTree
 ## C2 shrink: a dish of 300,000 founders taken out of a pool that then runs a small dish: the record slots shrink to the limits' floor or
 ##    twice the slots in use, and the buffers the arena holds fall by the slots' share (380 B a slot) [derived]; the device's own count of
 ##    buffer memory falls by about as much once the device has passed the frames a freed buffer waits for (RenderingDevice disposes of a
-##    freed buffer when the frame slot it was freed in comes round again: a few submits later) [placeholder: a probe read twice the
-##    expected footprint after a 3 GiB buffer was freed].
+##    freed buffer when the frame slot it was freed in comes round again: a few submits later) [measured: a freed 3 GiB buffer still counted twice its
+##    footprint for a few submits].
 ## C3 edits: a drop of 1,000 units of energy at the centre of an empty dish raises its grid's total (concentration x cell area) by 1,000
 ##    within 1e-5 relative (float32 sums) [derived]; an eraser of radius 200 µm and strength 1 at the centre takes the share 1 - d / r of
 ##    the cell under the centre, leaving d / r of what it held (d its centre's distance) [derived].

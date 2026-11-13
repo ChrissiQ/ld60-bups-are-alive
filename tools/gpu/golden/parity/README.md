@@ -1,4 +1,4 @@
-# Parity fixtures
+# Parity fixtures (the replaced simulation's answers, which the pooled world is compared with)
 
 [measured] on Apple M1 Pro, Metal, Godot 4.7.2. These are what the CPU simulation the pooled world replaced answered: a 20,000-bup state and the answers it gave to queries about it. Tests in `tests/` and `tests/sim/` load the state into the pooled world and compare its answers with these.
 

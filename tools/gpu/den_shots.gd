@@ -23,7 +23,7 @@ func _grab(m: Node, path: String) -> void:
 	var image := m.get_viewport().get_texture().get_image()
 	image.save_png(path)
 	var v: ViewRenderer = m.dish.drawing.view
-	print("DEN %s: density_ready %s, picture %s, sprite %s, bups %d" % [path.get_file(), v.density_ready() if v != null else "no view", str(v.density_size()) if v != null else "-", m.dish.drawing.density_sprite.visible if "density_sprite" in m.dish.drawing else "none (base code)", m.dish.population()])
+	print("DEN %s: density_ready %s, picture %s, sprite %s, bups %d" % [path.get_file(), v.density_ready() if v != null else "no view", str(v.density_size()) if v != null else "-", m.dish.drawing.density_sprite.visible if "density_sprite" in m.dish.drawing else "none", m.dish.population()])
 
 
 func _run() -> void:
@@ -36,7 +36,7 @@ func _run() -> void:
 	var args := OS.get_cmdline_user_args()
 	var out: String = args[0] if args.size() > 0 else "user://den_shots"
 	var count := int(args[1]) if args.size() > 1 else 1000
-	var off_only := args.size() > 2 and args[2] == "off"  ## the base code's check: only the density-off shots
+	var off_only := args.size() > 2 and args[2] == "off"  ## only the density-off shots (the picture without density mode)
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(out))
 	var start := StartConditions.new()
 	start.dish_radius = 90000.0
