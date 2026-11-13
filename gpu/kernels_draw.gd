@@ -44,7 +44,7 @@ vec3 from_hsv(float h, float s, float v) {
 const THUMB_TILE := 64  ## a dish's thumbnail tile: THUMB_TILE x THUMB_TILE texels
 const THUMB_ATLAS := 2048  ## the atlas's width and height in texels: THUMB_ATLAS / THUMB_TILE tiles a row, so D_MAX tiles fill it
 const POOL_DRAW_TYPES := {
-	"PAYLOAD": "uvec4", "IDTEX": "uint", "VIEW": "float", "VQ": "float", "HAZEPIX": "uint", "STEERPIX": "uint",
+	"PAYLOAD": "uvec4", "IDTEX": "uint", "VIEW": "float", "VQ": "float", "HAZEPIX": "uint", "STEERPIX": "uint", "FAINTLO": "uint", "FAINTHI": "uint",
 	"THUMBN": "uint", "THUMBMAX": "uint", "THUMBS": "uint",
 }
 
@@ -77,7 +77,8 @@ GRID_LOOP(f, ((DS(uint(pcs.pa), DS_COUNT) + PAYLOAD_TEX_WIDTH - 1u) / PAYLOAD_TE
 ## What a cell of dish row `pcs.pa` shows: its concentration, and in a cell inside the dish the clouds' at the
 ## cell's centre, a cloud counting where the cell is in the block of cells its reach covers (a square, one cell wider
 ## than the reach, where the bups' reads use the circle). The block's cells can lie three squares from a cloud's listed ones, so each cell
-## looks at 7 x 7 squares and takes a cloud from the first of them that it and the cloud's squares share. VIEW is indexed by pool cell.
+## looks at 7 x 7 squares and takes a cloud from the first of them that it and the cloud's squares share. The clouds no list holds
+## (`pool_view_faint`) come from FAINTLO and FAINTHI. VIEW is indexed by pool cell.
 const K_POOL_VIEW := """
 void f(uint l) {
 	uint d = uint(pcs.pa), n = DPU(d, DP_CELLS), c = DPU(d, DP_FIELD_BASE) + l;
@@ -103,10 +104,44 @@ void f(uint l) {
 				v += r0.z / (6.2831853 * r0.w) * exp(-(dx * dx + dy * dy) * 0.5 / r0.w);
 			}
 		}
+		v += FIX30(FAINTHI[l], FAINTLO[l]) / FAINT_UNIT;
 	}
 	VIEW[c] = v;
 }
 GRID_LOOP(f, DPU(uint(pcs.pa), DP_CELLS) * DPU(uint(pcs.pa), DP_CELLS))
+"""
+
+## The clouds of dish row `pcs.pa` that no list holds (those with no reach, see `pool_bin_count`), for the picture alone: no bup reads
+## them, but their nutrient is in the dish, and where many lie on one another it shows. Each adds its concentration at the centres of
+## the cells round it (the block `pool_view` gives a cloud whose reach is 0), into a sum a cell of the dish (FAINTLO, FAINTHI: fixed
+## point, FAINT_UNIT x 2^30 to the unit of concentration, so the order the threads run in does not matter). A cloud made since the
+## lists were last built (its sigma word is still 0) is not yet in the picture, as one with a reach is not.
+const FAINT_UNIT := 4096.0
+
+const K_POOL_VIEW_FAINT_CLEAR := """
+void f(uint l) { FAINTLO[l] = 0u; FAINTHI[l] = 0u; }
+GRID_LOOP(f, DPU(uint(pcs.pa), DP_CELLS) * DPU(uint(pcs.pa), DP_CELLS))
+"""
+
+const K_POOL_VIEW_FAINT := """
+void f(uint k) {
+	uint o = k * 8u, d = uint(pcs.pa);
+	if (PUFF[o + 5] < 0.5 || floatBitsToUint(PUFF[o + 5]) - PUFF_ROW_BASE != d) return;
+	if (!(PUFF[o + 6] <= 0.0) || PUFF[o + 7] <= 0.0) return;  // (listed, or not yet looked at by the lists)
+	float x = PUFF[o], y = PUFF[o + 1], mass = PUFF[o + 2], v = PUFF[o + 3];
+	if (!(mass > 0.0) || !(v > 0.0)) return;
+	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS); uint base = DPU(d, DP_FIELD_BASE);
+	int x0 = max(0, int(floor((x + org) / sp - 0.5))), x1 = min(n - 1, int(ceil((x + org) / sp - 0.5)));
+	int y0 = max(0, int(floor((y + org) / sp - 0.5))), y1 = min(n - 1, int(ceil((y + org) / sp - 0.5)));
+	for (int cy = y0; cy <= y1; cy++) for (int cx = x0; cx <= x1; cx++) {
+		uint l = uint(cy * n + cx);
+		if (INSIDE[base + l] == 0) continue;
+		float dx = (float(cx) + 0.5) * sp - org - x, dy = (float(cy) + 0.5) * sp - org - y;
+		float c = mass / (6.2831853 * v) * exp(-(dx * dx + dy * dy) * 0.5 / v) * FAINT_UNIT;
+		ADD_FIXED30(FAINTLO, FAINTHI, l, c)
+	}
+}
+GRID_LOOP(f, WORLD[WD_CLOUD_SLOTS])
 """
 
 ## The nutrient picture of dish row `pcs.pa`: `pcs.pb` visible_above, `pcs.pc` alpha_scale, `pcs.pd` max_alpha.
@@ -183,7 +218,10 @@ static func _register_pool(out: Dictionary) -> void:
 	var view_buffers := ["DISHP", "OWNER", "INSIDE", "VIEW"]
 	assert(GpuLayout.D_MAX == (THUMB_ATLAS / THUMB_TILE) * (THUMB_ATLAS / THUMB_TILE), "the atlas holds one tile a dish row")
 	GpuKernels.add(out, "pool_payload", K_POOL_PAYLOAD, ["P", "DSTATE", "BUPS", "BUPS_U", "PAYLOAD", "IDTEX"], "", 64, POOL_DRAW_TYPES)
-	GpuKernels.add(out, "pool_view", K_POOL_VIEW, ["DISHP", "CONC", "INSIDE", "ENTD", "BINS", "BINC", "VIEW"], GpuKernelsClouds.POOL_CLOUD_FUNCS, 64, POOL_DRAW_TYPES)
+	var faint := "const float FAINT_UNIT = %.1f;\n" % FAINT_UNIT + GpuKernels.FIXED_FUNCS
+	GpuKernels.add(out, "pool_view_faint_clear", K_POOL_VIEW_FAINT_CLEAR, ["DISHP", "FAINTLO", "FAINTHI"], "", 64, POOL_DRAW_TYPES)
+	GpuKernels.add(out, "pool_view_faint", K_POOL_VIEW_FAINT, ["WORLD", "DISHP", "PUFF", "INSIDE", "FAINTLO", "FAINTHI"], faint, 64, POOL_DRAW_TYPES)
+	GpuKernels.add(out, "pool_view", K_POOL_VIEW, ["DISHP", "CONC", "INSIDE", "ENTD", "BINS", "BINC", "VIEW", "FAINTLO", "FAINTHI"], faint + GpuKernelsClouds.POOL_CLOUD_FUNCS, 64, POOL_DRAW_TYPES)
 	GpuKernels.add(out, "pool_haze", K_POOL_HAZE, ["DISHP", "VIEW", "HAZEPIX"], "", 64, POOL_DRAW_TYPES)
 	GpuKernels.add(out, "pool_steer_map", K_POOL_STEER_MAP, ["P", "TABLE", "DISHP", "OWNER", "INSIDE", "VIEW", "VQ", "STEERPIX"],
 		GpuKernelsField.LOOKUP_FUNCS + GpuKernelsClouds.POOL_STEER_FUNCS, 64, POOL_DRAW_TYPES)

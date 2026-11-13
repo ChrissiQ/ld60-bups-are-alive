@@ -10,6 +10,8 @@ layout(set = 0, binding = 3, std430) buffer B_ENTD { vec4 ENTD[]; };
 layout(set = 0, binding = 4, std430) buffer B_BINS { uint BINS[]; };
 layout(set = 0, binding = 5, std430) buffer B_BINC { uint BINC[]; };
 layout(set = 0, binding = 6, std430) buffer B_VIEW { float VIEW[]; };
+layout(set = 0, binding = 7, std430) buffer B_FAINTLO { uint FAINTLO[]; };
+layout(set = 0, binding = 8, std430) buffer B_FAINTHI { uint FAINTHI[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -53,6 +55,13 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define BLOCK_LOOP(F) void main() { uint nb_ = (WORLD[WD_SLOTS] + BLK_SLOTS - 1u) >> BLK_SHIFT; for (uint k_ = gl_WorkGroupID.x; k_ < nb_; k_ += gl_NumWorkGroups.x) { F(k_, BLKDISH[k_]); barrier(); } }
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
 #define LEDGER(d, t, amount) { if (WORLD[WD_LEDGER] != 0u) { float rest_ = (amount); uint lo_ = (d) * DS_WORDS + DS_LEDGER + 2u * (t), hi_ = lo_ + 1u; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); uint old_ = atomicAdd(DSTATE[lo_], q_); if (old_ + q_ < old_) atomicAdd(DSTATE[hi_], 1u); } } }
+const float FAINT_UNIT = 4096.0;
+
+#define ADD64(LO, HI, cell, q_) { uint old_ = atomicAdd(LO[cell], q_); if (old_ + q_ < old_) atomicAdd(HI[cell], 1u); }
+#define ADD_FIXED30(LO, HI, cell, amount) { float rest_ = amount; while (rest_ > 0.0) { float part_ = min(rest_, 3.9); rest_ -= part_; uint q_ = uint(part_ * 1073741824.0 + 0.5); ADD64(LO, HI, cell, q_) } }
+#define ADD_FIXED20(LO, HI, cell, amount) { float rest_ = amount; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); ADD64(LO, HI, cell, q_) } }
+#define FIX30(HI, LO) (float(HI) * 4.0 + float(LO) * 9.313225746154785e-10)
+#define FIX20(HI, LO) (float(HI) * 4096.0 + float(LO) * 9.5367431640625e-7)
 
 // the list of entries (a range of ENTD) of the square of dish d that holds a point
 void bin_list(uint d, float x, float y, out uint e0, out uint e1) {
@@ -102,6 +111,7 @@ void f(uint l) {
 				v += r0.z / (6.2831853 * r0.w) * exp(-(dx * dx + dy * dy) * 0.5 / r0.w);
 			}
 		}
+		v += FIX30(FAINTHI[l], FAINTLO[l]) / FAINT_UNIT;
 	}
 	VIEW[c] = v;
 }

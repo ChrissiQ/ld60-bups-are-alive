@@ -1619,6 +1619,8 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 		if tracking:
 			_disp_track(cl, row)
 		if fw >= 0 or sw >= 0:
+			_disp(cl, "pool_view_faint_clear", _groups(nn * nn), float(row))
+			_disp(cl, "pool_view_faint", _groups(maxi(_wd(GpuLayout.WD_CLOUD_SLOTS), 64)), float(row))
 			_disp(cl, "pool_view", _groups(nn * nn), float(row))
 		if fw >= 0:
 			_disp(cl, "pool_haze", _groups(nn * nn), float(row), view.haze.x, view.haze.y, view.haze.z)

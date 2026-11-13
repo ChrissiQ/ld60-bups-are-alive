@@ -59,7 +59,7 @@ const BUFFERS := {
 ## texels; "view": the pool's cells; "pixel": the main dish's cells; "fixed").
 const DRAW_BUFFERS := {
 	"PAYLOAD": ["texel", GpuLayout.PAYLOAD_BYTES], "IDTEX": ["texel", GpuLayout.IDT_BYTES], "VIEW": ["view", 4], "HAZEPIX": ["pixel", 4],
-	"STEERPIX": ["pixel", 4], "VQ": ["fixed", 16],
+	"STEERPIX": ["pixel", 4], "FAINTLO": ["pixel", 4], "FAINTHI": ["pixel", 4], "VQ": ["fixed", 16],
 	"THUMBN": ["fixed", D_MAX * GpuKernelsDraw.THUMB_TILE * GpuKernelsDraw.THUMB_TILE * 4], "THUMBMAX": ["fixed", D_MAX * 4],
 	"THUMBS": ["fixed", GpuKernelsDraw.THUMB_ATLAS * GpuKernelsDraw.THUMB_ATLAS * 4],
 }

@@ -57,7 +57,7 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 
 void f(uint k) {
 	uint o = k * 8u;
-	if (PUFF[o + 5] < 0.5) return;
+	if (PUFF[o + 5] < 0.5 || PUFF[o + 6] <= 0.0) return;
 	uint d = floatBitsToUint(PUFF[o + 5]) - PUFF_ROW_BASE;
 	float x = PUFF[o], y = PUFF[o + 1], reach = sqrt(PUFF[o + 6]);
 	int nb = int(DPU(d, DP_BINS_ACROSS)); float bs = DPF(d, DP_BIN_SIZE), org = DPF(d, DP_RADIUS); uint base = DPU(d, DP_BIN_BASE);

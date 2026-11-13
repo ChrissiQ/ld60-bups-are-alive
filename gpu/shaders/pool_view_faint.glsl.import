@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://dbewnwe6ec78f"
+path="res://.godot/imported/pool_view_faint.glsl-ec1c5fb2ab74df3b262caea00b30ef92.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_view_faint.glsl"
+dest_files=["res://.godot/imported/pool_view_faint.glsl-ec1c5fb2ab74df3b262caea00b30ef92.res"]
+
+[params]
+

@@ -64,6 +64,7 @@ void f(uint k) {
 	float cut = max(P[P_CLOUD_CUT] * PUFF[o + 4] * P[P_DETECTION_FLOOR], 1e-30);
 	float reach = peak > cut ? sqrt(2.0 * v * log(peak / cut)) : 0.0;
 	PUFF[o + 6] = reach * reach; PUFF[o + 7] = sqrt(v);
+	if (PUFF[o + 6] <= 0.0) return;
 	int nb = int(DPU(d, DP_BINS_ACROSS)); float bs = DPF(d, DP_BIN_SIZE), org = DPF(d, DP_RADIUS); uint base = DPU(d, DP_BIN_BASE);
 	int lx = clamp(int((x - reach + org) / bs), 0, nb - 1), hx = clamp(int((x + reach + org) / bs), 0, nb - 1);
 	int ly = clamp(int((y - reach + org) / bs), 0, nb - 1), hy = clamp(int((y + reach + org) / bs), 0, nb - 1);
