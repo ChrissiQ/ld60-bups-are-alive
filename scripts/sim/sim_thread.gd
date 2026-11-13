@@ -708,9 +708,9 @@ func _handle(cmd: SimCommand) -> void:
 
 
 func _unsupported(cmd: SimCommand, what: String) -> void:
-	_error("%s: not supported by SimCore yet" % what)
+	_error("%s: not a command the simulation thread knows" % what)
 	if cmd.reply != null:
-		cmd.reply.complete(null, "%s: not supported by SimCore yet" % what)
+		cmd.reply.complete(null, "%s: not a command the simulation thread knows" % what)
 
 
 func _add_dish(client: int, spec: DishSpec) -> void:
