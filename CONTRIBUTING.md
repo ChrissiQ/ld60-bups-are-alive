@@ -39,19 +39,6 @@ The quick ones cover the interface (`ui_lint_test`, `strings_test`, `fonts_test`
 
 Where a test's header lists expected values, a tag beside a figure says where it comes from: `[derived]` is worked out from the code's rules and constants, `[measured]` was read from a run (the text beside it says of what, and on what where that matters). Work out what a test should find before it first runs; do not fit an expectation to the test's own output.
 
-## Making a release
-
-Push a version tag; the release workflow does the rest:
-
-```
-git tag v0.2.0
-git push origin v0.2.0
-```
-
-It builds the libraries for Windows, Linux and macOS, exports the three builds, and publishes a GitHub release with notes (the commit subjects since the previous tag), the three builds, and the Godot project zip with the prebuilt libraries. Pushes alone build nothing. To move a tag, delete the release on GitHub first, then force-push the tag.
-
-The macOS export needs ETC2/ASTC texture import enabled (already set in `project.godot`).
-
 ## Commits and pull requests
 
 - Commit messages are one short line in the present tense, third person: "Fixes source selection", "Adds a layers panel".

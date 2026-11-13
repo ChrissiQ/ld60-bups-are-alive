@@ -44,4 +44,4 @@ Only the lineage store needs compiling. GDScript changes take effect on the next
 
 ## Contributing and license
 
-Tests, releases and how to change the project are in [CONTRIBUTING.md](CONTRIBUTING.md). The code is under the [MIT License](LICENSE); the bundled fonts keep their own licenses (`fonts/OFL-IBMPlex.txt`, `fonts/OFL.txt`).
+Tests and how to change the project are in [CONTRIBUTING.md](CONTRIBUTING.md). The code is under the [MIT License](LICENSE); the bundled fonts keep their own licenses (`fonts/OFL-IBMPlex.txt`, `fonts/OFL.txt`).
