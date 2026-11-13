@@ -252,8 +252,16 @@ static func apply() -> void:
 		var mode := DisplayServer.WINDOW_MODE_FULLSCREEN if fullscreen else _windowed_mode()
 		if DisplayServer.window_get_mode() != mode:
 			DisplayServer.window_set_mode(mode)
-	elif DisplayServer.get_name() != "headless" and DisplayServer.window_get_mode() != DisplayServer.WINDOW_MODE_WINDOWED:
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)  # (a run from a script is a small window where it was put, whatever mode the project starts in)
+	else:
+		hold_windowed()
+
+
+## A run from a script is a window of the size and at the place it was started with, whatever mode the project starts in. A window
+## manager that lays windows out may resize a new one just after it opens, so `PreferencesHook` asks again each frame for the run's
+## first seconds.
+static func hold_windowed() -> void:
+	if DisplayServer.get_name() != "headless" and not _window_is_managed() and DisplayServer.window_get_mode() != DisplayServer.WINDOW_MODE_WINDOWED:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 
 
 ## The key that flips full screen, as the player reads it. F11 is the system's own "Show Desktop" on a Mac (it slides the windows away and never reaches
