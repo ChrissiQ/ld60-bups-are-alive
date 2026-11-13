@@ -61,7 +61,7 @@ static func default_hours(name: String) -> int:
 	return {"A": 60, "B": 12, "C": 30, "D": 24, "E": 24, "F": 24, "L": 16, "M": 12, "S": 120}[name]
 
 
-## One SAMPLE line, the format compare_dynamics.py and game_dynamics_flags.py read: `means` are speed, sense, metabolism, size, harm.
+## One SAMPLE line, the format `validate_dynamics.gd` prints: `means` are speed, sense, metabolism, size, harm.
 static func sample_text(mode: String, name: String, seed_value: int, hour: float, pop: int, means: Array, energy: float, nutrient: float) -> String:
 	return "SAMPLE %s %s %d %.2f %d %.4f %.4f %.5f %.5f %.5f %.4f %.2f" % [mode, name, seed_value, hour, pop, means[0], means[1], means[2], means[3], means[4], energy, nutrient]
 
