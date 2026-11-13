@@ -94,7 +94,7 @@ void share(uint i, uint d) {
 	CONC[i] = c0 - lo;
 }
 // only an owner cell holds sums (a bup's cell is always its owner), so this is where they are left at zero for the next step's demand
-// (a step's pool_clear is no longer a pass of its own); a word already zero is not written
+// (a step has no separate clearing pass); a word already zero is not written
 void f(uint i, uint d, uint l) {
 	if (OWNER[i] != int(i)) return;
 	share(i, d);
