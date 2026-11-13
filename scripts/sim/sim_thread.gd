@@ -31,6 +31,7 @@ const THUMBS_MSEC := 1000  ## the least real time between two thumbnail atlases
 const ANSWER_MSEC := 100  ## the least real time between two answers to a dish's fraction questions
 const SPEED_WINDOW_MSEC := 1000  ## the achieved speed is the world time over the real time of about this much
 const REST_SLICE_USEC := 1000
+const SPIN_SHARE := 0.5  ## with one step a frame, an iteration that fills at least this share of the display's frame keeps the thread spinning between frames
 const REFUSED_RETRY_MSEC := 250  ## a world whose iteration of one step was refused is tried again after this long, or at once after a command that may make room
 const TEXTURE_KINDS := ["payload", "ids", "haze", "steer", "thumbs"]
 ## The commands that may give a world over the memory budget room (fewer bups or dishes, a lower limit, a smaller dish; a test's budget).
@@ -85,6 +86,8 @@ var _refusal := ""  ## why the iterations are being refused (the memory budget),
 var _refused_k := 0  ## the steps of the last iteration if it was refused (0: it ran)
 var _retry_msec := -1  ## after a refused iteration of one step: when the next is tried (-1: not waiting to try)
 var _pipettes: Array = []  ## pipettes waiting for their new dish's grid, made on the worker pool: {client, centre, radius, dest, reply, spec, made, task}
+var _tick_usec := 0  ## when the last set_time command was drained
+var _busy_ema := 0.0  ## ms: the iterations' busy time, smoothed
 var _grids := {}  ## the grid a pipette from the main view's dish would give its new dish, made ahead on the worker pool (`_make_grid_ahead`): key (`_grid_key`) -> {task, made}
 var _mass_um := 0.0  ## a bup's drawn length per unit of mass (SimConstants' mass_um)
 
@@ -204,9 +207,10 @@ func _run() -> void:
 			elif retry_at >= 0:
 				_wait_for_command(retry_at)
 			else:
-				queue.wait()
+				_wait_for_tick()
 			continue
 		var busy := _iterate(k)
+		_busy_ema = busy if _busy_ema == 0.0 else lerpf(_busy_ema, busy, 0.1)
 		_rest(governor.rest_ms(busy))
 	for p: Dictionary in _pipettes:
 		WorkerThreadPool.wait_for_task_completion(p["task"])
@@ -459,6 +463,17 @@ func _wait_for_command(until_msec: int) -> void:
 		OS.delay_usec(REST_SLICE_USEC)
 
 
+## Nothing is owed: waits for the next command (the interface's frame). With one step a frame and iterations that fill much of it the
+## thread spins in place of the block, up to two frames: a thread that sleeps between iterations runs the next one's GPU wait slower
+## (a one-step sync of about 4.3 ms against about 3.0 ms).
+func _wait_for_tick() -> void:
+	if not governor.paused and governor.display_ms > 0.0 and governor.frame_steps() > 0 and _busy_ema >= SPIN_SHARE * governor.display_ms:
+		var deadline := _tick_usec + 2 * int(governor.display_ms * 1000.0)
+		while queue.size() == 0 and Time.get_ticks_usec() < deadline and not _stopping():
+			pass
+	queue.wait()
+
+
 func _rest(ms: float) -> void:
 	var until := Time.get_ticks_usec() + int(ms * 1000.0)
 	while Time.get_ticks_usec() < until and not _stopping():
@@ -631,6 +646,7 @@ func _handle(cmd: SimCommand) -> void:
 	var a := cmd.args
 	match cmd.kind:
 		SimCommand.KIND_SET_TIME:
+			_tick_usec = Time.get_ticks_usec()
 			governor.frame(float(a.get("real_dt", 0.0)) * 1000.0, float(a.get("display_ms", 0.0)))
 			governor.set_time(float(a.get("speed", 1.0)), bool(a.get("paused", false)), float(a.get("real_dt", 0.0)))
 			if governor.paused:
