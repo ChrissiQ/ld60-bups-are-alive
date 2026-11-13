@@ -65,6 +65,7 @@ var _event_rows := {}  ## rows whose family events of the last iteration are in 
 var _stats_fresh := false  ## STATS sample 0 is every running dish's current state
 var _entries_peak := 0  ## the most list entries asked for since the last shrink check
 var _entry_density := 0  ## the most entries a cloud slot in use had in the last iterations (decaying), from WORLD
+var _entries_last := 0  ## the most list entries a step of the last iteration that made lists asked for
 var _deaths_per_step := 0.0  ## the most deaths a step of the last iterations had (all dishes), for the clouds' headroom
 var _births_per_step := 0.0
 var _textures := {}  ## kind -> Array of TEXTURES texture RIDs (publish)
@@ -1951,10 +1952,19 @@ func _read_back() -> void:
 	_overflow |= _wd(GpuLayout.WD_OVERFLOW)
 	var peak := _wd(GpuLayout.WD_ENTRIES_PEAK)
 	if peak > 0:  # (what the lists asked for: the kernel keeps the most since it was last set to 0, and the host takes it here)
+		_entries_last = peak
 		_entries_peak = maxi(_entries_peak, peak)
 		_entry_density = maxi(_wd(GpuLayout.WD_ENTRY_DENSITY), int(_entry_density * 0.9))  # (falls by a tenth an iteration, as the deaths do)
 		_set_wd(GpuLayout.WD_ENTRIES_PEAK, 0)
 		_set_wd(GpuLayout.WD_ENTRY_DENSITY, 0)
+
+
+## What the kernels' loops run over now, beside the capacities of `SimArena.report` (for the debug log): the record slots, cloud slots
+## and husk slots in use (the dead among them are counted until the next compaction), the cloud lists' entries, the field cells and
+## list squares given out, and the field's tiles in each of a step's rounds.
+func in_use() -> Dictionary:
+	return {"slots": _wd(GpuLayout.WD_SLOTS), "clouds": _wd(GpuLayout.WD_CLOUD_SLOTS), "husks": _wd(GpuLayout.WD_HUSK_SLOTS), "entries": _entries_last,
+		"entries_a_cloud": _entry_density, "cells": arena.cell_top, "bins": arena.bin_top, "field_rounds": Array(_tile_rounds)}
 
 
 func _free_sets() -> void:

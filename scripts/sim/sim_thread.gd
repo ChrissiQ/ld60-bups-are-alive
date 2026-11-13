@@ -450,6 +450,7 @@ func _timing() -> Dictionary:
 	t["device"] = _status.get("device", "")
 	t["refused_iteration"] = _refusal
 	t["pool"] = _core.arena.report()
+	t["pool_in_use"] = _core.in_use()
 	t["memory_fraction"] = _core.arena.memory_fraction()
 	t["machine"] = limits.watch.report() if limits.watch != null else {}
 	t["next_growth_bytes"] = _core.arena.next_growth_bytes()
