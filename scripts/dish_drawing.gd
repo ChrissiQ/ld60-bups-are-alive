@@ -358,8 +358,11 @@ func view_ring(id: int) -> Variant:
 func draw() -> void:
 	# Dish: dark agar, green-tinted glass rim.
 	dish.draw_colored_polygon(disc_outline(dish.radius), AGAR)  # (not draw_circle: it draws a big disc with few sides, and the flats show when the dish is bigger than the window)
-	dish.draw_arc(Vector2.ZERO, dish.radius, 0.0, TAU, 96, RIM, 3.0)
-	dish.draw_arc(Vector2.ZERO, dish.radius + 6.0, 0.0, TAU, 96, RIM_OUTER, 2.0)
+	# The rim follows the disc's own outline and is never thinner than a screen pixel: a thinner line shows only where it happens to
+	# cross the pixels' centres, which on a wide dish is one upright stretch of it at the left and right edges.
+	var px := dish.pixel()
+	dish.draw_arc(Vector2.ZERO, dish.radius, 0.0, TAU, Dish.DISC_SIDES + 1, RIM, maxf(3.0, px))
+	dish.draw_arc(Vector2.ZERO, dish.radius + maxf(6.0, 1.5 * px), 0.0, TAU, Dish.DISC_SIDES + 1, RIM_OUTER, maxf(2.0, px))
 
 	if dish.layer_shown(Dish.Layer.MEDIUM):
 		_draw_medium()
