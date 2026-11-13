@@ -115,9 +115,32 @@ func open(dish: Dish, free_mode: bool, started_as: StartConditions = null) -> vo
 		dish_row.value = dish.radius / StartConditions.UM_PER_MM
 		limit_row.value = maxi(dish.bup_limit, floor_limit)
 		_opening = false
+		_align_setting_rows()
 	_show_controls(false)
 	visible = true
 	resume_button.grab_focus()
+
+
+## The two settings share one name width, number width and unit width, so their sliders start and end in one place (a row on its own would
+## measure itself by its own name, number and unit).
+func _align_setting_rows() -> void:
+	var setting_rows: Array[SettingRow] = [dish_row, limit_row]
+	var name_width := 0.0
+	var value_width := 0.0
+	var unit_width := 0.0
+	for row in setting_rows:
+		var size := row.label.get_theme_font_size("font_size")
+		name_width = maxf(name_width, row.label.get_theme_font("font").get_string_size(row.label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x)
+		var vsize := row.value_field.get_theme_font_size("font_size")
+		var widest := row.value_field.get_theme_font("font").get_string_size(row._format(row.slider.max_value), HORIZONTAL_ALIGNMENT_LEFT, -1, vsize).x
+		value_width = maxf(value_width, widest + row.value_field.get_theme_stylebox("normal").get_minimum_size().x + 8.0)
+		var usize := row.unit_label.get_theme_font_size("font_size")
+		unit_width = maxf(unit_width, row.unit_label.get_theme_font("font").get_string_size(row.suffix, HORIZONTAL_ALIGNMENT_LEFT, -1, usize).x)
+	for row in setting_rows:
+		row.label.custom_minimum_size.x = ceilf(name_width) + 16.0
+		row.value_min_width = ceilf(value_width)
+		row.value_field.custom_minimum_size.x = ceilf(value_width)
+		row.unit_label.custom_minimum_size.x = ceilf(unit_width)
 
 
 ## A new size is only reported once the slider has been still for a moment: a smaller dish cuts bups off for good, so
