@@ -959,7 +959,7 @@ func living_descendants_of(chain: PackedInt64Array) -> PackedInt32Array:
 	return store.living_descendants_of(chain, _number())
 
 
-## Asks for a bup's record (its ancestors') to be kept after it dies, until it is unpinned: a pin held by this dish's number.
+## Asks for a bup's record (and its ancestors') to be kept after it dies, until it is unpinned: a pin held by this dish's number.
 ## False when there was no record to pin (the store may have dropped it since `has_record` answered: the worker prunes a dead bup's record
 ## whenever nothing holds it).
 func pin_bup(id: int) -> bool:
