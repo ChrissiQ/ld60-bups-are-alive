@@ -3,6 +3,7 @@
 [ext_resource type="Script" path="res://ui/options_panel.gd" id="1"]
 [ext_resource type="PackedScene" path="res://ui/toggle_row.tscn" id="toggle_row"]
 [ext_resource type="PackedScene" path="res://ui/setting_row.tscn" id="setting_row"]
+[ext_resource type="PackedScene" path="res://ui/memory_row.tscn" id="memory_row"]
 [ext_resource type="Texture2D" path="res://icons/reset.svg" id="reset_icon"]
 
 [node name="OptionsPanel" type="PanelContainer"]
@@ -64,6 +65,9 @@ layout_mode = 2
 label_text = "@options.motion"
 auto_text = "@options.motion_system"
 hint_text = "@options.motion_hint"
+
+[node name="MemoryRow" parent="Box/Scroll/Rows" instance=ExtResource("memory_row")]
+layout_mode = 2
 
 [node name="Actions" type="HBoxContainer" parent="Box"]
 layout_mode = 2
