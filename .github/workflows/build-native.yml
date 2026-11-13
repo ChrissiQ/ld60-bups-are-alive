@@ -4,7 +4,7 @@
 #
 # It builds against godot-cpp's own bundled Godot 4.5 API (api_version=4.5, matching
 # compatibility_minimum in native/bups.gdextension), so no API dump is needed, and the result runs
-# on Godot 4.5 and later. godot-cpp is pinned to the commit the game was developed against.
+# on Godot 4.5 and later. godot-cpp is pinned to a known-good commit.
 name: build-native
 on:
   workflow_dispatch:
