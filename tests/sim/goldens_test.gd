@@ -7,7 +7,6 @@ extends SceneTree
 ##   run is deterministic per seed on one machine; the check asks for equality at one dish and one seed].
 ## - The goldens were made on Apple Silicon with Metal. On another GPU or driver the comparison is against a golden made there before the
 ##   change, so a mismatch on a new machine is a reason to regenerate the goldens there, not a failure of the code.
-## - `tools/gpu/golden/pre_pool/` holds the earlier path's files: references for the ensemble test only, never compared byte for byte.
 ## Windowed only (GPU).
 
 const Tools := preload("res://tools/gpu/world_tools.gd")

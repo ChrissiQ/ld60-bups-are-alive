@@ -141,7 +141,7 @@ func _replay(stem: String) -> void:
 		TestUtil.check(store.holds(int(id)) >= 1, "%s: pinned id %s is held" % [stem, id])
 
 
-## A pre-pool export of a dish with husks (golden/parity/lineage_export.txt: 254 records, 250 alive). Expected [derived]: every
+## An export of a dish with husks made by the CPU simulation the pooled world replaced (254 records, 250 alive). Expected [derived]: every
 ## dead record in an export of a live sim has a living descendant or a pin, so an import with the living ids prunes nothing: 254 records
 ## again, the same by id.
 func _parity_import() -> void:

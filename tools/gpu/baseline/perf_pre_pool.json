@@ -964,10 +964,5 @@
     }
    }
   }
- },
- "zoomed_out_pictures": {
-  "label": "[measured]",
-  "what": "paused, never advanced dish of 200,000 bups (seed 3, 90 mm, processor), 1280x720 SubViewport, at fit zoom and 20x, 100x, 500x fit zoom",
-  "determinism": "fit, zoom20, zoom100 are byte-identical across two processes; zoom500 differs between processes in the background shade only (the field is almost empty at that zoom)"
  }
 }
