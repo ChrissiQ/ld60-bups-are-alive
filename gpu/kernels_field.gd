@@ -168,7 +168,7 @@ void main() {
 """
 
 
-## ---- The pooled world's field kernels: the same arithmetic as the single dish's above, per dish row `d`. ----
+## ---- The pooled world's field kernels: per dish row `d`. ----
 ## A dish's cells are one run of the pool's field buffers: its cell `l` (row-major in its grid) is the cell `DP_FIELD_BASE + l`, and OWNER,
 ## CELLOF, CELL2 and the cloud lists hold pool cells, never a dish's own index. The pool's cells in use (the bound of the cell kernels) are
 ## WORLD[WD_CELLS]; a dish's own geometry is in DISHP. The motion table, and every constant of the model, stay in P; no pooled kernel reads

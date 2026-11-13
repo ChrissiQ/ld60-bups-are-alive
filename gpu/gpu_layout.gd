@@ -165,7 +165,7 @@ const DP_HANDOVER := 4  ## float: a cloud this wide goes to the grid
 const DP_BIN_BASE := 5  ## uint: the first of the dish's cloud-list squares in the pool
 const DP_BINS_ACROSS := 6  ## uint
 const DP_BIN_SIZE := 7  ## float
-const DP_FEED := 8  ## float: the feed of one step (the feed per second times the step, worked out on the host, as the single dish's P_FEED)
+const DP_FEED := 8  ## float: the feed of one step (the feed per second times the step, worked out on the host)
 const DP_UPKEEP_SCALE := 9  ## float
 const DP_LIMIT := 10  ## uint: the most bups
 const DP_CAP := 11  ## uint: the hard cap c_d, the newborn cutoff
@@ -187,7 +187,7 @@ const DPF_MAIN_VIEW := 5
 const DPF_ACETATE := 6
 const DPF_COUNT := 6
 
-## DSTATE[d]: device-owned, read back each iteration (the single-dish path's CNT and PCNT, per dish). Uints; words 24-31 are the energy ledger.
+## DSTATE[d]: device-owned, read back each iteration. Uints; words 24-31 are the energy ledger.
 const DS_WORDS := 32
 const DS_START := 0  ## the first slot of the dish's segment
 const DS_COUNT := 1
