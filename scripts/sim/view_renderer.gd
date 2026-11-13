@@ -92,10 +92,7 @@ func _init(limits_frame_queue := 2, device: RenderingDevice = null) -> void:
 	if rd == null:
 		errors.append("no main rendering device")
 		return
-	if _defs.is_empty():  # (GpuKernels.all writes every kernel's text, about 17 ms [measured, M1 Pro]: once a run, not once a dish)
-		var all := GpuKernels.all()
-		for kname: String in KERNELS:
-			_defs[kname] = all[kname]
+	_take_defs()
 	var shaders := ShaderSet.imported(_defs)
 	_on_device(func() -> void: _made = shaders.create(rd))
 	errors.append_array(shaders.errors)
@@ -113,15 +110,24 @@ func can_draw() -> bool:
 
 ## Density mode on or off (`taps`: GpuKernelsView.DENSITY_NEAREST, DENSITY_BILINEAR or DENSITY_ROD). The density kernels are made the first time it is
 ## switched on; if they do not build, `density_ready` stays false and the capsule drawing goes on whatever the switch says.
+## The view's and the density mode's kernel definitions, taken once a run and together (GpuKernels.all writes every kernel's text, about
+## 17 ms [measured, M1 Pro]: not once a dish, and not once for each of the two sets).
+static func _take_defs() -> void:
+	if not _defs.is_empty():
+		return
+	var all := GpuKernels.all()
+	for kname: String in KERNELS:
+		_defs[kname] = all[kname]
+	for kname: String in GpuKernelsView.DENSITY_KERNELS:
+		_den_defs[kname] = all[kname]
+
+
 func set_density(on: bool, taps := GpuKernelsView.DENSITY_BILINEAR) -> void:
 	density = on
 	density_taps = taps
 	if not on or rd == null or not _den_made.is_empty():
 		return
-	if _den_defs.is_empty():
-		var all := GpuKernels.all()
-		for kname: String in GpuKernelsView.DENSITY_KERNELS:
-			_den_defs[kname] = all[kname]
+	_take_defs()
 	var shaders := ShaderSet.imported(_den_defs)
 	_on_device(func() -> void: _den_made = shaders.create(rd))
 	errors.append_array(shaders.errors)
