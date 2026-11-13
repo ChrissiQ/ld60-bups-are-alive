@@ -168,6 +168,11 @@ func begin_game(game_began: float) -> void:
 	_send(SimThread.KIND_BEGIN_GAME, {"game_began": game_began})
 
 
+## The memory setting changed (`UserSettings.memory_mode`, `memory_gb`): the most the pool may hold follows it from now on.
+func set_memory(mode: String, gb: float) -> void:
+	_send(SimThread.KIND_MEMORY, {"mode": mode, "gb": gb})
+
+
 ## The world's seed (a new dish's seed is drawn from it and its number when its spec has none).
 func set_world_seed(seed_value: int) -> void:
 	_send(SimThread.KIND_WORLD_SEED, {"seed": seed_value})

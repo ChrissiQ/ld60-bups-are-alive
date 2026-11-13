@@ -42,6 +42,17 @@ func tick(now_msec: int, held: int) -> void:
 		_read(now_msec, held)
 
 
+## A new ceiling (the memory setting changed): the working budget is worked out again at once, so a lower ceiling takes hold now and a higher one
+## as far as the free memory allows.
+func set_ceiling(new_ceiling: int, now_msec: int, held: int) -> void:
+	ceiling = new_ceiling
+	var limits: PoolLimits = _limits.get_ref()
+	if limits != null and limits.memory_budget_bytes > ceiling:
+		limits.memory_budget_bytes = ceiling
+		lowered += 1
+	_read(now_msec, held)
+
+
 ## Before a growth: reads again unless a read is under MIN_GAP_MSEC old.
 func before_growth(now_msec: int, held: int) -> void:
 	if now_msec - _last_read_msec >= MIN_GAP_MSEC:

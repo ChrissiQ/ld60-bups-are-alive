@@ -35,6 +35,12 @@ static var reduce_motion: bool:
 			"off":
 				return false
 		return system_reduce_motion()
+const MEMORY_GB_MIN := 1.0  ## the number of GB the memory setting may be given: from the least the pool can work in (`PoolLimits.BUDGET_FLOOR`)
+const MEMORY_GB_MAX := 64.0
+const MEMORY_GB_STEP := 0.5
+static var memory_mode := PoolLimits.MEMORY_AUTO  ## the memory the simulation may use: `PoolLimits.MEMORY_AUTO`, `MEMORY_LOW` or `MEMORY_CUSTOM`
+static var memory_gb := 0.0  ## with MEMORY_CUSTOM, the number of GB (0: none chosen yet)
+static var _memory_listeners: Array[Callable] = []  ## called when the memory setting changes
 static var _loaded := false
 static var _system_motion := false
 static var _system_motion_at := -10000
@@ -74,6 +80,15 @@ static func load_once() -> void:
 		reduce_motion_choice = str(file.get_value("comfort", "reduce_motion", reduce_motion_choice))
 		if not reduce_motion_choice in ["system", "on", "off"]:
 			reduce_motion_choice = "system"
+		read_memory(file)
+
+
+## The memory setting from a preferences file (a value that is not one of the three modes becomes Auto, a number is held to its range).
+static func read_memory(file: ConfigFile) -> void:
+	memory_mode = str(file.get_value("simulation", "memory_mode", memory_mode))
+	if not memory_mode in [PoolLimits.MEMORY_AUTO, PoolLimits.MEMORY_LOW, PoolLimits.MEMORY_CUSTOM]:
+		memory_mode = PoolLimits.MEMORY_AUTO
+	memory_gb = _clean_gb(float(file.get_value("simulation", "memory_gb", memory_gb)))
 
 
 static func set_fullscreen(on: bool) -> void:
@@ -98,6 +113,32 @@ static func set_reduce_motion(choice: String) -> void:
 	load_once()
 	reduce_motion_choice = choice
 	_commit()
+
+
+## Sets the memory the simulation may use: a mode and, for MEMORY_CUSTOM, a number of GB (kept when the mode changes, so a number the player gave
+## is there again). The listeners (the running simulation) are told.
+static func set_memory(mode: String, gb: float) -> void:
+	load_once()
+	memory_mode = mode if mode in [PoolLimits.MEMORY_AUTO, PoolLimits.MEMORY_LOW, PoolLimits.MEMORY_CUSTOM] else PoolLimits.MEMORY_AUTO
+	memory_gb = _clean_gb(gb)
+	_commit()
+	for listener in _memory_listeners:
+		listener.call()
+
+
+static func listen_memory(listener: Callable) -> void:
+	_memory_listeners.append(listener)
+
+
+static func unlisten_memory(listener: Callable) -> void:
+	_memory_listeners.erase(listener)
+
+
+## A number of GB held to the setting's range and step (0 stays 0: none chosen).
+static func _clean_gb(gb: float) -> float:
+	if gb <= 0.0:
+		return 0.0
+	return clampf(snappedf(gb, MEMORY_GB_STEP), MEMORY_GB_MIN, MEMORY_GB_MAX)
 
 
 ## Windows that a person is not looking at keep the size they were started with: headless, started from a script (the tests and tools), or with
@@ -303,7 +344,11 @@ static func reset() -> void:
 	ui_scale = 1.0
 	scroll_speed = 1.0
 	reduce_motion_choice = "system"
+	memory_mode = PoolLimits.MEMORY_AUTO
+	memory_gb = 0.0
 	_commit()
+	for listener in _memory_listeners:
+		listener.call()
 
 
 static func _commit() -> void:
@@ -319,4 +364,6 @@ static func _save() -> void:
 	file.set_value("interface", "tray_order", tray_order)
 	file.set_value("comfort", "scroll_speed", scroll_speed)
 	file.set_value("comfort", "reduce_motion", reduce_motion_choice)
+	file.set_value("simulation", "memory_mode", memory_mode)
+	file.set_value("simulation", "memory_gb", memory_gb)
 	file.save(path)

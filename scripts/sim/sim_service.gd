@@ -22,7 +22,10 @@ func world() -> WorldClient:
 		if _backend == null:
 			var gpu: GDScript = load(GPU_BACKEND)
 			_backend = gpu.new() if gpu.available() else CpuSimBackend.new()
-			_backend.start(PoolLimits.from_settings())
+			var limits := PoolLimits.from_settings()
+			if MemoryMode.machine == null:
+				MemoryMode.machine = limits.machine  # (the screens judge the machine by what the simulation started from)
+			_backend.start(limits)
 		_world = WorldClient.new(_backend)
 	return _world
 
@@ -43,6 +46,16 @@ func use_backend(b: SimBackend) -> void:
 ## Whether the world has been made (nothing runs before the first `world()`).
 func started() -> bool:
 	return _world != null
+
+
+func _ready() -> void:
+	UserSettings.listen_memory(_memory_changed)
+
+
+## The memory setting changed: the running simulation follows (a world not made yet reads the setting when it starts).
+func _memory_changed() -> void:
+	if _world != null:
+		_world.set_memory(UserSettings.memory_mode, UserSettings.memory_gb)
 
 
 func _process(_delta: float) -> void:
