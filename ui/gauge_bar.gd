@@ -25,10 +25,17 @@ func show_gauge(new_kind: Kind, new_tone: Tone, new_fraction: float, new_ticks: 
 	kind = new_kind
 	tone = new_tone
 	fraction = clampf(new_fraction, 0.0, 1.0)
-	ticks = new_ticks
-	mark = new_mark
-	band = new_band
+	ticks = []
+	for share in new_ticks:  # (nothing of a bar is drawn outside its track: a share past the end stands at the end)
+		ticks.append(clampf(share, 0.0, 1.0))
+	mark = minf(new_mark, 1.0)
+	band = clampf(new_band, 0.0, 1.0)
 	queue_redraw()
+
+
+## A bar with nothing on its track: the figures are not known yet.
+func show_empty(new_kind: Kind) -> void:
+	show_gauge(new_kind, Tone.NORMAL, 0.0, [], -1.0, 0.0)
 
 
 func _fill_color() -> Color:
@@ -48,7 +55,8 @@ func _draw() -> void:
 	if kind == Kind.MASS:
 		var y := (size.y - CAPSULE_HEIGHT) * 0.5
 		_capsule(Rect2(0.0, y, size.x, CAPSULE_HEIGHT), track)
-		_capsule(Rect2(0.0, y, maxf(size.x * fraction, CAPSULE_HEIGHT), CAPSULE_HEIGHT), _fill_color())
+		if fraction > 0.0:
+			_capsule(Rect2(0.0, y, maxf(size.x * fraction, CAPSULE_HEIGHT), CAPSULE_HEIGHT), _fill_color())
 		if tone != Tone.DEAD:
 			for share in ticks:
 				_tick(share, y, CAPSULE_HEIGHT, tick)

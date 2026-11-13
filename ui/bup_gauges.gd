@@ -62,6 +62,15 @@ func _row(name_key: String) -> Array:
 	return [bar, value, word]
 
 
+## The bars of a living bup whose figures have not come from the simulation yet: empty tracks and no numbers, until `show_bup` has them.
+func show_waiting() -> void:
+	_mass_bar.show_empty(GaugeBar.Kind.MASS)
+	_reserve_bar.show_empty(GaugeBar.Kind.RESERVE)
+	_mass_value.text = ""
+	_reserve_value.text = ""
+	_reserve_state.text = ""
+
+
 ## `info` is a bup's info (alive) or its family record (dead); `starvation` is whether the dish lets bups starve.
 func show_bup(info: Dictionary, starvation: bool, alive: bool) -> void:
 	var mass: float = info["mass"]

@@ -51,5 +51,15 @@ func _initialize() -> void:
 	g.show_bup(_info(3.0, 2.0), true, false)
 	TestUtil.check(mass_bar.tone == GaugeBar.Tone.DEAD and reserve_bar.tone == GaugeBar.Tone.DEAD and g._reserve_state.text == "" and g._mass_value.text == "3.0" and g._reserve_value.text == "2", "a dead bup's bars are grey, with the numbers it died with")
 
+	# A record with no reserve to hold (capacity 0): the floor's share of the track is far past its end, and stands at the end. Nothing of a bar is outside its track.
+	g.show_bup({"mass": 0.0, "birth_mass": 0.0, "div_mass": 0.0, "energy": 0.0, "max_energy": 0.0}, false, true)
+	TestUtil.check(reserve_bar.band == 1.0 and reserve_bar.ticks[0] == 1.0 and mass_bar.ticks[0] <= 1.0, "a band and a tick never pass the end of the track (band %s, tick %s)" % [reserve_bar.band, reserve_bar.ticks])
+
+	# A living bup whose figures are not known yet: empty tracks, no numbers, no word.
+	g.show_bup(_info(6.0, 2.0), true, true)
+	g.show_waiting()
+	var empty := mass_bar.fraction == 0.0 and reserve_bar.fraction == 0.0 and mass_bar.ticks.is_empty() and reserve_bar.ticks.is_empty() and mass_bar.mark < 0.0 and reserve_bar.band == 0.0
+	TestUtil.check(empty and mass_bar.tone == GaugeBar.Tone.NORMAL and g._mass_value.text == "" and g._reserve_value.text == "" and g._reserve_state.text == "", "a bup that is waiting for its figures has empty bars and no numbers")
+
 	g.free()
 	TestUtil.finish(self, "BUP GAUGES TESTS OK")

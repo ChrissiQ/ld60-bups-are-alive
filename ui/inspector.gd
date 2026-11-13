@@ -122,8 +122,10 @@ func _show_info(following: bool) -> void:
 	var pinned := dish.has_selection()
 	var editing := source != null and bup_id < 0
 	var alive_info: Dictionary = dish.bup_info(bup_id) if bup_id >= 0 else {}  # (fetched once: the panels below are built from it)
+	var waiting := false  # (alive, but its record has not been answered yet: its family record stands in, rather than showing it as deceased, and that has no mass or reserve of a living bup)
 	if bup_id >= 0 and alive_info.is_empty() and dish.has_bup(bup_id):
-		alive_info = dish.lineage_info(bup_id)  # (alive, but its record has not been answered yet: its family record stands in, rather than showing it as deceased)
+		alive_info = dish.lineage_info(bup_id)
+		waiting = true
 	if bup_id >= 0 and alive_info.is_empty() and dish.lineage_info(bup_id).is_empty():
 		bup_id = -1  # (nothing is known of it yet: neither its record nor its place in the family tree has come back)
 	var dead := bup_id >= 0 and alive_info.is_empty()  # a selected bup that has died stays up, as a record
@@ -161,7 +163,10 @@ func _show_info(following: bool) -> void:
 		info_genome.show_bup(record, true)
 		readout.set_text(info_tail, PanelText.tail(record), "tail %d" % bup_id)
 		var divided := note_divisions(bup_id, record) and not dead
-		info_gauges.show_bup(record, dish.stationary_phase, not dead)
+		if waiting:
+			info_gauges.show_waiting()
+		else:
+			info_gauges.show_bup(record, dish.stationary_phase, not dead)
 		name_row.show_bup(dish, bup_id, true)  # a bup can be renamed once it is clicked, not just hovered
 		readout.set_text(info_text, body, "bup %d" % bup_id, divided)
 	elif source != null:
@@ -194,8 +199,10 @@ func _show_hover(hover_point: Variant) -> void:
 		hover_card.visible = false  # (the pointer is over what the info panel shows)
 		return
 	var alive_info: Dictionary = dish.bup_info(bup_id) if bup_id >= 0 else {}
+	var waiting := false  # (as in `update`)
 	if bup_id >= 0 and alive_info.is_empty() and dish.has_bup(bup_id):
 		alive_info = dish.lineage_info(bup_id)
+		waiting = true
 	if bup_id >= 0 and alive_info.is_empty() and dish.lineage_info(bup_id).is_empty():
 		bup_id = -1  # (nothing is known of it yet, as in `update`)
 	var dead := bup_id >= 0 and alive_info.is_empty()
@@ -212,7 +219,10 @@ func _show_hover(hover_point: Variant) -> void:
 		var body := _deceased_text(record) if dead else PanelText.bup(alive_info, number_of.call(dish))
 		hover_genome.show_bup(record, false)
 		readout.set_text(hover_tail, PanelText.tail(record), "tail %d" % bup_id)
-		hover_gauges.show_bup(record, dish.stationary_phase, not dead)
+		if waiting:
+			hover_gauges.show_waiting()
+		else:
+			hover_gauges.show_bup(record, dish.stationary_phase, not dead)
 		body = "%s\n%s" % [dish.bup_display(bup_id).get("name", ""), body]  # (the hover card has no name row)
 		readout.set_text(hover_text, body, "bup %d" % bup_id)
 	elif source != null:
