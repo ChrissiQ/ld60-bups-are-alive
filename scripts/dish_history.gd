@@ -54,13 +54,29 @@ static func boundary_of(time: float) -> int:
 	return floori(time / INTERVAL + Governor.OWED_TOLERANCE)
 
 
-## A snapshot's samples of the dish ({time, stats} each, oldest first). Returns how many were new.
+## A snapshot's samples of the dish ({time, stats} each, oldest first). Returns how many were new. Samples are one a multiple of INTERVAL; when
+## a sample is for a later multiple than the next one (the dish was handed only some of its samples), the multiples between are filled in on
+## a straight line from the last figures to the sample's, so the graph's time axis stays the world's (`take_until` does it within a time).
 func take(samples: Array) -> int:
 	var taken := 0
 	for s: Dictionary in samples:
+		_fill_to(float(s["time"]), s["stats"], 0)
 		if record(float(s["time"]), s["stats"]):
 			taken += 1
 	return taken
+
+
+## `take` for as long as the clock (Time.get_ticks_usec) is before `deadline`: returns how many of `samples` it went through, from the first.
+## A sample part way through a long gap stays (not counted), the gap filled as far as the time allowed.
+func take_until(samples: Array, deadline: int) -> int:
+	var k := 0
+	while k < samples.size():
+		var s: Dictionary = samples[k]
+		if not _fill_to(float(s["time"]), s["stats"], deadline):
+			break
+		record(float(s["time"]), s["stats"])
+		k += 1
+	return k
 
 
 ## One sample, taken at world time `time`, from these figures (DishState.STATS_KEYS). False, and nothing changes, when the sample is for a
@@ -69,26 +85,41 @@ func record(time: float, stats: Dictionary) -> bool:
 	var boundary := boundary_of(time)
 	if boundary <= _boundary:
 		return false
+	var row: Array
+	if stats["count"] == 0 and not fine["harm"].is_empty():  # (nobody left to average: the traits stay as they last were)
+		row = _last_row()
+		row[0] = 0
+	else:
+		row = _row_of(stats)
+	_push(row, time, boundary)
+	return true
+
+
+## The figures a series shows, from a sample's stats.
+static func _row_of(stats: Dictionary) -> Array:
+	var row: Array = [stats["count"]]
+	for series: String in TRAITS:
+		row.append(stats[series] * 100.0 if series == "harm" or series == "donor" or series == "key" else stats[series])
+	return row
+
+
+func _last_row() -> Array:
+	var row := []
+	for series in SERIES:
+		row.append(fine[series][-1])
+	return row
+
+
+func _push(row: Array, time: float, boundary: int) -> void:
 	_boundary = boundary
 	last_time = time
-	fine["pop"].append(stats["count"])
-	if stats["count"] == 0 and not fine["harm"].is_empty():  # (nobody left to average: the traits stay as they last were)
-		for series in SERIES:
-			if series != "pop":
-				fine[series].append(fine[series][-1])
-	else:
-		for gene in Genome.GENES:
-			fine[gene].append(stats[gene])
-		fine["harm"].append(stats["harm"] * 100.0)
-		fine["mutator"].append(stats["mutator"])
-		fine["donor"].append(stats["donor"] * 100.0)
-		fine["key"].append(stats["key"] * 100.0)
-		fine["generation"].append(stats["generation"])
+	for i in SERIES.size():
+		fine[SERIES[i]].append(row[i])
 	if fine["pop"].size() > LEN:
 		for series in fine.values():
 			series.pop_front()
-	for series in SERIES:
-		_sums[series] += fine[series][-1]
+	for i in SERIES.size():
+		_sums[SERIES[i]] += row[i]
 	_count += 1
 	if _count >= whole_factor:
 		for series in SERIES:
@@ -98,6 +129,29 @@ func record(time: float, stats: Dictionary) -> bool:
 		if whole["pop"].size() >= ALL_LEN:
 			_thin()
 	version += 1
+
+
+## Fills the multiples of INTERVAL between the newest sample and one at `time`, on a straight line from the newest figures to the new ones (held
+## level when either end has nobody: no figures to join). False when `deadline` (a Time.get_ticks_usec value; 0: none) passed first: the line
+## goes on from where it got to the next time.
+func _fill_to(time: float, stats: Dictionary, deadline: int) -> bool:
+	var gap := boundary_of(time) - _boundary - 1
+	if gap <= 0 or fine["pop"].is_empty():
+		return true
+	var from := _last_row()
+	var level: bool = stats["count"] == 0 or from[0] == 0
+	var to := from if level else _row_of(stats)
+	var spans := gap + 1
+	for j in range(1, spans):
+		if deadline > 0 and Time.get_ticks_usec() >= deadline:
+			return false
+		var t := float(j) / spans
+		var row := []
+		for i in SERIES.size():
+			row.append(from[i] + (to[i] - from[i]) * t)
+		if not level:
+			row[0] = roundi(row[0])
+		_push(row, (_boundary + 1) * INTERVAL, _boundary + 1)
 	return true
 
 

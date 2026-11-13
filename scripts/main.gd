@@ -636,7 +636,9 @@ func _record_parked_history() -> void:
 	while k < _to_record.size() and Time.get_ticks_usec() < until:
 		var d: Variant = _to_record[k]
 		if is_instance_valid(d):
-			(d as Dish).record_history()
+			(d as Dish).record_history(until)
+			if (d as Dish).has_unrecorded():  # (the time ran out part way through it: it goes on next frame)
+				break
 		k += 1
 	if k > 0:
 		_to_record = _to_record.slice(k)

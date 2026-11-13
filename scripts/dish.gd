@@ -187,7 +187,8 @@ var history: DishHistory:  ## what the graph shows of this dish (a parked dish's
 			_unrecorded = []
 			_history.take(samples)
 		return _history
-var _unrecorded: Array = []  ## history samples a parked dish was handed and has not recorded yet, oldest first
+var _unrecorded: Array = []  ## history samples a parked dish was handed and has not recorded yet, oldest first (at most BACKLOG_MAX: `_thin_backlog`)
+const BACKLOG_MAX := 96  ## the most samples a parked dish keeps unrecorded; past it every second one is let go (the history draws a line across the gap)
 var edit_count := 0  ## bumped by every change made to the dish by hand and by every new copy of its world, so screens can tell when to look again
 var patch_seed := 0  ## which landscape of richer and poorer patches the nutrient follows (see NUTRIENT_PATCHINESS)
 var watched: Array[int] = []  ## the bups the player is watching, newest first (see watch_bup); each holds a pin of this dish's number
@@ -277,6 +278,8 @@ func take_parked(snap: Snapshot) -> bool:
 	_state = ds
 	var samples: Array = snap.history.get(row, [])
 	_unrecorded.append_array(samples)
+	if _unrecorded.size() > BACKLOG_MAX:
+		_thin_backlog()
 	var copy: DishWorldCopy = snap.worlds.get(row)
 	if copy != null and copy.version != _world_version:
 		_take_world(copy)
@@ -286,9 +289,25 @@ func take_parked(snap: Snapshot) -> bool:
 	return not samples.is_empty()
 
 
-## Records the samples a parked dish was handed (reading the history does it).
-func record_history() -> void:
-	var _read := history  # (reading it records them)
+## Lets go of every second unrecorded sample, the oldest and the newest kept, until at most BACKLOG_MAX are left: a dish parked for a long time at
+## a high speed would otherwise hold a sample for every interval it missed. The history fills what is missing from a line between the samples
+## that remain (the oldest stays so that a dish's history still begins where it began).
+func _thin_backlog() -> void:
+	while _unrecorded.size() > BACKLOG_MAX:
+		var kept := _unrecorded.slice(0, _unrecorded.size(), 2)
+		if _unrecorded.size() % 2 == 0:  # (the newest is not one of every second from the oldest)
+			kept.append(_unrecorded[-1])
+		_unrecorded = kept
+
+
+## Records the samples a parked dish was handed, for as long as the clock (Time.get_ticks_usec) is before `deadline` (0: all of them). Reading the
+## history does all of them.
+func record_history(deadline := 0) -> void:
+	if deadline == 0 or _unrecorded.is_empty():
+		var _read := history  # (reading it records them)
+		return
+	var went := _history.take_until(_unrecorded, deadline)
+	_unrecorded = _unrecorded.slice(went)
 
 
 ## The history's version as far as it is recorded: reading it does not record the samples a parked dish is holding (the screen records those within

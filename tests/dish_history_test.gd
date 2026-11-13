@@ -30,6 +30,7 @@ func _initialize() -> void:
 	_series()
 	_whole_run()
 	_extinct()
+	_gaps()
 	TestUtil.finish(self, "DISH HISTORY TEST OK")
 
 
@@ -153,3 +154,24 @@ func _extinct() -> void:
 		h.record((k + 1) * DishHistory.INTERVAL + 3.0, stats(0, 0.0))
 	TestUtil.check(h.fine["pop"].size() == 6 and h.fine["pop"][-1] == 0 and h.fine["sense"][-1] == sense_then and h.fine["speed"][-1] == 32.0, "an extinct dish: pop 0, the traits held, a sample each 120 s as before")
 	TestUtil.check(is_equal_approx(h.last_time, 6.0 * DishHistory.INTERVAL + 3.0), "the history's time goes on after the dish died out (%.1f)" % h.last_time)
+
+
+## A sample for a later multiple of INTERVAL than the next one has the multiples between filled in on a line.
+func _gaps() -> void:
+	var h := DishHistory.new()
+	for k in 3:
+		h.record((k + 1) * DishHistory.INTERVAL + 3.0, stats(100, 20.0))
+	var n := h.take([{"time": 10.0 * DishHistory.INTERVAL + 3.0, "stats": stats(100, 30.0)}])
+	TestUtil.check(n == 1 and h.fine["pop"].size() == 10, "a gap of 6 multiples is filled: 10 samples, 1 new (%d, %d)" % [h.fine["pop"].size(), n])
+	TestUtil.check(is_equal_approx(h.fine["speed"][5], 20.0 + 10.0 * 3.0 / 7.0) and is_equal_approx(h.fine["speed"][9], 30.0), "...on a straight line from the last figures to the new (%.3f)" % h.fine["speed"][5])
+	TestUtil.check(is_equal_approx(h.last_time, 10.0 * DishHistory.INTERVAL + 3.0), "...and the history's time is the sample's")
+	var late := DishHistory.new()
+	late.record(1.0 * DishHistory.INTERVAL, stats(100, 20.0))
+	late.record(2.0 * DishHistory.INTERVAL, stats(100, 20.0))
+	late.take([{"time": 6.0 * DishHistory.INTERVAL, "stats": stats(0, 0.0)}])
+	TestUtil.check(late.fine["pop"].size() == 6 and late.fine["pop"][2] == 100 and late.fine["pop"][5] == 0 and late.fine["speed"][4] == 20.0, "a gap that ends with nobody is held level, then the sample (pop %s)" % [late.fine["pop"]])
+	var timed := DishHistory.new()
+	timed.record(1.0 * DishHistory.INTERVAL, stats(100, 20.0))
+	var far := [{"time": 40.0 * DishHistory.INTERVAL, "stats": stats(100, 60.0)}]
+	TestUtil.check(timed.take_until(far, Time.get_ticks_usec() - 1) == 0 and timed.fine["pop"].size() == 1, "take_until with its time passed goes through nothing and changes nothing")
+	TestUtil.check(timed.take_until(far, Time.get_ticks_usec() + 10000000) == 1 and timed.fine["pop"].size() == 40 and is_equal_approx(timed.fine["speed"][19], 20.0 + 40.0 * 19.0 / 39.0), "...with time it takes it and fills the line (%d)" % timed.fine["pop"].size())
