@@ -7,6 +7,8 @@
 # Windows, Linux and macOS, and the Godot project (source plus the prebuilt native libraries for all
 # three, so it plays from inside Godot with nothing to compile).
 #
+# No release is made unless the simulation tests pass on a software Vulkan driver (sim-tests.yml).
+#
 # The export presets are in export_presets.cfg.
 name: release
 on:
@@ -17,8 +19,10 @@ env:
 jobs:
   native:
     uses: ./.github/workflows/build-native.yml
+  sim-tests:
+    uses: ./.github/workflows/sim-tests.yml
   release:
-    needs: native
+    needs: [native, sim-tests]
     runs-on: ubuntu-latest
     permissions:
       contents: write

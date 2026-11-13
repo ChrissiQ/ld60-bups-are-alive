@@ -1,0 +1,82 @@
+# Runs simulation tests on a hosted Linux runner, which has no GPU: the software Vulkan driver
+# (lavapipe) does the compute, under a virtual display. It runs by hand and as a job of release.yml,
+# which makes no release unless this passes. It does not run on pushes.
+#
+# The tests are the ones that need no values recorded on another machine:
+#   isolation, permutation, field_padding, continuation, conjugation_isolation: each compares runs
+#     made on the one device, word for word (conjugation_isolation also expects a dish's donors to
+#     grow in number, which is not derived for any device);
+#   invariants, stats: exact counts, and sums within the tolerances the tests state.
+# Not run here: goldens_test (its recorded values are one machine's), the timing gates and the tests
+# of the game's screens.
+#
+# A test counts as passed only when its OK line is in its log; its exit status is not read.
+name: sim-tests
+on:
+  workflow_dispatch:
+  workflow_call:
+env:
+  GODOT_VERSION: "4.7.2"
+  TEST_TIMEOUT: "900" # (seconds a test may take: a bound for a test that hangs, not a measured time)
+jobs:
+  lavapipe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install scons
+      # The project loads the lineage store, and a Godot that is not an export loads the debug library.
+      - name: Build the lineage store for Linux
+        run: |
+          commit="$(sed -n 's/^  GODOT_CPP_COMMIT: *//p' .github/workflows/build-native.yml)"
+          [ -n "$commit" ] || { echo "::error::GODOT_CPP_COMMIT was not found in build-native.yml"; exit 1; }
+          git clone https://github.com/godotengine/godot-cpp native/godot-cpp
+          git -C native/godot-cpp checkout "$commit"
+          (cd native && scons platform=linux arch=x86_64 target=template_debug api_version=4.5 -j4)
+          test -f native/bin/libbups.linux.template_debug.x86_64.so
+      - name: Install lavapipe, xvfb and the Vulkan loader
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers libvulkan1 vulkan-tools xvfb unzip
+      - name: Get Godot
+        run: |
+          base="https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-stable"
+          curl -fsSL -o "$RUNNER_TEMP/godot.zip" "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP"
+          sudo mv "$RUNNER_TEMP/Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot
+      - name: Use lavapipe as the Vulkan driver
+        run: |
+          ls /usr/share/vulkan/icd.d/
+          icd="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -n 1)"
+          [ -n "$icd" ] || { echo "::error::No lavapipe driver file (lvp_icd*.json) in /usr/share/vulkan/icd.d"; exit 1; }
+          echo "VK_ICD_FILENAMES=$icd" >> "$GITHUB_ENV"
+          VK_ICD_FILENAMES="$icd" vulkaninfo --summary || true
+      # One trivial kernel in an empty project: when this fails the runner has no working compute
+      # device, and a failure of the tests below would say nothing about the game.
+      - name: Check that the driver runs a compute kernel
+        run: |
+          xvfb-run -a -s "-screen 0 1280x720x24" \
+            godot --path tools/ci/probe_project --rendering-driver vulkan -s ../compute_probe.gd --quit-after 600 2>&1 | tee "$RUNNER_TEMP/probe.log"
+          grep -q "^COMPUTE_PROBE OK$" "$RUNNER_TEMP/probe.log" || { echo "::error::The probe did not print COMPUTE_PROBE OK"; exit 1; }
+      - name: Import the project and check the shaders
+        run: |
+          godot --headless --path . --import || true # (the first import may exit badly yet leave a good result)
+          # The import reports success even when a GPU shader fails to compile, so the shaders are checked here.
+          godot --headless --path . -s tests/gpu_shaders_test.gd || { echo "::error::The GPU shader check failed (tests/gpu_shaders_test.gd). The failures are listed above."; exit 1; }
+      - name: Run the tests
+        run: |
+          failed=""
+          for t in isolation permutation field_padding continuation conjugation_isolation invariants stats; do
+            log="$RUNNER_TEMP/${t}_test.log"
+            echo "::group::${t}_test"
+            timeout -k 30 "$TEST_TIMEOUT" xvfb-run -a -s "-screen 0 1280x720x24" \
+              godot --path . --rendering-driver vulkan -s "tests/sim/${t}_test.gd" 2>&1 | tee "$log"
+            echo "::endgroup::"
+            if ! grep -q "^OK ${t}_test" "$log"; then
+              echo "::error::${t}_test did not print its OK line"
+              failed="$failed ${t}_test"
+            fi
+          done
+          [ -z "$failed" ] || { echo "Failed:$failed"; exit 1; }
