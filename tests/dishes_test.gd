@@ -7,7 +7,9 @@ extends SceneTree
 ## Expected values [derived from the rules in main.gd and FakeWorld; the fake's clock starts at 3,661 s and
 ## each frame stands for 1/60 s of real time, times the speed]:
 ##  - A second dish joins the set and the strip (2 tabs); every dish sits at the origin and only the main view's dish is shown (the
-##    other is parked: hidden, not processing, nothing made to draw); the next-dish step wraps.
+##    other is parked: hidden, not processing, nothing made to draw); the next-dish step wraps. A dish has one overlay (DishOverlay)
+##    whether it was shown from the start or first shown later: an overlay made twice leaves one that is never drawn again, and the
+##    strike's flash stays on it [derived].
 ##  - Dishes of 100 bups (every mean 10) and 300 bups (every mean 20) show a speed of (100 x 10 + 300 x 20) / 400 = 17.5 in the
 ##    all-dishes section, with 2 dishes and 400 bups [derived].
 ##  - The source tool: a click selects nothing at once (the world's copy has not come), and the source placed once it has (1-2 frames).
@@ -64,8 +66,10 @@ func _run() -> void:
 	TestUtil.check(m.dishes.size() == 2 and m.dish == first and m.dish_strip.visible and m.dish_strip.count() == 2, "a second dish joins the set and shows in the strip; the main view stays")
 	TestUtil.check(other.position == Vector2.ZERO and first.position == Vector2.ZERO, "every dish sits at the screen's origin (what is drawn is in the main dish's own coordinates)")
 	TestUtil.check(first.visible and not other.visible and other.is_parked() and not other.can_process() and other.drawing.bups_mesh == null, "only the dish in the main view is shown; the other is parked, does nothing a frame and has made nothing to draw")
+	TestUtil.check(_overlays(first) == 1, "the shown dish has one overlay: what it draws is made once (it has %d)" % _overlays(first))
 	m._step_dish(1)
 	TestUtil.check(m.dish == other, "the next-dish step goes to the second dish")
+	TestUtil.check(_overlays(other) == 1, "a parked dish makes what it draws once, when it is first shown (it has %d overlays)" % _overlays(other))
 	m._step_dish(1)
 	TestUtil.check(m.dish == first, "the next-dish step wraps to the first")
 	m._step_dish(-1)
@@ -176,6 +180,11 @@ func _run() -> void:
 	await _limit(fake, chosen)
 	_graph_times()
 	TestUtil.finish(self, "DISHES TESTS OK")
+
+
+## The overlays among a dish's children.
+func _overlays(d: Dish) -> int:
+	return d.get_children().filter(func(c: Node) -> bool: return c is DishOverlay).size()
 
 
 ## The all-dishes figures are every bup of every dish averaged (a dish counts by its bups), read from the snapshot. And the source tool

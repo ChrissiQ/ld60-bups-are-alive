@@ -227,7 +227,7 @@ func _init() -> void:
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR  # the haze is a small texture stretched over the dish
-	if visible:
+	if visible and drawing.bups_mesh == null:  # (a shown dish is told it is visible as it enters the tree, before this, and has made them then)
 		drawing.build_children()
 	_world()
 
