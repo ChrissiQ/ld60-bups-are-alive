@@ -71,7 +71,8 @@ static func report(dish: Dish, scene: Node, extra: Dictionary) -> String:
 
 
 ## Where the bups are simulated: the setting (a hidden field the world ignores), where they run (the pooled GPU world, or the stub,
-## which runs nothing), whether this machine can use the GPU at all, both devices' names, the governor's figures and the pool's, the
+## which runs nothing), whether this machine can use the GPU at all, both devices' names, the governor's figures (the steps of the last
+## iteration, `k`, the world step's length, `step_s`, and the world time the iteration covered) and the pool's, the
 ## payload's age behind the clock, and the pick latency.
 static func backend(dish: Dish) -> Dictionary:
 	var world := WorldClient.shared()
@@ -86,6 +87,8 @@ static func backend(dish: Dish) -> Dictionary:
 		"main_device": RenderingServer.get_video_adapter_name(),
 		"governor": {
 			"k": timing.get("steps", 0),
+			"step_s": timing.get("delta", 0.0),
+			"iteration_world_s": float(timing.get("steps", 0)) * float(timing.get("delta", 0.0)),
 			"duty": timing.get("duty", 0.0),
 			"T_ITER_ms": Governor.T_ITER_MS,
 			"step_ms_ema": timing.get("step_ms_ema", 0.0),

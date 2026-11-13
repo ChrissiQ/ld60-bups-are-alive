@@ -42,8 +42,9 @@ func _initialize() -> void:
 		TestUtil.check(data.has("backend") and data["backend"]["running"] == "gpu" and data["backend"]["gpu_available"] == GpuSimBackend.available(), "it says where the bups run: that the world simulates (the canned backend can)")
 		TestUtil.check(data["backend"].get("gpu_device") == "test device" and data["backend"].get("main_device") is String, "...both devices' names: the simulation's from the backend, the main one's from the renderer")
 		var be: Dictionary = data["backend"]
-		for key in ["k", "duty", "T_ITER_ms", "step_ms_ema", "sync_ms", "publish_ms"]:
+		for key in ["k", "step_s", "iteration_world_s", "duty", "T_ITER_ms", "step_ms_ema", "sync_ms", "publish_ms"]:
 			TestUtil.check(be["governor"].has(key) and (be["governor"][key] is float or be["governor"][key] is int), "the governor has the number %s" % key)
+		TestUtil.check(is_equal_approx(float(be["governor"]["iteration_world_s"]), float(be["governor"]["k"]) * float(be["governor"]["step_s"])), "...the world time of the last iteration is its steps times the step length")
 		TestUtil.check(be["governor"]["T_ITER_ms"] == Governor.T_ITER_MS and be["pool"] is Dictionary and be["pool_overflow"] is float and be["payload_behind_sim_s"] is float,"...T_ITER is the governor's, and the pool, its overflow bits and the payload's age are there (the canned world serves none)")
 		TestUtil.check(be.has("time_process") and (be["time_process"] is float or be["time_process"] is int), "backend has the process time")
 		TestUtil.check(be.has("draw_slots") and be["draw_slots"] is Dictionary and be["draw_slots"].has("drawn") and be["draw_slots"].has("capacity") and be["draw_slots"].has("live"), "...draw_slots has drawn, capacity and live")
