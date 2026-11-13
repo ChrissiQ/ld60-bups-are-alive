@@ -5,7 +5,7 @@ extends SceneTree
 ## Windowed, through the lock. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/refresh_rate_test.gd
 ##
-## Expected values, written before the first run:
+## Expected values:
 ## - both runs take steps of 1/120 s (x1: Governor.step_length(1) [derived]) and run exactly N = 240 steps from (N + 0.5) steps'
 ##   time (N frames of 1/120 s and half a frame, or 2N + 1 frames of 1/240 s), then one more step alone (a frame of 1/120 s, or of 1/240 s
 ##   on the half step left), so the last iteration is a single step in both [derived from the Governor's owed time]; no time is dropped

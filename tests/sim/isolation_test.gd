@@ -1,7 +1,7 @@
 extends SceneTree
 ## A dish's run does not depend on what shares the pool.
 ##
-## Expected values, written before the first run:
+## Expected values:
 ## - dish X (number 1, seed 11, every flag on, resolution 100, 40 founders, radius 600 µm) alone and the same dish with 1, 7 and 64
 ##   random other dishes beside it: after every 20 steps of 20 s (200 steps in all) the canonical dumps differ nowhere
 ##   (diff == "") [derived: per-dish segments, RNG and clouds are pooled by dish]. Three seeds for the others.

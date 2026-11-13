@@ -1,7 +1,7 @@
 extends SceneTree
 ## The harness's own checks: they run headless (no GPU, no SimCore needed) and print OK.
 ##
-## Expected values, written before the first run (derived unless marked):
+## Expected values (derived unless marked):
 ## - `diff` of a dump with itself is ""; with one word of record 3 changed to R_ENERGY's place it is a line naming "record 3" and
 ##   "R_ENERGY"; with DS_MOVED_IN changed it names "DS_MOVED_IN"; with the picture words (R_PX, R_PY) changed and nothing else it is "".
 ## - a dump whose records are longer than the other's says "length".

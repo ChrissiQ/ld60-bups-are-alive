@@ -1,7 +1,7 @@
 extends SceneTree
 ## The per-dish stats equal a recount of the dish's records.
 ##
-## Expected values, written before the first run:
+## Expected values:
 ## - ST_COUNT equals the number of records exactly [derived]; the sums of the four genes, mutator, donors and key equal the sums of
 ##   the dump's records within 1e-5 relative [placeholder: the fold order of the stats pass is not pinned; if it were, the
 ##   comparison would be exact].

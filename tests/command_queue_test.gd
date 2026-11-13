@@ -3,7 +3,7 @@ extends SceneTree
 ## The command queue, replies and the main thread's door to the simulation, with the processor's stub
 ## backend and the test double; no device.
 ##
-## Expected values, written before the first run [derived from the classes' contracts]:
+## Expected values [derived from the classes' contracts]:
 ##  - CommandQueue: three pushes drain as a, b, c, and the queue is empty after; two writer threads of 1,000 commands each arrive all
 ##    2,000, each writer's in its own order; a reader waiting in `wait` wakes on a push. After 10,000 pushes drained with no wait (a
 ##    running sim thread drains between iterations without waiting), one `wait` returns at once and the next sleeps until a push 60 ms

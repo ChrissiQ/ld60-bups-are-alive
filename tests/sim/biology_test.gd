@@ -1,7 +1,7 @@
 extends SceneTree
 ## The pooled world reproduces the known biology.
 ##
-## Expected values, written before the first run:
+## Expected values:
 ## - Doubling time (derived from Biology.DOUBLING_SECONDS = 2400 s, which holds for a bup that is fed to saturation): one unit of nutrient
 ##   is NUTRIENT_ENERGY 16, so 64 units/mm2 is 64 x 16 / 1e6 = 0.001 energy/um2, below Cell.HALF_SATURATION 0.002: uptake is c/(c+K) = 0.34
 ##   of its maximum, and the bups are food-limited by concentration, not by the dish's total (that is 64 x 28.3 mm2 x 16 = 29,000 energy,

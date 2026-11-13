@@ -1,7 +1,7 @@
 extends SceneTree
 ## The pooled world reproduces its own goldens.
 ##
-## Expected values, written before the first run:
+## Expected values:
 ## - For every `tools/gpu/golden/dynamics_pooled_<scenario>_seed1_6h.txt`, one dish of that scenario (defined in tools/gpu/world_tools.gd) at seed 1 run for 6 sim-hours in steps
 ##   of 20 s (what `tools/gpu/validate_dynamics.gd gpu <scenario> 1 6` does) gives the same six SAMPLE lines, byte for byte [derived: the
 ##   run is deterministic per seed on one machine; the check asks for equality at one dish and one seed].

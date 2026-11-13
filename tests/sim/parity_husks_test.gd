@@ -4,7 +4,7 @@ extends SceneTree
 ## its DishDrawing and pointed at with the select tool's hover. Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_husks_test.gd
 ##
-## Expected values, written before the first run [derived unless marked]:
+## Expected values [derived unless marked]:
 ## 1  One husk of 50 energy: the husks' multimesh draws 1 instance, and the dish counts 1 (DishState.husk_count), within 3 s of frames.
 ## M  199,999 more (200,000): the multimesh draws 200,000 and the dish counts 200,000 (the picture is the whole list, never a share).
 ## H  The Husks layer hidden: none drawn, and the pointer resting on the first husk's place outlines none (Dish.looks_at_husks is false);

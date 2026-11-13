@@ -3,7 +3,7 @@ extends SceneTree
 ## meanwhile. Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/pipette_row_reuse_test.gd
 ##
-## Expected values, written before the first run [derived from the code: SimThread._pipette keeps the source's client row, WorldClient hands
+## Expected values [derived from the code: SimThread._pipette keeps the source's client row, WorldClient hands
 ## a freed client row out again at once, and the retarget looks the row up when the grid is ready]:
 ## - dish 1 (client row 0, 30 bups) is asked for a pipette that takes every bup (radius 600 over a 244 um colony), then trashed, and a
 ##   different dish (number 5, 25 bups, another size) is added at client row 0, all before the grid is ready (a grid of 100 cells takes

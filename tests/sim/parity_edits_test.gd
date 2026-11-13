@@ -4,7 +4,7 @@ extends SceneTree
 ## edits it, paused, the pool read before and after each edit (SimCore.gather). Needs a GPU (windowed). On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_edits_test.gd
 ##
-## Expected values, written before the first run [derived unless marked]:
+## Expected values [derived unless marked]:
 ## A dish of 3 mm (100 cells of 60 µm; a cloud goes to the grid at half a cell, 30 µm), 32 units/mm², 50 founders, paused throughout.
 ## D1 A dose of 9 (Dish.drop_nutrients: 144 energy over Dish.scatter_radius(9) = 15 µm; variance max(15² / 4, 100) = 100, sigma 10 < 30)
 ##    is one more cloud at the click's point exactly (dish-local (310, -220)), mass 144, variance 100; the nutrient's total rises by 144

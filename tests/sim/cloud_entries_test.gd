@@ -1,7 +1,7 @@
 extends SceneTree
 ## The cloud lists' entry buffer does not run out before the cloud slots do.
 ##
-## Expected, written before the first run:
+## Expected:
 ## - scenario D seed 6 (tools/gpu/world_tools.gd) is a dish whose clouds reach up to 56 bins [measured]; with the entries sized at 12 a
 ##   cloud slot the pool's overflow flag would rise. Here it is run 1,200 steps of 20 s: the clouds' reach (a handover-wide sigma, 6.5 sigma each way, over bins half a
 ##   cell wide) needs more than 12 entries each [derived], so the entries must have grown with them: the pool's overflow flag stays 0, the

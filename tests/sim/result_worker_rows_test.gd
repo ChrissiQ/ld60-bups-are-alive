@@ -1,7 +1,7 @@
 extends SceneTree
 ## A world row another dish took over does not carry the old dish's history samples or world copy into the snapshots.
 ##
-## Expected, written before the run: a row's sample, held until acknowledged, is in the next snapshot while the same dish (number 7) holds the row;
+## Expected: a row's sample, held until acknowledged, is in the next snapshot while the same dish (number 7) holds the row;
 ## once the row shows dish 8 the snapshot has only dish 8's own sample (one, with the time it was given), and the old world copy is gone.
 
 func _item(number: int, sample_time: float, worlds: Dictionary) -> Dictionary:

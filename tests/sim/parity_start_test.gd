@@ -4,7 +4,7 @@ extends SceneTree
 ## the pool (SimCore.gather). Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_start_test.gd
 ##
-## Expected values, written before the first run [derived unless marked]:
+## Expected values [derived unless marked]:
 ## N  A 3 mm dish struck with 32 units/mm² (100 cells of 60 µm), paused: the grid holds 32 x Dish.CONCENTRATION_PER_DENSITY x (the cells
 ##    inside the rim) x the cell's area in energy, within 1e-4 relative (DishGrid.filled: the landscape's weights average 1 over the
 ##    inside cells, each cell rounded to float32). "Area" is the inside cells', not pi R² (they differ by 0.3% here). The game's dish is

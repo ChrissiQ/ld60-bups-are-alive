@@ -4,7 +4,7 @@ extends SceneTree
 ## pool_conj_apply then pool_life, every other kernel the same, in the same order. Windowed, through the lock. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/fused_check.gd [-- seed_shift=N]
 ##
-## Expected values, written before the first run [derived]: on each of three states (400 donors and recipients packed in a 100 µm dish
+## Expected values [derived]: on each of three states (400 donors and recipients packed in a 100 µm dish
 ## with food enough to divide and the donors' genes set apart from the others', so transfers happen and show; a 20 mm dish (a 400 µm grid, so a plankton's burst is a cloud, not cells) with the
 ## bloom at its most and scarce food, so plankton clouds and
 ## starvation's death clouds; the stationary phase on scarce food), STEPS steps of 20 s (two hours: past the cloud compactions and husk

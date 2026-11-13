@@ -4,7 +4,7 @@ extends SceneTree
 ## point readout's slope; a source's release so far; a dose's scatter; the husks' picture; the start of a game. Over a backend of this
 ## file's own that keeps what is sent and serves the snapshots the test writes (SimService.use_backend).
 ##
-## Expected values, written before the first run [derived from the code's rules; the backend's clock is whatever the test says]:
+## Expected values [derived from the code's rules; the backend's clock is whatever the test says]:
 ##  - Husks (a dish with death husks, the snapshot counting 5): the select tool's hover at (100, 50) asks for the husks within half a
 ##    husk's drawn size (3 px at a scale of 1: 1.5 µm) of it, and finds none until answered; answered with a husk at (100.5, 50) holding
 ##    160 energy, 30 s old, 2 pieces let go, the hover finds it there; its details: age 30, left exp(-0.5) = 0.6065, units 160 x 0.6065 /

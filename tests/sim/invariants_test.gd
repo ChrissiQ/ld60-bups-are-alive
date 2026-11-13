@@ -1,7 +1,7 @@
 extends SceneTree
 ## The pool's conservation checks.
 ##
-## Expected values, written before the first run:
+## Expected values:
 ## - after 300 steps of 20 s of a mixed pool (goal dish, a dish with every flag, a dish with a key, a dish that starves), invariants()
 ##   is empty: DS_COUNT = records, ids unique, every bup inside the rim, count within the limit [derived].
 ## - an empty dish (no bups, no feed, no bloom, nothing emitted) keeps its field total: |total_after - total_before| <= 1e-5 x

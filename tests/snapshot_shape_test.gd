@@ -1,7 +1,7 @@
 extends SceneTree
 ## Run: godot --headless --path . -s tests/snapshot_shape_test.gd
 ## The fake's canned snapshots have the real `Snapshot`'s shape, and the fake's own machinery works.
-## Expected values, written before the first run [derived from the real Snapshot and its client]:
+## Expected values [derived from the real Snapshot and its client]:
 ##  - every member of `Snapshot` (read from the script) is present in a canned snapshot with the declared type: seq/sim_time/
 ##    achieved_speed/paused: int/float/float/bool, dishes/history/answers/worlds/timing/totals: Dictionary, payloads: Array, husk_view: Dictionary, payload/field_view/thumbs: objects of
 ##    PayloadInfo/FieldViewInfo/ThumbsInfo; `Snapshot` has exactly 15 members;

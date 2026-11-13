@@ -13,7 +13,7 @@ extends SceneTree
 ## ONE dish of 45 mm and a 100,000 limit filled to the limit at once (perf_gates_test.filled_spec, put on the screen's own dish through a
 ## DishSpec: StartConditions.bups stops at 250), nutrient and feed at the setup maxima, asked x10,000, 12 s settle, 30 s of frames, three runs in
 ## three processes). The bound is `gate_e` (p95 <= min(the baseline's 10.18 ms, 1.15 x the display frame = 9.58 ms on the 120 Hz display of the machine the baseline was measured on), speed >= x9,500).
-## Expected values, written before the first run:
+## Expected values:
 ## - A frame here is the main thread's part only (the sim runs on its own thread): the snapshot swap and its decode for one 100,000-bup dish,
 ##   the view kernels and the draw of 100,000 instances at 2560 x 1440, the tray, graph and history refresh, the strip. The baseline's frames
 ##   with the same dish were mean 9.06, p95 10.18, worst 55 ms [measured]; the simulation runs on its own device, not the main thread's
@@ -24,7 +24,7 @@ extends SceneTree
 ##   the screen's own with one 100,000-bup dish. The p95 sits close to the 9.58 ms cap, so a pass or fail by tenths is likely: the verdict is the mean of three processes.
 ## - Speed reached x9,990-10,000 [measured, baseline]; population 99,800-99,900 at both ends (the dish holds its limit).
 ##
-## Expected values, written before the first run:
+## Expected values:
 ## - The bound is `gate_interface` of perf_gates_test.gd: the p95 and the mean no worse than the baseline's scenario with 20 dishes of 48 x 48 cells (C48;
 ##   the same grids; perf_pre_pool.json: mean 9.31 ms, p95 10.33, max 14.48). This screen's frames at 994 dishes were p50 8.34, p95 8.96-9.10,
 ##   worst 11.1-11.35 ms [measured, asked x100]; at x10,000 asked the main thread's part is the same (the sim is on its own
@@ -39,7 +39,7 @@ extends SceneTree
 ## zoomed out, as the winner view draws them. The bound is `gate_ab`: the p95 (mean of the three runs) no worse than the baseline's in
 ## tools/gpu/baseline/perf_pre_pool.json (A: p95 32.0 ms, mean 31.45, speed x624; B: p95 31.32, mean 30.64, speed x630 [measured, baseline]).
 ## Speed is not in the coded rule: it is printed and compared with the baseline's.
-## Expected values, written before the first run:
+## Expected values:
 ## - A frame is the main thread's part (the sim runs on its own thread). `game_check perf 2000000` with the winner view reached x389 with frame
 ##   p50 8.9 ms and p95 26 ms, against x37 and p50 37 ms with capsules [measured with the capsule draw]; at fit the
 ##   winner view's frame mean at 2,000,000 bups was 5.3 ms against 32.5 ms with capsules [measured]. The baseline's A and B frames (mean 31 ms) were

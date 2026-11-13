@@ -11,7 +11,7 @@ extends SceneTree
 ##   GPU_FROM_SOURCE=1 compiles the kernels from GpuKernels.all() at run time instead of using the imported shaders. NO_BUPS=1 runs the
 ##   dish without bups (what goes into the field: feed, bursts, sources).
 ##
-## Expected values, written before the first run [derived]: scenario B for 6 hours at seed 1 prints six SAMPLE lines (hours 1-6) whose
+## Expected values [derived]: scenario B for 6 hours at seed 1 prints six SAMPLE lines (hours 1-6) whose
 ## populations grow from 250 towards the limit 20,000 and stay at or under it, and OVERFLOWS 0; two runs of the same arguments print the
 ## same lines byte for byte (the run is deterministic per seed on one machine).
 

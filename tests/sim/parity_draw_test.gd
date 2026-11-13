@@ -5,7 +5,7 @@ extends SceneTree
 ## Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_draw_test.gd
 ##
-## Expected values, written before the first run [derived unless marked]:
+## Expected values [derived unless marked]:
 ## L  The pool holds the fixture word for word.
 ## H  The haze the dish draws (the medium layer shown; Dish's look: DETECTION_FLOOR, 0.5 x 255 / sqrt(10 HALF_SATURATION), 0.45 x 255)
 ##    equals the fixture's haze_bytes: alpha within 1 in every cell, RGB equal wherever either alpha is above 0 (the bound: the float

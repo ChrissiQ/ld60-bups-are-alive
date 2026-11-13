@@ -1,6 +1,6 @@
 extends SceneTree
 ## Run: godot --headless --path . -s tests/sim_layout_test.gd
-## The pooled world's word layouts (gpu/gpu_layout.gd), headless. Expected values, written before the first run:
+## The pooled world's word layouts (gpu/gpu_layout.gd), headless. Expected values:
 ##  - the record: 28 words, each of R_* named once (0-27), no word or constant naming a dish (a bup's dish is its segment);
 ##  - ids: one world-wide positive 63-bit number (ID_MAX 2^63 - 1), no dish in it; R_ID_HI is its high word; WORLD holds the next id (WD_NEXT_ID_LO/HI);
 ##  - an event's step word (ED_STEP, and a birth's EB_STEP): 13 low bits step, 19 high bits dish number, 13 + 19 = 32; MAX_STEPS_PER_BATCH (1024) fits in 13 bits;

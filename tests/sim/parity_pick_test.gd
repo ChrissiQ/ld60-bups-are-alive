@@ -3,7 +3,7 @@ extends SceneTree
 ## the game's world (ParityGame.fixture_dish), paused, a Dish node at ParityGame.PLACE drawing it. Needs a GPU (windowed). On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_pick_test.gd
 ##
-## Expected values, written before the first run [derived unless marked]:
+## Expected values [derived unless marked]:
 ## L  The pool holds the fixture word for word: its 20,000 records (ids given the dish's number), its grid and its 60 clouds.
 ## F  The fixture's 300 picks (queries_pick_near.txt: point, slack, pixel -> id), asked of the dish's picture (ViewRenderer.pick, the
 ##    question Dish.cell_at sends, with the fixture's pixel): every answer is the fixture's id (or none where it found none). The payload's

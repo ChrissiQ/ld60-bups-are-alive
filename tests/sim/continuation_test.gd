@@ -1,7 +1,7 @@
 extends SceneTree
 ## Freeze and thaw is invisible to the run.
 ##
-## Expected values, written before the first run:
+## Expected values:
 ## - run N = 80 steps, freeze, thaw, run M = 80 steps gives a dump with 0 differing words against the dish run N + M = 160 steps
 ##   straight (diff == "") [derived: a frozen dish keeps its records, field, clouds, husks, RNG state and step; thawing restores them
 ##   to a new row and the step counter carries on; the harness keeps the dish's world (DishWorld.save()) in the blob and restores it].

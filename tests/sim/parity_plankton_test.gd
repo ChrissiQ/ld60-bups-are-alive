@@ -3,7 +3,7 @@ extends SceneTree
 ## (Dish.plankton, from the world's copies), the nutrient read from the pool (SimCore.gather). Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_plankton_test.gd
 ##
-## Expected values, written before the first run [derived unless marked]:
+## Expected values [derived unless marked]:
 ## The dish: 20 mm, 100 cells of 400 µm; a cloud goes to the grid once its sigma reaches half a cell (200 µm); D = 600 / 25 = 24 µm²/s.
 ## L  A plankton placed with Dish.place_plankton shows in the dish's next copy, born at the world's time then, and bursts between 0.5 and
 ##    1.5 of PLANKTON_MEAN_LIFE (1,800 to 5,400 s) later (its burst_at).

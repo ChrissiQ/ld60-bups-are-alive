@@ -5,7 +5,7 @@ extends SceneTree
 ## Windowed, through the lock (a run of about 11 minutes). On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/soak_test.gd [-- seconds=600]
 ##
-## Expected values, written before the first run:
+## Expected values:
 ## - no deadlock: a new snapshot at least every WATCHDOG_S = 10 s throughout [derived: an iteration at 2M is one step of about 20 ms
 ##   [measured] plus its readback and publish, so 10 s is hundreds of iterations]; else the test fails at once and quits.
 ## - every CYCLE_S = 20 s: a pipette of the small dish (a retarget into a new dish), a freeze of that new dish (its blob is that dish,

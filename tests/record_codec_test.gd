@@ -1,7 +1,7 @@
 extends SceneTree
 ## Run: godot --headless --path . -s tests/record_codec_test.gd
 ## RecordCodec.info_from_record against the pooled world's record layout (gpu/gpu_layout.gd), headless.
-## Expected values, written before the first run, each word read at the place the layout names (R_*) and each figure worked out here from
+## Expected values, each word read at the place the layout names (R_*) and each figure worked out here from
 ## the game's constants (Cell, Biology) and the formulas the step kernel uses (gpu/kernels_field.gd `apply`: upkeep = scale x (base +
 ## per_mass x mass) + drag x speed² x size + sense_upkeep x sense, with size = sqrt(mass)) [derived]:
 ##  - records made as the world loads them (Scenario.founder_records with every flag on: donors, acetate keys, all founders' words) and

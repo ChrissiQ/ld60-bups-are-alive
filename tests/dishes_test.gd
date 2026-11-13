@@ -4,7 +4,7 @@ extends SceneTree
 ## SimService.use_backend): a second dish runs beside the main one, has a thumbnail in the strip, and a click on it brings it into the main
 ## view (the graph, the panels and the camera follow); dishes that die out; the pipette, whose answer comes a frame later; its timer.
 ##
-## Expected values, written before the first run [derived from the rules in main.gd and FakeWorld; the fake's clock starts at 3,661 s and
+## Expected values [derived from the rules in main.gd and FakeWorld; the fake's clock starts at 3,661 s and
 ## each frame stands for 1/60 s of real time, times the speed]:
 ##  - A second dish joins the set and the strip (2 tabs); every dish sits at the origin and only the main view's dish is shown (the
 ##    other is parked: hidden, not processing, nothing made to draw); the next-dish step wraps.

@@ -37,6 +37,8 @@ godot --headless --path . res://tests/dialog_test.tscn
 
 The quick ones cover the interface (`ui_lint_test`, `strings_test`, `fonts_test`, `screens_test`, `settings_test`, `toolbar_test`, `free_mode_test`, `tutorial_test`, `dish_codec_test`). The simulation ones (`tests/sim/`, run on macOS by `tools/run_sim_tests.sh`) open a window, need a GPU and are slow; `motion_table_test` checks the generated motion table. Run `godot --headless --path . --import` after adding a `class_name` script.
 
+Where a test's header lists expected values, a tag beside a figure says where it comes from: `[derived]` is worked out from the code's rules and constants, `[measured]` was read from a run (the text beside it says of what, and on what where that matters). Work out what a test should find before it first runs; do not fit an expectation to the test's own output.
+
 ## Making a release
 
 Push a version tag; the release workflow does the rest:

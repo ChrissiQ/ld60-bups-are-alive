@@ -1,7 +1,7 @@
 extends SceneTree
 ## A dish that needs few diffusion iterations is not changed by pooling with one that needs many.
 ##
-## Expected values, written before the first run:
+## Expected values:
 ## - a dish of radius 150 µm at resolution 100 (6.25 µm cells) needs 62 diffusion iterations a step at 20 s; a dish of 3000 µm at
 ##   resolution 100 needs 2 [derived: iterations = ceil(D dt / (cell² x limit)); the 62 is not re-derived
 ##   here]. Both dishes pooled equal each dish alone after 100 steps (diff == "" for both) [derived: a dish is stepped by its own

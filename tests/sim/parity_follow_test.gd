@@ -5,7 +5,7 @@ extends SceneTree
 ## pixels. Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_follow_test.gd
 ##
-## Expected values, written before the first run [derived unless marked]:
+## Expected values [derived unless marked]:
 ## F  The bound: over 100 frames at x10,000, zoomed in to 2 px a µm, the followed bup is drawn within 2 px of the stage's middle
 ##    in every frame. StageInput.follow_selected puts the camera on Dish.bup_world_pos, which is the bup's place in the payload the frame
 ##    draws (PayloadInfo.places: the sim thread looks up the bups the dish asks after as it publishes, and Main gives the view the frame's

@@ -3,7 +3,7 @@ extends SceneTree
 ## textures, and a dish whose clouds last (the sim tests' dishes hand theirs to the grid within a step or two). Windowed, through the lock. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/core_check.gd
 ##
-## Expected values, written before the first run:
+## Expected values:
 ## C1 growth: a dish with every flag but plankton husks (200 founders, 900 µm, a bloom) among six random others, in a pool started at 256
 ##    of everything (it grows several times) and in one started big: every dish's dump equal after every 20 of 100 steps, WORLD's overflow 0
 ##    in both [derived: a growth copies what the buffers hold and moves nothing; a dish's run does not depend on the pool's sizes].

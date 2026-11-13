@@ -1,7 +1,7 @@
 extends SceneTree
 ## Bup ids are the world's: unique across every dish, sequential from 1, kept by a pipette, never recycled.
 ##
-## Expected values, written before the first run [derived from the design: a newborn's id is the world's next id plus its rank among the
+## Expected values [derived from the design: a newborn's id is the world's next id plus its rank among the
 ## pool's newborns in slot order; the pool's slot order is the same for a seed]:
 ## - a fresh world with dishes of 40, 30 and 20 founders: the founders' ids are 1..40, 41..70 and 71..90 in founder order, and the next id is 91.
 ## - after 200 steps of 20 s: invariants() is empty (ids unique across the three dishes), births happened (the next id is above 91), every

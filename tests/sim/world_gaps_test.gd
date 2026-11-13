@@ -4,7 +4,7 @@ extends SceneTree
 ## Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/world_gaps_test.gd
 ##
-## Expected values, written before the first run [derived unless marked]:
+## Expected values [derived unless marked]:
 ## K  SimCore builds every kernel on the device, pool_husk_view and the three pool_husk_near passes among them: `errors` is empty.
 ## H  Two dishes (3 mm, plankton husks on) given 300 and 50 plankton husks of 50 energy at random places in one step: `husk_view` of each
 ##    lists exactly its own live husks: 300 and 50 transforms, each with a unit basis, whose places are the gather's live husks' places as

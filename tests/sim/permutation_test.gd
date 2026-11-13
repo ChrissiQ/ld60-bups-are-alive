@@ -1,7 +1,7 @@
 extends SceneTree
 ## The order dishes are added in, and adding or removing a dish mid-run, change no dish.
 ##
-## Expected values, written before the first run:
+## Expected values:
 ## - four dishes (numbers 1-4, mixed flags) added in the given order, the reverse, and two shuffles, run 100 steps: each dish's dump
 ##   equals its dump in the first pool (diff == "") [derived: a dish's result depends on its own segment only].
 ## - a fifth dish added after 40 steps leaves the other four equal to the pool that never had it, and itself equal to its lone run

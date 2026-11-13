@@ -7,7 +7,7 @@ extends SceneTree
 ## title (the menu), default (a dish of the default size and limit, run to its limit), ten (ten of them), big (the largest dish the interface allows,
 ## run towards its limit: `stage` = the most real seconds to run, default 900). Stop rules S1 and S2 are checked about once a second while they run.
 ##
-## Stop rules, written before any run (a stage is refused before it is made, a stage that breaks one ends the run):
+## Stop rules (a stage is refused before it is made, a stage that breaks one ends the run):
 ##  S1 the system's available memory (free + inactive + speculative + purgeable) after the stage's expected growth must stay at least RESERVE (a share of the physical memory);
 ##  S2 swap in use may not rise by more than 256 MB over the start, and pageouts by no more than 2,000 pages;
 ##  S3 a step's time per million bups (slots mode) or per dish (dishes mode) more than 3x the median of the stages before it ends the run;

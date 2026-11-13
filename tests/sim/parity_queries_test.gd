@@ -4,7 +4,7 @@ extends SceneTree
 ## asks the world after). Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_queries_test.gd
 ##
-## Expected values, written before the first run [derived unless marked]:
+## Expected values [derived unless marked]:
 ## L  The pool holds the fixture word for word.
 ## Q  At the fixture's 50 medium points (medium_points.txt: field.read's concentration and gradient), Dish.nutrient_at's concentration is
 ##    the fixture's within 1e-4 relative (the bound; the probe sums the grid's bilinear read and the clouds in float32 where the

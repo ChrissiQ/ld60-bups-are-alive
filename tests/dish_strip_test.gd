@@ -2,7 +2,7 @@ extends SceneTree
 ## Run: godot --headless --path . -s tests/dish_strip_test.gd
 ## The strip and the tray's sections at Main.MAX_DISHES (999) dishes, over FakeWorld.
 ##
-## Expected values, written before the first run:
+## Expected values:
 ##  - The strip is hidden with one dish and has k entries for k dishes; its count reads "..k". Every tab has one width, at least what "999"
 ##    and "888" need, already with three one-digit dishes.
 ##  - At 999 dishes it makes at most 40 tabs at every scroll position [derived: a strip of at most 1,199 px of tabs about 64 px apart

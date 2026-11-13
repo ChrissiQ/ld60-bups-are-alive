@@ -2,7 +2,7 @@ extends SceneTree
 ## Through the save format: a dish frozen, written with DishCodec as JSON text, read back and thawed carries on as if it had run
 ## straight through (continuation property).
 ##
-## Expected values, written before the first run:
+## Expected values:
 ## - run N = 80 steps, freeze, DishCodec.write_blob, JSON text, DishCodec.read_blob, thaw, run M = 80 steps gives a dump with 0 differing
 ##   words against the dish run N + M = 160 steps straight (diff == "") [derived: the codec keeps every block of the blob byte for byte and
 ##   the world (DishWorld.save()) as a lossless binary variant, so the thawed dish is the one `continuation_test` thaws from memory].

@@ -4,7 +4,7 @@ extends SceneTree
 ## then every bup taken out with the pipette, the dish run on empty. Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_history_test.gd
 ##
-## Expected values, written before the first run [derived unless marked]:
+## Expected values [derived unless marked]:
 ## The world's clock starts at 0 (a fresh run) and the dish is struck before it moves.
 ## T  At x10,000 a step is MAX_STEP, 20 s (Governor: min(20, speed / 120)), so the steps end on multiples of 20 s and each multiple of
 ##    DishHistory.INTERVAL (120 s) is a step's end: over about 2 sim-hours every sample's time is k x 120 s exactly (k = 1, 2, 3 ... with

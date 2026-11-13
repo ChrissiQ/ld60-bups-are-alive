@@ -1,7 +1,7 @@
 extends SceneTree
 ## The pipette and the freezer move bups and dishes without changing them.
 ##
-## Expected values, written before the first run:
+## Expected values:
 ## - a pipette of radius 150 µm at (0, 0) in a dish of 40 founders after 60 steps moves some number m of bups (m reported, > 0) into a
 ##   new dish (the pipette's); the reply equals DS_MOVED_OUT of the source and DS_MOVED_IN of the new dish
 ##   (moved_out == moved_in == m) [derived: the retarget pass counts each move twice, once at each end].

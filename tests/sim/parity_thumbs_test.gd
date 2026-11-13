@@ -6,7 +6,7 @@ extends SceneTree
 ## into the shared texture). Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_thumbs_test.gd
 ##
-## Expected values, written before the run [derived unless marked]:
+## Expected values [derived unless marked]:
 ## A  The atlas made from the pool as it is now (its publish's three kernels, run on the sim thread): the tile of the dish with 2,000 or
 ##    more bups (its core row's: THUMB_TILE texels square, THUMB_ATLAS / THUMB_TILE tiles a row) has texels with alpha above 0, at least
 ##    one at 255 (the tile's densest texel); the bare dish's tile is all zero.

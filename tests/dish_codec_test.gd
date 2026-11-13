@@ -2,7 +2,7 @@ extends SceneTree
 ## Run: godot --headless --path . -s tests/dish_codec_test.gd
 ## DishCodec's blob format, on blobs built here (no device).
 ##
-## Expected values, written before the first run:
+## Expected values:
 ## - Round trip: a blob with records, device blocks, clouds, husks, a world, history, watch list and lineage bytes, written, put through JSON text
 ##   and read back, is the same blob: every block byte for byte, the spec and the world as dictionaries (equal and equal in hash), the
 ##   host's history keys, watch list (order kept), lineage bytes and nutrients_placed [derived: the blocks are bytes and the spec and

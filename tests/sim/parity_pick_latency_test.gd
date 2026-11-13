@@ -5,7 +5,7 @@ extends SceneTree
 ## the dish's own frame). Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_pick_latency_test.gd
 ##
-## Expected values, written before the run [derived unless marked]:
+## Expected values [derived unless marked]:
 ## R  50 times: the pointer jumps to a random place within half the dish's radius (where bups are about 250 µm apart, so one lies within
 ##    the slack, 4 px of about 150 µm) and rests. The latency is the frames from the one the pointer moved in to the one whose hover
 ##    outlines a bup an answer to a question asked at the new place found (DishDrawing.pick takes only such an answer: until it comes the

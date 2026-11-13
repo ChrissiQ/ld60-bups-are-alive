@@ -1,7 +1,7 @@
 extends SceneTree
 ## Run: godot --headless --path . -s tests/memory_mode_test.gd
 ## Low-memory mode and the memory setting, headless, over made-up machines (MemoryMode.machine) and FakeWorld.
-## Expected values, written before the first run [derived from PoolLimits: MIN_PHYSICAL 3 GiB, MIN_FREE 1 GiB, BUDGET_SHARE 0.4,
+## Expected values [derived from PoolLimits: MIN_PHYSICAL 3 GiB, MIN_FREE 1 GiB, BUDGET_SHARE 0.4,
 ## DISCRETE_BUDGET 2 GiB, ENOUGH_BUDGET 2 GiB, LOW_BUPS 500,000, LOW_DISHES 10, LOW_GRID 200]:
 ##  - class: 16 GiB with 8 free is enough (not low mode); 4 GiB with 3 free has a budget of 1.6 GiB, under the 2 GiB a dish of the largest size
 ##    needs: low (not below), low mode on; 2 GiB installed is below; 16 GiB with 0.5 GiB free is below; a discrete card on 16 GiB has 2 GiB: enough.

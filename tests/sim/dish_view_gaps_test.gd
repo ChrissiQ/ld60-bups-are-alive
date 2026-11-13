@@ -3,7 +3,7 @@ extends SceneTree
 ## player sees them. Needs a GPU (windowed). On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/dish_view_gaps_test.gd
 ##
-## Expected values, written before the first run [derived from the code's rules]:
+## Expected values [derived from the code's rules]:
 ## V  A 3 mm dish (death and plankton husks on, 30 founders, paused) given 300 plankton husks: within 3 s of frames the view is made, the
 ##    husks' multimesh draws 300 instances, and instance k's transform has a unit basis and an origin among the 300 husks' places; with the
 ##    Medium layer hidden and a founder selected, the steering map is still asked for and the view's "steer" texture, which the dish draws

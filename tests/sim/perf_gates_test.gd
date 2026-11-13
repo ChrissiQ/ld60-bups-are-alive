@@ -8,7 +8,7 @@ extends SceneTree
 ## bups; G, 50, 200 or 1,000 bups in one 45 mm dish; x1, the share of display frames in which a new picture is shown at playback speed x1.
 ## A, B and the interface are measured by tests/sim/interface_gate.gd, the others here.
 ##
-## Expected values, written before the first run:
+## Expected values:
 ## - Static part (runs headless): the baseline holds every key the gates read, so a missing key fails with its path [derived from the
 ##   gates]: scenarios A, B, C100, C48, D, E, F each with frame_ms_p95_mean_of_runs and achieved_speed_mean_of_runs; G "50", "200",
 ##   "1000" each with cpu and gpu (the figures of the two backends the baseline was measured with: a simulation on the processor, the CPU
@@ -22,7 +22,7 @@ extends SceneTree
 ##   stack): the main thread only sends set_time each frame, tells the sim which payload texture it bound, and reads snapshots.
 ##   The dishes are filled to their limit at once (the founder's genes, reserves from none to full,
 ##   masses 1 to 2 birth masses, spread inside 95% of the rim), nutrient and feed at the setup maxima, 100 cells across; 12 s of settling,
-##   then the window. Achieved speed = the snapshots' world clock over the wall clock. Written before the first run:
+##   then the window. Achieved speed = the snapshots' world clock over the wall clock. Expected:
 ##   E: 100,000 bups, 45 mm, x10,000, 600 s: every sliding 60 s window (1 s apart) >= x9,500 and the whole run >= baseline E's mean
 ##     minus its spread, 9,994 - 8.3 = x9,985.7 [measured baseline]; expected to pass: a 100k step is about 0.9 ms of GPU plus about 0.5 ms
 ##     fixed [derived from the measured 18 ms 2M step and the per-step dispatches], so x10,000 (500 steps a second) keeps the device about 70% busy.
@@ -39,7 +39,7 @@ extends SceneTree
 ##     [measured baseline, a pixel hash].
 ##   The interface column (frame p95 and worst on the game screen) is measured by tests/sim/interface_gate.gd; the main frames printed here
 ##   are this script's (no game screen), for reference only.
-## - Gates C and D, written before the first run. Both ask x10,000 (20 s steps: min(20, speed/120)) and the speed reached is the figure; the
+## - Gates C and D. Both ask x10,000 (20 s steps: min(20, speed/120)) and the speed reached is the figure; the
 ##   step's cost is the sum of the window's iterations' busy time over their steps (each iteration once), and the reference world is measured
 ##   first in the same process (the GPU is bimodal between processes), each world with 12 s of settling.
 ##   C: 100 dishes of 100 bups at the limit, each the default dish (45 mm, a 100 x 100 grid, checked): the speed reached >= x5,000 (the
@@ -51,7 +51,7 @@ extends SceneTree
 ##   The 1,000-dish interface is tests/sim/interface_gate.gd (the game screen on the real pool: this script has none), whose bounds are the
 ##   static `gate_interface` here.
 ## - The pipette on a dish of 1,000,000 bups, through WorldClient as Dish.pipette sends it, the world running at x10,000 (the
-##   filled dish: 1,000,000 bups, 90 mm, limit 1,000,000), a circle of 20 mm at the middle. Written before the first run:
+##   filled dish: 1,000,000 bups, 90 mm, limit 1,000,000), a circle of 20 mm at the middle. Expected:
 ##   the main thread's part of the call (WorldClient.pipette: a command queued) < 1 ms [derived: no read, no wait]; no frame of the wait
 ##   longer than 3 display frames [derived: the main thread only polls]; no whole-dish readback and no lineage export or import [derived,
 ##   read in the code: SimCore.pipette reads back DSTATE and WORLD and the moved ids only (`_ids_from`), the store gets `retarget_ids`];
@@ -221,7 +221,7 @@ func _gate_checks() -> void:
 
 
 ## WorldClient.playout on synthetic arrivals (publishes per frame), expected values derived from the rule (the oldest is shown, at most two wait,
-## the oldest of more are skipped) before the first run:
+## the oldest of more are skipped):
 ## - [1, 1, 0, 2] x 25 (an iteration ending just after a poll every fourth frame): showing the newest changes the picture in 75 of 100
 ##   frames; the playout misses only the first empty frame (nothing was waiting yet; from the first double on one always is): 99 of 100.
 ## - [1, 0, 1, 1, 2] x 20 (the empty frame some frames before the double): the newest 80 of 100; the playout 99 (the first empty frame).

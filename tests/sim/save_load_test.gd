@@ -2,7 +2,7 @@ extends SceneTree
 ## The game's save and load on the real pool, through the simulation thread, the lineage store and the save file. Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/save_load_test.gd
 ##
-## Expected values, written before the first run [derived from the code: `SimThread._save_all` is `SimCore.gather` plus the dish's world
+## Expected values [derived from the code: `SimThread._save_all` is `SimCore.gather` plus the dish's world
 ## and its lineage export; DishCodec writes every block bit for bit; a thaw is `SimCore.load_dish` plus the world and the lineage import]:
 ## - (the stats section is excluded: a pass's scratch, zero in a dish that has not stepped since its load)
 ## - a dish with 40 bups, a source and plankton, run at x600 for a while and then paused, saved (`save_all`), written through

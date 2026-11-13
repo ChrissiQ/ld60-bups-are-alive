@@ -1,7 +1,7 @@
 extends SceneTree
 ## The population holds at the bup limit.
 ##
-## Expected values, written before the first run:
+## Expected values:
 ## - a dish with limit 600 and a rich medium (radius 1200 µm, 1000 units/mm2, bloom 0) grows to within 2% of the limit. Food, not the
 ##   doubling time, decides it [derived]: 600 bups of mean mass about 11.5 (8 to 16) at COST_PER_MASS 4 are about 27,600 energy; a unit is
 ##   16 energy, so the dish (4.52 mm2 x 1000 = 4,520 units) holds 72,000 and the founders' reserves 2,000. A smaller or poorer dish holds too little food to reach the limit. Doubling takes 40 min, 20 to 600

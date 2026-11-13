@@ -15,7 +15,7 @@ extends SceneTree
 ## Prints "GAME CHECK OK" or the failures. A SCRIPT ERROR anywhere while it runs fails it (a Logger counts them); an ERROR line Godot
 ## prints is a failure too: grep the output for them.
 ##
-## Expected values of `edits`, written before the first run [derived unless marked]:
+## Expected values of `edits` [derived unless marked]:
 ## - consistent (after each change, paused and settled): the pool's live ids of the dish are unique and equal the family tree's living
 ##   bups whose home is the dish.
 ## - resize to 8 mm: every bup inside 8 mm; back to 10 mm: consistent.

@@ -4,7 +4,7 @@ extends SceneTree
 ## a dish is frozen (the simulation takes it out of the world whole, and answers a frame later), thawed under its own number at the world's
 ## time, or trashed; the question after a pipette; the sections of the tray; the save, which has no freezer.
 ##
-## Expected values, written before the first run [derived from the rules in main.gd and FakeWorld; the fake's clock starts at 3,661 s and
+## Expected values [derived from the rules in main.gd and FakeWorld; the fake's clock starts at 3,661 s and
 ## each frame stands for 1/60 s of real time, times the speed]:
 ##  - The last dish's buttons say why they are off; with 3 dishes the freeze and trash buttons are on. A freeze sends one FREEZE for
 ##    the dish's row; the dish leaves the running set and the world's rows at once, its entry keeps its number and its count, and its row

@@ -1,7 +1,7 @@
 extends SceneTree
 ## A donor in one dish touches nothing in another.
 ##
-## Expected values, written before the first run:
+## Expected values:
 ## - dishes X and Z (donors every fifth founder) on either side of dish Y (no donors: rows 0, 1, 2, so Y's segment has donors' segments
 ##   before and after it), all three laid over the same coordinates (equal layout_seed), run 200 steps of 20 s: Y's dump equals Y's
 ##   lone run (diff == "") and Y has 0 donors (ST_DONORS == 0) [derived: the donor table is keyed by dish].

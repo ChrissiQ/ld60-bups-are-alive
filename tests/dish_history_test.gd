@@ -3,7 +3,7 @@ extends SceneTree
 ## A dish's history from the simulation's samples (host side): the samples are the ones Governor.sample_steps marks
 ## (after the step that crosses each multiple of DishHistory.INTERVAL of the world's clock), with their exact times, as snapshots carry them.
 ##
-## Expected values, written before the first run [derived from the rule and the constants: INTERVAL 120 s, LEN 5,040, ALL_LEN 1,024]:
+## Expected values [derived from the rule and the constants: INTERVAL 120 s, LEN 5,040, ALL_LEN 1,024]:
 ##  - Steps of 7 s from 0, in iterations of 1 to 5 steps (cycling) up to 172 steps (1,204 s): one sample for each multiple of
 ##    120 s, ten in all, at 126, 245, 364, 483, 602, 721, 840, 966, 1,085 and 1,204 s (the first step end at or past each multiple: 840 is
 ##    one exactly); each iteration's samples handed over twice (a snapshot not yet acknowledged carries them again) add nothing.

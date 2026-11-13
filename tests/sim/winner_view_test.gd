@@ -5,7 +5,7 @@ extends SceneTree
 ## and none is a capsule. Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/winner_view_test.gd
 ##
-## Expected values, written before the first run [derived from the splat's rules, GpuKernelsView.K_DENSITY_SPLAT and its header]:
+## Expected values [derived from the splat's rules, GpuKernelsView.K_DENSITY_SPLAT and its header]:
 ## W  The view is made with density on and ready; the sprite shows a picture the size of the camera's rectangle (`density_size`, one texel a pixel,
 ##    at least 300 high so that the dish lies inside it; the test sets its window to 1280 x 720; checked here); the last count of bups
 ##    the capsule path must draw is 0 (`_large`: every bup is under its footprint).

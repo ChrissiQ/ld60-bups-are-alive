@@ -3,7 +3,7 @@ extends SceneTree
 ## bups' records and the probes, the founders in the family tree, and a refused iteration (the memory budget). Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/core_calls_test.gd
 ##
-## Expected values, written before the first run [derived unless marked]:
+## Expected values [derived unless marked]:
 ## R  reads: `records`, `live_ids` (the `pool_ids` kernel) and `gather`'s field equal what a straight `buffer_get_data` of the same range
 ##    gives, byte for byte, after 20 steps of a dish of 60 founders beside another dish (a read copies the bytes, nothing else).
 ## P  set_params: a dish struck with spec Y (feed 0, upkeep 1, limit 1000, no flags) and given X (feed 5, upkeep 1.3, limit 400,

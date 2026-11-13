@@ -2,7 +2,7 @@ extends SceneTree
 ## Run: godot --headless --path . -s tests/dish_world_test.gd
 ## Checks DishWorld against a step-by-step reference written in this test (plankton and emitters advanced one step at a time).
 ##
-## Expected values, written before the first run (derived unless marked):
+## Expected values (derived unless marked):
 ## - Setup: radius 20,000 um, bloom density 1 per mm2 a day = 1256.6 a day, so one arrival every 68.75 s, the first at t = 0.
 ##   100 windows of 30 steps of 20 s = 60,000 s: 873 arrivals (floor(60000 / 68.75) + 1).
 ## - With the same seed the draws come in the same order, so DishWorld's rows equal the reference's exactly.

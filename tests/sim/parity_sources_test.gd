@@ -4,7 +4,7 @@ extends SceneTree
 ## from its DishWorld on the sim thread. Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_sources_test.gd
 ##
-## Expected values, written before the first run [derived unless marked]:
+## Expected values [derived unless marked]:
 ## The source gives rate / 60 x delta units a step (DishWorld._source_events). Its emitter keeps what it gave for up to EMIT_INTERVAL
 ## (60 s) and lets it go as a cloud, unless the grid is fine enough to hold the plume (sqrt(D x 60 s) >= half a cell), when it goes onto
 ## the grid at once; the fixture's total counted what the emitter keeps, so "what the source added" is the pool's gain plus what

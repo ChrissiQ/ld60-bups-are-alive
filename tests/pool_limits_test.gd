@@ -1,7 +1,7 @@
 extends SceneTree
 ## Run: godot --headless --path . -s tests/pool_limits_test.gd
 ## The pool's memory budget worked out from what a machine reports (MachineMemory, PoolLimits.budget_for, working_budget_for, MemoryWatch),
-## headless, with made-up machines. Expected values, written before the first run
+## headless, with made-up machines. Expected values
 ## [derived from BUDGET_SHARE 0.4, BUDGET_FLOOR 1 GiB, BUDGET_CAP 8 GiB, DISCRETE_BUDGET 2 GiB, GROW_SHARE 0.5, SHORT_FREE_SHARE 0.1]:
 ##  - what a machine has free is `free` on Windows and macOS (never the engine's `available`: Windows' commit limit, macOS's free swap
 ##    added), `MemAvailable` on Linux when it is read, else `free`; a figure the engine gives as -1 is unknown;

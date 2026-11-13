@@ -3,7 +3,7 @@ extends SceneTree
 ## Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/two_games_test.gd
 ##
-## Expected values, written before the first run [derived from `SimCore.begin_game`, `ResultWorker` and the family tree's rules]:
+## Expected values [derived from `SimCore.begin_game`, `ResultWorker` and the family tree's rules]:
 ##  - Game 1 (30 founders in dish 1, run for 2,400 s of world time at x600) has divided: the world's next id is past 31, so there are ids
 ##    to collide with. A pipette makes dish 2 (the first game's numbers go 1, 2).
 ##  - With both dishes trashed the family tree holds nothing (no record, claim or tombstone).
