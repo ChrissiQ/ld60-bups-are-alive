@@ -1,25 +1,30 @@
 extends SceneTree
-## Where the pooled world's graphics memory runs out on this machine (the memory budget's rule). Windowed, through the run lock, one mode a run:
+## Where the pooled world's graphics memory runs out on the machine it runs on (the memory budget's rule; macOS: it reads `vm_stat`, `footprint` and `sysctl`). Windowed, through the run lock, one mode a run:
 ##   RUN_TIMEOUT=900 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/mem_check.gd -- <mode> [stage] [stages]
 ## modes: info (what the machine reports), slots (bups added `stage` thousand a time in one pool), dishes (empty 400x400 dishes added `stage` at a time),
 ## bigbuf (single buffers and a growth by copy, to see what a big buffer costs while it is made and after it is freed).
+## The game's own needs, on the real game screen at x10,000 (the arena's bytes, both devices' memory and the process footprint at each sample):
+## title (the menu), default (a dish of the default size and limit, run to its limit), ten (ten of them), big (the largest dish the interface allows,
+## run towards its limit: `stage` = the most real seconds to run, default 900). Stop rules S1 and S2 are checked about once a second while they run.
 ##
 ## Stop rules, written before any run (a stage is refused before it is made, a stage that breaks one ends the run):
-##  S1 the system's available memory (free + inactive + speculative + purgeable) after the stage's expected growth must stay at least RESERVE;
+##  S1 the system's available memory (free + inactive + speculative + purgeable) after the stage's expected growth must stay at least RESERVE (a share of the physical memory);
 ##  S2 swap in use may not rise by more than 256 MB over the start, and pageouts by no more than 2,000 pages;
 ##  S3 a step's time per million bups (slots mode) or per dish (dishes mode) more than 3x the median of the stages before it ends the run;
 ##  S4 the footprint added may not pass 1.3x what the arena's bytes, the renderer's baseline and one growth's copy account for;
-##  S5 the arena may not pass HARD_CEILING bytes. Each stage steps its dishes 20 steps twice.
+##  S5 the arena may not pass HARD_CEILING bytes (a share of the physical memory). Each stage steps its dishes 20 steps twice.
 ## Expected bytes of each stage: `SimArena.estimate_bytes` at the capacities `slot_cap_for` will make, printed before the stage runs.
 
-const RESERVE := 3.0 * 1073741824.0
-const HARD_CEILING := 9.0 * 1073741824.0
+const RESERVE_SHARE := 0.2  ## of the physical memory the system reports: what must stay available
+const CEILING_SHARE := 0.55  ## of the physical memory: the most the arena may hold
 const SWAP_RISE := 256.0 * 1048576.0
 const PAGEOUTS_RISE := 2000
 const SLOW_FACTOR := 3.0
 const FOOTPRINT_FACTOR := 1.3
 const GIB := 1073741824.0
 
+var _reserve := 0.0
+var _ceiling := 0.0
 var _page := 16384
 var _base_swap := 0.0
 var _base_pageouts := 0
@@ -31,12 +36,20 @@ func _initialize() -> void:
 	var mode := String(args[0]) if args.size() > 0 else "info"
 	var stage := int(args[1]) if args.size() > 1 else 250
 	var stages := int(args[2]) if args.size() > 2 else 40
+	var physical := float(OS.get_memory_info().get("physical", 0))
+	_reserve = RESERVE_SHARE * physical
+	_ceiling = CEILING_SHARE * physical
 	SimConstants.apply()
-	_info()
+	var is_game := mode in ["title", "default", "ten", "big"]
+	if not is_game:
+		_info()
 	_base_swap = _swap_used()
 	_base_pageouts = int(_vm().get("pageouts", 0))
 	_base_footprint = _footprint()
 	print("BASE footprint %.0f MB, available %.2f GiB, swap used %.0f MB, pageouts %d" % [_base_footprint / 1048576.0, float(_vm()["available"]) / GIB, _base_swap / 1048576.0, _base_pageouts])
+	if is_game:
+		_game(mode, stage if args.size() > 1 else 900)
+		return
 	match mode:
 		"slots": _slots(stage * 1000, stages)
 		"dishes": _dishes(stage, stages)
@@ -126,11 +139,11 @@ func _core() -> SimCore:
 func _may_grow(expected_extra: float, held: float) -> bool:
 	var v := _vm()
 	var left := float(v["available"]) - expected_extra * 2.0  # (a growth holds the old buffers and the new together while it copies)
-	if left < RESERVE:
-		print("STOP S1: available %.2f GiB, the stage adds about %.2f GiB (x2 while it grows), the reserve is %.1f GiB" % [float(v["available"]) / GIB, expected_extra / GIB, RESERVE / GIB])
+	if left < _reserve:
+		print("STOP S1: available %.2f GiB, the stage adds about %.2f GiB (x2 while it grows), the reserve is %.1f GiB" % [float(v["available"]) / GIB, expected_extra / GIB, _reserve / GIB])
 		return false
-	if held + expected_extra > HARD_CEILING:
-		print("STOP S5: the arena would pass the hard ceiling (%.2f GiB)" % (HARD_CEILING / GIB))
+	if held + expected_extra > _ceiling:
+		print("STOP S5: the arena would pass the hard ceiling (%.2f GiB)" % (_ceiling / GIB))
 		return false
 	return true
 
@@ -236,7 +249,7 @@ func _bigbuf() -> void:
 	var rd := RenderingServer.create_local_rendering_device()
 	for gib in [0.25, 0.5, 1.0, 2.0, 3.0]:
 		var n := int(gib * GIB)
-		if float(_vm()["available"]) - 2.2 * n < RESERVE:
+		if float(_vm()["available"]) - 2.2 * n < _reserve:
 			print("STOP S1 at a buffer of %.2f GiB" % gib)
 			return
 		var f0 := _footprint()
@@ -256,7 +269,7 @@ func _bigbuf() -> void:
 	for gib in [0.5, 1.0, 1.5]:
 		var a := int(gib * GIB)
 		var b := int(gib * 1.5 * GIB)
-		if float(_vm()["available"]) - 2.2 * (a + b) < RESERVE:
+		if float(_vm()["available"]) - 2.2 * (a + b) < _reserve:
 			print("STOP S1 at a growth of %.2f GiB" % gib)
 			return
 		var f0 := _footprint()
@@ -308,3 +321,141 @@ func _fill(chunk_mb: int) -> void:
 		rd.free_rid(rid)
 	_settle(rd, 10)
 	print("FILL freed: footprint +%.0f MB, available %.2f GiB" % [(_footprint() - _base_footprint) / 1048576.0, float(_vm()["available"]) / GIB])
+
+
+# ---- the game's own needs ---------------------------------------------------------------------------------------------------------
+
+var _main: Node
+var _stopped := false
+
+
+func _inspect(call: Callable) -> Variant:
+	var reply := WorldClient.shared().inspect(call)
+	for i in 6000:
+		if reply == null or reply.is_done():
+			break
+		await process_frame
+	return reply.value() if reply != null else null
+
+
+func _sample(label: String) -> void:
+	var sim: Variant = await _inspect(func(core: SimCore, _r: Dictionary) -> Dictionary:
+		var d := {"arena": core.arena.bytes_now(), "slots": core.arena.slot_cap, "cells": core.arena.cell_cap}
+		if core.rd != null:
+			d["buffers"] = core.rd.get_memory_usage(RenderingDevice.MEMORY_BUFFERS)
+			d["textures"] = core.rd.get_memory_usage(RenderingDevice.MEMORY_TEXTURES)
+			d["total"] = core.rd.get_memory_usage(RenderingDevice.MEMORY_TOTAL)
+		return d)
+	var rd := RenderingServer.get_rendering_device()
+	var v := _vm()
+	var pop := 0
+	var dishes := 0
+	if _main != null and _main.get("dishes") != null:
+		dishes = _main.dishes.size()
+		for d: Dish in _main.dishes:
+			pop += d.population()
+	var s: Dictionary = sim if sim is Dictionary else {}
+	var m_buf := rd.get_memory_usage(RenderingDevice.MEMORY_BUFFERS) / 1048576.0 if rd != null else -1.0
+	var m_tex := rd.get_memory_usage(RenderingDevice.MEMORY_TEXTURES) / 1048576.0 if rd != null else -1.0
+	var m_tot := rd.get_memory_usage(RenderingDevice.MEMORY_TOTAL) / 1048576.0 if rd != null else -1.0
+	print("GAME %s: dishes %d bups %d | arena %.0f MB (slots %d, cells %d) | sim device buffers %.0f textures %.0f total %.0f MB | main device buffers %.0f textures %.0f total %.0f MB | footprint %.0f MB | available %.2f GiB swap %.0f MB static %.0f MB" % [
+		label, dishes, pop, float(s.get("arena", 0)) / 1048576.0, int(s.get("slots", 0)), int(s.get("cells", 0)),
+		float(s.get("buffers", 0)) / 1048576.0, float(s.get("textures", 0)) / 1048576.0, float(s.get("total", 0)) / 1048576.0,
+		m_buf, m_tex, m_tot, _footprint() / 1048576.0, float(v["available"]) / GIB, _swap_used() / 1048576.0, OS.get_static_memory_usage() / 1048576.0])
+
+
+## S1 and S2 while the game runs: false when either is broken.
+func _safe() -> bool:
+	var v := _vm()
+	if float(v["available"]) < _reserve:
+		print("STOP S1: available %.2f GiB, the reserve is %.2f GiB" % [float(v["available"]) / GIB, _reserve / GIB])
+		return false
+	if _swap_used() - _base_swap > SWAP_RISE or int(v["pageouts"]) - _base_pageouts > PAGEOUTS_RISE:
+		print("STOP S2: swap or pageouts rose")
+		return false
+	return true
+
+
+func _game_start(radius: float, resolution: int, limit: int, bups: int, feed: float, bloom: float) -> StartConditions:
+	var s := StartConditions.new()
+	s.dish_radius = radius
+	s.nutrient_resolution = resolution
+	s.bup_limit = limit
+	s.bups = bups
+	s.feed_density = feed
+	s.bloom_density = bloom
+	s.spread_founders()
+	return s
+
+
+func _game_wait_ready() -> void:
+	for i in 3600:
+		if _main == null or not _main.has_method("add_dish") or (_main.is_node_ready() and _main.dish != null and _main.dish.row >= 0):
+			break
+		await process_frame
+	var w := WorldClient.shared()
+	for i in 3600:
+		if bool(w.backend.status().get("ready", false)):
+			break
+		await process_frame
+
+
+func _game(mode: String, seconds: int) -> void:
+	for i in 600:
+		if root.is_node_ready():
+			break
+		await process_frame
+	if mode == "title":
+		_main = load(Scenes.MENU).instantiate()
+		root.add_child(_main)
+		await _game_wait_ready()
+		for i in 240:
+			await process_frame
+		await _sample("title")
+		quit(0)
+		return
+	var start := _game_start(45000.0, 100, 100000, 250, 3.0, 0.0)
+	var target := 97000
+	var copies := 1
+	if mode == "ten":
+		copies = 10
+	if mode == "big":
+		start = _game_start(StartConditions.MAX_DISH_RADIUS, StartConditions.MAX_NUTRIENT_RESOLUTION, StartConditions.MAX_BUP_LIMIT, 250, StartConditions.MAX_FEED_DENSITY, 0.0)
+		target = 1940000
+	_main = TestUtil.game_screen(self, start)
+	await _game_wait_ready()
+	for i in 120:
+		await process_frame
+	await _sample("start (one dish)")
+	for i in copies - 1:
+		_main.add_dish(_game_start(45000.0, 100, 100000, 250, 3.0, 0.0))
+		for j in 30:
+			await process_frame
+	if copies > 1:
+		await _sample("added %d dishes" % copies)
+	_main.toolbar.set_paused(false)
+	_main._set_paused(false)
+	_main.sim_speed = 10000.0
+	_main.achieved_speed = 10000.0
+	var t0 := Time.get_ticks_msec()
+	var n := 0
+	while Time.get_ticks_msec() - t0 < seconds * 1000:
+		await process_frame
+		n += 1
+		if n % 60 == 0 and not _safe():
+			_stopped = true
+			break
+		if n % 600 == 0:
+			await _sample("running %.0f s" % ((Time.get_ticks_msec() - t0) / 1000.0))
+		var low := 1 << 30
+		for d: Dish in _main.dishes:
+			low = mini(low, d.population())
+		if low >= target and n > 300:
+			break
+	_main.toolbar.set_paused(true)
+	_main._set_paused(true)
+	for i in 120:
+		await process_frame
+	await _sample("end")
+	print("DONE %s after %.0f s%s" % [mode, (Time.get_ticks_msec() - t0) / 1000.0, ", stopped by a stop rule" if _stopped else ""])
+	quit(0)
