@@ -2,7 +2,7 @@ extends SceneTree
 ## The step length follows the speed, never the frame. The same dish is run
 ## twice through the real sim thread (GpuSimBackend, WorldClient) at x1, once fed by frames of 1/120 s and once by frames of 1/240 s,
 ## for the same simulated time, and the two end states are compared word for word.
-## Windowed, through the lock:
+## Windowed, through the lock. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/refresh_rate_test.gd
 ##
 ## Expected values, written before the first run:

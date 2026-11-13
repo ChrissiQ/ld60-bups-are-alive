@@ -1,6 +1,6 @@
 extends SceneTree
 ## A whole run of the pooled world, one dish, one seed: the SAMPLE line of every sim-hour, to compare with tools/gpu/golden/ or with another
-## run. Windowed, through the lock:
+## run. Windowed, through the lock. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/validate_dynamics.gd -- gpu scenario seed [hours [step]]
 ##   mode: gpu (the only mode; kept as an argument for the SAMPLE line's format)   scenario: A (default dish until 1,000 bups) | B (3 mm dish, 20k cap, feed) |
 ##   C (90 mm dish, 100k cap, feed) | D-F, L, S, M (tools/gpu/world_tools.gd holds the table)

@@ -5,7 +5,7 @@ extends SceneTree
 ## that it declares each of its buffers, and that it compiled: the importer reports success even when the shader has an error, so
 ## the error is read from the imported resource.
 ## An edit of a kernel needs both steps (a headless -s run does not import):
-const REGENERATE := "stale: run  /Applications/Godot.app/Contents/MacOS/Godot --headless --path . -s tools/gen_gpu_shaders.gd  and then  --headless --path . --import"
+const REGENERATE := "stale: run  godot --headless --path . -s tools/gen_gpu_shaders.gd  and then  godot --headless --path . --import"
 
 
 func _init() -> void:

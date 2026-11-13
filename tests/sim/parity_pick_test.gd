@@ -1,6 +1,6 @@
 extends SceneTree
 ## The select tool's pick on the real pool, with the picking that needs the real picture: the fixture state (tools/gpu/golden/parity) loaded as a dish of
-## the game's world (ParityGame.fixture_dish), paused, a Dish node at ParityGame.PLACE drawing it. Needs a GPU (windowed):
+## the game's world (ParityGame.fixture_dish), paused, a Dish node at ParityGame.PLACE drawing it. Needs a GPU (windowed). On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_pick_test.gd
 ##
 ## Expected values, written before the first run [derived unless marked]:

@@ -1,7 +1,7 @@
 extends SceneTree
 ## The medium's readout under the pointer on the real pool: the fixture state (tools/gpu/golden/parity) as a dish of the game's world
 ## (ParityGame.fixture_dish), paused; the readout read as the select tool's Background mode reads it (Dish.nutrient_at, whose point the dish
-## asks the world after). Windowed only:
+## asks the world after). Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_queries_test.gd
 ##
 ## Expected values, written before the first run [derived unless marked]:

@@ -1,7 +1,7 @@
 extends SceneTree
 ## The husks' layer (every husk drawn, what can be pointed at is what is drawn) on the real pool: a dish with plankton
 ## husks on at ParityGame.PLACE, given husks through the world's own events (an IterationPlan's "husks" rows on the sim thread), drawn by
-## its DishDrawing and pointed at with the select tool's hover. Windowed only:
+## its DishDrawing and pointed at with the select tool's hover. Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_husks_test.gd
 ##
 ## Expected values, written before the first run [derived unless marked]:

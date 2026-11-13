@@ -2,7 +2,7 @@ extends SceneTree
 ## The nutrient haze and the steering arcs and map on the real pool: the fixture state (tools/gpu/golden/parity) as a dish of the
 ## game's world (ParityGame.fixture_dish), paused, a Dish node drawing it; the pictures read back from the textures the dish draws (the
 ## world's published haze and steering map, as the main device imported them), the steering read as the selected bup's panel reads it.
-## Windowed only:
+## Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_draw_test.gd
 ##
 ## Expected values, written before the first run [derived unless marked]:

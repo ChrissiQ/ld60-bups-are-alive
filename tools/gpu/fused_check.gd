@@ -1,7 +1,7 @@
 extends SceneTree
 ## The step's fused passes against the lone kernels they stand for (SimCore.lone_passes): pool_swim_demand against pool_swim then
 ## pool_demand, pool_apply_count against pool_apply then pool_conj_count, and pool_ac_conj_life with pool_donor_life against pool_ac_apply,
-## pool_conj_apply then pool_life, every other kernel the same, in the same order. Windowed, through the lock:
+## pool_conj_apply then pool_life, every other kernel the same, in the same order. Windowed, through the lock. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/fused_check.gd [-- seed_shift=N]
 ##
 ## Expected values, written before the first run [derived]: on each of three states (400 donors and recipients packed in a 100 µm dish

@@ -2,7 +2,7 @@ extends SceneTree
 ## The hover ring shows within 3 frames of the pointer stopping, on the real pool at x10,000: a 100,000-bup dish (the
 ## goal-sized dish: 45 mm, filled at once) at ParityGame.PLACE, drawn by its Dish at the stage's fit, the pointer moved to a new place and
 ## resting there, the select tool's hover asked every frame as Main asks it (StageInput.update_pointer: clear_hover, then hover_at, before
-## the dish's own frame). Windowed only:
+## the dish's own frame). Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_pick_latency_test.gd
 ##
 ## Expected values, written before the run [derived unless marked]:

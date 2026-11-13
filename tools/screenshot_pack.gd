@@ -2,6 +2,7 @@ extends SceneTree
 ## A screenshot pack of the pooled world, windowed, on the real game stack, saved at interface sizes
 ## 100%, 150% and 250% for a look: the title backdrop, the free-setup preview, the game screen with feeders (sources layer), a bup at close zoom,
 ## and the busy state (several dishes, frozen dishes, a picked bup, a full watch list, the pipette open). It prints the counts it shows (watched bups, frozen dishes, dishes).
+## On macOS:
 ## tools/run_windowed.sh <log> -- --path . --rendering-driver metal --resolution 1920x1080 --position 6000,6000 -s tools/screenshot_pack.gd -- <out_dir> [dishes] [frozen] [sections: title,setup,game,busy]
 
 const WATCHED := 12  ## bups put on the watch list in the busy state

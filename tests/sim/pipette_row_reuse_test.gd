@@ -1,6 +1,6 @@
 extends SceneTree
 ## A pipette waits for its new dish's grid (made on the worker pool); the source's client row can be freed and given to another dish
-## meanwhile. Windowed only:
+## meanwhile. Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/pipette_row_reuse_test.gd
 ##
 ## Expected values, written before the first run [derived from the code: SimThread._pipette keeps the source's client row, WorldClient hands

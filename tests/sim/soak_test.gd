@@ -2,7 +2,7 @@ extends SceneTree
 ## The interface stays unfrozen while the sim runs, and the shutdown is clean. A world of one 2,000,000-bup dish (scenario F's
 ## dish, tools/gpu/world_tools.gd, tests/sim/perf_gates_test.gd) and a small one runs at x10,000 for 10 minutes through the real sim thread (GpuSimBackend, WorldClient), while the main
 ## thread drives every kind of command on a schedule and checks every reply; then the world is shut down and both threads joined.
-## Windowed, through the lock (a run of about 11 minutes):
+## Windowed, through the lock (a run of about 11 minutes). On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/soak_test.gd [-- seconds=600]
 ##
 ## Expected values, written before the first run:

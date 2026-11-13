@@ -1,7 +1,7 @@
 extends SceneTree
 ## A source's output on the real pool: a source placed with Dish.place_source in a bare dish (no bups, no nutrient, no
 ## feed) at ParityGame.PLACE, the world run ten minutes, the pool read before and after (SimCore.gather) and the source's own count read
-## from its DishWorld on the sim thread. Windowed only:
+## from its DishWorld on the sim thread. Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_sources_test.gd
 ##
 ## Expected values, written before the first run [derived unless marked]:

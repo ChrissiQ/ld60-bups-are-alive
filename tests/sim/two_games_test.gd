@@ -1,6 +1,6 @@
 extends SceneTree
 ## Two games in one process: a game is run until its bups have divided, ended (every dish trashed), and another begun in the same world.
-## Windowed only:
+## Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/two_games_test.gd
 ##
 ## Expected values, written before the first run [derived from `SimCore.begin_game`, `ResultWorker` and the family tree's rules]:

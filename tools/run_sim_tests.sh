@@ -1,6 +1,7 @@
 #!/bin/bash
 # Runs the windowed simulation tests (tests/sim/*_test.gd, needing a GPU) one after another,
 # each through tools/run_windowed.sh (the run lock) with a timeout each.
+# For macOS: it asks Godot for the Metal driver (`--rendering-driver metal`).
 # Usage: tools/run_sim_tests.sh
 # Env: RUN_SIM_TIMEOUT (seconds per test, default 1800), RUN_SIM_OUT (output folder,
 #      default <project>/.godot/sim-tests); the lock and binary variables of run_windowed.sh apply.

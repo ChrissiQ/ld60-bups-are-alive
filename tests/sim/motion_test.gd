@@ -1,5 +1,5 @@
 extends SceneTree
-## Run (windowed, the GPU): tools/run_windowed.sh <outfile> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/motion_test.gd
+## Run (windowed, the GPU), on macOS: tools/run_windowed.sh <outfile> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/motion_test.gd
 ## The coarse motion of long steps (the swim kernel's table lookup) against the real run-and-tumble swimming (its fine branch), on
 ## the pooled GPU: each case is a dish of one world, run once at 0.05 s steps and once at the coarse steps. Nothing eats, the nutrient
 ## is frozen (the medium's thickness is huge), so only the motion differs between the runs. It checks:

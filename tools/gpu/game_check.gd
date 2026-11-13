@@ -3,6 +3,7 @@ extends SceneTree
 ## itself (Main, free mode, on SimService's world: its WorldClient, sim thread and LineageStore) is run as the player runs it, its
 ## speed and pause set as its toolbar sets them; what the screen does is checked against the pool behind it (an `inspect` on the sim thread,
 ## with the world paused and settled, so the family tree has caught up with the pool).
+## On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/game_check.gd -- <mode> [args]
 ## Modes:
 ##   smoke                          a few hundred frames at x10,000: the screen's figures do not jump, a selected bup's panel has its info

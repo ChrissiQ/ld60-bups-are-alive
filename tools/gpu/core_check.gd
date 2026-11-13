@@ -1,6 +1,6 @@
 extends SceneTree
 ## SimCore's own checks beyond the sim tests (tests/sim/*): the arena's growth and shrinking, the field edits, the publish into the shared
-## textures, and a dish whose clouds last (the sim tests' dishes hand theirs to the grid within a step or two). Windowed, through the lock:
+## textures, and a dish whose clouds last (the sim tests' dishes hand theirs to the grid within a step or two). Windowed, through the lock. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/core_check.gd
 ##
 ## Expected values, written before the first run:

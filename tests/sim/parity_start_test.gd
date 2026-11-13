@@ -1,7 +1,7 @@
 extends SceneTree
 ## The starting nutrient, the feed and the grid's detail on the real pool:
 ## dishes struck as the game strikes them (Dish.strike from StartConditions) or added bare (no bups), at ParityGame.PLACE, read back from
-## the pool (SimCore.gather). Windowed only:
+## the pool (SimCore.gather). Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_start_test.gd
 ##
 ## Expected values, written before the first run [derived unless marked]:

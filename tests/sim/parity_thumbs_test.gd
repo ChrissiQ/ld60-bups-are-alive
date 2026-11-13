@@ -3,7 +3,7 @@ extends SceneTree
 ## main view and a bare dish parked (Dish.park, as Main parks every dish out of the view), the main view's dish asking for thumbnails as the
 ## screen asks while the strip shows (Dish.want_thumbnails), and the atlas taken each frame as the strip takes it (a ThumbAtlas ticked, its
 ## texture drawn from: it tells the world which atlas it used); the atlas read on the sim thread (SimCore's THUMBS, what its publish copies
-## into the shared texture). Windowed only:
+## into the shared texture). Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_thumbs_test.gd
 ##
 ## Expected values, written before the run [derived unless marked]:

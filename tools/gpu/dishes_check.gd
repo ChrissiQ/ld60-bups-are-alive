@@ -1,6 +1,7 @@
 extends SceneTree
 ## Several dishes on the game screen, windowed: a second and third dish run beside the main one (one of them on the GPU), the strip's thumbnails are drawn,
 ## and a screenshot of the screen is written for a look.
+## On macOS:
 ## godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/dishes_check.gd -- <out_png>
 
 func _initialize() -> void:

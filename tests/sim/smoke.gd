@@ -1,5 +1,5 @@
 extends SceneTree
-## Windowed only: tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/smoke.gd
+## Windowed only. On macOS: tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/smoke.gd
 ## Plays goal mode as intended, in simulation time, on the pooled world with the dish goal mode starts with (`dish.strike(null)`), at
 ## x10,000: wait for experiment 1; then, as the game does when it is done (scripts/main.gd's _on_goal_completed), make staying alive
 ## cost more and let the plankton bloom at the rate the experiment's text suggests. Fails if either experiment is not done within

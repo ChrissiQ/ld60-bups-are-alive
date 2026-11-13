@@ -35,7 +35,7 @@ godot --headless --path . -s tests/strings_test.gd
 godot --headless --path . res://tests/dialog_test.tscn
 ```
 
-The quick ones cover the interface (`ui_lint_test`, `strings_test`, `fonts_test`, `screens_test`, `settings_test`, `toolbar_test`, `free_mode_test`, `tutorial_test`, `dish_codec_test`). The simulation ones (`tests/sim/`, run by `tools/run_sim_tests.sh`) open a window, need a GPU and are slow; `motion_table_test` checks the generated motion table. Run `godot --headless --path . --import` after adding a `class_name` script.
+The quick ones cover the interface (`ui_lint_test`, `strings_test`, `fonts_test`, `screens_test`, `settings_test`, `toolbar_test`, `free_mode_test`, `tutorial_test`, `dish_codec_test`). The simulation ones (`tests/sim/`, run on macOS by `tools/run_sim_tests.sh`) open a window, need a GPU and are slow; `motion_table_test` checks the generated motion table. Run `godot --headless --path . --import` after adding a `class_name` script.
 
 ## Making a release
 

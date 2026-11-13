@@ -1,7 +1,7 @@
 extends SceneTree
 ## A dish's picture after it was out of the main view (Dish.park, unpark), on the real pool: while it was away the world published the
 ## other dish into the shared textures its view last drew from, so until the world publishes it again its view must draw nothing and
-## answer no pick, never a pick on the other dish's bups. Windowed only:
+## answer no pick, never a pick on the other dish's bups. Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/park_view_test.gd
 ##
 ## Expected values, written before the first run [derived from the textures' reuse rule: SimCore.TEXTURES (10) of a kind, each written again

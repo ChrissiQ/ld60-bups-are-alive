@@ -3,6 +3,7 @@ extends SceneTree
 ## 250% at fit zoom and at four closer zooms (the density picture's crossing is at a bup length of Cell.MIN_VISIBLE_LENGTH_PX screen pixels: a
 ## founder is 2 to 4 µm long, so a zoom of 0.5 px/µm has every bup under it, 0.75 some, 1.5 none), and each again right after with density off (the
 ## capsule drawing the same view gets without it: cap_*.png). Prints each view's density state.
+## On macOS:
 ## tools/run_windowed.sh <log> -- --path . --rendering-driver metal --resolution 1920x1080 --position 6000,6000 -s tools/gpu/den_shots.gd -- <out_dir> [bups] [off]
 
 const ZOOMS := [0.5, 0.75, 1.5, 4.0]  ## px/µm; fit zoom besides

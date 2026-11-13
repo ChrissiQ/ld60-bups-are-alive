@@ -1,7 +1,7 @@
 extends SceneTree
 ## The pooled world's answers the dish screen needs: the husks' list and the nearest husk, a dose's
 ## scatter, the gradient's size at a point, the steering picture's texture, a source's release, and a game's numbers and family-tree clock.
-## Windowed only:
+## Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/world_gaps_test.gd
 ##
 ## Expected values, written before the first run [derived unless marked]:

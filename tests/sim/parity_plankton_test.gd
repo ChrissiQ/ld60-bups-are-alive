@@ -1,6 +1,6 @@
 extends SceneTree
 ## A plankton placed by hand floats, then bursts into a cloud that spreads into the grid, and the bloom's timing, on the real pool: a bare 20 mm dish (no bups, no nutrient, no feed) at ParityGame.PLACE, the plankton seen as the screen sees them
-## (Dish.plankton, from the world's copies), the nutrient read from the pool (SimCore.gather). Windowed only:
+## (Dish.plankton, from the world's copies), the nutrient read from the pool (SimCore.gather). Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_plankton_test.gd
 ##
 ## Expected values, written before the first run [derived unless marked]:

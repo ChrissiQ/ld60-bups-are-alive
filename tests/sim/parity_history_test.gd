@@ -1,7 +1,7 @@
 extends SceneTree
 ## The history's samples and their times on the real pool, and the history after a dish dies out: a
 ## struck dish at ParityGame.PLACE run at x10,000 and x1,000, its samples as the snapshots carry them and as its DishHistory keeps them;
-## then every bup taken out with the pipette, the dish run on empty. Windowed only:
+## then every bup taken out with the pipette, the dish run on empty. Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_history_test.gd
 ##
 ## Expected values, written before the first run [derived unless marked]:

@@ -1,6 +1,7 @@
 extends SceneTree
 ## Measures the motion table (scripts/motion_table.gd) from the real run-and-tumble swimming, and writes it.
 ##
+## On macOS:
 ##   tools/run_windowed.sh <outfile> -- --path . --rendering-driver metal --position 6000,6000 -s tools/gen_motion_table.gd [-- out=<path> calibration=<x>]
 ##
 ## Windowed (it runs on the GPU). Run it whenever tests/motion_table_test.gd says the table is stale, which it does when a

@@ -1,6 +1,6 @@
 extends SceneTree
 ## SimCore's calls beyond the step: right-sized reads, set_params, resize, the tracked
-## bups' records and the probes, the founders in the family tree, and a refused iteration (the memory budget). Windowed only:
+## bups' records and the probes, the founders in the family tree, and a refused iteration (the memory budget). Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/core_calls_test.gd
 ##
 ## Expected values, written before the first run [derived unless marked]:

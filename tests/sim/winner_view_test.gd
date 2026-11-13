@@ -2,7 +2,7 @@ extends SceneTree
 ## The winner view as the game draws it (DishDrawing turns ViewRenderer's density mode on; the picture is a sprite under the capsules).
 ## A bare Dish on the screen over the real world, paused, 3 mm across (1,500 um radius: 150 texels at 0.1 px/um, inside the picture's half height), 100 founders in four colours, the camera at 0.1 px/um: every bup is
 ## far under its least footprint (Cell.MIN_VISIBLE_LENGTH_PX = 2 px; a founder is 2 to 4 um = 0.2 to 0.4 px), so every bup is in the picture
-## and none is a capsule. Windowed only:
+## and none is a capsule. Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/winner_view_test.gd
 ##
 ## Expected values, written before the first run [derived from the splat's rules, GpuKernelsView.K_DENSITY_SPLAT and its header]:

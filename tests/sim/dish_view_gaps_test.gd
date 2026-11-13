@@ -1,6 +1,6 @@
 extends SceneTree
 ## A Dish on the screen over the real world (SimService's GPU backend, the main device drawing): its steering map and its husks as the
-## player sees them. Needs a GPU (windowed):
+## player sees them. Needs a GPU (windowed). On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/dish_view_gaps_test.gd
 ##
 ## Expected values, written before the first run [derived from the code's rules]:

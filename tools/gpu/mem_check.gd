@@ -1,5 +1,5 @@
 extends SceneTree
-## Where the pooled world's graphics memory runs out on the machine it runs on (the memory budget's rule; macOS: it reads `vm_stat`, `footprint` and `sysctl`). Windowed, through the run lock, one mode a run:
+## Where the pooled world's graphics memory runs out on the machine it runs on (the memory budget's rule). For macOS only: it reads `vm_stat`, `footprint` and `sysctl`. Windowed, through the run lock, one mode a run:
 ##   RUN_TIMEOUT=900 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/mem_check.gd -- <mode> [stage] [stages]
 ## modes: info (what the machine reports), slots (bups added `stage` thousand a time in one pool), dishes (empty 400x400 dishes added `stage` at a time),
 ## bigbuf (single buffers and a growth by copy, to see what a big buffer costs while it is made and after it is freed).

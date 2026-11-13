@@ -2,7 +2,7 @@ extends SceneTree
 ## The interface at 999 dishes: the game screen on the real pool with every dish it allows running (Main.MAX_DISHES,
 ## 999: an interface choice, not the world's 1,024 rows), the dish strip and the sections showing them, measured as the baseline's 20-dish
 ## scenarios were (`tools/gpu/baseline/perf_pre_pool.json`, made before the pooled world; the game screen, the dishes filled at once, an asked x10,000, 12 s of settling, then
-## 30 s of frames between process_frame calls at 2560 x 1440 windowed). Run windowed; it is not a `*_test.gd`, so tools/run_sim_tests.sh skips it:
+## 30 s of frames between process_frame calls at 2560 x 1440 windowed). Run windowed; it is not a `*_test.gd`, so tools/run_sim_tests.sh skips it. On macOS:
 ## tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tests/sim/interface_gate.gd
 ## Args (after --): `dishes=N` (default 999), `seconds=N` (the window, default 30), `scenario=E` (gate E's frame p95, below), `scenario=A` or `scenario=B` (gates A and B, at the end of this header).
 ## A run counts only as the scene the baseline measured: the window 2560 x 1440 when the frames begin and when they end, and the pointer

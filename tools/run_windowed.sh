@@ -4,14 +4,14 @@
 # with RUN_LOCK_WAIT=0 refuses at once (exit 75). The lock is released on any exit.
 # Usage: tools/run_windowed.sh <outfile> -- <godot args...>
 # Env: RUN_LOCK_DIR (lock folder), RUN_LOCK_WAIT (seconds to wait, default 86400),
-#      RUN_WINDOWED_BIN (Godot binary), RUN_TIMEOUT (seconds the run may take; exit 124 when over).
+#      RUN_WINDOWED_BIN (Godot binary; the default is the application's usual place on macOS, so set it on another system), RUN_TIMEOUT (seconds the run may take; exit 124 when over).
 # Prints the output file's path last on stdout.
 # (Windowed tools are run with `--position 6000,6000`, which puts the window off the display.)
 set -uo pipefail
 
 LOCK_DIR="${RUN_LOCK_DIR:-/tmp/bups-windowed-run.lock}"
 WAIT="${RUN_LOCK_WAIT:-86400}"
-BIN="${RUN_WINDOWED_BIN:-/Applications/Godot.app/Contents/MacOS/Godot}"
+BIN="${RUN_WINDOWED_BIN:-/Applications/Godot.app/Contents/MacOS/Godot}"  # the default is for macOS
 EMPTY_LOCK_SECONDS=30  # a lock folder with no pid file for this long is taken as left behind
 
 if [ $# -lt 3 ] || [ "$2" != "--" ]; then

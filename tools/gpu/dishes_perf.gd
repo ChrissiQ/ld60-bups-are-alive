@@ -1,5 +1,6 @@
 extends SceneTree
 ## Two big dishes at once on the game screen at x10,000 (both grow to the limit): what each gets of the frame.
+## On macOS:
 ## godot --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/dishes_perf.gd -- [dishes] [seconds]
 
 func _initialize() -> void:

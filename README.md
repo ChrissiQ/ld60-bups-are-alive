@@ -26,7 +26,7 @@ You need Godot 4.7, Python 3 with SCons (`pip install scons`), and a C++ compile
    git clone https://github.com/godotengine/godot-cpp native/godot-cpp
    git -C native/godot-cpp checkout <that commit>
    ```
-2. **Compile the lineage store** (debug is what the editor uses; release is for exports):
+2. **Compile the lineage store** (debug is what the editor uses; release is for exports). On macOS (on another system give its `platform` and `arch`, as the matrix of `.github/workflows/build-native.yml` lists them):
    ```
    cd native
    scons platform=macos arch=universal target=template_debug api_version=4.5 -j8
