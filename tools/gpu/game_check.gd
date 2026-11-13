@@ -8,7 +8,7 @@ extends SceneTree
 ##   smoke                          a few hundred frames at x10,000: the screen's figures do not jump, a selected bup's panel has its info
 ##   edits                          mid-game changes (resize, the limit, watched bups, the pipette and the question about the old dish:
 ##                                  freeze, thaw, trash; a save written and read through the game's codec and loaded again; the debug
-##                                  log), in the game build 
+##                                  log), in the game build
 ##   long [hours] [founders] [limit] [feed] [bloom]   x10,000 for `hours` sim-hours: frame times, memory, the population; MEM lines
 ##   perf [bups] [radius] [speed] [seconds]           a dish filled with `bups` at once, drawn, at `speed`: frame times, achieved speed
 ## Prints "GAME CHECK OK" or the failures. A SCRIPT ERROR anywhere while it runs fails it (a Logger counts them); an ERROR line Godot

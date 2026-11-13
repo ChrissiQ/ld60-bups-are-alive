@@ -26,7 +26,7 @@ func _init() -> void:
 		print("usage: ... -s tools/gpu/capture_ensemble.gd -- scenario seed [hours]")
 		quit(1)
 		return
-	if not SimHarness.begin(self, "capture_ensemble", "SimCore"):
+	if not SimHarness.begin(self, "capture_ensemble", "the pooled core (SimCore)"):
 		return
 	var scenario: String = a[0]
 	var seed_value := int(a[1])

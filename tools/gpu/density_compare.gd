@@ -1,5 +1,5 @@
 extends SceneTree
-## density mode (ViewRenderer.set_density) against the single-dish path's capsule look and the point path, drawn
+## Density mode (ViewRenderer.set_density) against the capsule look and the point path, drawn
 ## from the same paused states, with the cost of each. Windowed, through the lock, one at a time:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/density_compare.gd -- pack
 ##   ... -- sparse      (1,500 bups at fit zoom and 4 x: does every bup leave a lit pixel, in each look)
@@ -12,7 +12,7 @@ extends SceneTree
 ##
 ## pack: for each count (a seeded state spread over the 90 mm dish, one step run, paused) and fit zoom and 20, 100 and 500 x
 ##   it (the closer ones centred on the densest 1 mm bin of the state): the picture of capsule (today), winner (density mode with bilinear taps), rod (two
-##   bilinear splats along the bup's axis), point (a measured point path fed by the same view_build instances), the density's
+##   bilinear splats along the bup's axis), point (the point path fed by the same view_build instances), the density's
 ##   nearest-tap variant and the bare dish, each frame
 ##   rebuilt (view_build every frame, as a running simulation makes it): the frame's interval (vsync off; median of 60 frames after 15)
 ##   with each look and with none (`hidden`), so a look's cost is its frame less hidden; view_build's cost
@@ -21,16 +21,16 @@ extends SceneTree
 ##   each density look against capsule, and point against capsule.
 ##
 ## Expected values, written before the first run:
-## - density's view_build at 2M fit zoom about 3.1 ms of splat and resolve plus the capsule kernels' 1 ms [measured, 3.1 ms on a
+## - density's view_build at 2M fit zoom about 3.1 ms of splat and resolve plus the capsule kernels' 1 ms [measured: 3.1 ms on a
 ##   local device with a buffer for the sums and no quad; the view kernels' cost on 2M is about 1 ms [derived]]. At fit zoom
 ##   every bup is small (375 µm a pixel), so the capsule kernels find nothing after the first build.
-## - capsule frame at 2M fit zoom about 10 ms over hidden [measured, 10.1 ms]; point path about 27.7 ms [measured].
+## - capsule frame at 2M fit zoom about 10 ms over hidden [measured: 10.1 ms]; point path about 27.7 ms [measured].
 ## - The running 2M fit zoom: 39.9 ms with the bups shown, 8.4 ms hidden [measured]. Density is expected to take the shown figure
 ##   down by about the capsule path's 10 ms less the splat's 3 ms: about 33 ms [derived: 39.9 - 10.1 + 3.1; the simulation's load is
 ##   unchanged], still over gate F's frame; the rest is the simulation sharing the GPU, which no drawing choice here changes.
-## - density against capsule at fit zoom: within a measured tolerance (mean absolute difference per channel <= 2/255 over the dish's disc,
+## - density against capsule at fit zoom: within a tolerance (mean absolute difference per channel <= 2/255 over the dish's disc,
 ##   <= 0.1% of the disc's pixels over 16/255) [derived: the same least footprint, summed and resolved with coverage 1 - exp(-area); two
-##   footprints on one pixel differ from the single-dish path's product of the two uncovered shares by the second-order term of the coverage]. Over the
+##   footprints on one pixel differ from the capsule path's product of the two uncovered shares by the second-order term of the coverage]. Over the
 ##   lit pixels alone the figures are larger by the lit share's inverse; reported, not gated.
 ## - sparse: every in-frame bup has a lit pixel within one pixel of it in both looks [derived: the least footprint is 2 x 1 pixels, 1.8
 ##   pixel², and bilinear taps keep 1.8 pixel² of coverage a bup over four pixels, the weakest 0.45 pixel² a pixel: alpha 0.36].
@@ -705,7 +705,7 @@ func _sim_main() -> void:
 
 
 ## 2M bups at fit zoom with a simulation running on a thread: each look for RUN_SECONDS, the frames' intervals and how many payloads the
-## simulation published meanwhile. Measured at the same state: 39.9 ms shown, 8.4 hidden.
+## simulation published meanwhile. A soak at the same state: 39.9 ms shown, 8.4 hidden.
 func _running(seconds: float) -> void:
 	run_spec = _spec(1, 2000000, 2000000, 0.9)
 	var fit := minf(VIEW.x * 0.5 - 40.0, VIEW.y * 0.5 - 120.0) / RADIUS

@@ -16,7 +16,7 @@ const STEPS_PER_FRAME := 8
 
 
 func _init() -> void:
-	if not SimHarness.begin(self, "cap_check", "SimCore"):
+	if not SimHarness.begin(self, "cap_check", "the pooled core (SimCore)"):
 		return
 	var a := OS.get_cmdline_user_args()
 	var limit := int(a[0]) if a.size() > 0 else 600

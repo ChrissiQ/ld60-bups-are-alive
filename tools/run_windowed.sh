@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs one Godot command at a time on this machine. Windowed and timing runs share
+# Runs one Godot command at a time. Windowed and timing runs share
 # one GPU, so each takes a lock first: it waits while another run holds the lock, or
 # with RUN_LOCK_WAIT=0 refuses at once (exit 75). The lock is released on any exit.
 # Usage: tools/run_windowed.sh <outfile> -- <godot args...>

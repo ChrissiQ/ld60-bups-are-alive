@@ -58,7 +58,7 @@ func _init() -> void:
 		print("usage: ... -s tools/gpu/validate_dynamics.gd -- gpu scenario seed [hours [step]]")
 		quit(1)
 		return
-	if not SimHarness.begin(self, "validate_dynamics", "SimCore"):
+	if not SimHarness.begin(self, "validate_dynamics", "the pooled core (SimCore)"):
 		return
 	var mode := a[0]
 	var scenario := a[1]

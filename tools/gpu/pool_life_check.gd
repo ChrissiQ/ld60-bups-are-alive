@@ -6,13 +6,13 @@ extends SceneTree
 ## jitters the bups so that they divide, die at the limit and touch, step after step.
 ##
 ## Expected values, written before the first run:
-## C1 one pooled dish (row 0, number 0, at slot 0) against the single-dish path's kernels (conj_clear/insert/apply, life, the scans, finalize, events,
+## C1 one pooled dish (row 0, number 0, at slot 0) against the single-dish kernels (conj_clear/insert/apply, life, the scans, finalize, events,
 ##    compact, copy, ev_count, setcount, stats1/2) with the same `grow`, 60 steps in batches of 10: records, the counters (count,
 ##    survivors, newborn, next count, next id, step, growth, births, deaths, lost, donors, donor reach), every event word and every stats
 ##    word equal bit for bit, for five dishes: plain; stationary; donors sparse; donors packed close (transfers happen: it differs from
 ##    the same run with no transfers); a cap under survivors + newborns (newborns dropped). [derived: the same arithmetic with the dish's
-##    words for CNT's and the place in the dish for the slot] The single-dish path's donor table drops donors past 4 a bucket (the pooled index drops
-##    none), so the packed dish is compared with the single-dish path's kernels given a 32-slot table, and its most donors in a bucket is reported.
+##    words for CNT's and the place in the dish for the slot] The single-dish donor table drops donors past 4 a bucket (the pooled index drops
+##    none), so the packed dish is compared with the single-dish kernels given a 32-slot table, and its most donors in a bucket is reported.
 ## C2 isolation: every dish of a pool of 2, 8 and 65 dishes (random rows, sizes, seeds, limits, caps, flags and donors; every dish
 ##    packed round 0, 0, so all of them overlap) equals its run alone (another row, at slot 0, another grid size), batch by batch:
 ##    records, every DSTATE word but the start, its events (births by EB_STEP's dish number, deaths by ED_STEP's), its stats. 0 words differ.
@@ -30,10 +30,10 @@ extends SceneTree
 ##    (births by EB_STEP's number, deaths by ED_STEP's) and none is the source's; count after - before = births - deaths + moved in -
 ##    moved out for every dish in both batches. The destination continued 20 steps equals it alone, loaded from its records and DSTATE.
 ## C0 every pooled kernel loads from the imported SPIR-V (gpu/shaders/pool_*.glsl) and makes a shader and a pipeline on the device.
-## C6 (mode time N, default 2,000,000): each pooled kernel's cost on one dish of N bups (2% donors, 5% at division) against the single-dish path's
-##    counterpart, median of 7 runs less a no-op [measured]; expected about the single-dish path's for life, events, the scans (+10%), compact
-##    (compact + copy today: about 0.5 x) [derived from the 2M figures]; the donors' index (count, scan, scatter) about 0.5 ms more
-##    than the single-dish path's insert [placeholder: a pass over the donor flags and a scan of N/4 buckets].
+## C6 (mode time N, default 2,000,000): each pooled kernel's cost on one dish of N bups (2% donors, 5% at division) against the single-dish
+##    counterpart, median of 7 runs less a no-op [measured]; expected about the single-dish cost for life, events, the scans (+10%), compact
+##    (compact + copy: about 0.5 x) [derived from the single-dish 2M figures]; the donors' index (count, scan, scatter) about 0.5 ms more
+##    than the single-dish insert [placeholder: a pass over the donor flags and a scan of N/4 buckets].
 
 const L := preload("res://gpu/gpu_layout.gd")
 const W := L.RECORD_WORDS
@@ -55,8 +55,8 @@ class World:
 	var phys := 0
 	var buckets := 0
 	var today := false
-	var wide := false  ## the single-dish path's, with the 32-slot donor table
-	var cap := 0  ## the single-dish path's: the dish's capacity
+	var wide := false  ## for the single-dish kernels, with the 32-slot donor table
+	var cap := 0  ## for the single-dish kernels: the dish's capacity
 
 
 func ok(cond: bool, what: String) -> void:
@@ -85,7 +85,7 @@ func probe_defs() -> Dictionary:
 	var blind := GpuKernelsLife.CONJ_FUNCS + GpuKernelsLife.dn_funcs() + "#define CONJ_BUCKETS (%s)\n" % GpuKernelsLife.CONJ_BUCKETS_EXPR + GpuKernelsLife.swapped(GpuKernelsLife.POOL_CONJ_FUNCS, " ^ d * 83492791u", "")
 	GpuKernels.add(defs, "pool_conj_count_blind", GpuKernelsLife.K_POOL_CONJ_COUNT, ["P", "BUPS", "WORLD", "BLKDISH", "DSTATE", "CBKT", "DCNT", "DBIT"], blind, 64, GpuKernelsLife.POOL_TYPES)
 	GpuKernels.add(defs, "pool_conj_apply_blind", GpuKernelsLife.swapped(GpuKernelsLife.K_POOL_CONJ_APPLY, "if (BLKDISH[j >> BLK_SHIFT] != d) continue;", ""), ["P", "BUPS", "WORLD", "BLKDISH", "DSTATE", "DCNT", "DOFF", "DLIST", "DBIT"], blind, 64, GpuKernelsLife.POOL_TYPES)
-	# the single-dish path's donor table with 32 slots a bucket in place of 4 (no donor dropped below 33 a bucket), for C1's dense dish
+	# the single-dish donor table with 32 slots a bucket in place of 4 (no donor dropped below 33 a bucket), for C1's dense dish
 	var wide := func(text: String) -> String: return text.replace("(DMASK + 1u) * 4u", "(DMASK + 1u) * WIDE").replace("s < 4u", "s < WIDE").replace("h * 4u + s", "h * WIDE + s")
 	var wide_funcs := GpuKernelsLife.CONJ_FUNCS + "const uint WIDE = 32u;\n"
 	GpuKernels.add(defs, "conj_clear_wide", wide.call(GpuKernelsLife.K_CONJ_CLEAR), ["CNT", "DTAB"], wide_funcs)
@@ -415,7 +415,7 @@ func pip_pass(cl: int, w: World, pip: Array, g: int, gs: int) -> void:
 	w.flipped = not w.flipped
 
 
-# ---- the single-dish path's single dish -------------------------------------------------------------------------------------------------------------
+# ---- the single dish -------------------------------------------------------------------------------------------------------------
 
 func today_world(s: Dictionary, phys: int, wide := false) -> World:
 	var w := make_world(phys, true, s["cap"])
@@ -538,7 +538,7 @@ func first_diff(a: Dictionary, b: Dictionary) -> String:
 	return ""
 
 
-# ---- C1: one dish against the single-dish path's ------------------------------------------------------------------------------------------------------
+# ---- C1: one dish against the single-dish kernels ------------------------------------------------------------------------------------------------------
 
 func c1() -> void:
 	var dishes := {
@@ -573,11 +573,11 @@ func c1() -> void:
 			for pr: Array in pairs:
 				if cnt.decode_u32(pr[0] * 4) != ds.decode_u32(pr[1] * 4) and same:
 					same = false
-					why = "batch %d counter %d: today %d, pooled %d" % [batch, pr[0], cnt.decode_u32(pr[0] * 4), ds.decode_u32(pr[1] * 4)]
+					why = "batch %d counter %d: single-dish %d, pooled %d" % [batch, pr[0], cnt.decode_u32(pr[0] * 4), ds.decode_u32(pr[1] * 4)]
 			var today_next := cnt.decode_u32(L.CNT_NEXT_ID_LO * 4) | (cnt.decode_u32(L.CNT_NEXT_ID_HI * 4) << 32)
 			if same and today_next != world_next_id(p):
 				same = false
-				why = "batch %d next id: today %d, pooled %d" % [batch, today_next, world_next_id(p)]
+				why = "batch %d next id: single-dish %d, pooled %d" % [batch, today_next, world_next_id(p)]
 			if same and (get_bytes(t, "BUPS", 0, n * RB) if n > 0 else PackedByteArray()) != segment(p, 0):
 				same = false
 				why = "batch %d records" % batch
@@ -589,7 +589,7 @@ func c1() -> void:
 			if same and get_bytes(t, "OUT", L.OUT_STATS * 4, L.STATS_WORDS * 4) != get_bytes(p, "STATS", 0, L.STATS_WORDS * 4):
 				same = false
 				why = "batch %d stats" % batch
-			if wide:  # (the most donors in one bucket of the last step's table: the single-dish path's 4-slot table drops those past 4)
+			if wide:  # (the most donors in one bucket of the last step's table: the single-dish 4-slot table drops those past 4)
 				var tab := get_bytes(t, "DTAB", 0, 65536 * 32 * 4)
 				for h in 65536:
 					var used := 0
@@ -599,7 +599,7 @@ func c1() -> void:
 					most = maxi(most, used)
 		var n_end := ds_word(p, 0, L.DS_COUNT)
 		print("C1 %s: %d bups after 60 steps, %d donors, births lost %d" % [name, n_end, ds_word(p, 0, L.DS_DONORS), ds_word(p, 0, L.DS_BIRTHS_LOST)])
-		ok(same, "C1 %s: pooled equals the single-dish path's%s bit for bit (records, counters, events, stats) %s" % [name, " with a 32-slot donor table (at most %d donors in a bucket at a batch's end; the single-dish path's 4-slot table drops those past 4)" % most if wide else "", why])
+		ok(same, "C1 %s: pooled equals the single-dish kernels%s bit for bit (records, counters, events, stats) %s" % [name, " with a 32-slot donor table (at most %d donors in a bucket at a batch's end; the single-dish 4-slot table drops those past 4)" % most if wide else "", why])
 		if name == "donors":
 			var q := make_world(phys)
 			put_dish(q, 0, s, 0)
@@ -972,7 +972,7 @@ func timing(n: int) -> void:
 		var b := pool_us - noop
 		sums[0] += a
 		sums[1] += b
-		print("TIME %s: today %.0f us, pooled %.0f us%s" % [name, a, b, (", ratio %.3f" % (b / a)) if a > 0.0 else ""])
+		print("TIME %s: single-dish %.0f us, pooled %.0f us%s" % [name, a, b, (", ratio %.3f" % (b / a)) if a > 0.0 else ""])
 	var with_bups := func(st: Dictionary) -> Dictionary:
 		var d := st.duplicate()
 		d["BUPS"] = recs
@@ -1003,12 +1003,12 @@ func timing(n: int) -> void:
 	print("after life: %d kept, %d newborn" % [ds_word(p, 0, L.DS_SURVIVORS), ds_word(p, 0, L.DS_NEWBORN)])
 	row.call("events", bench(t, tsm2, func(cl: int) -> void: disp(cl, t, "events", threads("events", t.cap)), reps), bench(p, psm2, func(cl: int) -> void: disp(cl, p, "pool_events", g), reps))
 	row.call("blk_fill", noop, bench(p, psm2, func(cl: int) -> void: disp(cl, p, "pool_blk_fill", maxi(1, g / 64)), reps))
-	row.call("compact (+ copy today)", bench(t, tsm2, func(cl: int) -> void:
+	row.call("compact (+ copy)", bench(t, tsm2, func(cl: int) -> void:
 		disp(cl, t, "compact", threads("compact", t.cap * 7))
 		disp(cl, t, "copy", threads("copy", t.cap * 7)), reps), bench(p, psm2, func(cl: int) -> void: disp(cl, p, "pool_compact", g), reps))
 	row.call("setcount", bench(t, tsm2, func(cl: int) -> void: disp(cl, t, "setcount", 1), reps), bench(p, psm2, func(cl: int) -> void: disp(cl, p, "pool_setcount", L.D_MAX / 64, 1.0), reps))
 	row.call("stats (1 + 2)", bench(t, tsm2, func(cl: int) -> void: today_stats(cl, t, 0), reps), bench(p, psm2, func(cl: int) -> void: pool_stats(cl, p, g, 0), reps))
-	print("SUM of the parts: today %.0f us, pooled %.0f us" % [sums[0], sums[1]])
+	print("SUM of the parts: single-dish %.0f us, pooled %.0f us" % [sums[0], sums[1]])
 	row.call("bup step (conj to setcount, one list)", bench(t, with_bups.call(tsm0), func(cl: int) -> void: today_step(cl, t, 0, false), reps), bench(p, with_bups.call(psm0), func(cl: int) -> void: pool_step(cl, p, 0, g, gs, "pool_conj_apply", false), reps))
 	# no donors: the conjugation's cost with nothing to transfer
 	var nod := recs.duplicate()

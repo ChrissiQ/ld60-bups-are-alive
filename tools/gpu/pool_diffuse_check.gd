@@ -1,5 +1,5 @@
 extends SceneTree
-## Padded diffusion check (the pooled pool_diffuse_a/b and pool_diffuse2_a/b against the single-dish path's diffuse_a/b run on each dish alone).
+## Padded diffusion check (the pooled pool_diffuse_a/b and pool_diffuse2_a/b against the single-dish diffuse_a/b run on each dish alone).
 ## Run: tools/run_windowed.sh <out> -- --path <worktree> --rendering-driver metal --position 6000,6000 -s tools/gpu/pool_diffuse_check.gd
 ##
 ## Expected, written before the first run:
@@ -70,7 +70,7 @@ func make_field(n: int, seed_v: int) -> Dictionary:
 	return {"inside": inside, "conc": conc, "conc2": conc2}
 
 
-## The dish alone: the single-dish path's kernels, `iterations / 2` times (a, b), with k in pcs.pb and P_CELLS the cells across.
+## The dish alone: the single-dish kernels, `iterations / 2` times (a, b), with k in pcs.pb and P_CELLS the cells across.
 func alone(f: Dictionary, n: int, k: float, iterations: int, acetate: bool) -> Dictionary:
 	var p := PackedFloat32Array()
 	p.resize(256)
