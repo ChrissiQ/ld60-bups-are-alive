@@ -3,7 +3,7 @@
   "machine": "Apple M1 Pro, Metal, Godot 4.7.2, display 120 Hz (a frame is at best 8.33 ms), game screen layout viewport 1280x720 in a 2560x1440 window",
   "window": "12 s settle, then 30 s measured (x1: 60 s), 3 runs each, all through tools/run_windowed.sh",
   "what_is_measured": "interface frame time = Main._process to Main._process; achieved speed = slowest dish's clock over wall time. Every dish is filled to its limit and nutrient/feed set to the setup maxima so populations hold. Speed x10,000, backend Auto, unless the scenario says forced.",
-  "commit_base": "the single-dish path's code, no pool"
+  "commit_base": "the last build before the pooled world"
  },
  "expected_before_running": {
   "written_before_running": true,
@@ -18,7 +18,6 @@
  "scenarios": {
   "A": {
    "label": "[measured]",
-   "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- world A 30",
    "dishes": 1,
    "setup": {
     "cells_across": [
@@ -73,7 +72,6 @@
   },
   "B": {
    "label": "[measured]",
-   "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- world B 30",
    "dishes": 7,
    "setup": {
     "cells_across": [
@@ -133,7 +131,6 @@
   },
   "C100": {
    "label": "[measured]",
-   "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- world C100 30",
    "dishes": 20,
    "setup": {
     "cells_across": [
@@ -186,11 +183,10 @@
    "frame_ms_max_of_runs": 12.565,
    "achieved_speed_mean_of_runs": 969,
    "achieved_speed_spread": 42.4,
-   "notes": "MEASURED AT TODAY'S LIMIT OF 20 DISHES (Main.MAX_DISHES), not 1,000: 20 dishes of 100 bups, 5 mm radius, 100 cells across. Scaled to 1,000 dishes [derived, linear in dish count, NOT measured]: achieved speed about x909-1000 * 20/1000 = x18-20."
+   "notes": "MEASURED AT THAT BUILD'S LIMIT OF 20 DISHES (Main.MAX_DISHES), not 1,000: 20 dishes of 100 bups, 5 mm radius, 100 cells across. Scaled to 1,000 dishes [derived, linear in dish count, NOT measured]: achieved speed about x909-1000 * 20/1000 = x18-20."
   },
   "C48": {
    "label": "[measured]",
-   "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- world C48 30",
    "dishes": 20,
    "setup": {
     "cells_across": [
@@ -243,11 +239,10 @@
    "frame_ms_max_of_runs": 14.476,
    "achieved_speed_mean_of_runs": 5008,
    "achieved_speed_spread": 3.8,
-   "notes": "MEASURED AT TODAY'S LIMIT OF 20 DISHES, not 1,000: 20 dishes of 100 bups on a 0.3 mm dish, the only radius that gives 48 cells across (the grid is derived from the radius; there is no setting). The population decays (about 505 to 400 over the 20 dishes: the tiny dish has little nutrient), so it is not held at its limit. Scaled to 1,000 dishes [derived, linear, NOT measured]: x5,000 * 20/1000 = x100."
+   "notes": "MEASURED AT THAT BUILD'S LIMIT OF 20 DISHES, not 1,000: 20 dishes of 100 bups on a 0.3 mm dish, the only radius that gives 48 cells across (the grid is derived from the radius; there is no setting). The population decays (about 505 to 400 over the 20 dishes: the tiny dish has little nutrient), so it is not held at its limit. Scaled to 1,000 dishes [derived, linear, NOT measured]: x5,000 * 20/1000 = x100."
   },
   "D": {
    "label": "[measured]",
-   "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- world D 30",
    "dishes": 20,
    "setup": {
     "cells_across": [
@@ -303,11 +298,10 @@
    "frame_ms_max_of_runs": 17.218,
    "achieved_speed_mean_of_runs": 1731,
    "achieved_speed_spread": 19.8,
-   "notes": "MEASURED AT TODAY'S LIMIT OF 20 DISHES, not 100: 20 dishes of 10k (45 mm). Scaled to 100 dishes [derived, linear, NOT measured]: x1,700 * 20/100 = x340."
+   "notes": "MEASURED AT THAT BUILD'S LIMIT OF 20 DISHES, not 100: 20 dishes of 10k (45 mm). Scaled to 100 dishes [derived, linear, NOT measured]: x1,700 * 20/100 = x340."
   },
   "E": {
    "label": "[measured]",
-   "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- world E 30",
    "dishes": 1,
    "setup": {
     "cells_across": [
@@ -362,7 +356,6 @@
   },
   "F": {
    "label": "[measured]",
-   "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- world F 30",
    "dishes": 1,
    "setup": {
     "cells_across": [
@@ -419,7 +412,6 @@
    "50": {
     "cpu": {
      "label": "[measured]",
-     "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- small 50 cpu 30",
      "dishes": 1,
      "setup": {
       "cells_across": [
@@ -474,7 +466,6 @@
     },
     "gpu": {
      "label": "[measured]",
-     "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- small 50 gpu 30",
      "dishes": 1,
      "setup": {
       "cells_across": [
@@ -539,7 +530,6 @@
    "200": {
     "cpu": {
      "label": "[measured]",
-     "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- small 200 cpu 30",
      "dishes": 1,
      "setup": {
       "cells_across": [
@@ -594,7 +584,6 @@
     },
     "gpu": {
      "label": "[measured]",
-     "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- small 200 gpu 30",
      "dishes": 1,
      "setup": {
       "cells_across": [
@@ -659,7 +648,6 @@
    "1000": {
     "cpu": {
      "label": "[measured]",
-     "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- small 1000 cpu 30",
      "dishes": 1,
      "setup": {
       "cells_across": [
@@ -714,7 +702,6 @@
     },
     "gpu": {
      "label": "[measured]",
-     "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- small 1000 gpu 30",
      "dishes": 1,
      "setup": {
       "cells_across": [
@@ -779,7 +766,6 @@
   },
   "G_backdrop": {
    "label": "[measured]",
-   "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- backdrop 30",
    "note": "menu scene's 4-bup dish stepped at x1 on the CPU as scripts/menu.gd does",
    "runs": [
     {
@@ -804,7 +790,6 @@
    "by_bups": {
     "1000": {
      "label": "[measured]",
-     "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- x1 1000 60",
      "backend": "cpu",
      "runs": [
       {
@@ -892,7 +877,6 @@
     },
     "100000": {
      "label": "[measured]",
-     "command": "RUN_LOCK_WAIT=86400 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- x1 100000 60",
      "backend": "gpu",
      "runs": [
       {
@@ -983,7 +967,6 @@
  },
  "zoomed_out_pictures": {
   "label": "[measured]",
-  "command": "tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tools/gpu/bench_scenarios.gd -- shots",
   "what": "paused, never advanced dish of 200,000 bups (seed 3, 90 mm, processor), 1280x720 SubViewport, at fit zoom and 20x, 100x, 500x fit zoom",
   "determinism": "fit, zoom20, zoom100 are byte-identical across two processes; zoom500 differs between processes in the background shade only (the field is almost empty at that zoom)"
  }
