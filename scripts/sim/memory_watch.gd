@@ -15,7 +15,7 @@ const INTERVAL_MSEC := 5000
 const MIN_GAP_MSEC := 1000
 const RAISE_STEP := 0.1  ## of the ceiling
 
-var limits: PoolLimits
+var _limits: WeakRef  ## the limits whose budget it sets (weak: the limits own the watch, and two counted references to each other are never freed)
 var ceiling := 0  ## the budget worked out at start: the working budget's upper bound
 var reader: Callable
 var first: MachineMemory  ## what the machine reported when the game started
@@ -29,7 +29,7 @@ var _last_read_msec := -MIN_GAP_MSEC
 
 
 func _init(p_limits: PoolLimits, p_reader: Callable) -> void:
-	limits = p_limits
+	_limits = weakref(p_limits)
 	ceiling = p_limits.memory_budget_bytes
 	reader = p_reader
 	first = p_limits.machine if p_limits.machine != null else MachineMemory.new()
@@ -51,8 +51,9 @@ func before_growth(now_msec: int, held: int) -> void:
 func _read(now_msec: int, held: int) -> void:
 	_last_read_msec = now_msec
 	_next_msec = now_msec + INTERVAL_MSEC
+	var limits: PoolLimits = _limits.get_ref()
 	var m: Variant = reader.call()
-	if not (m is MachineMemory):
+	if limits == null or not (m is MachineMemory):
 		return
 	last = m
 	reads += 1
@@ -69,4 +70,5 @@ func _read(now_msec: int, held: int) -> void:
 
 ## For the debug log.
 func report() -> Dictionary:
-	return {"class": PoolLimits.classify(first), "at_start": first.to_dict(), "machine": last.to_dict(), "ceiling": ceiling, "working": limits.memory_budget_bytes, "short": short, "reads": reads, "lowered": lowered, "raised": raised}
+	var limits: PoolLimits = _limits.get_ref()
+	return {"class": PoolLimits.classify(first), "at_start": first.to_dict(), "machine": last.to_dict(), "ceiling": ceiling, "working": limits.memory_budget_bytes if limits != null else 0, "short": short, "reads": reads, "lowered": lowered, "raised": raised}
