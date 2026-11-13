@@ -44,7 +44,7 @@ text = "@options.memory_custom"
 [node name="AmountRow" parent="." instance=ExtResource("setting_row")]
 visible = false
 layout_mode = 2
-label_text = "@options.memory_custom"
+label_text = "@options.memory_limit"
 slider_min_width = 160.0
 
 [node name="Hint" type="Label" parent="."]
