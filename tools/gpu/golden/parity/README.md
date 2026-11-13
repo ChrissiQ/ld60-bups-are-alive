@@ -1,12 +1,12 @@
-# Parity fixtures (the replaced simulation's answers, which the pooled world is compared with)
+# Parity fixtures (the answers of the game's earlier CPU simulation, which the pooled world is compared with)
 
-[measured] on Apple M1 Pro, Metal, Godot 4.7.2. These are what the CPU simulation the pooled world replaced answered: a 20,000-bup state and the answers it gave to queries about it. Tests in `tests/` and `tests/sim/` load the state into the pooled world and compare its answers with these.
+[measured] on Apple M1 Pro, Metal, Godot 4.7.2. These were recorded from the game's earlier CPU simulation, the one the pooled world replaced: a 20,000-bup state and the answers it gave to queries about it. That simulation is no longer in the code, so the files are a fixed reference. Tests in `tests/` and `tests/sim/` load the state into the pooled world and compare its answers with these.
 
 Files are text (`var_to_str` for vectors and dicts) or gzip (read with `FileAccess.open_compressed(path, READ, COMPRESSION_GZIP)`).
 
 | file | what | read by | stable? |
 |---|---|---|---|
-| `state_records.bin.gz` | the replaced simulation's exported state (28-word record layout): 20,000 bups, radius 3000, seed 5, the last 50 on the spots of others (ties) | `tests/sim/parity_game.gd` | deterministic |
+| `state_records.bin.gz` | that simulation's exported state (28-word record layout): 20,000 bups, radius 3000, seed 5, the last 50 on the spots of others (ties) | `tests/sim/parity_game.gd` | deterministic |
 | `state_field_conc.bin.gz`, `state_field_puffs.bin.gz` | the nutrient grid (float32, conc) and the 60 clouds (5 floats each) as `export_packed()` | `tests/sim/parity_game.gd` | deterministic |
 | `queries_pick_near.txt` | 300 rounds of `pick_bup(point, slack, pixel)` and 4 `nearest_and_count` each (rng seed 7) | `tests/sim/parity_pick_test.gd` | deterministic |
 | `queries_info.txt` | `bup_info` (every key), `bup_steering`, `bup_radius(id, 2)`, `bup_pos` for 40 bups (indexes 0, 500, ... of `bup_ids()`) | `tests/sim/parity_draw_test.gd` | deterministic |

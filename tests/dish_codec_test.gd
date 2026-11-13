@@ -21,7 +21,7 @@ extends SceneTree
 ##   tracker's index is 2 and its held time within 0.001 of 1234.5678, and the dish blob reads back equal to the one written.
 
 const SCRATCH := "user://dish_codec_test_save.json"
-## A lineage export recorded from the CPU simulation the pooled world replaced.
+## A lineage export recorded from the game's earlier CPU simulation, the one the pooled world replaced.
 const LINEAGE_GOLDEN := "res://tools/gpu/golden/parity/lineage_export.bin.gz"
 const NUMBER := 7
 

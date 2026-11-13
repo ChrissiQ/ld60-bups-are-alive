@@ -1,7 +1,7 @@
 extends SceneTree
 ## Run: godot --headless --path . -s tests/lineage_store_test.gd
 ## LineageStore (native/src/lineage_store.cpp), the family tree on its own, with no simulation:
-##  - the two event streams recorded from the CPU simulation the pooled world replaced (tools/gpu/golden/lineage_*), replayed into a store that starts from the stream's
+##  - the two event streams recorded from the game's earlier CPU simulation, the one the pooled world replaced (tools/gpu/golden/lineage_*), replayed into a store that starts from the stream's
 ##    initial records, give the final records of the capture, compared by id (the order of an export's records is not stable);
 ##  - an export recorded from that simulation (golden/parity/lineage_export.bin.gz) imported into an empty store exports the same records;
 ##  - the cases of a pipette, freeze, thaw and trash on a store holding two or three dishes (cases (a)-(g), and (h):
@@ -141,7 +141,7 @@ func _replay(stem: String) -> void:
 		TestUtil.check(store.holds(int(id)) >= 1, "%s: pinned id %s is held" % [stem, id])
 
 
-## An export of a dish with husks made by the CPU simulation the pooled world replaced (254 records, 250 alive). Expected [derived]: every
+## An export of a dish with husks made by that earlier simulation (254 records, 250 alive). Expected [derived]: every
 ## dead record in an export of a live sim has a living descendant or a pin, so an import with the living ids prunes nothing: 254 records
 ## again, the same by id.
 func _parity_import() -> void:

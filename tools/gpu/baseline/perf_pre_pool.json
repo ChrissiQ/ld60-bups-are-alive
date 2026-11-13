@@ -3,7 +3,7 @@
   "machine": "Apple M1 Pro, Metal, Godot 4.7.2, display 120 Hz (a frame is at best 8.33 ms), game screen layout viewport 1280x720 in a 2560x1440 window",
   "window": "12 s settle, then 30 s measured (x1: 60 s), 3 runs each, all through tools/run_windowed.sh",
   "what_is_measured": "interface frame time = Main._process to Main._process; achieved speed = slowest dish's clock over wall time. Every dish is filled to its limit and nutrient/feed set to the setup maxima so populations hold. Speed x10,000, backend Auto (the measured build chose between its CPU and GPU simulations), unless the scenario says forced.",
-  "commit_base": "the build of the CPU simulation the pooled world replaced",
+  "commit_base": "the measured build is the game before the pooled world: each dish had a simulation of its own, on the CPU or on the GPU, and at most 20 dishes ran at once",
   "scenarios_explained": {
    "A": "one 90 mm dish of 1,000,000 bups",
    "B": "a 940,000-bup dish plus six dishes of 12,000 bups",
@@ -195,7 +195,7 @@
    "frame_ms_max_of_runs": 12.565,
    "achieved_speed_mean_of_runs": 969,
    "achieved_speed_spread": 42.4,
-   "notes": "Measured with 20 dishes, the most that build allowed, not 1,000: 20 dishes of 100 bups, 5 mm radius, 100 cells across. Scaled to 1,000 dishes [derived, linear in dish count, NOT measured]: achieved speed about x909-1000 * 20/1000 = x18-20."
+   "notes": "Measured with 20 dishes, the most the measured build allowed, not 1,000: 20 dishes of 100 bups, 5 mm radius, 100 cells across. Scaled to 1,000 dishes [derived, linear in dish count, NOT measured]: achieved speed about x909-1000 * 20/1000 = x18-20."
   },
   "C48": {
    "label": "[measured]",
@@ -251,7 +251,7 @@
    "frame_ms_max_of_runs": 14.476,
    "achieved_speed_mean_of_runs": 5008,
    "achieved_speed_spread": 3.8,
-   "notes": "Measured with 20 dishes, the most that build allowed, not 1,000: 20 dishes of 100 bups on a 0.3 mm dish, the only radius that gives 48 cells across (the grid is derived from the radius; there is no setting). The population decays (about 505 to 400 over the 20 dishes: the tiny dish has little nutrient), so it is not held at its limit. Scaled to 1,000 dishes [derived, linear, NOT measured]: x5,000 * 20/1000 = x100."
+   "notes": "Measured with 20 dishes, the most the measured build allowed, not 1,000: 20 dishes of 100 bups on a 0.3 mm dish, the only radius that gives 48 cells across (the grid is derived from the radius; there is no setting). The population decays (about 505 to 400 over the 20 dishes: the tiny dish has little nutrient), so it is not held at its limit. Scaled to 1,000 dishes [derived, linear, NOT measured]: x5,000 * 20/1000 = x100."
   },
   "D": {
    "label": "[measured]",
@@ -310,7 +310,7 @@
    "frame_ms_max_of_runs": 17.218,
    "achieved_speed_mean_of_runs": 1731,
    "achieved_speed_spread": 19.8,
-   "notes": "Measured with 20 dishes, the most that build allowed, not 100: 20 dishes of 10k (45 mm). Scaled to 100 dishes [derived, linear, NOT measured]: x1,700 * 20/100 = x340."
+   "notes": "Measured with 20 dishes, the most the measured build allowed, not 100: 20 dishes of 10k (45 mm). Scaled to 100 dishes [derived, linear, NOT measured]: x1,700 * 20/100 = x340."
   },
   "E": {
    "label": "[measured]",
@@ -778,7 +778,7 @@
   },
   "G_backdrop": {
    "label": "[measured]",
-   "note": "menu scene's 4-bup dish stepped at x1 on the CPU, as the replaced build's menu did",
+   "note": "menu scene's 4-bup dish stepped at x1 on the CPU, as the measured build's menu did",
    "runs": [
     {
      "frame_ms_mean": 8.34,

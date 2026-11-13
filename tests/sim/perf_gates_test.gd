@@ -11,8 +11,8 @@ extends SceneTree
 ## Expected values:
 ## - Static part (runs headless): the baseline holds every key the gates read, so a missing key fails with its path [derived from the
 ##   gates]: scenarios A, B, C100, C48, D, E, F each with frame_ms_p95_mean_of_runs and achieved_speed_mean_of_runs; G "50", "200",
-##   "1000" each with cpu and gpu (the figures of the two backends the baseline was measured with: a simulation on the processor, the CPU
-##   simulation the pooled world replaced, and one on the GPU) and best_of_the_two; x1 by_bups "1000" and "100000" with runs[].share_frames_picture_changed.
+##   "1000" each with cpu and gpu (the figures of the two backends the baseline was measured with: the game's earlier CPU simulation
+##   and its earlier GPU one, both replaced by the pooled world) and best_of_the_two; x1 by_bups "1000" and "100000" with runs[].share_frames_picture_changed.
 ## - The gate functions (`gate_*`), checked on synthetic numbers [derived from the gate text]:
 ##   E: p95 <= min(baseline E p95, 1.15 x display frame) and speed >= 9,500 (measured baseline: p95 10.18 ms, speed 9,994; display frame
 ##   8.33 ms [measured] so the cap is 9.58 ms). F: p95 and speed no worse than the baseline's (p95 64.66 ms, speed 309 [measured]) and
