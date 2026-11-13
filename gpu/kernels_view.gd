@@ -56,7 +56,7 @@ const VO_WORDS := VO_LARGE + 1
 
 ## Density mode: a bup under its least footprint (its length below Cell.MIN_VISIBLE_LENGTH_PX
 ## screen pixels: the capsule is then the least footprint, a rod of that length and width) adds its coverage to the pixels it lies on
-## instead of being drawn. A pixel's coverage is what the single-dish path's blending leaves: 1 - the product of what each footprint leaves uncovered of
+## instead of being drawn. A pixel's coverage is what the capsule path's blending leaves: 1 - the product of what each footprint leaves uncovered of
 ## it, so each footprint adds L = -ln(1 - its share of the pixel) to a sum, and the pixel's coverage is 1 - exp(-sum L): one bup on a
 ## pixel covers what its share is, and a crowd saturates. Two uint words a pixel are used in DEN: the L sum (word 4, in 1/DENSITY_ALPHA_SCALE;
 ## at least 1 so a faint footprint still counts) and the winner's key (word 5); words 0-3 are not used. The L sum wraps at 790,000 bups' worth.
@@ -73,7 +73,7 @@ const DENSITY_WORDS := 6  ## the words a pixel: word 4 the L sum, word 5 the win
 
 const TYPES := {"VP": "uint", "VCOUNT": "uint", "VOFFS": "uint", "VPD": "uint", "VOUT": "uint", "INST": "vec4", "DEN": "uint"}
 
-## The kernels density mode adds (made only when it is on: a density kernel that does not build must not stop the single-dish path's bups drawing).
+## The kernels density mode adds (made only when it is on: a density kernel that does not build must not stop the capsule path drawing the bups).
 const DENSITY_KERNELS := ["density_clear", "density_splat", "density_resolve"]
 
 ## The image bindings of each kernel (binding -> the texture ViewRenderer binds there: "payload" or "ids"), past its storage buffers.

@@ -121,14 +121,14 @@ const POOL_MACRO_BUFFERS := {
 }
 
 ## The groups of 64 a per-bup kernel of the pool is dispatched with, for `slots` slots in use (the host's last WORLD[WD_SLOTS]; only the
-## speed depends on it): about two slots a thread, from 64 groups up to 16,384 (M1 Pro, at 2M bups: 16,384 groups within 1.02
+## speed depends on it): about two slots a thread, from 64 groups up to 16,384 (measured on an M1 Pro, at 2M bups: 16,384 groups within 1.02
 ## of a thread a slot for swim, life, compact and copy; 4,096 groups 1.19, with compact's and copy's memory traffic starved).
 static func bup_groups(slots: int) -> int:
 	return clampi(ceili(slots / 128.0), 64, 16384)
 
 
 ## The groups of a grid scan of `elements` (GpuKernels.add_grid_scan): each group scans a chunk of elements / groups, then one group scans
-## the groups' sums, so the cost is least near sqrt(elements) / 2.8 groups (M1 Pro: best at about 512 at 2.1M elements and at
+## the groups' sums, so the cost is least near sqrt(elements) / 2.8 groups (measured on an M1 Pro: best at about 512 at 2.1M elements and at
 ## 100 to 200 at 100k).
 static func scan_groups(elements: int) -> int:
 	return clampi(int(sqrt(float(elements)) * 0.35), 1, 4096)
