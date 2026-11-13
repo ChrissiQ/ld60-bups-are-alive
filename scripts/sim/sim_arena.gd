@@ -11,6 +11,7 @@ const GROW := 1.5
 const FILL := 0.9  ## a class grows when what is asked passes this share of it
 const SHRINK_BELOW := 0.25
 const SHRINK_EVERY_MSEC := 60000
+const SHORT_SHRINK_MSEC := 10000  ## how long a class must have been little used before it shrinks while the machine is short of memory
 const SCAN_SCRATCH := 4096  ## words of a grid scan's group sums (GpuKernels.scan_groups' most)
 const D_MAX := GpuLayout.D_MAX
 const TILES_ACROSS_MOST := (StartConditions.MAX_NUTRIENT_RESOLUTION + GpuKernelsField.FIELD_TILE - 1) / GpuKernelsField.FIELD_TILE
@@ -393,6 +394,8 @@ static func _trim(free: Array, top: int) -> int:
 ## Whether the pool with these capacities (slots, clouds, husks, events and entries: the most of these and the single-dish path's; cells and bins: more than
 ## the single-dish path's) stays within the memory budget.
 func fits(slots: int, cells: int, bins: int, clouds: int, husks: int, events := 0, entries := 0) -> bool:
+	if limits.watch != null:
+		limits.watch.before_growth(Time.get_ticks_msec(), bytes_now())  # (the free memory is read again before room is made, at most once a second)
 	var cloud_room := maxi(clouds, cloud_cap)
 	return estimate_bytes(maxi(slots, slot_cap), cell_cap + cells, bin_cap + bins, cloud_room, maxi(husks, husk_cap), maxi(events, event_cap), maxi(entries, maxi(entry_cap, GpuKernelsClouds.ENTRIES_PER_SLOT * cloud_room))) <= limits.memory_budget_bytes
 

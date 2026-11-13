@@ -185,7 +185,9 @@ func _run() -> void:
 	_set_status("alive", true)
 	_mass_um = float(SimConstants.build()["mass_um"])
 	_core.warm_up_pipette()
+	limits.start_watch()
 	while not _stopping():
+		_watch_memory()
 		for cmd in queue.drain():
 			_handle(cmd)
 		_finish_pipettes()
@@ -223,6 +225,15 @@ func _run() -> void:
 	_core.release()
 	_core = null
 	_set_status("alive", false)
+
+
+## The memory watch's timer (once a loop, a clock compare): the working budget follows the free memory, and while the machine is short the
+## arena gives back the classes it uses little after seconds, not a minute.
+func _watch_memory() -> void:
+	if limits.watch == null:
+		return
+	limits.watch.tick(Time.get_ticks_msec(), _core.arena.bytes_now())
+	_core.arena.shrink_after_msec = SimArena.SHORT_SHRINK_MSEC if limits.watch.short else SimArena.SHRINK_EVERY_MSEC
 
 
 ## The world could not be made: every command that wants a reply is answered with an error until the thread is stopped.
@@ -439,6 +450,7 @@ func _timing() -> Dictionary:
 	t["refused_iteration"] = _refusal
 	t["pool"] = _core.arena.report()
 	t["memory_fraction"] = _core.arena.memory_fraction()
+	t["machine"] = limits.watch.report() if limits.watch != null else {}
 	t["next_growth_bytes"] = _core.arena.next_growth_bytes()
 	t["overflow"] = _core.overflow()
 	return t

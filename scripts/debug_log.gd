@@ -108,6 +108,7 @@ static func backend(dish: Dish) -> Dictionary:
 			"next_growth_bytes": timing.get("next_growth_bytes", 0),
 			"warn_fraction": PoolLimits.WARN_FRACTION,
 			"warning": PoolLimits.warning_state(timing),
+			"machine": timing.get("machine", {}),
 		},
 		"pool": timing.get("pool", {}),
 		"pool_overflow": timing.get("overflow", 0),
