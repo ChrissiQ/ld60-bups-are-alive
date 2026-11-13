@@ -940,10 +940,11 @@ func living_descendants_of(chain: PackedInt64Array) -> PackedInt32Array:
 
 
 ## Asks for a bup's record (its ancestors') to be kept after it dies, until it is unpinned: a pin held by this dish's number.
-func pin_bup(id: int) -> void:
+## False when there was no record to pin (the store may have dropped it since `has_record` answered: the worker prunes a dead bup's record
+## whenever nothing holds it).
+func pin_bup(id: int) -> bool:
 	var store := lineage_store()
-	if store != null and id >= 0:
-		store.pin(id, _number())
+	return store != null and id >= 0 and store.pin(id, _number())
 
 
 func unpin_bup(id: int) -> void:
@@ -961,7 +962,8 @@ func is_watched(id: int) -> bool:
 func watch_bup(id: int) -> bool:
 	if not has_record(id) or watched.has(id) or watched.size() >= MAX_WATCHED:
 		return false
-	pin_bup(id)
+	if not pin_bup(id):
+		return false
 	watched.push_front(id)
 	watch_version += 1
 	watch_epoch += 1
