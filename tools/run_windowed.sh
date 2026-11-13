@@ -11,6 +11,7 @@ set -uo pipefail
 LOCK_DIR="${RUN_LOCK_DIR:-/tmp/bups-windowed-run.lock}"
 WAIT="${RUN_LOCK_WAIT:-86400}"
 BIN="${RUN_WINDOWED_BIN:-/Applications/Godot.app/Contents/MacOS/Godot}"
+EMPTY_LOCK_SECONDS=30  # a lock folder with no pid file for this long is taken as left behind
 
 if [ $# -lt 3 ] || [ "$2" != "--" ]; then
 	echo "usage: $0 <outfile> -- <godot args...>" >&2
@@ -24,10 +25,22 @@ if [ ! -x "$BIN" ]; then
 	exit 1
 fi
 
-# Removes the lock when the pid in it is no longer running. Returns 0 if it did.
+# Removes the lock when the pid in it is no longer running, or when it has held no pid for a while (a run that took the lock writes
+# its pid at once, so a lock without one was left behind half made or half removed). Returns 0 if it did.
 clear_stale_lock() {
-	local pid
+	local pid age
 	pid="$(cat "$LOCK_DIR/pid" 2>/dev/null)"
+	if [ -z "$pid" ] && [ -d "$LOCK_DIR" ]; then
+		age=$(( $(date +%s) - $(stat -f %m "$LOCK_DIR" 2>/dev/null || stat -c %Y "$LOCK_DIR" 2>/dev/null || date +%s) ))
+		if [ "$age" -ge "$EMPTY_LOCK_SECONDS" ] && [ -z "$(cat "$LOCK_DIR/pid" 2>/dev/null)" ]; then
+			echo "run_windowed: clearing a lock that has had no pid for $age s" >&2
+			if mv "$LOCK_DIR" "$LOCK_DIR.stale.$$" 2>/dev/null; then
+				rm -rf "$LOCK_DIR.stale.$$"
+			fi
+			return 0
+		fi
+		return 1
+	fi
 	if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
 		echo "run_windowed: clearing lock left by pid $pid (not running)" >&2
 		# Moving the folder first makes the clearing atomic: only one run can take it.
