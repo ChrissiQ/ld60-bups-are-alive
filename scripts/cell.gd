@@ -40,13 +40,13 @@ const DETECTION_FLOOR := HALF_SATURATION / 20.0  ## concentrations below this ma
 # is changing (Berg & Purcell 1977; Mora & Wingreen 2010): the error in its estimate of the
 # change falls with the square root of the concentration and with the receptor array, which
 # grows with the sense gene. A bup with poor senses cannot resolve a shallow gradient.
-const GRADIENT_NOISE := 0.04  ## error of the estimated change at the reference concentration and range (a game choice: how noisy a founder's senses are, which is what makes the sense gene worth having; scaling it down with the stronger chemotaxis gain nearly stops sense from evolving, see memory/calibration-study)
+const GRADIENT_NOISE := 0.04  ## error of the estimated change at the reference concentration and range (a game choice: how noisy a founder's senses are, which is what makes the sense gene worth having; scaling it down with the stronger chemotaxis gain nearly stops sense from evolving)
 const NOISE_REFERENCE_CONC := HALF_SATURATION  ## where receptors are about half occupied, so the estimate is at its best
 
 # Chemotaxis, after Berg & Brown (1972) and Segall, Block & Berg (1986): it tumbles about once a
 # second; swimming up a gradient makes runs longer, and swimming down one does not shorten them.
 const TUMBLE_BASE := 1.0 / Biology.RUN_SECONDS
-const CHEMOTAXIS_GAIN := 64.0  ## how strongly an improving signal suppresses tumbling. Fitted so that a swimmer with no sensing noise climbs a gentle log-gradient as E. coli does: the decay constant v_d/D within 0.6-1.2x of Kalinin, Jiang, Tu & Wu 2009 (Fig. 6, read from the figure) at 0.025-0.2 %/µm, and chi = v_d/gradient within ~1.25x of Mattingly et al. 2021 (4300 µm²/s at 0.01-0.04 %/µm). At 8 it was ~10x too weak. The molecular gain (kinase amplification x the motor's cooperativity) is of order 100 or more [memory]; 64 is a fit, not a derivation. See memory/calibration-study
+const CHEMOTAXIS_GAIN := 64.0  ## how strongly an improving signal suppresses tumbling. Fitted so that a swimmer with no sensing noise climbs a gentle log-gradient as E. coli does: the decay constant v_d/D within 0.6-1.2x of Kalinin, Jiang, Tu & Wu 2009 (Fig. 6, read from the figure) at 0.025-0.2 %/µm, and chi = v_d/gradient within ~1.25x of Mattingly et al. 2021 (4300 µm²/s at 0.01-0.04 %/µm). A gain of 8 gives a climb ~10x too weak. The molecular gain (kinase amplification x the motor's cooperativity) is of order 100 or more [memory]; 64 is a fit, not a derivation.
 # How a swimmer moves over many runs at once (long steps, fast playback) is not set here: it is measured from the run-and-tumble
 # model above (the constants of Biology and this file), by tools/gen_motion_table.gd, into scripts/motion_table.gd. A change to
 # a constant of the swimming makes that table stale; tests/motion_table_test.gd says so.

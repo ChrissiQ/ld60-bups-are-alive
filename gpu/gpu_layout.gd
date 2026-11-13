@@ -33,7 +33,7 @@ const R_DIVISIONS := 20  ## a whole number as a float
 const R_ID_HI := 21  ## the id's high 32 bits (uint bits)
 const R_PX := 22  ## where it was in the last picture (>= 1e30: none; a newborn 3e38)
 const R_PY := 23  ## (a bup that died of starvation or chance has -2 here from `life` until `copy`, for `death_clouds` and `events`)
-const R_FAST := 24  ## the fine path's chemotaxis memory: the signal read lately (below 0: none read yet)
+const R_FAST := 24  ## the fine step's chemotaxis memory (a step as short as `fine_step` follows each run and tumble): the signal read lately (below 0: none read yet)
 const R_SLOW := 25  ## ... and over a longer memory
 const R_NOISE := 26  ## its receptor noise
 const R_TUMBLING := 27  ## the seconds of tumble left
@@ -170,7 +170,7 @@ const NO_DISH := 0xFFFFFFFF  ## a row that is no dish (a block of no dish in BLK
 ## is WORLD[WD_NEXT_ID_LO], WORLD[WD_NEXT_ID_HI].
 const ID_MAX := 0x7FFFFFFFFFFFFFFF  ## the largest id (2^63 - 1)
 
-## The block table: BLKDISH[slot >> BLK_SHIFT] is the dish row of each block of BLK_SLOTS slots, or NO_DISH (A and B halves, like the records).
+## The block table: BLKDISH[slot >> BLK_SHIFT] is the dish row of each block of BLK_SLOTS slots, or NO_DISH (for both halves of the records' ping-pong pair, as BLKDISH and BLKDISH2).
 const BLK_SLOTS := 256
 const BLK_SHIFT := 8
 const PIPDST_WORDS := 1  ## the pipette's scratch: one uint a slot (the destination row, NO_DISH: stays), apart from the record

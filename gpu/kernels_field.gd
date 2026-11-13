@@ -731,7 +731,7 @@ void share(uint i, uint d) {
 	CONC[i] = c0 - lo;
 }
 // only an owner cell holds sums (a bup's cell is always its owner), so this is where they are left at zero for the next step's demand
-// (a step's pool_clear is no longer a pass of its own); a word already zero is not written
+// (a step has no separate clearing pass); a word already zero is not written
 void f(uint i, uint d, uint l) {
 	if (OWNER[i] != int(i)) return;
 	share(i, d);
@@ -845,7 +845,7 @@ static func _pooled_swim() -> String:
 	body = body.replace("P[P_RADIUS]", "DPF(d, DP_RADIUS)").replace("P[P_SPACING]", "DPF(d, DP_SPACING)")
 	body = body.replace("P[P_UPKEEP_SCALE]", "DPF(d, DP_UPKEEP_SCALE)").replace("P[P_NOISE_REFERENCE]", "DPF(d, DP_NOISE_REFERENCE)")
 	body = body.replace("P[P_STATIONARY] > 0.5", "((DPU(d, DP_FLAGS) >> DPF_STATIONARY) & 1u) != 0u")
-	assert(body.ends_with("}\n") and not body.contains("BUP_RECORD_THREAD") and not body.contains("CNT["), "swim: the body no longer ends as expected")
+	assert(body.ends_with("}\n") and not body.contains("BUP_RECORD_THREAD") and not body.contains("CNT["), "swim: the body must end with the loop's closing brace")
 	return body + "BUP_LOOP(f)\n"
 
 

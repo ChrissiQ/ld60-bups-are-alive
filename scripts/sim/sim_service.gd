@@ -1,6 +1,6 @@
 extends Node
 ## The simulation's one world for the whole run of the game, an autoload: the backend is chosen once, when the
-## world is first asked for (`world()`): the GPU where a local device can be made and the pooled kernels load, else the processor's stub,
+## world is first asked for (`world()`): the GPU where a local device can be made and the pooled kernels load, else the stub backend (CpuSimBackend),
 ## which runs nothing. It lives until the game quits, when the sim thread is stopped and joined. Each frame it polls the world, so
 ## `WorldClient.snapshot_changed` is emitted on the main thread.
 ##

@@ -356,7 +356,7 @@ static func pool_life_slot() -> String:
 	t = swapped(t, "atomicAdd(CNT[CNT_TRIMMED], 1u)", "atomicAdd(DS(d, DS_TRIMMED), 1u)")
 	t = swapped(t, "	if (natural || trimmed) return;", "	if (natural || trimmed) {\n\t\tLEDGER(d, LG_LIFE, energy + P[P_COST_PER_MASS] * mass - (natural && P[P_DEATH_GIVE] > 0.0 ? P[P_DEATH_GIVE] * mass : 0.0))\n\t\treturn;\n\t}")
 	t = swapped(t, "		if (!lethal) {\n", "		LEDGER(d, LG_LIFE, lethal ? de + P[P_COST_PER_MASS] * dm : de - min(de, P[P_RESERVE_PER_MASS] * dm))\n		if (!lethal) {\n")
-	assert(not t.contains("CNT["), "pool_life still reads CNT")
+	assert(not t.contains("CNT["), "pool_life must not read CNT")
 	return t
 
 

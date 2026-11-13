@@ -4,7 +4,7 @@ extends RefCounted
 ## comes from. The simulation clock runs in these seconds (see SimClock); the player's playback
 ## speed multiplies it. Nothing here is sped up for the game: when a number is a game decision it
 ## says "choice". Provenance tags:
-##   [search]  seen in a source while building this
+##   [search]  taken from a source (named where the line gives one)
 ##   [memory]  recalled, NOT checked against a source: treat as unverified
 ##   choice    a game decision, not biology
 
@@ -15,7 +15,7 @@ const TUMBLE_SECONDS := 0.1  ## a tumble [search]
 const TUMBLE_TURN_MEAN := 1.19  ## radians, about 68 degrees [memory]
 const TUMBLE_TURN_SPREAD := 0.68  ## [memory]
 const ROTATIONAL_DIFFUSION := 0.55  ## rad per sqrt(s), i.e. a rotational diffusion of 0.15 rad^2/s [memory]
-const TUMBLE_UP_FACTOR := 0.15  ## tumble rate falls to this fraction while climbing, so runs are ~7x longer; strong ramps suppress tumbling by far more than 3x [memory; the stronger-model consult, citing Block 1983 tethered-cell data]
+const TUMBLE_UP_FACTOR := 0.15  ## tumble rate falls to this fraction while climbing, so runs are ~7x longer; strong ramps suppress tumbling by far more than 3x [memory: recalled from Block 1983 tethered-cell data, not checked]
 # The response to a change in concentration is biphasic: a fast positive lobe, then a negative
 # one, back to baseline within ~5 s [search: Segall 1985 thesis; cells respond most to changes over
 # about a run length, Block 1983 thesis]. It is modelled as a fast average (the motor's response,
@@ -28,11 +28,11 @@ const MEMORY_LONG := 2.0  ## s
 
 # --- The medium ------------------------------------------------------------------------------
 const MEDIUM_THICKNESS := 25.0  ## how many times thicker than water the medium is (viscosity): nutrient diffuses that many times slower (Stokes-Einstein). Swimming is left as it is [choice]
-const WATER_DIFFUSION := 600.0  ## µm^2/s, glucose in water [memory: the search could not confirm it]
+const WATER_DIFFUSION := 600.0  ## µm^2/s, glucose in water [memory]
 const NUTRIENT_DIFFUSION := WATER_DIFFUSION / MEDIUM_THICKNESS  ## µm^2/s
 
 # --- Body ------------------------------------------------------------------------------------
-const BIRTH_LENGTH := 2.0  ## µm [search: length 2.6-4.0 µm in one compilation; 2 at birth is typical]
+const BIRTH_LENGTH := 2.0  ## µm [search: length 2.6-4.0 µm reported; 2 at birth is typical]
 const WIDTH := 0.9  ## µm [search: diameter 0.68-1.04 µm]
 
 # --- Growth and upkeep -----------------------------------------------------------------------

@@ -751,7 +751,7 @@ func _finish_pipette() -> void:
 	_pipette_pending = {}
 	_sync_reply_hold()
 	if got == null:
-		if dishes.has(source) and reply.error() != "":  # (the processor's stub answers with nothing and no error: nothing ran)
+		if dishes.has(source) and reply.error() != "":  # (the stub backend, CpuSimBackend, answers with nothing and no error: nothing ran)
 			_show_banner(Strings.t("banner.memory_budget"), BANNER_SECONDS, true)
 		return
 	if int(got["moved"]) == 0 or not dishes.has(source):
@@ -1017,7 +1017,7 @@ func thaw(entry: Dictionary) -> void:
 	entry["thawing"] = true
 	_thawing[d.row] = {"entry": entry, "dish": d}
 	if not WorldClient.shared().backend.can_simulate():
-		_thawed(d.row)  # (the processor's stub shows no dish: there is nothing to wait for)
+		_thawed(d.row)  # (the stub backend shows no dish: there is nothing to wait for)
 	_sync_reply_hold()
 
 

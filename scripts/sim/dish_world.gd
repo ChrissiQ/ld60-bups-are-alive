@@ -107,7 +107,7 @@ func apply(edit: Dictionary) -> Variant:
 
 
 ## The clouds, deposits and husks the window puts into the medium: `steps` steps of `delta` seconds after `t0`. Step n (1-based) ends at
-## t0 + n * delta, which is the time the old path's n-th `_step_world` sees. Returns {"discs", "puffs", "deposits", "husks"} (flat
+## t0 + n * delta, which is the time at the end of step n. Returns {"discs", "puffs", "deposits", "husks"} (flat
 ## PackedFloat64Arrays, row layouts above), in step order within each.
 func events(t0: float, steps: int, delta: float) -> Dictionary:
 	time = t0

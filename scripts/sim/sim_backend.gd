@@ -11,7 +11,7 @@ func device_name() -> String:
 	return ""
 
 
-## `limits` is the pool's limits (a `PoolLimits` once that type exists).
+## `limits` is the pool's limits (a `PoolLimits`).
 func start(_limits: RefCounted) -> void:
 	pass
 

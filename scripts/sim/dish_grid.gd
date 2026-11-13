@@ -139,7 +139,7 @@ static func _corner(ix: int, iy: int, seed_v: int) -> float:
 
 
 ## One octave of the landscape: the lattice's corner values over the cells' span, made once (a cell's four corners are shared by its
-## neighbours; hashing them again for each cell was most of a grid's cost).
+## neighbours; hashing them again for each cell would be most of a grid's cost).
 class Octave:
 	var lattice := 1.0
 	var ix0 := 0

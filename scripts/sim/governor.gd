@@ -19,7 +19,7 @@ extends RefCounted
 ##   one publish for k frames, so k - 1 frames show nothing new for good. When the sim keeps up (a frame's steps cost, on the slow mean, within a display frame,
 ##   resting included; one late iteration must not turn the split off just when it is needed, so this is not the fast EMA) and at most SPLIT_OWED_MOST frames' worth are owed (the pictures the display keeps: one shown and
 ##   WorldClient.WAITING_MOST waiting; more would be dropped there), an iteration takes one frame's worth, so each frame owed has its own
-##   publish. Past either bound, or at MAX_STEP and above (a frame owes more than one iteration's worth anyway), the owed steps merge as before
+##   publish. Past either bound, or at MAX_STEP and above (a frame owes more than one iteration's worth anyway), the owed steps merge into one iteration
 ##   and a world that cannot keep up slows together. The steps' arithmetic does not depend on how they are grouped.
 ## - Duty: three frames in a row longer than SLOW_FRAME x the display's frame lower it by DUTY_DOWN; each frame within FAST_FRAME of it
 ##   raises it by DUTY_UP; after an iteration that kept the thread busy `busy` ms it rests `busy x (1 / duty - 1)` ms.

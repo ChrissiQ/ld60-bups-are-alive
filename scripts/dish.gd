@@ -34,7 +34,7 @@ const PLANKTON_PICTURE_REFRESH_MSEC := 100  ## the placing of the pictures is re
 const MAX_PLANKTON := 20000  ## floating at once: the most the biggest dish at the most bloom holds (a plankton floats about an hour, so 10 per mm² a day on 25,000 mm² is about 10,600)
 const MAX_WATCHED := 1000  ## the most bups on the watch list
 const SUGGESTED_BLOOM_DENSITY := 0.08  ## plankton in each mm² every sim-day that the goal text suggests: about one an hour on a 10 mm dish, 300 units an hour
-const GOAL_UPKEEP_FACTOR := 3.0  ## how much costlier staying alive is once goal mode reaches experiment 2 (set by GoalTracker.apply_costs; 1 elsewhere) [x10 killed every colony tested at once; x3 did not]
+const GOAL_UPKEEP_FACTOR := 3.0  ## how much costlier staying alive is once goal mode reaches experiment 2 (set by GoalTracker.apply_costs; 1 elsewhere) [choice: x10 kills colonies outright, x3 does not]
 const MAX_BLOOM_ARRIVALS_PER_STEP := 200  ## the most plankton one step lets the bloom add (the most there is, at the most bloom on the biggest dish, is about 60 in a 20 s step; a rate raised a great deal starts over)
 const BURST_CHECK_SECONDS := 60.0  ## how often the plankton are looked over for ones that have burst (sim seconds): with thousands floating that is most of what they cost, and a minute is nothing against the hour they float
 const BLOOM_DENSITY_STEP := 0.01  ## the bloom density moves in these steps (plankton in each mm² a sim-day)
@@ -869,7 +869,7 @@ func nutrient_reading(local: Vector2) -> Vector3:
 
 
 ## What a bup is called: the name the player gave it, or else its size word and its number ("lil bup #578",
-## the 578th born in this dish). Empty if there is no such bup. This is the only way to get a bup's name.
+## 578 being its id). Empty if there is no such bup. This is the only way to get a bup's name.
 func bup_name(id: int) -> String:
 	var custom := bup_custom_name(id)
 	return custom if custom != "" else bup_default_name(id)

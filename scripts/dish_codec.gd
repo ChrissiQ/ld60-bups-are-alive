@@ -5,7 +5,7 @@ extends RefCounted
 
 const MAX_SAVED_BYTES := 600000000  ## the most a save's block of bups or of family records may be once decompressed (2,000,000 bups are 224 MB)
 
-const FORMAT := 3  ## the blob format; a save of another one (every earlier one included) is refused, never read
+const FORMAT := 3  ## the blob format; a save of any other format is refused, never read
 const SPEC_NUMBERS := ["number", "seed", "radius", "resolution", "limit", "step", "flags", "nutrient_density", "feed_density", "bloom_density", "upkeep",
 		"medium_thickness", "patch_seed", "patchiness", "cloud_quota", "husk_quota"]
 const WORLD_NUMBERS := ["time", "radius", "bloom_density", "diffusion", "handover_len", "nutrient_energy", "next_source", "bloom_due", "burst_clock", "rng_seed", "rng_state"]

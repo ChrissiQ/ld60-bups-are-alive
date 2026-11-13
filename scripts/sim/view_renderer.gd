@@ -2,7 +2,7 @@ class_name ViewRenderer
 extends RefCounted
 ## The main device's side of the pooled world's picture: it imports the textures the simulation publishes on its own
 ## device, draws the main-view dish's bups from the payload (`view_build`: gpu/kernels_view.gd) into a MultiMesh's buffer with no copy
-## through the processor, answers the pointer's questions on the payload, and gives the canvas the nutrient haze, the steering map and
+## through the CPU, answers the pointer's questions on the payload, and gives the canvas the nutrient haze, the steering map and
 ## the thumbnails' atlas as textures. Main thread only (its device calls go through RenderingServer.call_on_render_thread, which runs
 ## them at once in this project, where the render thread is the main thread); `take_bound` may be called from any thread.
 ##

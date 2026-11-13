@@ -292,7 +292,7 @@ static func pool_events() -> String:
 	t = GpuKernelsLife.swapped(t, "EVB[o + EB_STEP] = st;", "EVB[o + EB_STEP] = (DPU(d, DP_NUMBER) << EV_DISH_SHIFT) | (st & EV_STEP_MASK);")
 	t = GpuKernelsLife.swapped(t, "EVD[o + ED_STEP] = st;", "EVD[o + ED_STEP] = (DPU(d, DP_NUMBER) << EV_DISH_SHIFT) | (st & EV_STEP_MASK);")
 	t = GpuKernelsLife.swapped(t, "atomicAdd(CNT[CNT_DEATHS_LOST], 1u)", "atomicAdd(DS(d, DS_DEATHS_LOST), 1u)")
-	assert(not t.contains("CNT["), "pool_events still reads CNT")
+	assert(not t.contains("CNT["), "pool_events must not read CNT")
 	return t + "BUP_LOOP(event_bup)\n"
 
 
@@ -301,7 +301,7 @@ static func pool_stats1() -> String:
 	var t := GpuKernelsLife.swapped(K_STATS1, "void main() {\n\tuint i = gl_GlobalInvocationID.x, l = gl_LocalInvocationID.x;", "void stats_block(uint blk, uint d) {\n\tuint l = gl_LocalInvocationID.x, i = (blk << BLK_SHIFT) + l;")
 	t = GpuKernelsLife.swapped(t, "if (i < CNT[CNT_BUPS]) {", "if (d != NO_DISH && i - DS(d, DS_START) < DS(d, DS_COUNT)) {")
 	t = GpuKernelsLife.swapped(t, "SPART[gl_WorkGroupID.x * STATS_SUMS", "SPART[blk * STATS_SUMS")
-	assert(not t.contains("CNT["), "pool_stats1 still reads CNT")
+	assert(not t.contains("CNT["), "pool_stats1 must not read CNT")
 	return t + "BLOCK_LOOP(stats_block)\n"
 
 
@@ -314,7 +314,7 @@ static func pool_stats2() -> String:
 	t = GpuKernelsLife.swapped(t, "uint o = uint(pcs.pb);", "uint o = d * STATS_DISH_WORDS + uint(pcs.pb) * STATS_WORDS;")
 	t = GpuKernelsLife.swapped(t, "float(CNT[CNT_BUPS])", "float(DS(d, DS_COUNT))")
 	t = t.replace("OUT[", "STATS[")
-	assert(not t.contains("CNT[") and not t.contains("OUT["), "pool_stats2 still reads CNT or writes OUT")
+	assert(not t.contains("CNT[") and not t.contains("OUT["), "pool_stats2 must not read CNT or write OUT")
 	return t + "void main() {\n\tfor (uint d = gl_WorkGroupID.x; d < D_MAX; d += gl_NumWorkGroups.x) {\n\t\tif (FLAG(d, DPF_RUNNING)) stats_dish(d);\n\t\tbarrier();\n\t}\n}\n"
 
 

@@ -125,7 +125,7 @@ func submit(cmd: SimCommand) -> void:
 
 
 ## {ready, alive, failed, device, errors}: ready once the device and kernels are made (failed when they could not be); alive while the loop
-## runs; errors: what went wrong since (a refused iteration, a command SimCore cannot do yet).
+## runs; errors: what went wrong since (a refused iteration, a command SimCore cannot do).
 func status() -> Dictionary:
 	_state.lock()
 	var s := _status.duplicate(true)

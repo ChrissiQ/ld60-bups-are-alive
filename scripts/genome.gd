@@ -35,7 +35,7 @@ const MAX_HARM := 5.0
 # drift apart in colour, slowly: a line has about 15 mutations by 72 hours, 120-190 by 400 hours and 500-800 by 3,000
 # (measured in long runs), and each step is small, so a clade keeps its founder's colour recognisably for hundreds of
 # hours: at 0.01 the hue has spread about +-14 degrees by 72 hours, +-50 by 400 and +-90 by 3,000, and the colour stays
-# saturated and bright (at the earlier 0.05 and 0.02 steps every hue was everywhere, and washed to off-white, within a
+# saturated and bright (with larger hue steps every hue appears everywhere and washes to off-white within a
 # few hundred hours).
 const HUE_STEP := 0.01  ## per mutation, as a fraction of the colour wheel (3.6 degrees)
 const SAT_STEP := 0.005

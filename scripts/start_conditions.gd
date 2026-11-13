@@ -8,7 +8,7 @@ const MAX_BUPS := 250  ## the most founders a dish starts with (each can be name
 const MIN_BUP_LIMIT := 10
 const DEFAULT_RADIUS := 45000.0  ## µm: 45 mm, the dish goal mode uses and free mode starts with
 const DEFAULT_BUP_LIMIT := 100000  ## what goal mode uses, and free mode starts with
-const MAX_BUP_LIMIT := 2000000  ## how far the limit slider goes: how many the machine can run is for the player to find out (on the CPU, crowds near the top make slow playback crawl; the GPU path is meant for them)
+const MAX_BUP_LIMIT := 2000000  ## how far the limit slider goes: how many the machine can run is for the player to find out (crowds near the top are for a machine with a strong GPU)
 const MAX_NUTRIENT_DENSITY := 1000.0  ## units of nutrient in each mm² of the dish at the start (the info panel reads the nutrient in the same units/mm²)
 const MAX_FEED_DENSITY := 20.0  ## units of nutrient added to each mm² of the dish every hour
 const MIN_NUTRIENT_RESOLUTION := 100  ## the fewest cells across the dish's nutrient grid (the default: what a dish up to 2.5 mm across gets anyway)
@@ -18,7 +18,7 @@ const MIN_MEDIUM_THICKNESS := 1.0  ## water
 const MAX_MEDIUM_THICKNESS := 100.0
 const MAX_BLOOM_DENSITY := 10.0  ## plankton blooming in each mm² of the dish every sim-day (about 250,000 a day, 10,000 floating at once, on the biggest dish)
 const MIN_DISH_RADIUS := 1000.0  ## µm: 1 mm, the smallest dish a player can choose (smaller ones are not much use)
-const MIN_SIM_RADIUS := 150.0  ## µm: the smallest dish the simulation itself will run (the tests and old saves use small ones)
+const MIN_SIM_RADIUS := 150.0  ## µm: the smallest dish the simulation itself will run (the tests use small ones)
 const MAX_DISH_RADIUS := 90000.0  ## µm: 90 mm in radius, 180 mm across; the nutrient grid has the same number of cells at any size, so a big dish has coarse ones (1.8 mm each here)
 
 ## The numeric settings and the range each is held to when read back (integers stay integers); a new one is a var and a row here.
@@ -35,7 +35,7 @@ const NUMBERS := {
 const FLAGS := ["death_husks", "plankton_husks", "stationary_phase", "tutorial"]  ## the yes/no settings
 
 var bups := 4
-var nutrient_density := 32.0  ## units of nutrient in each mm² of the dish at the start, spread evenly: enough that a few founders grow past the first goal (1,000 bups) with room to spare (measured at 10 mm radius, 10,000 units in all, about this much: all of 110 runs reached 1,000, at about 25-27 sim-hours; twice the nutrient gets there in about 12). A density, not a total, so the dish can be made any size without choosing the nutrient again.
+var nutrient_density := 32.0  ## units of nutrient in each mm² of the dish at the start, spread evenly: enough that a few founders grow past the first goal (1,000 bups) with room to spare ([measured] at 10 mm radius, 10,000 units in all, about this much: all of 110 runs reached 1,000, at about 25-27 sim-hours; twice the nutrient gets there in about 12). A density, not a total, so the dish can be made any size without choosing the nutrient again.
 var feed_density := 0.0  ## units of nutrient fed in to each mm² of the dish every hour, spread evenly (none by default: the starting nutrient is the medium they begin in)
 var bloom_density := 0.0  ## plankton appearing in each mm² of the dish every sim-day, at random places, each bursting into nutrient some time later (a density, like the nutrient and the feed, so the dish can be any size without choosing it again)
 var dish_radius := DEFAULT_RADIUS  ## physical size of the dish

@@ -14,7 +14,7 @@ void puffs_at(float x, float y, out float c, out float gx, out float gy, out flo
 	uint e0 = BINS[b], e1 = min(e0 + BINC[b], uint(P[P_ENTRY_CAPACITY]));
 	for (uint e = e0; e < e1; e++) {
 		vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];  // x, y, mass, variance | reach^2, sigma, cloud index, 0
-		float dx = x - r0.x, dy = y - r0.y, r2 = fma(dy, dy, dx * dx);  // (fma written out: the compiler contracted the old gathering code this way, and exp() magnifies a last-bit change in r2)
+		float dx = x - r0.x, dy = y - r0.y, r2 = fma(dy, dy, dx * dx);  // (fma written out: the compiler contracts this expression this way, and exp() magnifies a last-bit change in r2)
 		if (r2 <= r1.x) {
 			float v = r0.w;
 			float ci = r0.z / (6.2831853 * v) * exp(-r2 * 0.5 / v);

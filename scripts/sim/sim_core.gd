@@ -290,7 +290,7 @@ func remove_dish(row: int) -> PackedInt64Array:
 ## What a dish is now, as a DishBlob (a blocking read): see DishBlob. The queued edits are made first, so a drop just before a freeze
 ## stays with the dish. Its clouds and husks are its live slots only, in pool order, not the dead slots too: every
 ## kernel passes a dead slot by, a dish's counters are virtual (DS_CLOUD_SLOTS and DS_HUSKS, recounted from the live slots at its own
-## cadence) and the cloud lists keep the live clouds' order, so a dead slot carries nothing the dish's run reads (the continuation test checks it bit for bit).
+## cadence) and the cloud lists keep the live clouds' order, so a dead slot carries nothing the dish's run reads (tests/sim/continuation_test.gd checks it bit for bit).
 func gather(row: int) -> DishBlob:
 	_apply_edits()
 	var cd: CoreDish = _dishes[row]
@@ -393,10 +393,10 @@ func warm_up_pipette() -> void:
 
 ## Pipette room made ahead (called between iterations, never inside a pipette). A pipette needs the world's slots plus a whole copy of
 ## the dish it takes from, which is up to twice what the dish needs to run, and growing the pool inside it cost ~40 ms of a ~55 ms pass
-## [measured]. Rule: once the world's slots are at PRE_GROW_USE (0.7) of the capacity, the capacity is grown (the
+## [measured, M1 Pro]. Rule: once the world's slots are at PRE_GROW_USE (0.7) of the capacity, the capacity is grown (the
 ## same `ensure_slots` path and its sizes) for the largest dish's pipette, but only when that fits the budget and leaves the buffers at
 ## no more than PoolLimits.WARN_FRACTION of it (so it neither reaches the warning nor takes room later growths may need); otherwise
-## nothing is done and nothing is said: the pipette then grows it itself, or is refused, as before. A growth the running of the dishes
+## nothing is done and nothing is said: the pipette then grows it itself, or is refused. A growth the running of the dishes
 ## needs anyway (`_ensure_room`) is not changed: this only grows the same class earlier, so a refusal of the running cannot come from it
 ## sooner than by the room it holds, which the share keeps under the warning. Returns whether it grew.
 func prepare_pipette_room() -> bool:
@@ -1377,7 +1377,7 @@ func canonical_dump(row: int) -> Dictionary:
 
 
 ## The share of dish `row`'s bups whose `gene` (a name of GpuLayout.GENE_NAMES) is at least `threshold`
-## (goal 2's input; a blocking read). The kernel counts the records' float genes at or above the least float
+## (the goal tracker's input; a blocking read). The kernel counts the records' float genes at or above the least float
 ## that is not below `threshold`, which is the same as comparing each float gene with `threshold` itself.
 func fraction_with_gene_at_least(row: int, gene: String, threshold: float) -> float:
 	var g := GpuLayout.GENE_NAMES.find(gene)

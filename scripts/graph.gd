@@ -222,7 +222,7 @@ static func window_start_for(mode: Span, sim_time: float) -> float:
 	return maxf(0.0, last_sample_time(sim_time) - span_seconds(mode, sim_time)) if mode != Span.ALL else 0.0
 
 
-## Fewer decimals for wide-ranging genes (speed 10..120), one for small ones (metabolism 0.4..2).
+## Fewer decimals for wide-ranging genes (speed 5..40), one for small ones (metabolism 0.4..2).
 static func tick_text(value: float, hi: float) -> String:
 	return UiText.thousands(value, 1) if hi <= 2.5 else UiText.thousands(value)
 
