@@ -4,7 +4,7 @@ extends SceneTree
 ## C scenarios (bench_scenarios.gd of the replaced CPU simulation: the game screen, the dishes filled at once, an asked x10,000, 12 s of settling, then
 ## 30 s of frames between process_frame calls at 2560 x 1440 windowed). Run windowed; it is not a `*_test.gd`, so tools/run_sim_tests.sh skips it:
 ## tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tests/sim/interface_gate.gd
-## Args (after --): `dishes=N` (default 999), `seconds=N` (the window, default 30), `scenario=E` (gate E's frame p95, below).
+## Args (after --): `dishes=N` (default 999), `seconds=N` (the window, default 30), `scenario=E` (gate E's frame p95, below), `scenario=A` or `scenario=B` (gates A and B, at the end of this header).
 ## A run counts only as the scene the baseline measured: the window 2560 x 1440 when the frames begin and when they end, and the pointer
 ## never over a bup (a hover card and its picks are not in the baseline). A run in a larger window with the pointer over the dish gave
 ## a p95 of 12.3-12.9 ms where this scene gives 9.0 [measured]; such a run fails as void.
@@ -31,6 +31,26 @@ extends SceneTree
 ##   worst 11.1-11.35 ms [measured, asked x100]; at x10,000 asked the main thread's part is the same (the sim is on its own
 ##   thread), so p95 about 9 ms is expected [derived]: inside both bounds.
 ## - The dishes are 300 um with 100 bups at their limit (gate C's dishes). The speed reached is printed (gate C's own figure is perf_gates_test's).
+##
+## `scenario=A` and `scenario=B` (gates A and B): the frame bound at a million bups, measured as the baseline's two big scenes were (the game
+## screen, the dishes filled to their limits at once, nutrient and feed at the setup maxima, asked x10,000, 12 s settle, 30 s of frames at
+## 2560 x 1440 windowed, three runs in three processes). A: ONE 90 mm dish of 1,000,000 bups. B: the same dish with 940,000 bups in the main
+## view and six more 45 mm dishes of 12,000 running beside it (tabs, strip and tray sections for seven dishes). Each dish is the screen's own
+## through a DishSpec (perf_gates_test.filled_spec), as for E. The camera is the game's fit of the main dish, so the million bups are drawn
+## zoomed out, as the winner view draws them. The bound is `gate_ab`: the p95 (mean of the three runs) no worse than the baseline's in
+## tools/gpu/baseline/perf_pre_pool.json (A: p95 32.0 ms, mean 31.45, speed x624; B: p95 31.32, mean 30.64, speed x630 [measured, the baseline]).
+## Speed is not in the coded rule: it is printed and compared with the baseline's.
+## Expected values, written before the first run:
+## - A frame is the main thread's part (the sim runs on its own thread). `game_check perf 2000000` with the winner view reached x389 with frame
+##   p50 8.9 ms and p95 26 ms, against x37 and p50 37 ms with capsules [measured with the capsule draw]; at fit the
+##   winner view's frame mean at 2,000,000 bups was 5.3 ms against 32.5 ms with capsules [measured]. The old A and B frames (mean 31 ms) were
+##   the capsule draw of a million bups [derived from those figures]. So at 1,000,000 here: frame p50 8-9 ms (the display's 8.33 ms), mean
+##   9-12 ms, p95 18-28 ms (late frames while the sim thread's publishes and the readback contend for the GPU), worst 40-200 ms [derived].
+##   A pass against 32.0 ms is expected for A and for B (B adds six small dishes' strip tiles and tray rows: mean +0.5 ms or less [derived]).
+## - Speed: gate F (2,000,000 bups) is about x800 with a step near 20 ms [derived, gate F's header]; a million bups is half the step, so a step
+##   of about 10 ms plus the iteration's readback and publish, about 80 iterations a second of one 20 s step each: x1,300-1,600 for A [derived].
+##   B has 1,012,000 bups and seven dishes: the same or a little lower, x1,200-1,600 [derived]. Both above the baseline's x624 and x630.
+## - Population: 1,000,000 (A) and 1,012,000 (B) at the start of the window, a little under at the end (deaths at the limit's trim).
 
 var BASELINE_KEY := "C48"
 const SETTLE_SECONDS := 12.0
@@ -57,9 +77,10 @@ func _run() -> void:
 			window = float(a.substr(8))
 		if a.begins_with("scenario="):
 			scenario = a.substr(9)
+	var gate_ab := scenario == "A" or scenario == "B"
 	var gate_e := scenario == "E"
-	if gate_e:
-		BASELINE_KEY = "E"
+	if gate_e or gate_ab:
+		BASELINE_KEY = scenario
 	var baseline: Dictionary = _perf.load_baseline()
 	var base_p95 := float(_perf.lookup(baseline, ["scenarios", BASELINE_KEY, "frame_ms_p95_mean_of_runs"]))
 	var base_mean := float(_perf.lookup(baseline, ["scenarios", BASELINE_KEY, "frame_ms_mean_of_runs"]))
@@ -69,9 +90,10 @@ func _run() -> void:
 		TestUtil.finish(self, "OK interface_gate (skipped: headless, no GPU)")
 		return
 	var start := StartConditions.new()
-	start.bups = 4 if gate_e else 100
-	start.bup_limit = 100000 if gate_e else 100
-	start.dish_radius = _perf.DISH_45MM if gate_e else 300.0
+	var big_bups := 1000000 if scenario == "A" else 940000
+	start.bups = 4 if (gate_e or gate_ab) else 100
+	start.bup_limit = 100000 if gate_e else (big_bups if gate_ab else 100)
+	start.dish_radius = _perf.DISH_45MM if gate_e else (_perf.DISH_90MM if gate_ab else 300.0)
 	start.nutrient_density = StartConditions.MAX_NUTRIENT_DENSITY
 	start.feed_density = StartConditions.MAX_FEED_DENSITY
 	start.tutorial = false
@@ -93,11 +115,35 @@ func _run() -> void:
 	var t0 := Time.get_ticks_msec()
 	if gate_e:
 		count = 1
-		_fill(m.dish, m)
+		_fill(m.dish, m, 100000, _perf.DISH_45MM)
 		for i in 3600:
 			await process_frame
 			if m.dish._state != null and m.dish.row >= 0:
 				break
+	if gate_ab:
+		count = 1 if scenario == "A" else 7
+		_fill(m.dish, m, big_bups, _perf.DISH_90MM)
+		for i in 3600:
+			await process_frame
+			if m.dish._state != null and m.dish.row >= 0:
+				break
+		var small := StartConditions.new()
+		small.bups = 4
+		small.bup_limit = 12000
+		small.dish_radius = _perf.DISH_45MM
+		small.nutrient_density = StartConditions.MAX_NUTRIENT_DENSITY
+		small.feed_density = StartConditions.MAX_FEED_DENSITY
+		small.tutorial = false
+		small.spread_founders()
+		while m.dishes.size() < count:
+			var d: Dish = m.add_dish(small)
+			if d == null:
+				break
+			for i in 3600:
+				if d.row >= 0:
+					break
+				await process_frame
+			_fill(d, m, 12000, _perf.DISH_45MM)
 	while m.dishes.size() < count:
 		if m.add_dish(start) == null:
 			break
@@ -149,6 +195,16 @@ func _run() -> void:
 	var hz := DisplayServer.screen_get_refresh_rate()
 	var display_ms: float = 1000.0 / hz if hz > 0.0 else float(_perf.DISPLAY_FRAME_MS)
 	print("IFACE [measured] %d dishes running (%d in the snapshot), %d frames over %.1f s: mean %.2f ms, p50 %.2f, p95 %.2f, worst %.2f; speed reached x%.0f (asked x10,000); display %.1f Hz (%.3f ms)" % [m.dishes.size(), in_world, frames.size(), wall, mean, p50, p95, worst, reached, hz, display_ms])
+	if gate_ab:
+		var base_speed_ab := float(_perf.lookup(baseline, ["scenarios", scenario, "achieved_speed_mean_of_runs"]))
+		print("IFACE %s [measured] p95 %.2f ms, mean %.2f, p50 %.2f, worst %.2f, speed x%.0f, population %d at the start of the window and %d at the end" % [scenario, p95, mean, p50, worst, reached, pop_start, m.dish.population()])
+		print("IFACE %s baseline [measured]: p95 %.2f ms, mean %.2f, worst %.2f, speed x%.0f" % [scenario, base_p95, base_mean, base_max, base_speed_ab])
+		var status_ab: Dictionary = WorldClient.shared().backend.status()
+		TestUtil.show(in_world >= m.dishes.size() and m.dishes.size() >= count, "gate %s: %d dishes running in the world (%d asked)" % [scenario, in_world, count])
+		TestUtil.show((status_ab.get("errors", []) as Array).is_empty() and status_ab.get("alive", false), "gate %s: the world is clean (%s)" % [scenario, status_ab])
+		TestUtil.show(_perf.gate_ab(p95, base_p95), "gate %s: p95 %.2f ms <= the baseline's %.2f ms (speed x%.0f against x%.0f)" % [scenario, p95, base_p95, reached, base_speed_ab])
+		TestUtil.finish(self, "OK interface_gate %s (p95 %.2f ms, mean %.2f ms, worst %.2f ms, x%.0f reached)" % [scenario, p95, mean, worst, reached])
+		return
 	if gate_e:
 		steps_ms.sort()
 		iter_ms.sort()
@@ -169,10 +225,10 @@ func _run() -> void:
 	TestUtil.finish(self, "OK interface_gate (%d dishes: p95 %.2f ms, mean %.2f ms, worst %.2f ms, x%.0f reached)" % [m.dishes.size(), p95, mean, worst, reached])
 
 
-## Gate E's dish: the screen's own dish put in the world again as perf_gates_test.filled_spec (100,000 bups at once) the way Dish.strike
+## Gate E's, A's and B's dish: a dish put in the world again as perf_gates_test.filled_spec (`n` bups at once) the way Dish.strike
 ## puts one there, but with the founders' records of the spec (StartConditions.bups stops at 250).
-func _fill(d: Dish, m: Node) -> void:
-	var spec: DishSpec = _perf.filled_spec(100000, _perf.DISH_45MM, d.number)
+func _fill(d: Dish, m: Node, n: int, radius: float) -> void:
+	var spec: DishSpec = _perf.filled_spec(n, radius, d.number)
 	d._leave_world()
 	d.radius = spec.radius
 	d.resolution = spec.resolution
