@@ -12,6 +12,7 @@ const CATEGORIES := [
 	["evolution", ["mutation", "harm", "selection", "conjugation", "generation", "founders"]],
 	["bups", ["mass", "energy", "steering", "starvation"]],
 	["dish", ["nutrient", "acetate", "sources", "plankton", "husks", "population_cap", "freezer"]],
+	["computer", ["memory"]],
 ]
 
 
