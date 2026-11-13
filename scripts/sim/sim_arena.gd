@@ -1,7 +1,7 @@
 class_name SimArena
 extends RefCounted
 ## The pooled world's buffers, by the unit each grows with: record slots, field cells, cloud-list squares, cloud slots,
-## husk slots, family events; and the fixed ones (the tables, the scans' scratch, the world's events). A class grows by 1.5 (or to what
+## husk slots, cloud-list entries, family events; and the fixed ones (the tables, the scans' scratch, the world's events). A class grows by 1.5 (or to what
 ## is asked, if more) by copying what it holds into new buffers on the device; it shrinks, at most once a minute, when it has used less
 ## than a quarter of its slots for that long, and never below the most that was asked of it while it was little used (`asked`), so room made ahead
 ## for the next iterations' worst case is kept and a class shrinks only when the need itself has fallen. `changed` tells the core to make its
@@ -17,7 +17,7 @@ const TILES_ACROSS_MOST := (StartConditions.MAX_NUTRIENT_RESOLUTION + GpuKernels
 const TILES_MOST := TILES_ACROSS_MOST * TILES_ACROSS_MOST  ## the field tiles of the biggest grid a dish has (pool_fdiff's TILES: a word a tile)
 
 ## name -> [class, bytes a unit, kept when it grows, fill (0 or 0xFF)]. A class's units: slots, blocks (slots / 256 + 1), buckets
-## (GpuKernelsLife.conj_buckets(slots)), cells, bins, clouds, husks, events, or 1 for a fixed buffer (its bytes).
+## (GpuKernelsLife.conj_buckets(slots)), cells, bins, clouds, husks, entries, events, or 1 for a fixed buffer (its bytes).
 const BUFFERS := {
 	"BUPS": ["slot", GpuLayout.RECORD_BYTES, true, 0], "BUPS2": ["slot", GpuLayout.RECORD_BYTES, true, 0], "CHILD": ["slot", GpuLayout.RECORD_BYTES, false, 0],
 	"SURV": ["slot", 4, false, 0], "KID": ["slot", 4, false, 0], "EXCS": ["slot", 4, false, 0], "EXCK": ["slot", 4, false, 0],
@@ -34,7 +34,7 @@ const BUFFERS := {
 	"BINC": ["bin", 4, false, 0], "BINS": ["bin", 4, false, 0], "BCUR": ["bin", 4, false, 0],
 	"PUFF": ["cloud", 32, true, 0], "PUFF2": ["cloud", 32, false, 0], "PDLO": ["cloud", 4, false, 0], "PDHI": ["cloud", 4, false, 0],
 	"PSCALE": ["cloud", 4, false, 0], "PAL": ["cloud", 4, false, 0], "PEXC": ["cloud", 4, false, 0],
-	"ENT": ["cloud", GpuKernelsClouds.ENTRIES_PER_SLOT * 4, false, 0], "ENTD": ["cloud", GpuKernelsClouds.ENTRIES_PER_SLOT * 32, false, 0],
+	"ENT": ["entry", 4, false, 0], "ENTD": ["entry", 32, false, 0],
 	"HUSK": ["husk", 32, true, 0], "HUSK2": ["husk", 32, false, 0], "HDUE": ["husk", 4, false, 0], "HEXC": ["husk", 4, false, 0],
 	"HAL": ["husk", 4, false, 0], "HKEEP": ["husk", 4, false, 0],
 	"EVB": ["event", GpuLayout.BIRTH_WORDS * 4, false, 0], "EVD": ["event", GpuLayout.DEATH_WORDS * 4, false, 0],
@@ -72,6 +72,7 @@ var cell_cap := 0
 var bin_cap := 0
 var cloud_cap := 0
 var husk_cap := 0
+var entry_cap := 0  ## the cloud lists' entries: at least ENTRIES_PER_SLOT a cloud slot, more when the lists have asked for more
 var event_cap := 0
 var cell_top := 0  ## the end of the last field block in use
 var bin_top := 0
@@ -83,7 +84,7 @@ var _low_since := {}  ## class -> msec since which it has used less than SHRINK_
 var _texels := 0
 var _pixels := 0
 var growths := {}  ## class -> how many times it grew (the debug log's pool figures)
-var asked := {}  ## class ("slot", "cloud", "husk") -> the most `ensure_*` was asked for it since it was last busy or shrunk: a shrink never goes below room for it
+var asked := {}  ## class ("slot", "cloud", "husk", "entry") -> the most `ensure_*` was asked for it since it was last busy or shrunk: a shrink never goes below room for it
 
 
 func _init(device: RenderingDevice, p_limits: PoolLimits) -> void:
@@ -108,6 +109,7 @@ func make_all(contents: Dictionary) -> void:
 	bin_cap = maxi(limits.bins, 256)
 	cloud_cap = maxi(limits.cloud_slots, 256)
 	husk_cap = maxi(limits.husk_slots, 256)
+	entry_cap = GpuKernelsClouds.ENTRIES_PER_SLOT * cloud_cap
 	event_cap = SimCore.EVENT_FLOOR
 	for nm: String in BUFFERS:
 		_make(nm, _bytes_of(nm), false)
@@ -130,6 +132,7 @@ func _bytes_of(nm: String) -> int:
 		"cell": return cell_cap * unit
 		"bin": return bin_cap * unit
 		"cloud": return cloud_cap * unit
+		"entry": return entry_cap * unit
 		"husk": return husk_cap * unit
 		"event": return event_cap * unit
 		"texel": return _texels * unit
@@ -228,8 +231,31 @@ func ensure_clouds(clouds: int) -> bool:
 		if not fits(0, 0, 0, want, 0):
 			return false
 	cloud_cap = want
+	entry_cap = maxi(entry_cap, GpuKernelsClouds.ENTRIES_PER_SLOT * cloud_cap)
 	_grew("cloud")
-	_remake(["cloud"])
+	_remake(["cloud", "entry"])
+	return true
+
+
+## The entries the lists need for `slots` cloud slots at `density` entries a slot (what the bin scan measured, with room to grow).
+static func entries_for(slots: int, density: int) -> int:
+	return maxi(GpuKernelsClouds.ENTRIES_PER_SLOT, density) * slots
+
+
+## Room for `entries` list entries; false when growing would pass the budget (the lists then keep what they have: the kernel cuts the
+## lists that do not fit and raises the overflow flag).
+func ensure_entries(entries: int) -> bool:
+	asked["entry"] = maxi(int(asked.get("entry", 0)), entries)
+	if entries <= int(FILL * entry_cap):
+		return true
+	var want := maxi(ceili(entries / FILL), int(entry_cap * GROW))
+	if not fits(0, 0, 0, 0, 0, 0, want):
+		want = entries
+		if not fits(0, 0, 0, 0, 0, 0, want):
+			return false
+	entry_cap = want
+	_grew("entry")
+	_remake(["entry"])
 	return true
 
 
@@ -364,16 +390,19 @@ static func _trim(free: Array, top: int) -> int:
 	return top
 
 
-## Whether the pool with these capacities (slots, clouds, husks and events: the most of these and the single-dish path's; cells and bins: more than
+## Whether the pool with these capacities (slots, clouds, husks, events and entries: the most of these and the single-dish path's; cells and bins: more than
 ## the single-dish path's) stays within the memory budget.
-func fits(slots: int, cells: int, bins: int, clouds: int, husks: int, events := 0) -> bool:
-	return estimate_bytes(maxi(slots, slot_cap), cell_cap + cells, bin_cap + bins, maxi(clouds, cloud_cap), maxi(husks, husk_cap), maxi(events, event_cap)) <= limits.memory_budget_bytes
+func fits(slots: int, cells: int, bins: int, clouds: int, husks: int, events := 0, entries := 0) -> bool:
+	var cloud_room := maxi(clouds, cloud_cap)
+	return estimate_bytes(maxi(slots, slot_cap), cell_cap + cells, bin_cap + bins, cloud_room, maxi(husks, husk_cap), maxi(events, event_cap), maxi(entries, maxi(entry_cap, GpuKernelsClouds.ENTRIES_PER_SLOT * cloud_room))) <= limits.memory_budget_bytes
 
 
 ## The bytes the buffers take at these capacities.
-func estimate_bytes(slots: int, cells: int, bins: int, clouds: int, husks: int, events := -1) -> int:
+func estimate_bytes(slots: int, cells: int, bins: int, clouds: int, husks: int, events := -1, entries := -1) -> int:
 	if events < 0:
 		events = event_cap
+	if entries < 0:
+		entries = maxi(entry_cap, GpuKernelsClouds.ENTRIES_PER_SLOT * clouds)
 	var total := 0
 	for nm: String in BUFFERS:
 		var e: Array = BUFFERS[nm]
@@ -387,6 +416,7 @@ func estimate_bytes(slots: int, cells: int, bins: int, clouds: int, husks: int, 
 			"bin": total += bins * unit
 			"cloud": total += clouds * unit
 			"husk": total += husks * unit
+			"entry": total += entries * unit
 			"event": total += events * unit
 			_: total += sizes.get(nm, unit)
 	return total
@@ -412,7 +442,7 @@ func next_growth_bytes() -> int:
 
 ## The capacities, the bytes held, the budget, the share of it held, the next growth's bytes and the growths so far (for the debug log).
 func report() -> Dictionary:
-	return {"fraction": memory_fraction(), "next_growth_bytes": next_growth_bytes(), "slots": slot_cap, "cells": cell_cap, "bins": bin_cap, "clouds": cloud_cap, "husks": husk_cap, "events": event_cap,
+	return {"fraction": memory_fraction(), "next_growth_bytes": next_growth_bytes(), "slots": slot_cap, "cells": cell_cap, "bins": bin_cap, "clouds": cloud_cap, "husks": husk_cap, "entries": entry_cap, "events": event_cap,
 		"bytes": bytes_now(), "budget_bytes": limits.memory_budget_bytes, "growths": growths.duplicate()}
 
 
@@ -422,13 +452,14 @@ func _grew(klass: String) -> void:
 
 ## Shrinks a class that has used less than a quarter of its slots for a minute (at least to the limits' size and to the room for what
 ## most `ensure_*` asked of it in that time, so the next iteration does not grow it back; at most once a minute).
-func maybe_shrink(slots: int, clouds: int, husks: int) -> void:
+func maybe_shrink(slots: int, clouds: int, husks: int, entries := 0) -> void:
 	var now := Time.get_ticks_msec()
-	for pair in [["slot", slots, slot_cap, limits.world_slots], ["cloud", clouds, cloud_cap, limits.cloud_slots], ["husk", husks, husk_cap, limits.husk_slots]]:
+	for pair in [["slot", slots, slot_cap, limits.world_slots], ["cloud", clouds, cloud_cap, limits.cloud_slots], ["husk", husks, husk_cap, limits.husk_slots], ["entry", entries, entry_cap, 0]]:
 		var cls: String = pair[0]
 		var used: int = pair[1]
 		var cap: int = pair[2]
-		var least: int = maxi(int(pair[3]), ceili(int(asked.get(cls, 0)) / FILL))
+		var floor_cap: int = GpuKernelsClouds.ENTRIES_PER_SLOT * cloud_cap if cls == "entry" else int(pair[3])  # (the entries' floor follows the clouds, which may have shrunk just now)
+		var least: int = maxi(floor_cap, ceili(int(asked.get(cls, 0)) / FILL))
 		if cls == "slot":
 			least = _align(least)
 		if used >= SHRINK_BELOW * cap or cap <= least:
@@ -454,6 +485,9 @@ func maybe_shrink(slots: int, clouds: int, husks: int) -> void:
 			"husk":
 				husk_cap = to
 				_remake(["husk"])
+			"entry":
+				entry_cap = to
+				_remake(["entry"])
 
 
 func free_all() -> void:

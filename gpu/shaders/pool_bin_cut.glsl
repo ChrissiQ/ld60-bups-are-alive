@@ -53,7 +53,7 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define BLOCK_LOOP(F) void main() { uint nb_ = (WORLD[WD_SLOTS] + BLK_SLOTS - 1u) >> BLK_SHIFT; for (uint k_ = gl_WorkGroupID.x; k_ < nb_; k_ += gl_NumWorkGroups.x) { F(k_, BLKDISH[k_]); barrier(); } }
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
 #define LEDGER(d, t, amount) { if (WORLD[WD_LEDGER] != 0u) { float rest_ = (amount); uint lo_ = (d) * DS_WORDS + DS_LEDGER + 2u * (t), hi_ = lo_ + 1u; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); uint old_ = atomicAdd(DSTATE[lo_], q_); if (old_ + q_ < old_) atomicAdd(DSTATE[hi_], 1u); } } }
-const uint ENTRIES_PER_SLOT = 12u;
+const uint ENTRIES_PER_CLOUD_MOST = 256u;
 
 // the first of the dish's nbins bins (from base) whose end passes `limit` (counted from `from`), nbins when none does
 uint first_past(uint base, uint nbins, uint from, uint limit) {
@@ -77,5 +77,5 @@ uint cut_from(uint d, bool own, uint limit) {
 	return dropped;
 }
 
-void f(uint d) { DS(d, DS_ENTRIES_CUT) += cut_from(d, true, ENTRIES_PER_SLOT * DPU(d, DP_CLOUD_QUOTA)); }
+void f(uint d) { DS(d, DS_ENTRIES_CUT) += cut_from(d, true, ENTRIES_PER_CLOUD_MOST * min(DPU(d, DP_CLOUD_QUOTA), 4194304u)); }
 GRID_LOOP(f, D_MAX)

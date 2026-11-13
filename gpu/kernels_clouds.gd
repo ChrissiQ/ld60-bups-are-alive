@@ -326,10 +326,15 @@ void main() {
 ## and a copy in the compaction, for the same information.) Slots are taken in the order (step, dish, rank), the dish's lone order, and a
 ## dish's own slot counter DS_CLOUD_SLOTS is virtual: raised by every append, and set to the dish's live clouds at its cadence, so
 ## whether a cloud finds room never depends on another dish. A dish's cells, bins and entries are in the pool's arrays at its own bases.
-## The pool's physical cloud slots are WORLD[WD_PUFF_CAPACITY] (its list entries ENTRIES_PER_SLOT as many), its bins WORLD[WD_BINS]
+## The pool's physical cloud slots are WORLD[WD_PUFF_CAPACITY] (its list entries WORLD[WD_ENTRY_CAPACITY]), its bins WORLD[WD_BINS]
 ## (uints: a float holds a count exactly only up to 2^24). WORLD[WD_CLOUD_SLOTS] is the physical top of PUFF. The events a step brings (EVR, EVP, EVCC, EVCA) are ordered by dish row; a cloud's
 ## EVP word 5 is its row word, and a cloud event whose word 4 (cut) is negative is a plankton husk (mass: its energy).
-const ENTRIES_PER_SLOT := 12
+const ENTRIES_PER_SLOT := 12  ## the list entries a physical cloud slot starts with: the entry buffers are never smaller than this times the slots, and grow past it with what the lists ask for (`SimArena.ensure_entries`)
+## The most entries one cloud can have (the bins its reach covers; its reach is at most about 6.5 of its sigma, as its sigma is at most a bin
+## `DP_BIN_SIZE`, the bin being half a cell and the handover half a cell: (2 x 6.5 + 2)^2 = 225, for a bin of 1 µm and a cloud of a million
+## energy; the game's dishes have bins of 30 µm and up and clouds of thousands, which reach 3 to 5 bins each way). A dish's list quota is this times
+## its cloud quota, so the quota's cut never fires before the cloud quota does.
+const ENTRIES_PER_CLOUD_MOST := 256
 
 const POOL_CLOUD_FUNCS := """
 // the list of entries (a range of ENTD) of the square of dish d that holds a point
@@ -560,13 +565,13 @@ void f(uint k) {
 GRID_LOOP(f, WORLD[WD_CLOUD_SLOTS])
 """
 
-## After the scan of the bins' counts: each dish keeps its lists whole, bin by bin, up to its entry quota (ENTRIES_PER_SLOT a cloud slot of
+## After the scan of the bins' counts: each dish keeps its lists whole, bin by bin, up to its entry quota (ENTRIES_PER_CLOUD_MOST a cloud slot of
 ## its own quota), counted from its own first entry. The bins are in order and their ends only grow, so the first bin that does not fit
 ## and every bin after it are cut: a thread a dish finds that first bin by bisection (none: nothing more to do) and empties the rest,
 ## counting the entries dropped in DS_ENTRIES_CUT. A bin whose count is zeroed gets no entries in the scatter and reads as empty. Then the
 ## counts are scanned again (`pool_bn`), so a dish's entries start where the cut lists of the dishes before it end, and `pool_bin_room`
 ## cuts, the same way, the bins whose end passes the pool's physical entries (nothing is written out of bounds) and raises the overflow
-## flag. Without an overflow a dish's lists are its own alone: neither the cut nor the room depends on another dish's clouds. With one,
+## flag; it also records what the lists asked for (WD_ENTRIES_PEAK, WD_ENTRY_DENSITY) for the host to size the entry buffers by. Without an overflow a dish's lists are its own alone: neither the cut nor the room depends on another dish's clouds. With one,
 ## the flag stays (the host cannot do the iteration again: the clouds change in place).
 const BIN_CUT_FUNCS := """
 // the first of the dish's nbins bins (from base) whose end passes `limit` (counted from `from`), nbins when none does
@@ -593,13 +598,20 @@ uint cut_from(uint d, bool own, uint limit) {
 """
 
 const K_POOL_BIN_CUT := """
-void f(uint d) { DS(d, DS_ENTRIES_CUT) += cut_from(d, true, ENTRIES_PER_SLOT * DPU(d, DP_CLOUD_QUOTA)); }
+void f(uint d) { DS(d, DS_ENTRIES_CUT) += cut_from(d, true, ENTRIES_PER_CLOUD_MOST * min(DPU(d, DP_CLOUD_QUOTA), 4194304u)); }
 GRID_LOOP(f, D_MAX)
 """
 
 const K_POOL_BIN_ROOM := """
 void f(uint d) {
-	if (cut_from(d, false, ENTRIES_PER_SLOT * WORLD[WD_PUFF_CAPACITY]) > 0u) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; }
+	if (((DPU(d, DP_FLAGS) >> DPF_RUNNING) & 1u) == 0u) return;
+	uint nbins = DPU(d, DP_BINS_ACROSS) * DPU(d, DP_BINS_ACROSS);
+	if (nbins == 0u) return;
+	uint last = DPU(d, DP_BIN_BASE) + nbins - 1u;
+	uint end = BINS[last] + BINC[last];  // (before the cut, which empties only this dish's own bins: what the lists ask for up to this dish)
+	atomicMax(WORLD[WD_ENTRIES_PEAK], end);
+	atomicMax(WORLD[WD_ENTRY_DENSITY], (end + max(WORLD[WD_CLOUD_SLOTS], 1u) - 1u) / max(WORLD[WD_CLOUD_SLOTS], 1u));
+	if (cut_from(d, false, WORLD[WD_ENTRY_CAPACITY]) > 0u) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; }
 }
 GRID_LOOP(f, D_MAX)
 """
@@ -852,7 +864,7 @@ static func _register_pool(out: Dictionary) -> void:
 	GpuKernels.add(out, "pool_bin_clear", K_POOL_BIN_CLEAR, ["WORLD", "BINC"])
 	GpuKernels.add(out, "pool_bin_count", K_POOL_BIN_COUNT, ["P", "WORLD", "DISHP", "PUFF", "BINC"])
 	GpuKernels.add_grid_scan(out, "pool_bn", "BINC", "BINS", "BSUM", "BOFF", "WORLD[WD_BINS]", ["WORLD"])
-	var cut := "const uint ENTRIES_PER_SLOT = %du;\n" % ENTRIES_PER_SLOT + BIN_CUT_FUNCS
+	var cut := "const uint ENTRIES_PER_CLOUD_MOST = %du;\n" % ENTRIES_PER_CLOUD_MOST + BIN_CUT_FUNCS
 	GpuKernels.add(out, "pool_bin_cut", K_POOL_BIN_CUT, ["WORLD", "DSTATE", "DISHP", "BINS", "BINC"], cut)
 	GpuKernels.add(out, "pool_bin_room", K_POOL_BIN_ROOM, ["WORLD", "DSTATE", "DISHP", "BINS", "BINC"], cut)
 	GpuKernels.add(out, "pool_bin_cursor", K_POOL_BIN_CURSOR, ["WORLD", "BINS", "BCUR"])

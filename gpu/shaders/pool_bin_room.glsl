@@ -29,9 +29,12 @@ const uint D_MAX = 1024u;
 const uint NO_DISH = 4294967295u;
 const int P_CELLS = 1;
 const uint RECORD_WORDS = 28u;
+const uint WD_CLOUD_SLOTS = 1u;
+const uint WD_ENTRIES_PEAK = 14u;
+const uint WD_ENTRY_CAPACITY = 13u;
+const uint WD_ENTRY_DENSITY = 15u;
 const uint WD_LEDGER = 10u;
 const uint WD_OVERFLOW = 4u;
-const uint WD_PUFF_CAPACITY = 7u;
 const uint WD_SLOTS = 0u;
 
 uint hash(uint x) { x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
@@ -54,7 +57,7 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define BLOCK_LOOP(F) void main() { uint nb_ = (WORLD[WD_SLOTS] + BLK_SLOTS - 1u) >> BLK_SHIFT; for (uint k_ = gl_WorkGroupID.x; k_ < nb_; k_ += gl_NumWorkGroups.x) { F(k_, BLKDISH[k_]); barrier(); } }
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
 #define LEDGER(d, t, amount) { if (WORLD[WD_LEDGER] != 0u) { float rest_ = (amount); uint lo_ = (d) * DS_WORDS + DS_LEDGER + 2u * (t), hi_ = lo_ + 1u; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); uint old_ = atomicAdd(DSTATE[lo_], q_); if (old_ + q_ < old_) atomicAdd(DSTATE[hi_], 1u); } } }
-const uint ENTRIES_PER_SLOT = 12u;
+const uint ENTRIES_PER_CLOUD_MOST = 256u;
 
 // the first of the dish's nbins bins (from base) whose end passes `limit` (counted from `from`), nbins when none does
 uint first_past(uint base, uint nbins, uint from, uint limit) {
@@ -79,6 +82,13 @@ uint cut_from(uint d, bool own, uint limit) {
 }
 
 void f(uint d) {
-	if (cut_from(d, false, ENTRIES_PER_SLOT * WORLD[WD_PUFF_CAPACITY]) > 0u) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; }
+	if (((DPU(d, DP_FLAGS) >> DPF_RUNNING) & 1u) == 0u) return;
+	uint nbins = DPU(d, DP_BINS_ACROSS) * DPU(d, DP_BINS_ACROSS);
+	if (nbins == 0u) return;
+	uint last = DPU(d, DP_BIN_BASE) + nbins - 1u;
+	uint end = BINS[last] + BINC[last];  // (before the cut, which empties only this dish's own bins: what the lists ask for up to this dish)
+	atomicMax(WORLD[WD_ENTRIES_PEAK], end);
+	atomicMax(WORLD[WD_ENTRY_DENSITY], (end + max(WORLD[WD_CLOUD_SLOTS], 1u) - 1u) / max(WORLD[WD_CLOUD_SLOTS], 1u));
+	if (cut_from(d, false, WORLD[WD_ENTRY_CAPACITY]) > 0u) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; }
 }
 GRID_LOOP(f, D_MAX)

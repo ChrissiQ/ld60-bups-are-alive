@@ -5,7 +5,7 @@ extends RefCounted
 
 var world_slots := 16384  ## bup record slots (the sum of the dishes' 256-aligned segments)
 var field_cells := 65536  ## field cells (the dishes' 256-aligned blocks of n² cells)
-var cloud_slots := 16384  ## physical cloud slots (each with ENTRIES_PER_SLOT list entries)
+var cloud_slots := 16384  ## physical cloud slots (each with ENTRIES_PER_SLOT list entries to start with)
 var husk_slots := 4096
 var bins := 65536  ## cloud-list squares
 const WARN_FRACTION := 0.90  ## the share of the memory budget at which the game warns that graphics memory is nearly full

@@ -253,7 +253,7 @@ const LG_MADE := 2  ## energy made: the acetate let go (besides the gain, not ta
 const LG_LIFE := 3  ## a death's reserve and body less what it gives back; a lethal daughter's share; a daughter's reserve past what she can hold
 const LG_TERMS := 4
 
-## WORLD: one row of the world's totals (uints; words 13-15 are spare).
+## WORLD: one row of the world's totals (uints).
 const WD_WORDS := 16
 const WD_SLOTS := 0  ## the slots in use (the sum of the aligned segment lengths)
 const WD_CLOUD_SLOTS := 1
@@ -262,12 +262,15 @@ const WD_ITERATION_STEP := 3  ## the iteration's step index
 const WD_OVERFLOW := 4
 const WD_CELLS := 5  ## the field cells in use (the bound of the cell kernels)
 const WD_BINS := 6  ## the cloud-list squares in use
-const WD_PUFF_CAPACITY := 7  ## the physical cloud slots (PUFF holds 8 floats a slot; the list entries are ENTRIES_PER_SLOT a slot)
+const WD_PUFF_CAPACITY := 7  ## the physical cloud slots (PUFF holds 8 floats a slot)
 const WD_HUSK_CAPACITY := 8  ## the physical husk slots (HUSK holds 8 floats a slot; a kernel does not read a buffer's length, which Metal's translation of the SPIR-V cannot bind)
 const WD_SLOT_CAPACITY := 9  ## the physical record slots (BUPS, BUPS2 and CHILD hold this many records)
 const WD_LEDGER := 10  ## 1: the kernels keep the energy ledger (DS_LEDGER), for tests; 0: they do not (the game)
 const WD_NEXT_ID_LO := 11  ## the id the next newborn of any dish gets (64 bits: low word; a step takes its newborns' ids by their rank in the pool's scan)
 const WD_NEXT_ID_HI := 12
+const WD_ENTRY_CAPACITY := 13  ## the physical list entries (ENT holds a word and ENTD two vec4s each): the room of `pool_bin_room`, set by the host
+const WD_ENTRIES_PEAK := 14  ## the most entries the lists asked for (before the room's cut) since the host last read it and set it to 0
+const WD_ENTRY_DENSITY := 15  ## the most entries a cloud slot in use averaged at the same time (rounded up), reset with WD_ENTRIES_PEAK
 
 ## The payload textures (a bup's picture, written sim-side after `finalize`): PAYLOAD (RGBA32UI, PAYLOAD_TEX_WIDTH wide) and the ids (RG32UI).
 const PL_WORDS := 4

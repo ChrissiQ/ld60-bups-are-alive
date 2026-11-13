@@ -26,6 +26,7 @@ extends RefCounted
 const D_MAX := GpuLayout.D_MAX
 const RB := GpuLayout.RECORD_BYTES
 const BLK := GpuLayout.BLK_SLOTS
+const ENTRY_MARGIN := 1.25  ## room over the measured entries a cloud slot: the clouds spread, and each reaches more bins
 const CLOUD_COMPACT_EVERY := 16  ## world steps between compactions of the clouds (a dish's own cadence is DS_STEP % 16)
 const HUSK_CULL_EVERY := 32  ## world steps between culls of the husks (any cadence: a cull changes no dish)
 const PRE_GROW_USE := 0.7  ## the share of the record slots in use at which pipette room is made ahead (`prepare_pipette_room`)
@@ -62,6 +63,8 @@ var _overflow := 0  ## OVERFLOW_* bits, kept once seen (an overflow is never und
 var _edits: Array = []  ## [row, WorldEdit] for the next batch
 var _event_rows := {}  ## rows whose family events of the last iteration are in the ring
 var _stats_fresh := false  ## STATS sample 0 is every running dish's current state
+var _entries_peak := 0  ## the most list entries asked for since the last shrink check
+var _entry_density := 0  ## the most entries a cloud slot in use had in the last iterations (decaying), from WORLD
 var _deaths_per_step := 0.0  ## the most deaths a step of the last iterations had (all dishes), for the clouds' headroom
 var _births_per_step := 0.0
 var _textures := {}  ## kind -> Array of TEXTURES texture RIDs (publish)
@@ -716,7 +719,8 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 	_deaths_per_step = maxf(float(deaths) / steps, _deaths_per_step * 0.9)
 	_births_per_step = maxf(float(births) / steps, _births_per_step * 0.9)
 	_stats_fresh = true
-	arena.maybe_shrink(_wd(GpuLayout.WD_SLOTS), _wd(GpuLayout.WD_CLOUD_SLOTS), _wd(GpuLayout.WD_HUSK_SLOTS))
+	arena.maybe_shrink(_wd(GpuLayout.WD_SLOTS), _wd(GpuLayout.WD_CLOUD_SLOTS), _wd(GpuLayout.WD_HUSK_SLOTS), _entries_peak)
+	_entries_peak = 0
 	if arena.changed:
 		_after_growth()
 	return {"steps": steps, "overflow": _overflow, "record_usec": t1 - t0, "gpu_usec": t2 - t1}
@@ -1039,6 +1043,12 @@ func _ensure_room(steps: int, ev: Dictionary) -> bool:
 		refused.append("cloud slots %d" % clouds)
 	if not arena.ensure_husks(husks):
 		refused.append("husk slots %d" % husks)
+	# The cloud lists' entries: the density the bin scan measured (entries a cloud slot in use) with ENTRY_MARGIN room, over the slots the
+	# iteration is expected to use (the estimate, not the hard bound, which can be many times the clouds there are). When the budget has
+	# no room for them the lists keep what they have: the kernel cuts what does not fit and raises the overflow flag.
+	if _entry_density > 0:
+		var estimate := _wd(GpuLayout.WD_CLOUD_SLOTS) + int(maxf(_deaths_per_step * 2.0, float(counted) / 50.0) * (mini(steps, CLOUD_COMPACT_EVERY) + 1)) + world_clouds + _wd(GpuLayout.WD_HUSK_SLOTS) * (mini(steps, CLOUD_COMPACT_EVERY) + 1)
+		arena.ensure_entries(SimArena.entries_for(mini(mini(clouds, estimate), arena.cloud_cap), ceili(_entry_density * ENTRY_MARGIN)))
 	_after_growth()
 	if refused.is_empty():
 		return true
@@ -1069,6 +1079,7 @@ func _put_world_capacities() -> void:
 	_set_wd(GpuLayout.WD_SLOT_CAPACITY, arena.slot_cap)
 	_set_wd(GpuLayout.WD_PUFF_CAPACITY, arena.cloud_cap)
 	_set_wd(GpuLayout.WD_HUSK_CAPACITY, arena.husk_cap)
+	_set_wd(GpuLayout.WD_ENTRY_CAPACITY, arena.entry_cap)
 
 
 ## A row's field block, squares and table rows; false when the arena cannot hold them within the budget.
@@ -1939,6 +1950,12 @@ func _read_back() -> void:
 	_world = rd.buffer_get_data(arena.buf("WORLD"))
 	_dstate = rd.buffer_get_data(arena.buf("DSTATE"))
 	_overflow |= _wd(GpuLayout.WD_OVERFLOW)
+	var peak := _wd(GpuLayout.WD_ENTRIES_PEAK)
+	if peak > 0:  # (what the lists asked for: the kernel keeps the most since it was last set to 0, and the host takes it here)
+		_entries_peak = maxi(_entries_peak, peak)
+		_entry_density = maxi(_wd(GpuLayout.WD_ENTRY_DENSITY), int(_entry_density * 0.9))  # (falls by a tenth an iteration, as the deaths do)
+		_set_wd(GpuLayout.WD_ENTRIES_PEAK, 0)
+		_set_wd(GpuLayout.WD_ENTRY_DENSITY, 0)
 
 
 func _free_sets() -> void:
