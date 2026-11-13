@@ -5,6 +5,9 @@ extends SceneTree
 ## 30 s of frames between process_frame calls at 2560 x 1440 windowed). Run windowed; it is not a `*_test.gd`, so tools/run_sim_tests.sh skips it:
 ## tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tests/sim/interface_gate.gd
 ## Args (after --): `dishes=N` (default 999), `seconds=N` (the window, default 30), `scenario=E` (gate E's frame p95, below).
+## A run counts only as the scene the baseline measured: the window 2560 x 1440 when the frames begin and when they end, and the pointer
+## never over a bup (a hover card and its picks are not in the baseline). A run in a larger window with the pointer over the dish gave
+## a p95 of 12.3-12.9 ms where this scene gives 9.0 [measured]; such a run fails as void.
 ##
 ## `scenario=E`: gate E's frame bound measured the way its baseline was (bench_scenarios.gd `world E 30` of the replaced CPU simulation: the game screen,
 ## ONE dish of 45 mm and a 100,000 limit filled to the limit at once (perf_gates_test.filled_spec, put on the screen's own dish through a
@@ -33,6 +36,7 @@ var BASELINE_KEY := "C48"
 const SETTLE_SECONDS := 12.0
 const WINDOW_SECONDS := 30.0
 const WAIT_MSEC := 900000
+const WINDOW_SIZE := Vector2i(2560, 1440)  ## the window the baseline was measured in
 
 var _perf := load("res://tests/sim/perf_gates_test.gd")
 
@@ -113,6 +117,8 @@ func _run() -> void:
 	var steps_ms: Array = []  ## gate E: the sim's step time (its moving average) and iteration time, sampled each frame
 	var iter_ms: Array = []
 	var pop_start: int = m.dish.population()
+	var size_start := DisplayServer.window_get_size()
+	var hover_frames := 0
 	var clock0: float = WorldClient.shared().latest().sim_time
 	var wall0 := Time.get_ticks_usec()
 	while (Time.get_ticks_usec() - wall0) / 1e6 < window:
@@ -120,11 +126,16 @@ func _run() -> void:
 		var now := Time.get_ticks_usec()
 		frames.append((now - last) / 1000.0)
 		last = now
+		if m.dish.hovered.bup >= 0:
+			hover_frames += 1
 		if gate_e:
 			var timing: Dictionary = WorldClient.shared().latest().timing
 			steps_ms.append(float(timing.get("step_ms_ema", 0.0)))
 			iter_ms.append(float(timing.get("iteration_ms", 0.0)))
 	var wall := (Time.get_ticks_usec() - wall0) / 1e6
+	var size_end := DisplayServer.window_get_size()
+	TestUtil.show(size_start == WINDOW_SIZE and size_end == WINDOW_SIZE, "the run is the baseline's scene: the window %d x %d throughout (%s at the start of the frames, %s at the end)" % [WINDOW_SIZE.x, WINDOW_SIZE.y, size_start, size_end])
+	TestUtil.show(hover_frames == 0, "the run is the baseline's scene: the pointer over no bup (%d frames with one hovered)" % hover_frames)
 	var reached := (float(WorldClient.shared().latest().sim_time) - clock0) / wall
 	var sorted := frames.duplicate()
 	sorted.sort()
