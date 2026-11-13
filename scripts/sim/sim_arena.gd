@@ -391,8 +391,8 @@ static func _trim(free: Array, top: int) -> int:
 	return top
 
 
-## Whether the pool with these capacities (slots, clouds, husks, events and entries: the most of these and the single-dish path's; cells and bins: more than
-## the single-dish path's) stays within the memory budget.
+## Whether the pool with these capacities (slots, clouds, husks, events and entries: the most of these and the pool's current ones; cells and bins: more than
+## the pool's current ones) stays within the memory budget.
 func fits(slots: int, cells: int, bins: int, clouds: int, husks: int, events := 0, entries := 0) -> bool:
 	if limits.watch != null:
 		limits.watch.before_growth(Time.get_ticks_msec(), bytes_now())  # (the free memory is read again before room is made, at most once a second)

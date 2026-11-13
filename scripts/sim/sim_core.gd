@@ -288,10 +288,9 @@ func remove_dish(row: int) -> PackedInt64Array:
 
 
 ## What a dish is now, as a DishBlob (a blocking read): see DishBlob. The queued edits are made first, so a drop just before a freeze
-## stays with the dish. Its clouds and husks are its live slots only, in pool order: every
+## stays with the dish. Its clouds and husks are its live slots only, in pool order, not the dead slots too: every
 ## kernel passes a dead slot by, a dish's counters are virtual (DS_CLOUD_SLOTS and DS_HUSKS, recounted from the live slots at its own
-## cadence) and the cloud lists keep the live clouds' order, so a dead slot carries nothing the dish's run reads (round_trip_test's
-## continuation, checks it bit for bit).
+## cadence) and the cloud lists keep the live clouds' order, so a dead slot carries nothing the dish's run reads (the continuation test checks it bit for bit).
 func gather(row: int) -> DishBlob:
 	_apply_edits()
 	var cd: CoreDish = _dishes[row]

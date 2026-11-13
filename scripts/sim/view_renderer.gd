@@ -13,7 +13,7 @@ extends RefCounted
 ##   sRGB): on Metal `texture_create_from_extension` wraps a native texture of the same format without retaining it, and freeing the
 ##   wrapper would free the simulation's texture twice (a crash at exit); a different format makes the driver build a view with its own
 ##   count, which is safe to free. A picture's Texture2DRD reads its sRGB import through a view in RGBA8 (the texture storage makes one
-##   for a format with an sRGB twin), so the canvas reads its bytes as they are and filters them as the single-dish path's pictures.
+##   for a format with an sRGB twin), so the canvas reads its bytes as they are and filters them as the other pictures.
 ## - The simulation writes a texture again only once the main side last used it more than `frame_queue_size` + 1 frames ago, so the main
 ##   side tells it which texture of each kind it used on which frame (`take_bound`; SimCore.texture_bound), every frame, the payload's
 ##   included whether or not a build read it (so the simulation's count of frames moves on).
@@ -112,7 +112,7 @@ func can_draw() -> bool:
 
 
 ## Density mode on or off (`taps`: GpuKernelsView.DENSITY_NEAREST, DENSITY_BILINEAR or DENSITY_ROD). The density kernels are made the first time it is
-## switched on; if they do not build, `density_ready` stays false and the single-dish path's drawing goes on whatever the switch says.
+## switched on; if they do not build, `density_ready` stays false and the capsule drawing goes on whatever the switch says.
 func set_density(on: bool, taps := GpuKernelsView.DENSITY_BILINEAR) -> void:
 	density = on
 	density_taps = taps
