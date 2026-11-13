@@ -583,7 +583,7 @@ void f(uint i, uint d, uint l) {
 BUP_LOOP(f)
 """
 
-## Swimming is the single dish's kernel with the dish's own words in place of P's dish slots, its stream from DISH_STREAM, and the dish's
+## Swimming for the pool is the template K_SWIM with the dish's own words in place of P's dish slots, its stream from DISH_STREAM, and the dish's
 ## fields and clouds read through `readf_d` and `puffs_at_d`.
 static func _pooled_swim() -> String:
 	var body := K_SWIM

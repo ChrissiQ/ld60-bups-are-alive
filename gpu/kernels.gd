@@ -90,7 +90,7 @@ const THREAD_FUNCS := """
 ## - CELL_LOOP(F, BOUND): F(c, d, l) for every field cell c < BOUND that belongs to a dish: d its row, l its place in the dish's grid
 ##   (l / DP_CELLS across). CELLDISH, DISHP.
 ## The dish's own words: DS(d, word) (DSTATE, read or written), DPU(d, word) and DPF(d, word) (DISHP as uint or float), DISH_STREAM(d, l,
-## salt) the random stream of the dish's bup l this step (the single dish's formula with the dish's seed and step), DISH_KEY(d) the key
+## salt) the random stream of the dish's bup l this step (the formula of the templates K_SWIM and K_LIFE, with the dish's seed and step), DISH_KEY(d) the key
 ## of the dish's step (its seed and step). LEDGER(d, term, amount) adds an amount to term LG_* of the dish's energy ledger while
 ## WORLD[WD_LEDGER] is on (a branch every thread takes alike, so the game, with it off, pays only the read of WORLD); an amount of 0 or
 ## less adds nothing, so a flow of either sign is two calls, its loss to one term and its negation to LG_MADE.

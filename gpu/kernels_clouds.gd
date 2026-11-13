@@ -88,7 +88,7 @@ void deposit_xy_d(uint d, float x, float y, float mass) {
 """
 
 ## The events of step pcs.pa, one thread so that the slots are taken in the events' order (dish by dish). A cloud takes the next slot of the
-## pool and of its dish's counter; one past its dish's quota goes onto the grid (as the single dish's past its capacity), and one that the
+## pool and of its dish's counter; one past its dish's quota goes onto the grid, and one that the
 ## pool's physical slots cannot hold goes onto the grid too and raises the overflow flag (the host sizes the slots so that it does not
 ## happen; when it does, the dish's run is no longer its run alone, and the flag stays). A plankton husk takes the next husk slot; past the
 ## dish's husk quota, or past the pool's husk slots (the overflow flag), its energy is given back at once, as a death's is (a
@@ -355,7 +355,7 @@ GRID_LOOP(f, WORLD[WD_BINS])
 ## the top. The host runs it every 16 world steps. Every step, after the deaths' clouds and the husks' pieces and before the dishes' steps
 ## are counted (`pool_setcount`), `pool_cloud_live` (and `pool_husk_live`, kernels_husks.gd) count in CLIVE (zero between steps: a dish's
 ## clouds at CLIVE[row], its husks at CLIVE[D_MAX + row]) the live clouds and husks of each dish whose own step is at its cadence
-## (DS_STEP % 16 == 15: the single dish's compaction after its step 15, 31, ... counted from its load), and `pool_cloud_cadence` makes
+## (DS_STEP % 16 == 15: after its steps 15, 31, ..., counted from its load), and `pool_cloud_cadence` makes
 ## them the dish's virtual counters DS_CLOUD_SLOTS and DS_HUSKS. So when a compaction or a cull frees the pool's slots never changes
 ## what a dish does.
 const K_POOL_PMARK := """
@@ -432,7 +432,7 @@ float steering_chance_d(uint d, float speed, float sense_range, float c, float g
 
 ## The full point answer of dish row `pcs.pb` for `pcs.pa` queries (SPQ: x, y, speed, sense range; SPR, PROBE_FLOATS a point: the unit
 ## direction up the gradient, the chance of steering up it, the concentration, the gradient's size; `pcs.pc` the steering window):
-## The steering readout and the hover card's nutrient, from the grid snapshot and the clouds as the single dish reads them. No gradient
+## The steering readout and the hover card's nutrient, from the grid snapshot and the clouds. No gradient
 ## (1e-12 or less) gives (0, 0, 0.5).
 const K_POOL_PROBE_FULL := """
 void f(uint i) {
@@ -451,11 +451,11 @@ void f(uint i) {
 GRID_LOOP(f, uint(pcs.pa))
 """
 
-## What a death gives back (the single dish's death_clouds, per dish). The dishes' death slots follow the step's other appends in the dish
+## What a death gives back, for each dish. The dishes' death slots follow the step's other appends in the dish
 ## order: `pool_death_bases` (one thread over the rows) gives each dish the first of the deaths' slots, in CBASE (the clouds') and CBASE
 ## from D_MAX + 1 (the husks'). A dish with death husks makes husks of its first deaths up to the room its quota leaves (`husk_room`) and
 ## clouds of the rest; a dish without gives every death back as a cloud. A death's rank is its place among its dish's deaths, trimmed ones
-## counted (a trimmed one's slot stays empty, as the single dish's).
+## counted (a trimmed one's slot stays empty).
 const DEATH_FUNCS := """
 uint deaths_of(uint d) { return DS(d, DS_COUNT) - DS(d, DS_SURVIVORS); }
 uint husk_room(uint d) {

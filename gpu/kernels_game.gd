@@ -164,9 +164,9 @@ static func pool_stats1() -> String:
 	return t + "BLOCK_LOOP(stats_block)\n"
 
 
-## `stats2` for the pool: one group for each running dish sums its blocks' partial sums in the order of its bups, as `stats2` sums a
-## single dish's, into the dish's row of STATS as sample `pcs.pb` (STATS_WORDS words each, STATS_DISH_WORDS a dish), taken after step
-## `pcs.pc`. A dish's blocks that a single dish would have had besides (up to its capacity) add exactly 0, so a dish's sums are its own alone.
+## `stats2` for the pool: one group for each running dish sums its blocks' partial sums in the order of its bups, as the template
+## K_STATS2 does for one dish, into the dish's row of STATS as sample `pcs.pb` (STATS_WORDS words each, STATS_DISH_WORDS a dish), taken after step
+## `pcs.pc`. Only the blocks the dish's bups fill are summed, so a dish's sums are its own alone.
 static func pool_stats2() -> String:
 	var t := GpuKernelsLife.swapped(K_STATS2, "void main() {\n\tuint l = gl_LocalInvocationID.x, groups = uint(pcs.pa);", "void stats_dish(uint d) {\n\tuint l = gl_LocalInvocationID.x, first = DS(d, DS_START) >> BLK_SHIFT, groups = (DS(d, DS_COUNT) + BLK_SLOTS - 1u) >> BLK_SHIFT;")
 	t = GpuKernelsLife.swapped(t, "SPART[g * STATS_SUMS", "SPART[(first + g) * STATS_SUMS")

@@ -237,14 +237,15 @@ static func dn_funcs() -> String:
 const FLAG_FUNC := "#define FLAG(d, f) ((DPU(d, DP_FLAGS) & (1u << (f))) != 0u)\n"
 
 
-## A copy of `text` with `from` replaced by `to`, which must be there exactly once: the pooled kernels are the single-dish kernels with their single
-## dish's words replaced by the dish's own, so the model's arithmetic has one source.
+## A copy of `text` with `from` replaced by `to`, which must be there exactly once: a pooled kernel is a template (K_LIFE, K_EVENTS,
+## K_STATS1...: kernel text written for one dish, which reads that dish's counters from CNT and its settings from P) with those words replaced by
+## the dish's own, so the model's arithmetic has one source.
 static func swapped(text: String, from: String, to: String) -> String:
 	assert(text.count(from) == 1, "pooled kernel: expected one '%s'" % from)
 	return text.replace(from, to)
 
 
-## `life` for each slot of the pool: SURV and KID 0 for every slot, then the single-dish division, death and mutation for each bup with its
+## `life` for each slot of the pool: SURV and KID 0 for every slot, then the template K_LIFE's division, death and mutation for each bup with its
 ## dish's stream, limit, growth and stationary flag; the energy ledger (LEDGER) takes what a death does not give back (the reserve and the
 ## body less P_DEATH_GIVE x the mass of a death by starvation or chance, all of a trimmed bup), a lethal daughter's share, and a
 ## daughter's reserve past what her mass holds.
@@ -279,7 +280,7 @@ static func pool_life_slot() -> String:
 
 ## Each dish's counts after `life` and the scans, and the next layout (one group of 256 threads, POOL_ROWS_PER_THREAD rows each): for a
 ## running row its kept bups and newborns (from the scans at its first and last slot), the count after the step (up to DP_CAP), what
-## the trim expects of the next step (the single-dish `finalize`), its births and deaths; then over every row in row
+## the trim expects of the next step, its births and deaths; then over every row in row
 ## order the next layout's starts (segments of whole blocks) and the event ring's places of each dish's births and deaths this step
 ## (after every event of the iteration so far: the sum of DS_BIRTHS and DS_DEATHS over the rows), and the next layout's slots in use.
 const K_POOL_FINALIZE := """
@@ -395,7 +396,7 @@ void setcount_row(uint d) {
 GRID_LOOP(setcount_row, D_MAX)
 """
 
-## Conjugation for the pool. The single-dish rule (see CONJ_FUNCS above): a recipient takes, of the donors of its dish that touch it and transfer
+## Conjugation for the pool. The rule (see CONJ_FUNCS above): a recipient takes, of the donors of its dish that touch it and transfer
 ## to it this step (a draw keyed by the dish's step and the two bups' places in their dish), the one with the lowest place. That is a
 ## least value, the same in whatever order the donors are listed, so the donors' index need not be sorted within a bucket: it is a count
 ## of the donors in each bucket of (dish, 20 µm cell), a scan, and a scatter, with no overflow (CBKT keeps each donor's bucket between

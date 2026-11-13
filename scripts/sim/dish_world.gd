@@ -5,7 +5,7 @@ extends RefCounted
 ## `events` answers a window of steps with the clouds, deposits and husks it puts into the medium, each stamped with its step, and costs
 ## time in the events of the window, not in its steps. It touches no node, no scene and no `Strings`, so it can live on a thread.
 ##
-## What it keeps of the per-step path of a single dish:
+## The rules of its events:
 ## the bloom's arrivals are on a steady schedule and each draws its place, its life and its shape in that order; the plankton are looked
 ## over every BURST_CHECK_SECONDS of simulated time and burst at the first look at or after their time; a source's emitter lets go of
 ## what it kept when its age reaches clamp(lived, 5, EMIT_INTERVAL).
