@@ -86,13 +86,14 @@ func _make_weights() -> void:
 			weights[i] = 1.0 if inside[i] == 1 else 0.0
 		return
 	_fill.resize(n * n)
+	_make_octaves()
 	var sum := 0.0
 	var sum_sq := 0.0
 	for y in n:
 		for x in n:
 			var i := y * n + x
 			if inside[i] == 1:
-				var v := _patch_noise((x + 0.5) * spacing - radius, (y + 0.5) * spacing - radius)
+				var v := _patch_noise(x, y)
 				_fill[i] = v
 				sum += v
 				sum_sq += v * v
@@ -137,36 +138,70 @@ static func _corner(ix: int, iy: int, seed_v: int) -> float:
 	return float(_logical_shift(h, 11)) * (2.0 / 9007199254740992.0) - 1.0
 
 
-static func _lattice_noise(x: float, y: float, lattice: float, seed_v: int) -> float:
-	var gx := x / lattice
-	var gy := y / lattice
-	var fx := floorf(gx)
-	var fy := floorf(gy)
-	var tx := gx - fx
-	var ty := gy - fy
-	tx = tx * tx * (3.0 - 2.0 * tx)
-	ty = ty * ty * (3.0 - 2.0 * ty)
-	var ix := int(fx)
-	var iy := int(fy)
-	var c00 := _corner(ix, iy, seed_v)
-	var c10 := _corner(ix + 1, iy, seed_v)
-	var c01 := _corner(ix, iy + 1, seed_v)
-	var c11 := _corner(ix + 1, iy + 1, seed_v)
-	var top := c00 + (c10 - c00) * tx
-	var bottom := c01 + (c11 - c01) * tx
-	return top + (bottom - top) * ty
+## One octave of the landscape: the lattice's corner values over the cells' span, made once (a cell's four corners are shared by its
+## neighbours; hashing them again for each cell was most of a grid's cost).
+class Octave:
+	var lattice := 1.0
+	var ix0 := 0
+	var iy0 := 0
+	var across := 0
+	var corners := PackedFloat64Array()
+	var at := PackedInt32Array()  ## for each cell column (and row alike: the same positions): its lattice cell's index
+	var smooth := PackedFloat64Array()  ## and how far along it, eased
 
 
-func _patch_noise(x: float, y: float) -> float:
-	var total := 0.0
-	var strength := 1.0
+var _octaves: Array[Octave] = []
+
+
+## The octaves the landscape adds up (each half the lattice of the one before, the first as wide as the dish, down to the cells'
+## spacing) with the corner values of every lattice point a cell's value reads.
+func _make_octaves() -> void:
+	_octaves.clear()
+	var low := 0.5 * spacing - radius  # (the first and last cells' centres)
+	var high := (n - 0.5) * spacing - radius
 	var lattice := _patch_size
 	var octave := 0
 	while octave < 10 and (octave == 0 or lattice >= spacing):
-		total += strength * _lattice_noise(x, y, lattice, _patch_seed + octave * K_OCTAVE)
-		strength *= 0.8
+		var o := Octave.new()
+		o.lattice = lattice
+		o.ix0 = int(floorf(low / lattice)) - 1
+		o.iy0 = o.ix0
+		var last := int(floorf(high / lattice)) + 2
+		o.across = last - o.ix0 + 1
+		o.corners.resize(o.across * o.across)
+		var seed_v := _patch_seed + octave * K_OCTAVE
+		for j in o.across:
+			for i in o.across:
+				o.corners[j * o.across + i] = _corner(o.ix0 + i, o.iy0 + j, seed_v)
+		o.at.resize(n)
+		o.smooth.resize(n)
+		for k in n:
+			var g := ((k + 0.5) * spacing - radius) / lattice
+			var f := floorf(g)
+			var t := g - f
+			o.smooth[k] = t * t * (3.0 - 2.0 * t)
+			o.at[k] = int(f) - o.ix0
+		_octaves.append(o)
 		lattice *= 0.5
 		octave += 1
+
+
+## The landscape's value at the centre of the cell in column `x`, row `y`.
+func _patch_noise(x: int, y: int) -> float:
+	var total := 0.0
+	var strength := 1.0
+	for o in _octaves:
+		var tx := o.smooth[x]
+		var ty := o.smooth[y]
+		var at := o.at[y] * o.across + o.at[x]
+		var c00 := o.corners[at]
+		var c10 := o.corners[at + 1]
+		var c01 := o.corners[at + o.across]
+		var c11 := o.corners[at + o.across + 1]
+		var top := c00 + (c10 - c00) * tx
+		var bottom := c01 + (c11 - c01) * tx
+		total += strength * (top + (bottom - top) * ty)
+		strength *= 0.8
 	return total
 
 
