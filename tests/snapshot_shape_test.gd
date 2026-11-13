@@ -154,4 +154,4 @@ func _shutdown_and_stub() -> void:
 	stub.start(null)
 	stub.submit(SimCommand.new(&"add_dish"))
 	stub.shutdown()
-	TestUtil.check(not stub.can_simulate() and stub.latest().dishes.is_empty() and stub.view_source() == null, "the base class is the stub's face")
+	TestUtil.check(not stub.can_simulate() and stub.latest().dishes.is_empty(), "the base class is the stub's face")

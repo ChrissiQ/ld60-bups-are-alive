@@ -25,9 +25,5 @@ func latest() -> Snapshot:
 	return Snapshot.new()
 
 
-func view_source() -> ViewSource:
-	return null
-
-
 func shutdown() -> void:
 	pass

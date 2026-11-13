@@ -122,7 +122,7 @@ func _stub() -> void:
 	b.submit(SimCommand.new(SimCommand.KIND_FREEZE, {"row": 0}, r))
 	TestUtil.check(r.is_done() and r.value() == null and r.error() == "", "the stub completes a reply at once with nothing")
 	var s := b.latest()
-	TestUtil.check(s.seq == 0 and s.dishes.is_empty() and b.view_source() == null, "the stub's snapshot is empty")
+	TestUtil.check(s.seq == 0 and s.dishes.is_empty(), "the stub's snapshot is empty")
 	b.shutdown()
 
 

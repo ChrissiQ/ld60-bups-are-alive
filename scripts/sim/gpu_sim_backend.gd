@@ -60,11 +60,6 @@ func latest() -> Snapshot:
 	return thread.worker.latest() if thread != null else Snapshot.new()
 
 
-## The main device imports the shared textures itself (ViewRenderer.bind, from `texture_handles`), so there is no main-side source here.
-func view_source() -> ViewSource:
-	return null
-
-
 func shutdown() -> void:
 	if thread != null:
 		thread.stop()
