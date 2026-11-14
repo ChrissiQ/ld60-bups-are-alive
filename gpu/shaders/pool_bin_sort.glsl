@@ -49,17 +49,29 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
 #define LEDGER(d, t, amount) { if (WORLD[WD_LEDGER] != 0u) { float rest_ = (amount); uint lo_ = (d) * DS_WORDS + DS_LEDGER + 2u * (t), hi_ = lo_ + 1u; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); uint old_ = atomicAdd(DSTATE[lo_], q_); if (old_ + q_ < old_) atomicAdd(DSTATE[hi_], 1u); } } }
 
+const uint SORT_LOCAL = 128u;
+void entry(uint e, uint k) {
+	uint o = k * 8u;
+	ENTD[e * 2u] = vec4(PUFF[o], PUFF[o + 1u], PUFF[o + 2u], PUFF[o + 3u]);
+	ENTD[e * 2u + 1u] = vec4(PUFF[o + 6u], PUFF[o + 7u], float(k), 0.0);
+}
 void f(uint b) {
-	uint e0 = BINS[b], e1 = e0 + BINC[b];
+	uint e0 = BINS[b], n = BINC[b], e1 = e0 + n;
+	if (n <= SORT_LOCAL) {
+		uint own[SORT_LOCAL];
+		for (uint a = 0u; a < n; a++) {
+			uint v = ENT[e0 + a]; uint j = a;
+			while (j > 0u && own[j - 1u] > v) { own[j] = own[j - 1u]; j--; }
+			own[j] = v;
+		}
+		for (uint a = 0u; a < n; a++) entry(e0 + a, own[a]);
+		return;
+	}
 	for (uint a = e0 + 1u; a < e1; a++) {
 		uint v = ENT[a]; uint j = a;
 		while (j > e0 && ENT[j - 1u] > v) { ENT[j] = ENT[j - 1u]; j--; }
 		ENT[j] = v;
 	}
-	for (uint e = e0; e < e1; e++) {
-		uint k = ENT[e]; uint o = k * 8u;
-		ENTD[e * 2u] = vec4(PUFF[o], PUFF[o + 1u], PUFF[o + 2u], PUFF[o + 3u]);
-		ENTD[e * 2u + 1u] = vec4(PUFF[o + 6u], PUFF[o + 7u], float(k), 0.0);
-	}
+	for (uint e = e0; e < e1; e++) entry(e, ENT[e]);
 }
 GRID_LOOP(f, WORLD[WD_BINS])

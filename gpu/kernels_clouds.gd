@@ -339,19 +339,35 @@ void f(uint k) {
 GRID_LOOP(f, WORLD[WD_CLOUD_SLOTS])
 """
 
+## A square's entries by cloud index (the scatter leaves them in the order its threads ran), each with what its readers take from the
+## cloud. A square of up to SORT_LOCAL entries is sorted in the thread's own memory, which is quicker than in the buffer, and ENT is left
+## as the scatter wrote it (nothing reads it after this); a longer one is sorted in ENT. A cloud is in a square once, so the order is
+## the same either way.
 const K_POOL_BIN_SORT := """
+const uint SORT_LOCAL = 128u;
+void entry(uint e, uint k) {
+	uint o = k * 8u;
+	ENTD[e * 2u] = vec4(PUFF[o], PUFF[o + 1u], PUFF[o + 2u], PUFF[o + 3u]);
+	ENTD[e * 2u + 1u] = vec4(PUFF[o + 6u], PUFF[o + 7u], float(k), 0.0);
+}
 void f(uint b) {
-	uint e0 = BINS[b], e1 = e0 + BINC[b];
+	uint e0 = BINS[b], n = BINC[b], e1 = e0 + n;
+	if (n <= SORT_LOCAL) {
+		uint own[SORT_LOCAL];
+		for (uint a = 0u; a < n; a++) {
+			uint v = ENT[e0 + a]; uint j = a;
+			while (j > 0u && own[j - 1u] > v) { own[j] = own[j - 1u]; j--; }
+			own[j] = v;
+		}
+		for (uint a = 0u; a < n; a++) entry(e0 + a, own[a]);
+		return;
+	}
 	for (uint a = e0 + 1u; a < e1; a++) {
 		uint v = ENT[a]; uint j = a;
 		while (j > e0 && ENT[j - 1u] > v) { ENT[j] = ENT[j - 1u]; j--; }
 		ENT[j] = v;
 	}
-	for (uint e = e0; e < e1; e++) {
-		uint k = ENT[e]; uint o = k * 8u;
-		ENTD[e * 2u] = vec4(PUFF[o], PUFF[o + 1u], PUFF[o + 2u], PUFF[o + 3u]);
-		ENTD[e * 2u + 1u] = vec4(PUFF[o + 6u], PUFF[o + 7u], float(k), 0.0);
-	}
+	for (uint e = e0; e < e1; e++) entry(e, ENT[e]);
 }
 GRID_LOOP(f, WORLD[WD_BINS])
 """
