@@ -245,7 +245,9 @@ GRID_LOOP(f, WORLD[WD_BINS])
 ## The lists: a cloud is entered in every square its reach covers, and a cloud with no reach (its peak is under its cut: spread thin or
 ## eaten down, it is nothing a bup can tell from the medium or take from) in none. It keeps its slot and its mass until it has spread to
 ## a cell and goes to the grid, but no list holds it, so no bup reads it: in a crowded dish most clouds are of this kind. The count and
-## the scatter both decide by the reach word the count has stored (word 6), so they agree on every cloud.
+## the scatter both take a cloud's squares from the square root of the reach word the count has stored (word 6). The root of the stored
+## square can differ in its last bit from the reach it was squared from, and a count and a scatter that differed on a square would leave
+## which cloud a full square drops to the order the threads ran in.
 const K_POOL_BIN_COUNT := """
 void f(uint k) {
 	uint o = k * 8u;
@@ -257,6 +259,7 @@ void f(uint k) {
 	float reach = peak > cut ? sqrt(2.0 * v * log(peak / cut)) : 0.0;
 	PUFF[o + 6] = reach * reach; PUFF[o + 7] = sqrt(v);
 	if (PUFF[o + 6] <= 0.0) return;
+	reach = sqrt(PUFF[o + 6]);
 	int nb = int(DPU(d, DP_BINS_ACROSS)); float bs = DPF(d, DP_BIN_SIZE), org = DPF(d, DP_RADIUS); uint base = DPU(d, DP_BIN_BASE);
 	int lx = clamp(int((x - reach + org) / bs), 0, nb - 1), hx = clamp(int((x + reach + org) / bs), 0, nb - 1);
 	int ly = clamp(int((y - reach + org) / bs), 0, nb - 1), hy = clamp(int((y + reach + org) / bs), 0, nb - 1);
