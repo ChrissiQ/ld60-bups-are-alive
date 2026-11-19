@@ -37,6 +37,7 @@ func _run() -> void:
 		TestUtil.show(false, "the world's device was made")
 		TestUtil.finish(self, "OK park_view_test")
 		return
+	world_thread_limits(g).payload_rows = 1  # (the payload's room starts at one row, so dish 2's two rows make it grow, as a bigger dish would with the usual floor)
 	var a: Dish = await g.add(_spec(1, 40, 11))
 	g.place = ParityGame.PLACE + Vector2(4.0e5, 0.0)  # (well apart from dish 1)
 	var b: Dish = await g.add(_spec(2, 3000, 12, 200))
@@ -100,6 +101,11 @@ func _run() -> void:
 	TestUtil.show(ViewRenderer.cpu_handover() or _made(retired_back, "haze") > _made(retired_there, "haze") and _made(retired_back, "steer") > _made(retired_there, "steer") and (retired_back[1] as Dictionary).is_empty(), "T back on dish 1 the haze and the map were made afresh again (%s); none waiting after the paused frames: %s" % [retired_back[0], retired_back[1]])
 	TestUtil.show(haze != null and haze.texture_rd_rid.is_valid(), "T dish 1's view has its haze to draw again (%s)" % [haze.texture_rd_rid if haze != null else "none"])
 	TestUtil.finish(self, "OK park_view_test")
+
+
+## The limits the simulation thread runs with.
+static func world_thread_limits(game: ParityGame) -> PoolLimits:
+	return (game.world.backend as GpuSimBackend).thread.limits
 
 
 ## The sets of textures of `kind` made afresh so far (SimCore.textures_remade).

@@ -1737,7 +1737,7 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 	var n := _ds(row, GpuLayout.DS_COUNT)
 	var rows := maxi(1, (n + GpuLayout.PAYLOAD_TEX_WIDTH - 1) / GpuLayout.PAYLOAD_TEX_WIDTH)
 	var texels := rows * GpuLayout.PAYLOAD_TEX_WIDTH
-	var drawn := arena.ensure_draw(texels, cd.grid.n * cd.grid.n)
+	var drawn := arena.ensure_draw(texels, cd.grid.n * cd.grid.n, ((cd.cap + GpuLayout.PAYLOAD_TEX_WIDTH - 1) / GpuLayout.PAYLOAD_TEX_WIDTH) * GpuLayout.PAYLOAD_TEX_WIDTH)
 	_after_growth()
 	if not drawn:
 		var why := "SimCore: the pictures' buffers for %d bups and a field of %d cells would pass the memory budget of %d bytes: not published" % [n, cd.grid.n * cd.grid.n, limits.memory_budget_bytes]
@@ -1758,7 +1758,7 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 		sw = fw
 		tw = 0 if view.want_thumbnails else -1
 	else:
-		w = _free_texture("payload", Vector2i(GpuLayout.PAYLOAD_TEX_WIDTH, rows))
+		w = _free_texture("payload", Vector2i(GpuLayout.PAYLOAD_TEX_WIDTH, maxi(rows, arena.draw_rows())))  # (as tall as the buffers' room: made anew only when that grows)
 		fw = _free_texture("haze", Vector2i(nn, nn)) if view.want_field_view else -1
 		sw = _free_texture("steer", Vector2i(nn, nn)) if view.want_field_view else -1
 		tw = _free_texture("thumbs", Vector2i(GpuKernelsDraw.THUMB_ATLAS, GpuKernelsDraw.THUMB_ATLAS)) if view.want_thumbnails else -1

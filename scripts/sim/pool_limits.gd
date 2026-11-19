@@ -33,7 +33,8 @@ var d_max := GpuLayout.D_MAX  ## dish rows (fixed by the layout)
 var memory_budget_bytes := 6 * 1024 * 1024 * 1024  ## what the arena may hold now (the working budget); `from_settings` works the game's out from what the machine reports (`budget_for`) and the memory watch moves it, the tests set their own
 var machine: MachineMemory  ## what the machine reported when the limits were made (null in the tests)
 var watch: MemoryWatch  ## keeps `memory_budget_bytes` in step with the free memory (null: it stays where it is set)
-var payload_rows := 64  ## rows of PAYLOAD_TEX_WIDTH texels the payload textures start with
+const PAYLOAD_ROWS := 64  ## rows of PAYLOAD_TEX_WIDTH texels (131,072 bups) the payload's textures and buffers are made with at least, a dish's limit permitting
+var payload_rows := PAYLOAD_ROWS  ## rows of PAYLOAD_TEX_WIDTH texels the payload textures start with
 var frame_queue_size := 2  ## the main device's frames in flight: a texture is written again only after this many frames and one more
 var from_source := false  ## compile the kernels from GpuKernels.all() on the device instead of loading the imported SPIR-V (tools)
 

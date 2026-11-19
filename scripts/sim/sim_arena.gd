@@ -313,21 +313,44 @@ func ensure_events(events: int, most := 0) -> int:
 
 
 ## The pictures' buffers for a payload of `texels` and a field of `pixels` cells; false, and they stay as they are, when making them
-## would pass the memory budget (they are counted in it with the rest: `estimate_bytes`).
-func ensure_draw(texels: int, pixels: int) -> bool:
+## would pass the memory budget (they are counted in it with the rest: `estimate_bytes`). The payload's room grows ahead of the bups,
+## by GROW and from `PoolLimits.PAYLOAD_ROWS` rows, but not past room for `most_texels` (0: no bound; the most the dish can hold) or what
+## is asked if that is more, and to what is asked when the room ahead would pass the budget: a growth makes the shared textures anew
+## (`SimCore.publish`), which takes the best part of a frame on some drivers, so it must come a handful of times as a dish grows and not
+## once for each row of bups. Only the buffers whose size changed are made again.
+func ensure_draw(texels: int, pixels: int, most_texels := 0) -> bool:
 	var grow := not bufs.has("PAYLOAD") or texels > _texels or pixels > _pixels
 	if not grow:
 		return true
 	if limits.watch != null:
 		limits.watch.before_growth(Time.get_ticks_msec(), bytes_now())
-	if bytes_now() - draw_bytes_now() + draw_bytes(maxi(texels, _texels), maxi(pixels, _pixels), cell_cap) > limits.memory_budget_bytes:
+	var others := bytes_now() - draw_bytes_now()
+	var want := maxi(texels, _texels)
+	var new_pixels := maxi(pixels, _pixels)
+	if texels > _texels:
+		var width := GpuLayout.PAYLOAD_TEX_WIDTH
+		var ahead := maxi(int(_texels * GROW), limits.payload_rows * width)
+		if most_texels > 0:
+			ahead = mini(ahead, most_texels)
+		ahead = ((ahead + width - 1) / width) * width
+		if ahead > want and others + draw_bytes(ahead, new_pixels, cell_cap) <= limits.memory_budget_bytes:
+			want = ahead
+	if others + draw_bytes(want, new_pixels, cell_cap) > limits.memory_budget_bytes:
 		return false
-	_texels = maxi(texels, _texels)
-	_pixels = maxi(pixels, _pixels)
+	_texels = want
+	_pixels = new_pixels
 	_grew("draw")
 	for nm: String in DRAW_BUFFERS:
-		_make(nm, _bytes_of(nm), false)
+		var bytes := maxi(16, ((_bytes_of(nm) + 15) / 16) * 16)
+		if bufs.has(nm) and int(sizes.get(nm, 0)) == bytes:
+			continue
+		_make(nm, bytes, false)
 	return true
+
+
+## The rows of payload texels the pictures' buffers hold (what the shared textures are as tall as at least).
+func draw_rows() -> int:
+	return _texels / GpuLayout.PAYLOAD_TEX_WIDTH
 
 
 ## The bytes the pictures' buffers take for a payload of `texels`, a field of `pixels` cells and a pool of `cells` field cells.

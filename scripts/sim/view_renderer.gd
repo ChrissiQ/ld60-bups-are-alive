@@ -517,7 +517,7 @@ func _hand_payload(info: PayloadInfo) -> void:
 	if _copy_made.is_empty():
 		return
 	if _ho.is_empty() or int(_ho["rows"]) < rows:
-		_make_handover(maxi(rows, int(int(_ho.get("rows", 0)) * 1.5)))
+		_make_handover(maxi(rows, maxi(PoolLimits.PAYLOAD_ROWS, int(int(_ho.get("rows", 0)) * 1.5))))
 		if _ho.is_empty():
 			return
 	if texels > 0:
