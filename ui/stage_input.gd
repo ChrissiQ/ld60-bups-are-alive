@@ -19,12 +19,14 @@ const PAINT_MAX_STEPS := 60  ## the most places one pointer movement makes (a fa
 const PAN_KEY_PIXELS := 600.0  ## screen pixels a second the view moves while a pan key (W, A, S or D) is held
 const FIT_MARGIN := 24.0  ## screen pixels kept clear round the dish when framing it in the stage
 const TRAY_RESERVE := 48.0  ## at the top of the stage, room for the tool options that open there (kept whether they are open or not, so choosing a tool never moves the dish)
+const BANNER_LINES := 2  ## the lines of the banner's usual size that the dish is kept clear of
 const PICK_SLACK_PIXELS := 4.0  ## how far outside a bup (in screen pixels) still counts as pointing at it
 
 var host: Node2D  ## the screen: the pointer is read in its coordinates
 var camera: Camera2D
 var stage: Control
 var tool_options: ToolOptions
+var banner: Label  ## the stage's banner, which sits at the top of the stage over the dish's frame
 var dish: Dish  ## the dish in the main view
 var tool := Toolbar.Tool.SELECT  ## the selected tool (the screen sets it)
 var following_id := -1  ## the bup the camera is keeping in the middle of the view, or -1
@@ -52,11 +54,20 @@ func fit_camera() -> void:
 	var area := Rect2(Vector2.ZERO, view)
 	if host.is_node_ready() and stage.size.x > 0.0:
 		area = stage.get_global_rect()
-		area = Rect2(area.position + Vector2(0.0, TRAY_RESERVE), area.size - Vector2(0.0, TRAY_RESERVE))
+		var reserve := maxf(TRAY_RESERVE, _banner_reserve())
+		area = Rect2(area.position + Vector2(0.0, reserve), area.size - Vector2(0.0, reserve))
 	var room := minf((area.size.x - 2.0 * FIT_MARGIN) * 0.5, (area.size.y - 2.0 * FIT_MARGIN) * 0.5)
 	room = maxf(room, 40.0)
 	camera.zoom = Vector2.ONE * clampf(room / dish.radius, ZOOM_MIN, 1.0)
 	camera.position = dish.global_position - _centre_shift(area, view) / camera.zoom.x
+
+
+## The room the banner takes at the top of the stage: where it starts and BANNER_LINES of its usual (largest) type, so a banner never covers the dish.
+func _banner_reserve() -> float:
+	if banner == null:
+		return 0.0
+	var line := banner.get_theme_font(&"font", &"Banner").get_height(banner.get_theme_font_size(&"font_size", &"Banner"))
+	return banner.offset_top + BANNER_LINES * line
 
 
 ## Screen pixels the middle of `area` (what the tray and rail leave clear) sits from the window's middle, which is where the camera looks.
@@ -77,6 +88,7 @@ func refit_when_laid_out() -> void:
 func on_stage_resized() -> void:
 	if following_id < 0 and not view_moved:
 		fit_camera()
+		refit_when_laid_out()  # (the theme's fonts, which the banner's room is measured from, follow the size a frame later)
 
 
 ## Notes where the dish is being looked at (and stops following), for when its view comes back: called as another dish comes into view.

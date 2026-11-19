@@ -123,6 +123,7 @@ func _ready() -> void:
 	stage_input.camera = camera
 	stage_input.stage = stage
 	stage_input.tool_options = tool_options
+	stage_input.banner = banner
 	stage_input.dish = dish
 	stage_input.clicked.connect(_click)
 	lineage.dishes = dishes
