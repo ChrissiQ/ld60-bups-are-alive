@@ -7,7 +7,7 @@ extends SceneTree
 ##   16 energy, so the dish (4.52 mm2 x 1000 = 4,520 units) holds 72,000 and the founders' reserves 2,000. A smaller or poorer dish holds too little food to reach the limit. Doubling takes 40 min, 20 to 600
 ##   is 5 doublings = 3.3 h.
 ## - after that, stepped as the game steps at x10,000 and 60 frames a second (166.7 s a frame: 8 steps of 20 s), the count read after each
-##   frame is over the limit in at most 1% of the frames [the 1% is this test's tolerance; AGENTS.md "Limits"].
+##   frame is over the limit in at most 1% of the frames [the 1% is this test's tolerance; docs/simulation.md "Limits"].
 ##   The trim expects the step's growth plus CAP_SIGMAS standard deviations, so the count stops a little short of the limit.
 ## Needs a GPU (windowed).
 

@@ -10,7 +10,7 @@ extends SceneTree
 ##   rate, and 20 founders eat under 1% of the dish in 3 h, so c stays put. Then log2(count at 3 h / count at 1 h) = 7200 / doubling and
 ##   the doubling time from that slope is within 5% of 2400 s (2280-2520 s) [the 5% is a placeholder for the sample noise: 20 founders over
 ##   2 h are about 20 x 2^1.5 to 20 x 2^4.5 bups].
-## - Starvation (derived, AGENTS.md "Starvation"): a bup starves only once its reserve is at Cell.MAINTENANCE_FLOOR 5, and then pays
+## - Starvation (derived, docs/simulation.md "Starvation"): a bup starves only once its reserve is at Cell.MAINTENANCE_FLOOR 5, and then pays
 ##   STARVE_MAINTENANCE 0.08/day of its body's energy (mass 8 x COST_PER_MASS 4 = 32), 0.08 x 32 / 86400 = 3.0e-5 energy/s, from the reserve
 ##   first: 5 of reserve lasts 47 h, while a reserve of 50 is spent growing and dividing. With stationary phase on, no nutrient and
 ##   founders at reserve 0, each alone in its own dish (in one dish the dead's clouds, DEATH_RELEASE, would feed the living): no growth, and the mass pays at once, 8% of itself a day, so over 12 h it falls to 8 x exp(-0.04) = 7.69 (below
