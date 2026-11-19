@@ -3,6 +3,11 @@ extends PanelPage
 ## The player's preferences (see UserSettings), with a Back button. Shown by the title screen and by the pause menu, in
 ## place of what is behind it, until `back_requested`.
 
+const WIDTH := 560.0  ## the least width of the rows at 100%: it grows with the text
+const CLEARANCE := 48.0  ## the room kept round the panel when the window is smaller than the rows
+
+@onready var scroll: ScrollContainer = $Box/Scroll
+@onready var rows: Control = $Box/Scroll/Rows
 @onready var fullscreen_toggle: ToggleRow = $Box/Scroll/Rows/FullscreenToggle
 @onready var scale_row: SettingRow = $Box/Scroll/Rows/ScaleRow
 @onready var scroll_row: SettingRow = $Box/Scroll/Rows/ScrollRow
@@ -33,7 +38,24 @@ func _ready() -> void:
 		UserSettings.reset()
 		_sync())
 	visibility_changed.connect(_sync)
+	visibility_changed.connect(_fit)
+	rows.minimum_size_changed.connect(_fit)
+	get_viewport().size_changed.connect(_fit)
 	_sync()
+	_fit()
+
+
+## The panel takes the size its rows need, and no more than the window leaves: past that only the rows scroll.
+func _fit() -> void:
+	await get_tree().process_frame  # (the sizes of what has just changed are known a frame later)
+	if not is_inside_tree():
+		return
+	scroll.custom_minimum_size = Vector2.ZERO
+	var view := get_viewport_rect().size
+	var chrome := get_combined_minimum_size().y  # (the heading, the buttons and the panel's own room, with the rows' height at zero)
+	scroll.custom_minimum_size = Vector2(
+		clampf(maxf(WIDTH * UserSettings.text_factor() / UserSettings.PLEX_SIZE, rows.get_combined_minimum_size().x), 0.0, maxf(view.x - CLEARANCE, 0.0)),
+		clampf(rows.get_combined_minimum_size().y, 0.0, maxf(view.y - chrome - CLEARANCE, 120.0)))
 
 
 func _sync() -> void:
