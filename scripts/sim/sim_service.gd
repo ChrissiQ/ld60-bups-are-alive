@@ -23,8 +23,8 @@ func world() -> WorldClient:
 			var gpu: GDScript = load(GPU_BACKEND)
 			_backend = gpu.new() if gpu.available() else CpuSimBackend.new()
 			var limits := PoolLimits.from_settings()
-			if MemoryMode.machine == null:
-				MemoryMode.machine = limits.machine  # (the screens judge the machine by what the simulation started from)
+			if MemoryMode.machine == null and _backend.can_simulate():
+				MemoryMode.machine = limits.machine  # (the screens judge the machine by what the simulation started from; with the stub backend there is no pool, so no machine)
 			_backend.start(limits)
 		_world = WorldClient.new(_backend)
 	return _world

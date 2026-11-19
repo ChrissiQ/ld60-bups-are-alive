@@ -19,13 +19,19 @@ static func report() -> MachineMemory:
 	return machine
 
 
+## Whether there is no pool to protect and no machine was set: the main thread has no rendering device (a headless run: the adapter's type and
+## memory cannot be read, so the machine would be classed by a guess) or the world's backend cannot simulate (the stub). No memory class applies.
+static func _no_pool() -> bool:
+	return machine == null and (RenderingServer.get_rendering_device() == null or not WorldClient.shared().backend.can_simulate())
+
+
 static func is_low() -> bool:
-	return PoolLimits.is_low_memory(report())
+	return not _no_pool() and PoolLimits.is_low_memory(report())
 
 
 ## Whether the machine itself is below the least the game is made for (what the first notice is about).
 static func is_below() -> bool:
-	return PoolLimits.classify(report()) == PoolLimits.MACHINE_BELOW
+	return not _no_pool() and PoolLimits.classify(report()) == PoolLimits.MACHINE_BELOW
 
 
 ## The most a dish's bup limit may be set to: `held` is what the dish has now (it keeps what it has).

@@ -29,6 +29,7 @@ func _run() -> void:
 	_classes()
 	_limits_in_ranges()
 	_notices()
+	_no_pool()
 	await _dishes()
 	MemoryMode.machine = null
 	TestUtil.finish(self, "OK memory_mode_test")
@@ -77,6 +78,21 @@ func _limits_in_ranges() -> void:
 	d.queue_free()
 	var goal := StartConditions.new()
 	TestUtil.check(goal.bup_limit <= 500000 and goal.nutrient_resolution <= 200, "goal mode's defaults are inside every limit")
+
+
+func _no_pool() -> void:
+	var service: Node = root.get_node("SimService")
+	var stub := FakeSimBackend.new()
+	stub.simulates = false
+	service.use_backend(stub)
+	MemoryMode.machine = null
+	TestUtil.check(not MemoryMode.is_low() and not MemoryMode.is_below() and MemoryMode.start_notices().is_empty(), "nothing can simulate: no memory class and no notices")
+	TestUtil.check(MemoryMode.max_bup_limit() == StartConditions.MAX_BUP_LIMIT and MemoryMode.max_resolution() == StartConditions.MAX_NUTRIENT_RESOLUTION and MemoryMode.max_dishes() == GpuLayout.D_MAX, "and the interface's own ranges")
+	service.use_backend(FakeSimBackend.new())
+	TestUtil.check(not MemoryMode.is_low() and MemoryMode.machine == null, "and with no rendering device even a backend that simulates has no class (a headless run)")
+	MemoryMode.machine = _machine(4, 3)
+	TestUtil.check(MemoryMode.is_low(), "a machine set explicitly is still judged")
+	MemoryMode.machine = null
 
 
 func _notices() -> void:
