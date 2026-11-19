@@ -124,7 +124,7 @@ var feed_density := 3.0:  ## units of nutrient fed in to each mm² of the dish e
 	set(value):
 		feed_density = clampf(value, 0.0, StartConditions.MAX_FEED_DENSITY)
 		_send_params({"feed_density": feed_density})
-var medium_thickness := Biology.MEDIUM_THICKNESS  ## how many times thicker than water the medium is (see StartConditions.medium_thickness)
+var medium_thickness := StartConditions.DEFAULT_MEDIUM_THICKNESS  ## how many times thicker than water the medium is (see StartConditions.medium_thickness)
 var bloom_density := 0.0:  ## plankton appearing in each mm² of the dish every sim-day (24 hours), at steady intervals, at random places (see `bloom_per_day`)
 	set(value):
 		bloom_density = clampf(value, 0.0, StartConditions.MAX_BLOOM_DENSITY)

@@ -30,9 +30,9 @@ signal bup_limit_chosen(limit: int)
 @onready var initial_dish: StatRow = %DishRow
 @onready var initial_detail: StatRow = %DetailRow
 @onready var initial_thickness: StatRow = %ThicknessRow
-@onready var initial_stationary: StatRow = %StationaryRow  ## shown when the dish was started with starvation switched on
-@onready var initial_plankton_husks: StatRow = %PlanktonHusksRow  ## shown when the dish was started with plankton husks
-@onready var initial_husks: StatRow = %HusksRow  ## shown when the dish was started with husks
+@onready var initial_stationary: StatRow = %StationaryRow  ## shown when the dish was started with starvation set other than by default
+@onready var initial_plankton_husks: StatRow = %PlanktonHusksRow  ## shown when the dish was started with plankton husks set other than by default
+@onready var initial_husks: StatRow = %HusksRow  ## shown when the dish was started with bup husks set other than by default
 @onready var initial_running: StatRow = %RunningRow  ## the device the world simulates on (unlike the rest of the record, this is read when the menu opens)
 @onready var initial_limit: StatRow = %LimitRow
 @onready var dish_row: SettingRow = %DishSettingRow
@@ -90,17 +90,17 @@ func open(dish: Dish, free_mode: bool, started_as: StartConditions = null) -> vo
 		initial_rate.value_text = UiText.thousands(started_as.feed_density, 1) + Strings.t("pause.per_mm2_hour")
 		initial_bloom.value_text = UiText.thousands(started_as.bloom_density, 2) + Strings.t("pause.per_mm2_day")
 		initial_dish.value_text = UiText.mm(started_as.dish_radius)
-		var defaults := StartConditions.new()  # (the advanced options are on the record only when they were not left as they were)
+		var defaults := StartConditions.new()  # (the advanced options are on the record only when they were not left at their defaults)
 		initial_detail.visible = started_as.nutrient_resolution != defaults.nutrient_resolution
 		initial_thickness.visible = not is_equal_approx(started_as.medium_thickness, defaults.medium_thickness)
 		initial_detail.value_text = UiText.thousands(started_as.nutrient_resolution) + Strings.t("pause.cells_across")
 		initial_thickness.value_text = UiText.thousands(started_as.medium_thickness) + Strings.t("pause.times_water")
-		initial_stationary.visible = started_as.stationary_phase
-		initial_stationary.value_text = Strings.t("pause.stationary_value")
-		initial_husks.visible = started_as.death_husks
-		initial_husks.value_text = Strings.t("pause.husks_value")
-		initial_plankton_husks.visible = started_as.plankton_husks
-		initial_plankton_husks.value_text = Strings.t("pause.husks_value")
+		initial_stationary.visible = started_as.stationary_phase != defaults.stationary_phase
+		initial_stationary.value_text = Strings.t("pause.stationary_value" if started_as.stationary_phase else "pause.stationary_off_value")
+		initial_husks.visible = started_as.death_husks != defaults.death_husks
+		initial_husks.value_text = Strings.t("pause.husks_value" if started_as.death_husks else "pause.husks_off_value")
+		initial_plankton_husks.visible = started_as.plankton_husks != defaults.plankton_husks
+		initial_plankton_husks.value_text = Strings.t("pause.husks_value" if started_as.plankton_husks else "pause.husks_off_value")
 		initial_limit.value_text = UiText.thousands(started_as.bup_limit)
 	if _record_shown:
 		var device: String = WorldClient.shared().backend.device_name()

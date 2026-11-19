@@ -203,19 +203,18 @@ func _init() -> void:
 	for row: SettingRow in [adv.bups_row, adv.nutrients_row, adv.rate_row, adv.limit_row]:
 		widths_after.append([row.value_field.size.x, row.slider.size.x])
 	TestUtil.check(widths_after == widths_before and is_equal_approx(adv.panel.size.x, panel_width_before), "pressing reset leaves every box, slider and the panel the width it was (%s vs %s, panel %.0f vs %.0f)" % [widths_before, widths_after, panel_width_before, adv.panel.size.x])
-	TestUtil.check(adv.detail_row.slider.value == 100 and is_equal_approx(adv.thickness_row.slider.value, 25.0) and adv._start.nutrient_resolution == 100 and is_equal_approx(adv._start.medium_thickness, 25.0), "the reset puts the advanced options back to their defaults")
+	TestUtil.check(adv.detail_row.slider.value == 100 and is_equal_approx(adv.thickness_row.slider.value, StartConditions.new().medium_thickness) and adv._start.nutrient_resolution == 100 and is_equal_approx(adv._start.medium_thickness, StartConditions.new().medium_thickness), "the reset puts the advanced options back to their defaults")
 	TestUtil.check(adv.bups_row.slider.value == _default_bups and adv._start.bups == _default_bups, "...and every other setting with them")
 	TestUtil.check(not adv.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "...and 'changed' goes with them")
-	TestUtil.check(not adv.husks_toggle.button_pressed and not adv._start.death_husks, "husks start off")
-	adv.husks_toggle.button_pressed = true
-	TestUtil.check(adv._start.death_husks and adv.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "turning husks on is kept, shown on the toggle and counted as a changed advanced option")
-	adv.reset_button.pressed.emit()
-	TestUtil.check(not adv._start.death_husks and not adv.husks_toggle.button_pressed, "the reset turns husks off")
-	TestUtil.check(not adv.plankton_husks_toggle.button_pressed and not adv._start.plankton_husks, "plankton husks start off")
-	adv.plankton_husks_toggle.button_pressed = true
-	TestUtil.check(adv._start.plankton_husks and adv.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "turning plankton husks on is kept, shown and counted as a changed advanced option")
-	adv.reset_button.pressed.emit()
-	TestUtil.check(not adv._start.plankton_husks and not adv.plankton_husks_toggle.button_pressed, "the reset turns them off")
+	var defaults := StartConditions.new()
+	for flag: Array in [["death_husks", adv.husks_toggle], ["plankton_husks", adv.plankton_husks_toggle], ["stationary_phase", adv.stationary_toggle]]:
+		var name: String = flag[0]
+		var toggle: ToggleRow = flag[1]
+		TestUtil.check(toggle.button_pressed == defaults.get(name) and adv._start.get(name) == defaults.get(name), "%s starts as StartConditions.new() has it" % name)
+		toggle.button_pressed = not defaults.get(name)
+		TestUtil.check(adv._start.get(name) == not defaults.get(name) and adv.advanced_toggle.text.contains(Strings.t("free_setup.advanced_changed").strip_edges()), "changing %s is kept, shown on the toggle and counted as a changed advanced option" % name)
+		adv.reset_button.pressed.emit()
+		TestUtil.check(adv._start.get(name) == defaults.get(name) and toggle.button_pressed == defaults.get(name), "the reset puts %s back" % name)
 	adv.queue_free()
 	await process_frame
 

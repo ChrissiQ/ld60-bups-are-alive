@@ -764,9 +764,12 @@ func _initialize() -> void:
 ## The husks setting; goal mode starts from the defaults.
 func _setting_tests() -> void:
 	var chosen := StartConditions.new()
-	chosen.death_husks = true
-	TestUtil.check(StartConditions.from_dict(chosen.to_dict()).death_husks and chosen.copy().death_husks and not StartConditions.new().death_husks and not StartConditions.from_dict({"death_husks": 1}).death_husks, "the husks setting is saved and loaded with the rest, starts off, and anything but a boolean is off")
-	chosen.death_husks = false
+	var defaults := StartConditions.new()
+	# The one place the decided starting values are pinned, so a change to them is deliberate: water, with both kinds of husk and starvation on.
+	TestUtil.check(is_equal_approx(defaults.medium_thickness, 1.0) and defaults.death_husks and defaults.plankton_husks and defaults.stationary_phase, "a dish starts in water with husks and starvation on")
+	chosen.death_husks = not defaults.death_husks
+	TestUtil.check(StartConditions.from_dict(chosen.to_dict()).death_husks == chosen.death_husks and chosen.copy().death_husks == chosen.death_husks and StartConditions.from_dict({"death_husks": 1}).death_husks == defaults.death_husks, "the husks setting is saved and loaded with the rest, and anything but a boolean is the default")
+	chosen.death_husks = defaults.death_husks
 	var goal_dish := TestUtil.dish_from(self, null)
 	var goal_spec := _spec()
 	var fresh := StartConditions.new()

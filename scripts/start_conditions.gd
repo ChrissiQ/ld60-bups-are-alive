@@ -1,6 +1,6 @@
 class_name StartConditions
 extends RefCounted
-## How a dish begins. Goal mode uses the defaults; free mode lets the player choose.
+## How a dish begins. Goal mode uses `StartConditions.new()`; free mode lets the player choose.
 
 const MIN_BUPS := 1
 const UM_PER_MM := 1000.0  ## the dish is chosen and shown in mm; the game works in µm
@@ -15,6 +15,7 @@ const MIN_NUTRIENT_RESOLUTION := 100  ## the fewest cells across the dish's nutr
 const MAX_NUTRIENT_RESOLUTION := 400  ## the most: 450 µm cells on the biggest dish, which keeps the plankton clouds there (see Dish.FIELD_MAX_ACROSS)
 const NUTRIENT_RESOLUTION_STEP := 50
 const MIN_MEDIUM_THICKNESS := 1.0  ## water
+const DEFAULT_MEDIUM_THICKNESS := 1.0  ## what `medium_thickness` starts as (water); the other settings start as their `var` says
 const MAX_MEDIUM_THICKNESS := 100.0
 const MAX_BLOOM_DENSITY := 10.0  ## plankton blooming in each mm² of the dish every sim-day (about 250,000 a day, 10,000 floating at once, on the biggest dish)
 const MIN_DISH_RADIUS := 1000.0  ## µm: 1 mm, the smallest dish a player can choose (smaller ones are not much use)
@@ -39,16 +40,16 @@ var nutrient_density := 32.0  ## units of nutrient in each mm² of the dish at t
 var feed_density := 0.0  ## units of nutrient fed in to each mm² of the dish every hour, spread evenly (none by default: the starting nutrient is the medium they begin in)
 var bloom_density := 0.0  ## plankton appearing in each mm² of the dish every sim-day, at random places, each bursting into nutrient some time later (a density, like the nutrient and the feed, so the dish can be any size without choosing it again)
 var dish_radius := DEFAULT_RADIUS  ## physical size of the dish
-var medium_thickness := Biology.MEDIUM_THICKNESS  ## how many times thicker than water the medium is: the nutrient spreads that many times slower in it (swimming is not slowed). An advanced option: the default is what the game is tuned for
+var medium_thickness := DEFAULT_MEDIUM_THICKNESS  ## how many times thicker than water the medium is: the nutrient spreads that many times slower in it (swimming is not slowed). An advanced option
 var nutrient_resolution := MIN_NUTRIENT_RESOLUTION  ## cells across the dish's nutrient grid: more shows small nutrient clouds true in a big dish (a cell is the dish's width over this) and slows the simulation
 ## What the player chose for the founders, in order: {"name": "", "color": "#rrggbb"}. Founders beyond the list, and
 ## any with nothing chosen, start unnamed and in the default colour.
 var founders: Array = []
 var tutorial := true  ## the guided tour of the screen runs when the dish starts (goal mode always has it); on by default, as every free-mode default is goal mode's
 var bup_limit := DEFAULT_BUP_LIMIT  ## the most bups the dish holds: past it each birth displaces a random bup
-var stationary_phase := false  ## starving bups stop growing, shrink and die at a constant rate, as E. coli does (Biology.STARVE_*), instead of dying when the reserve is gone (an advanced option: off by default, as in goal mode, whose goals were tuned without it)
-var plankton_husks := false  ## a plankton that dies leaves a husk that leaks its nutrient back slowly (Biology.HUSK_SECONDS) instead of bursting into a cloud (an advanced option: off by default)
-var death_husks := false  ## a dead bup leaves a husk that leaks its nutrient back slowly (Biology.HUSK_SECONDS) instead of giving it back at once (an advanced option: off by default)
+var stationary_phase := true  ## starving bups stop growing, shrink and die at a constant rate, as E. coli does (Biology.STARVE_*), instead of dying when the reserve is gone (an advanced option)
+var plankton_husks := true  ## a plankton that dies leaves a husk that leaks its nutrient back slowly (Biology.HUSK_SECONDS) instead of bursting into a cloud (an advanced option)
+var death_husks := true  ## a dead bup leaves a husk that leaks its nutrient back slowly (Biology.HUSK_SECONDS) instead of giving it back at once (an advanced option)
 
 
 ## Where free mode remembers the player's last choices (separate from the experiment save).

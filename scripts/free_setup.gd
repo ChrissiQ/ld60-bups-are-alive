@@ -216,7 +216,8 @@ func _show_tab(advanced_wanted: bool) -> void:
 
 
 func _update_advanced_label() -> void:
-	var changed := not is_equal_approx(detail_row.value, detail_row.default_value) or not is_equal_approx(thickness_row.value, thickness_row.default_value) or _start.death_husks or _start.plankton_husks or _start.stationary_phase != StartConditions.new().stationary_phase
+	var defaults := StartConditions.new()
+	var changed := not is_equal_approx(detail_row.value, detail_row.default_value) or not is_equal_approx(thickness_row.value, thickness_row.default_value) or _start.death_husks != defaults.death_husks or _start.plankton_husks != defaults.plankton_husks or _start.stationary_phase != defaults.stationary_phase
 	advanced_toggle.text = Strings.t("free_setup.advanced") + (Strings.t("free_setup.advanced_changed") if changed else "")
 
 

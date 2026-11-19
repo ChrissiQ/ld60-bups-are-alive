@@ -188,6 +188,10 @@ func _initialize() -> void:
 		TestUtil.check(m.toolbar.button_for(t) != null, "the toolbar has a button for tool %d" % t)
 	TestUtil.check(m.tool_options.toolbar == m.toolbar, "the options tray is wired to its toolbar by export, not by a hard-coded path")
 	var husk_pick: Button = m.tool_options.pick_buttons[Dish.PickMode.HUSKS]
+	m.dish.death_husks = false
+	m.dish.plankton_husks = false
+	m.layers_panel.sync_from(m.dish)
+	m.tool_options.set_husks_available(m.dish.has_husks())
 	TestUtil.check(not m.dish.has_husks() and not husk_pick.visible and not m.layers_panel.husks_button.visible, "a dish without husks has no Husks layer button and no Husks mode")
 	m.dish.death_husks = true
 	m.layers_panel.sync_from(m.dish)
