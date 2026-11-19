@@ -947,8 +947,8 @@ func _record_lists(cl: int, hg: int) -> void:
 
 ## Whether the lists of the coming step list only the squares near a bup. The marking passes cost a pass over every square and the
 ## reads that can meet an unlisted square carry the code for it, which a dense dish (many bups to a cloud) or a dish of many squares
-## and few clouds pays for and does not get back: when the marks do not pay, every square is listed, as the lists were made before
-## marks, and the reads are the ones without that code. Either way a read sums what the list would; only the work differs. Judged from
+## and few clouds pays for and does not get back: when the marks do not pay, every square is listed, with no marking
+## passes, and the reads are the ones without that code. Either way a read sums what the list would; only the work differs. Judged from
 ## the counts of the last read-back, so a step after a change may use the other mode: no result depends on it.
 func _marks_pay() -> bool:
 	if list_margin_override >= 0.0:
