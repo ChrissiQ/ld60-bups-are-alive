@@ -16,7 +16,7 @@ const CARD_SHARE := 0.75  ## of what the system lets the process use on a card w
 const DISCRETE_BUDGET := 2 * 1024 * 1024 * 1024  ## the budget for a card with memory of its own whose size could not be read (the native query is not there or the driver did not answer): a 4 GB card has to hold the interface's drawing besides
 const GROW_SHARE := 0.5  ## of the system memory free now (a card with a live budget uses CARD_SHARE of its own free memory instead), what the pool may take on top of what it holds
 const SHORT_FREE_SHARE := 0.1  ## of the physical memory: below this much free the machine is short and the pool gives back what it uses little
-const LOW_BUPS := 500000  ## low-memory mode: the most bups a dish may be given as its limit (about 0.5 GB of buffers a dish at its limit)
+const LOW_BUPS := 500000  ## low-memory mode: the most bups a dish may be given as its limit (about 0.6 GB of buffers and picture textures a dish at its limit)
 const LOW_DISHES := 10  ## low-memory mode: the most dishes running at once
 const LOW_GRID := 200  ## low-memory mode: the most cells across a dish's nutrient grid (about 21 MB a dish)
 const GIB := 1024 * 1024 * 1024
@@ -27,7 +27,7 @@ const MACHINE_LOW := "low"
 const MACHINE_BELOW := "below"
 const MIN_PHYSICAL := 3 * 1024 * 1024 * 1024  ## under this much memory the default game (about 0.9 GB of process at 100,000 bups) leaves the system too little
 const MIN_FREE := 1024 * 1024 * 1024  ## under this much free at start the default game does not fit beside what is running
-const ENOUGH_BUDGET := 2 * 1024 * 1024 * 1024  ## a budget under this cannot hold the largest dish the interface allows (about 1.85 GB of buffers) whole
+const ENOUGH_BUDGET := 3 * 1024 * 1024 * 1024  ## a budget under this cannot hold the largest dish the interface allows (about 2.5 GB: 1.85 GB of buffers and 0.65 GB of the pictures' textures, as `SimArena.bytes_now` counts them) whole
 
 var d_max := GpuLayout.D_MAX  ## dish rows (fixed by the layout)
 var memory_budget_bytes := 6 * 1024 * 1024 * 1024  ## what the arena may hold now (the working budget); `from_settings` works the game's out from what the machine reports (`budget_for`) and the memory watch moves it, the tests set their own

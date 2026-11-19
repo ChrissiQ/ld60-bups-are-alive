@@ -81,7 +81,11 @@ var _frame := 0  ## the main side's frame count as last told
 var _retired_textures: Array = []  ## {kind, rids, last_seq, last_use, made, moved_on} of each set of textures made afresh, freed once unused (`_free_retired`)
 var textures_remade := {}  ## kind -> sets of textures made afresh so far, each kept until unused (for checks)
 var publish_seq := 0  ## the number of the last publish that wrote a texture
-var cpu_handover := false  ## the main device cannot import this device's textures (Vulkan: every local device is a device of its own): `publish` makes no textures and keeps the bytes of what it publishes in `handed` for the host to carry to the main device (ViewRenderer.cpu_handover)
+var cpu_handover := false:  ## the main device cannot import this device's textures (Vulkan: every local device is a device of its own): `publish` makes no textures and keeps the bytes of what it publishes in `handed` for the host to carry to the main device (ViewRenderer.cpu_handover)
+	set(v):
+		cpu_handover = v
+		if arena != null:
+			arena.cpu_handover = v  # (the memory budget counts the textures of the path in use)
 var handed := {}  ## with `cpu_handover`, the last publish's bytes: "payload" and "ids" (the bups' used texels), "haze" and "steer" (RGBA8, a cell each), "thumbs" (the atlas's tile rows in use, with "thumb_rows" their number)
 var handed_usec := 0  ## what `_read_handed` has cost so far (microseconds), the reads made and the bytes they took
 var handed_calls := 0
@@ -1737,7 +1741,7 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 	var n := _ds(row, GpuLayout.DS_COUNT)
 	var rows := maxi(1, (n + GpuLayout.PAYLOAD_TEX_WIDTH - 1) / GpuLayout.PAYLOAD_TEX_WIDTH)
 	var texels := rows * GpuLayout.PAYLOAD_TEX_WIDTH
-	var drawn := arena.ensure_draw(texels, cd.grid.n * cd.grid.n, ((cd.cap + GpuLayout.PAYLOAD_TEX_WIDTH - 1) / GpuLayout.PAYLOAD_TEX_WIDTH) * GpuLayout.PAYLOAD_TEX_WIDTH)
+	var drawn := arena.ensure_draw(texels, cd.grid.n * cd.grid.n, ((cd.cap + GpuLayout.PAYLOAD_TEX_WIDTH - 1) / GpuLayout.PAYLOAD_TEX_WIDTH) * GpuLayout.PAYLOAD_TEX_WIDTH, view.want_thumbnails)
 	_after_growth()
 	if not drawn:
 		var why := "SimCore: the pictures' buffers for %d bups and a field of %d cells would pass the memory budget of %d bytes: not published" % [n, cd.grid.n * cd.grid.n, limits.memory_budget_bytes]

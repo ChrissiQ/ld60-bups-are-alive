@@ -187,7 +187,7 @@ func _classes() -> void:
 	var B := PoolLimits.MACHINE_BELOW
 	TestUtil.check(PoolLimits.classify(_machine_of(16 * GIB, 10 * GIB, -1, MAC, INTEGRATED)) == E, "16 GiB shared: enough")
 	TestUtil.check(PoolLimits.classify(_machine_of(8 * GIB, 5 * GIB, -1, WIN, INTEGRATED)) == E, "8 GiB shared: enough (3.2 GiB budget)")
-	TestUtil.check(PoolLimits.classify(_machine_of(32 * GIB, 20 * GIB, -1, WIN, DISCRETE)) == E, "discrete card of unknown size, 32 GiB: enough (2 GiB budget)")
+	TestUtil.check(PoolLimits.classify(_machine_of(32 * GIB, 20 * GIB, -1, WIN, DISCRETE)) == L, "discrete card of unknown size, 32 GiB: low (2 GiB budget, under the 3 GiB the largest dish needs)")
 	TestUtil.check(PoolLimits.classify(_machine_of(4 * GIB, 2 * GIB, -1, WIN, INTEGRATED)) == L, "4 GiB shared: low (1.6 GiB budget)")
 	TestUtil.check(PoolLimits.classify(_machine_of(-1, -1, -1, "Other", OTHER)) == L, "nothing reported: low")
 	TestUtil.check(PoolLimits.classify(_machine_of(2 * GIB, 1 * GIB, -1, WIN, INTEGRATED)) == B, "2 GiB: below the minimum")

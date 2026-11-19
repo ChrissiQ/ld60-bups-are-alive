@@ -65,8 +65,31 @@ const DRAW_BUFFERS := {
 	"THUMBS": ["fixed", GpuKernelsDraw.THUMB_ATLAS * GpuKernelsDraw.THUMB_ATLAS * 4],
 }
 
+## What the pictures take besides DRAW_BUFFERS, as [class, bytes a unit] (the classes of DRAW_BUFFERS; "fixed": the bytes), by how the pictures
+## reach the main device (`cpu_handover`, SimCore.cpu_handover). Both devices draw on the one graphics memory, so both are counted.
+## "thumbs" is a fixed size, there once the thumbnails have been asked for (`thumbs`: with a second dish running).
+## Shared textures: SimCore.TEXTURES of each kind on the simulation's device (the main device imports them without a copy), one of each
+## haze, steer and thumbnail picture the main device draws, and the main device's per-texel buffer of the view kernels.
+const TEXTURES_SHARED := [
+	["texel", (GpuLayout.PAYLOAD_BYTES + GpuLayout.IDT_BYTES) * SimCore.TEXTURES],  # payload and ids
+	["texel", 4],  # ViewRenderer's VPD
+	["pixel", 2 * 4 * (SimCore.TEXTURES + 1)],  # haze and steer
+	["thumbs", GpuKernelsDraw.THUMB_ATLAS * GpuKernelsDraw.THUMB_ATLAS * 4 * (SimCore.TEXTURES + 1)],  # thumbnails
+]
+## Handed over as bytes: the simulation's read-back buffer (SimCore._read_handed: what it publishes in one piece), and on the main device
+## the payload and ids textures with the two buffers that fill them, the view kernels' buffer and the pictures it draws.
+const TEXTURES_HANDED := [
+	["texel", GpuLayout.PAYLOAD_BYTES + GpuLayout.IDT_BYTES],  # the read-back buffer
+	["texel", 2 * (GpuLayout.PAYLOAD_BYTES + GpuLayout.IDT_BYTES)],  # textures and staging buffers
+	["texel", 4],  # ViewRenderer's VPD
+	["pixel", 2 * 4 * 2],  # haze and steer, read back and drawn
+	["thumbs", GpuKernelsDraw.THUMB_ATLAS * GpuKernelsDraw.THUMB_ATLAS * 4 * 2],  # thumbnails, read back and drawn
+]
+
 var rd: RenderingDevice
 var limits: PoolLimits
+var cpu_handover := false  ## the pictures reach the main device as bytes, not as shared textures: which textures are counted
+var thumbs := false  ## the thumbnails' atlas has been asked for, so its textures are made and counted
 var bufs := {}  ## physical name -> RID (an alias maps a name to another's RID)
 var sizes := {}  ## name -> bytes
 var slot_cap := 0
@@ -312,14 +335,15 @@ func ensure_events(events: int, most := 0) -> int:
 	return 1
 
 
-## The pictures' buffers for a payload of `texels` and a field of `pixels` cells; false, and they stay as they are, when making them
-## would pass the memory budget (they are counted in it with the rest: `estimate_bytes`). The payload's room grows ahead of the bups,
+## The pictures' buffers for a payload of `texels` and a field of `pixels` cells; false, and they stay as they are, when making them or
+## the textures that go with them (`texture_bytes`) would pass the memory budget (they are counted in it with the rest: `estimate_bytes`). The payload's room grows ahead of the bups,
 ## by GROW and from `PoolLimits.PAYLOAD_ROWS` rows, but not past room for `most_texels` (0: no bound; the most the dish can hold) or what
 ## is asked if that is more, and to what is asked when the room ahead would pass the budget: a growth makes the shared textures anew
 ## (`SimCore.publish`), which takes the best part of a frame on some drivers, so it must come a handful of times as a dish grows and not
 ## once for each row of bups. Only the buffers whose size changed are made again.
-func ensure_draw(texels: int, pixels: int, most_texels := 0) -> bool:
-	var grow := not bufs.has("PAYLOAD") or texels > _texels or pixels > _pixels
+func ensure_draw(texels: int, pixels: int, most_texels := 0, with_thumbs := false) -> bool:
+	var new_thumbs := thumbs or with_thumbs
+	var grow := not bufs.has("PAYLOAD") or texels > _texels or pixels > _pixels or new_thumbs != thumbs
 	if not grow:
 		return true
 	if limits.watch != null:
@@ -333,12 +357,13 @@ func ensure_draw(texels: int, pixels: int, most_texels := 0) -> bool:
 		if most_texels > 0:
 			ahead = mini(ahead, most_texels)
 		ahead = ((ahead + width - 1) / width) * width
-		if ahead > want and others + draw_bytes(ahead, new_pixels, cell_cap) <= limits.memory_budget_bytes:
+		if ahead > want and others + draw_bytes(ahead, new_pixels, cell_cap, new_thumbs) <= limits.memory_budget_bytes:
 			want = ahead
-	if others + draw_bytes(want, new_pixels, cell_cap) > limits.memory_budget_bytes:
+	if others + draw_bytes(want, new_pixels, cell_cap, new_thumbs) > limits.memory_budget_bytes:
 		return false
 	_texels = want
 	_pixels = new_pixels
+	thumbs = new_thumbs
 	_grew("draw")
 	for nm: String in DRAW_BUFFERS:
 		var bytes := maxi(16, ((_bytes_of(nm) + 15) / 16) * 16)
@@ -353,9 +378,10 @@ func draw_rows() -> int:
 	return _texels / GpuLayout.PAYLOAD_TEX_WIDTH
 
 
-## The bytes the pictures' buffers take for a payload of `texels`, a field of `pixels` cells and a pool of `cells` field cells.
-static func draw_bytes(texels: int, pixels: int, cells: int) -> int:
-	var total := 0
+## The bytes the pictures take for a payload of `texels`, a field of `pixels` cells and a pool of `cells` field cells: their buffers and
+## the textures made for the main device (`texture_bytes`).
+func draw_bytes(texels: int, pixels: int, cells: int, with_thumbs := false) -> int:
+	var total := texture_bytes(texels, pixels, thumbs or with_thumbs)
 	for nm: String in DRAW_BUFFERS:
 		var e: Array = DRAW_BUFFERS[nm]
 		var unit: int = e[1]
@@ -367,9 +393,22 @@ static func draw_bytes(texels: int, pixels: int, cells: int) -> int:
 	return total
 
 
-## The bytes the pictures' buffers hold now (0 before anything is published).
-func draw_bytes_now() -> int:
+## The bytes of the textures (and the buffers beside them) the pictures take on the path in use, for a payload of `texels` and a field
+## of `pixels` cells (the thumbnails' atlas with `with_thumbs`).
+func texture_bytes(texels: int, pixels: int, with_thumbs := false) -> int:
 	var total := 0
+	for e: Array in (TEXTURES_HANDED if cpu_handover else TEXTURES_SHARED):
+		match e[0]:
+			"texel": total += texels * int(e[1])
+			"pixel": total += pixels * int(e[1])
+			"thumbs": total += int(e[1]) if with_thumbs else 0
+			_: total += int(e[1])
+	return total
+
+
+## The bytes the pictures hold now: their buffers and textures (0 before anything is published).
+func draw_bytes_now() -> int:
+	var total := texture_bytes(_texels, _pixels, thumbs) if bufs.has("PAYLOAD") else 0
 	for nm: String in DRAW_BUFFERS:
 		total += int(sizes.get(nm, 0))
 	return total
@@ -471,7 +510,7 @@ func fits(slots: int, cells: int, bins: int, clouds: int, husks: int, events := 
 	return estimate_bytes(maxi(slots, slot_cap), cell_cap + cells, bin_cap + bins, cloud_room, maxi(husks, husk_cap), maxi(events, event_cap), maxi(entries, maxi(entry_cap, GpuKernelsClouds.ENTRIES_PER_SLOT * cloud_room))) <= limits.memory_budget_bytes
 
 
-## The bytes the buffers take at these capacities.
+## The bytes the buffers and the pictures' textures take at these capacities.
 func estimate_bytes(slots: int, cells: int, bins: int, clouds: int, husks: int, events := -1, entries := -1) -> int:
 	if events < 0:
 		events = event_cap
@@ -496,9 +535,9 @@ func estimate_bytes(slots: int, cells: int, bins: int, clouds: int, husks: int, 
 	return total + draw_bytes_now()
 
 
-## The bytes the buffers take now.
+## The bytes the buffers and the pictures' textures take now.
 func bytes_now() -> int:
-	var total := 0
+	var total := texture_bytes(_texels, _pixels, thumbs) if bufs.has("PAYLOAD") else 0
 	for nm: String in sizes:
 		total += sizes[nm]
 	return total

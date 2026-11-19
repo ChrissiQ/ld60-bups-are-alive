@@ -2,9 +2,9 @@ extends SceneTree
 ## Run: godot --headless --path . -s tests/memory_mode_test.gd
 ## Low-memory mode, headless, over made-up machines (MemoryMode.machine) and FakeWorld.
 ## Expected values [derived from PoolLimits: MIN_PHYSICAL 3 GiB, MIN_FREE 1 GiB, BUDGET_SHARE 0.4,
-## DISCRETE_BUDGET 2 GiB, ENOUGH_BUDGET 2 GiB, LOW_BUPS 500,000, LOW_DISHES 10, LOW_GRID 200]:
-##  - class: 16 GiB with 8 free is enough (not low mode); 4 GiB with 3 free has a budget of 1.6 GiB, under the 2 GiB a dish of the largest size
-##    needs: low (not below), low mode on; 2 GiB installed is below; 16 GiB with 0.5 GiB free is below; a discrete card whose size is not known on 16 GiB has 2 GiB: enough.
+## DISCRETE_BUDGET 2 GiB, ENOUGH_BUDGET 3 GiB, LOW_BUPS 500,000, LOW_DISHES 10, LOW_GRID 200]:
+##  - class: 16 GiB with 8 free is enough (not low mode); 4 GiB with 3 free has a budget of 1.6 GiB, under the 3 GiB a dish of the largest size
+##    needs: low (not below), low mode on; 2 GiB installed is below; 16 GiB with 0.5 GiB free is below; a discrete card whose size is not known on 16 GiB has 2 GiB: low.
 ##  - low-memory mode follows the machine alone: nothing the player sets turns it on or off.
 ##  - limits: in low mode a bup limit goes to 500,000 and no further (a dish that holds 800,000 keeps 800,000 and cannot rise), the grid to 200,
 ##    the running dishes to 10 (an 11th add_dish returns null, a pipette is refused); outside it the interface's own ranges.
@@ -39,7 +39,7 @@ func _classes() -> void:
 	TestUtil.check(PoolLimits.classify(_machine(4, 3)) == PoolLimits.MACHINE_LOW, "4 GiB with 3 free is low")
 	TestUtil.check(PoolLimits.classify(_machine(2, 1.5)) == PoolLimits.MACHINE_BELOW, "2 GiB installed is below")
 	TestUtil.check(PoolLimits.classify(_machine(16, 0.5)) == PoolLimits.MACHINE_BELOW, "16 GiB with 0.5 free is below")
-	TestUtil.check(PoolLimits.classify(_machine(16, 8, RenderingDevice.DEVICE_TYPE_DISCRETE_GPU)) == PoolLimits.MACHINE_ENOUGH, "a card with memory of its own of unknown size on 16 GiB is enough (2 GiB)")
+	TestUtil.check(PoolLimits.classify(_machine(16, 8, RenderingDevice.DEVICE_TYPE_DISCRETE_GPU)) == PoolLimits.MACHINE_LOW, "a card with memory of its own of unknown size on 16 GiB is low (2 GiB)")
 	var card := _machine(16, 8, RenderingDevice.DEVICE_TYPE_DISCRETE_GPU)
 	card.card_dedicated = 2 * GIB
 	TestUtil.check(PoolLimits.classify(card) == PoolLimits.MACHINE_LOW, "a 2 GiB card has 1.5 GiB: low")
