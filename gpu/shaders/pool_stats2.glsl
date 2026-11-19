@@ -26,12 +26,13 @@ const uint NO_DISH = 4294967295u;
 const int P_CELLS = 1;
 const uint RECORD_WORDS = 28u;
 const uint STATS_DISH_WORDS = 272u;
-const uint STATS_SUMS = 11u;
+const uint STATS_SUMS = 12u;
 const uint STATS_WORDS = 16u;
 const uint ST_COUNT = 0u;
 const uint ST_DIVISIONS = 11u;
 const uint ST_DONORS = 9u;
 const uint ST_KEY = 10u;
+const uint ST_MASS = 12u;
 const uint ST_MUTATIONS = 6u;
 const uint ST_MUTATOR = 8u;
 const uint ST_SPEED = 1u;
@@ -83,7 +84,8 @@ void stats_dish(uint d) {
 		STATS[o + ST_DONORS] = uint(sm[10 * 256] + 0.5);  // (the donors' count: of the bups now, not of the last step)
 		STATS[o + ST_KEY] = floatBitsToUint(sm[8 * 256]);  // (the key's count)
 		STATS[o + ST_DIVISIONS] = floatBitsToUint(sm[9 * 256]);  // (the divisions' sum)
-		for (uint k = ST_DIVISIONS + 1u; k < STATS_WORDS; k++) STATS[o + k] = 0u;
+		STATS[o + ST_MASS] = floatBitsToUint(sm[11 * 256]);  // (the mass's sum, with which the host bounds the births of an iteration)
+		for (uint k = ST_MASS + 1u; k < STATS_WORDS; k++) STATS[o + k] = 0u;
 	}
 }
 void main() {

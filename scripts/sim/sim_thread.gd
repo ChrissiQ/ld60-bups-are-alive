@@ -273,8 +273,8 @@ func _plan_steps() -> int:
 	return governor.steps(room, samples)
 
 
-## The most steps (up to `most`) whose room fits the memory budget: every dish's segment after k doublings (a bup divides at
-## most once a step, never past its dish's cap), and the family events they can make.
+## The most steps (up to `most`) whose room fits the memory budget: every dish's segment after k steps of births (`SimCore.births_series`,
+## never past its dish's cap), and the family events they can make.
 func _room_steps(most: int) -> int:
 	if _fits(most):
 		return most
@@ -286,18 +286,17 @@ func _room_steps(most: int) -> int:
 
 func _fits(k: int) -> bool:
 	var slots := 0
-	var events := 0
+	var bound := 0
+	var delta := _core.step_length()
 	for client: int in _rows:
 		var cr: int = _rows[client]
-		var n := _core.count(cr)
-		var cap := _core.cap_of(cr)
-		slots += _align(mini(cap, n << mini(k, 30)))
+		var series := SimCore.births_series(_core.count(cr), _core.mass_of(cr), _core.cap_of(cr), k, delta)
+		slots += _align(series[k])
 		for j in k:
-			events += mini(cap, n << mini(j, 30))
-			if events >= SimCore.EVENT_EXACT_MOST:
-				break
+			bound += series[j]
+	var events := bound
 	if events >= SimCore.EVENT_EXACT_MOST:
-		events = maxi(SimCore.EVENT_EXACT_MOST, int(4.0 * _births_per_step * k))
+		events = mini(events, maxi(SimCore.EVENT_EXACT_MOST, int(4.0 * _births_per_step * k)))
 	return _core.arena.fits(maxi(slots, _core.world_word(GpuLayout.WD_SLOTS)), 0, 0, 0, 0, maxi(events, SimCore.EVENT_FLOOR))
 
 
@@ -451,7 +450,7 @@ func _timing() -> Dictionary:
 	t["delta"] = governor.delta()
 	t["iterations"] = _iterations
 	t["device"] = _status.get("device", "")
-	t["refused_iteration"] = _refusal
+	t["refused_iteration"] = _refusal if _refusal != "" else _core.draw_refusal
 	t["pool"] = _core.arena.report()
 	t["pool_in_use"] = _core.in_use()
 	t["memory_fraction"] = _core.arena.memory_fraction()

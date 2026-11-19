@@ -123,8 +123,9 @@ const ST_STEP := 7  ## the step of the batch it was taken after
 const ST_MUTATOR := 8
 const ST_DONORS := 9  ## a uint: the donors
 const ST_KEY := 10  ## the bups with the acetate key
-const ST_DIVISIONS := 11  ## (12-15 are 0)
-const STATS_SUMS := 11  ## the sums `stats1` makes for each group of 256 bups (SPART): count, the genes, harm, mutations, mutator, key, divisions, donors
+const ST_DIVISIONS := 11
+const ST_MASS := 12  ## the sum of the bups' masses (13-15 are 0)
+const STATS_SUMS := 12  ## the sums `stats1` makes for each group of 256 bups (SPART): count, the genes, harm, mutations, mutator, key, divisions, donors, mass
 
 # ---- the pooled world: ids, blocks, the dish tables, the payload ---------------------------------------------------------
 # The bup record above is the pool's record too: it has no dish word. A bup's dish is the segment it occupies (BLKDISH, DS_START).

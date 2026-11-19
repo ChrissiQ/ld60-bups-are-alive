@@ -56,6 +56,7 @@ void main() {
 		v[8] = ((int(BUPS[b + R_REACH] + 0.5) >> 8) & 3) == 2 ? 1.0 : 0.0;  // (the bups with the acetate key)
 		v[9] = BUPS[b + R_DIVISIONS];
 		v[10] = BUPS[b + R_DONOR];  // (1 for a donor, 0 for the rest)
+		v[11] = BUPS[b + R_MASS];
 	}
 	for (int k = 0; k < SUMS; k++) sm[k * 256 + int(l)] = v[k];
 	barrier();
@@ -90,7 +91,8 @@ void main() {
 		OUT[o + ST_DONORS] = uint(sm[10 * 256] + 0.5);  // (the donors' count: of the bups now, not of the last step)
 		OUT[o + ST_KEY] = floatBitsToUint(sm[8 * 256]);  // (the key's count)
 		OUT[o + ST_DIVISIONS] = floatBitsToUint(sm[9 * 256]);  // (the divisions' sum)
-		for (uint k = ST_DIVISIONS + 1u; k < STATS_WORDS; k++) OUT[o + k] = 0u;
+		OUT[o + ST_MASS] = floatBitsToUint(sm[11 * 256]);  // (the mass's sum, with which the host bounds the births of an iteration)
+		for (uint k = ST_MASS + 1u; k < STATS_WORDS; k++) OUT[o + k] = 0u;
 	}
 }
 """

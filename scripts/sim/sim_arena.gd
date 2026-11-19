@@ -82,10 +82,11 @@ var shrink_after_msec := SHRINK_EVERY_MSEC  ## how long a class must have been l
 var _cell_free: Array = []  ## [start, size] blocks below cell_top
 var _bin_free: Array = []
 var _low_since := {}  ## class -> msec since which it has used less than SHRINK_BELOW
+var _event_shrink_to := 0  ## the ring's size `ensure_events` makes it at the next iteration's start (0: none)
 var _texels := 0
 var _pixels := 0
 var growths := {}  ## class -> how many times it grew (the debug log's pool figures)
-var asked := {}  ## class ("slot", "cloud", "husk", "entry") -> the most `ensure_*` was asked for it since it was last busy or shrunk: a shrink never goes below room for it
+var asked := {}  ## class ("slot", "cloud", "husk", "entry", "event") -> the most `ensure_*` was asked for it since it was last busy or shrunk: a shrink never goes below room for it
 
 
 func _init(device: RenderingDevice, p_limits: PoolLimits) -> void:
@@ -184,12 +185,16 @@ func _remake(classes: Array) -> void:
 			_make(nm, _bytes_of(nm), false)
 
 
-## The slot capacity `ensure_slots(slots)` would make: the one now when `slots` are within FILL of it, the grown one when that fits the
-## budget (by GROW or what is asked, else just what is asked), 0 when none does.
-func slot_cap_for(slots: int) -> int:
+## The slot capacity `ensure_slots(slots, most)` would make: the one now when `slots` are within FILL of it, the grown one when that fits the
+## budget (by GROW, but not past room for `most` slots (0: no bound), the most the slots can ever need, or what is asked if that is more;
+## else just what is asked), 0 when none does.
+func slot_cap_for(slots: int, most := 0) -> int:
 	if slots <= int(FILL * slot_cap):
 		return slot_cap
-	var want := _align(maxi(ceili(slots / FILL), int(slot_cap * GROW)))
+	var grown := int(slot_cap * GROW)
+	if most > 0:
+		grown = mini(grown, ceili(most / FILL))
+	var want := _align(maxi(ceili(slots / FILL), grown))
 	if not fits(want, 0, 0, 0, 0):
 		want = _align(slots)
 		if not fits(want, 0, 0, 0, 0):
@@ -197,10 +202,11 @@ func slot_cap_for(slots: int) -> int:
 	return want
 
 
-## Room for `slots` record slots; false when that would pass the budget.
-func ensure_slots(slots: int) -> bool:
+## Room for `slots` record slots; false when that would pass the budget. `most` (0: none) is what the slots can never pass, so a growth by
+## GROW stops short of room for more than that.
+func ensure_slots(slots: int, most := 0) -> bool:
 	asked["slot"] = maxi(int(asked.get("slot", 0)), slots)
-	var want := slot_cap_for(slots)
+	var want := slot_cap_for(slots, most)
 	if want == 0:
 		return false
 	if want != slot_cap:
@@ -277,11 +283,24 @@ func ensure_husks(husks: int) -> bool:
 
 
 ## Room for `events` births (and deaths) in an iteration: 1 when the ring was made again, 0 when it was big enough, -1 when it would
-## pass the budget.
-func ensure_events(events: int) -> int:
+## pass the budget. A growth by GROW stops at `most` (0: none), the most an iteration can have, or at `events` when that is more. A ring
+## `maybe_shrink` found little used for a minute is made smaller first, here, where the last iteration's events have been read and the
+## next's not yet written, when the room asked for now fits it.
+func ensure_events(events: int, most := 0) -> int:
+	asked["event"] = maxi(int(asked.get("event", 0)), events)
+	var made := 0
+	if _event_shrink_to > 0:
+		if _event_shrink_to < event_cap and events <= _event_shrink_to:
+			event_cap = _event_shrink_to
+			_remake(["event"])
+			made = 1
+		_event_shrink_to = 0
 	if events <= event_cap:
-		return 0
-	var want := maxi(events, int(event_cap * GROW))
+		return made
+	var grown := int(event_cap * GROW)
+	if most > 0:
+		grown = mini(grown, most)
+	var want := maxi(events, grown)
 	if not fits(0, 0, 0, 0, 0, want):
 		want = events
 		if not fits(0, 0, 0, 0, 0, want):
@@ -292,16 +311,44 @@ func ensure_events(events: int) -> int:
 	return 1
 
 
-## The pictures' buffers for a payload of `texels` and a field of `pixels` cells.
-func ensure_draw(texels: int, pixels: int) -> void:
+## The pictures' buffers for a payload of `texels` and a field of `pixels` cells; false, and they stay as they are, when making them
+## would pass the memory budget (they are counted in it with the rest: `estimate_bytes`).
+func ensure_draw(texels: int, pixels: int) -> bool:
 	var grow := not bufs.has("PAYLOAD") or texels > _texels or pixels > _pixels
 	if not grow:
-		return
+		return true
+	if limits.watch != null:
+		limits.watch.before_growth(Time.get_ticks_msec(), bytes_now())
+	if bytes_now() - draw_bytes_now() + draw_bytes(maxi(texels, _texels), maxi(pixels, _pixels), cell_cap) > limits.memory_budget_bytes:
+		return false
 	_texels = maxi(texels, _texels)
 	_pixels = maxi(pixels, _pixels)
 	_grew("draw")
 	for nm: String in DRAW_BUFFERS:
 		_make(nm, _bytes_of(nm), false)
+	return true
+
+
+## The bytes the pictures' buffers take for a payload of `texels`, a field of `pixels` cells and a pool of `cells` field cells.
+static func draw_bytes(texels: int, pixels: int, cells: int) -> int:
+	var total := 0
+	for nm: String in DRAW_BUFFERS:
+		var e: Array = DRAW_BUFFERS[nm]
+		var unit: int = e[1]
+		match e[0]:
+			"texel": total += texels * unit
+			"view": total += cells * unit
+			"pixel": total += pixels * unit
+			_: total += unit
+	return total
+
+
+## The bytes the pictures' buffers hold now (0 before anything is published).
+func draw_bytes_now() -> int:
+	var total := 0
+	for nm: String in DRAW_BUFFERS:
+		total += int(sizes.get(nm, 0))
+	return total
 
 
 ## Writes `bytes` to the small fixed buffer `nm`, making it larger first when it must be.
@@ -422,7 +469,7 @@ func estimate_bytes(slots: int, cells: int, bins: int, clouds: int, husks: int, 
 			"entry": total += entries * unit
 			"event": total += events * unit
 			_: total += sizes.get(nm, unit)
-	return total
+	return total + draw_bytes_now()
 
 
 ## The bytes the buffers take now.
@@ -454,15 +501,17 @@ func _grew(klass: String) -> void:
 
 
 ## Shrinks a class that has used less than a quarter of its slots for a minute (at least to the limits' size and to the room for what
-## most `ensure_*` asked of it in that time, so the next iteration does not grow it back; at most once a minute).
-func maybe_shrink(slots: int, clouds: int, husks: int, entries := 0) -> void:
+## most `ensure_*` asked of it in that time, so the next iteration does not grow it back; at most once a minute). `events` is the most the
+## ring held in an iteration (births or deaths): the ring is the one class not made smaller here but at the start of the next iteration
+## (`ensure_events`), as the last iteration's events are still to be read from it.
+func maybe_shrink(slots: int, clouds: int, husks: int, entries := 0, events := 0) -> void:
 	var now := Time.get_ticks_msec()
-	for pair in [["slot", slots, slot_cap, limits.world_slots], ["cloud", clouds, cloud_cap, limits.cloud_slots], ["husk", husks, husk_cap, limits.husk_slots], ["entry", entries, entry_cap, 0]]:
+	for pair in [["slot", slots, slot_cap, limits.world_slots], ["cloud", clouds, cloud_cap, limits.cloud_slots], ["husk", husks, husk_cap, limits.husk_slots], ["entry", entries, entry_cap, 0], ["event", events, event_cap, SimCore.EVENT_FLOOR]]:
 		var cls: String = pair[0]
 		var used: int = pair[1]
 		var cap: int = pair[2]
 		var floor_cap: int = GpuKernelsClouds.ENTRIES_PER_SLOT * cloud_cap if cls == "entry" else int(pair[3])  # (the entries' floor follows the clouds, which may have shrunk just now)
-		var least: int = maxi(floor_cap, ceili(int(asked.get(cls, 0)) / FILL))
+		var least: int = maxi(floor_cap, int(asked.get(cls, 0)) if cls == "event" else ceili(int(asked.get(cls, 0)) / FILL))  # (the ring is asked for exactly what it must hold)
 		if cls == "slot":
 			least = _align(least)
 		if used >= SHRINK_BELOW * cap or cap <= least:
@@ -491,6 +540,8 @@ func maybe_shrink(slots: int, clouds: int, husks: int, entries := 0) -> void:
 			"entry":
 				entry_cap = to
 				_remake(["entry"])
+			"event":
+				_event_shrink_to = to
 
 
 func free_all() -> void:

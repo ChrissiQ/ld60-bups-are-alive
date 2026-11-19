@@ -33,6 +33,8 @@ const PRE_GROW_USE := 0.7  ## the share of the record slots in use at which pipe
 const EVENT_FLOOR := 32768  ## the event ring's least size (births, and as many deaths)
 const EVENT_EXACT_MOST := 1 << 21  ## past this bound of an iteration's births the ring is sized from what the last iterations had
 const MAX_STEPS := GpuLayout.MAX_STEPS_PER_BATCH
+const MASS_SUM_MARGIN := 1.0e-3  ## the share the measured mass sum is raised by: the sums are float, in a fixed order, with a relative error far under this
+const MASS_READ_ROWS := 16  ## the most running dishes whose mass sum is read from their own rows of STATS; with more, STATS is read up to the highest row
 const TEXTURES := 10  ## shared textures of each kind: a publish's texture is held for WorldClient.WAITING_MOST + 6 publishes at one publish a display frame (it waits to be shown, is shown, is superseded by the next, then frame_queue_size + 2 frames), so the rest is room for a late frame
 const HARD_BOUND_MOST := 1 << 18  ## the cloud (and husk) slots past which an iteration's room is estimated instead of bounded [placeholder: about 135 MB of cloud buffers at 516 B a slot]
 const OVERFLOW_DEVICE := 1  ## `overflow()` bits: a kernel found a buffer full (WORLD's flag)
@@ -62,6 +64,8 @@ var _overflow := 0  ## OVERFLOW_* bits, kept once seen (an overflow is never und
 var _edits: Array = []  ## [row, WorldEdit] for the next batch
 var _event_rows := {}  ## rows whose family events of the last iteration are in the ring
 var _stats_fresh := false  ## STATS sample 0 is every running dish's current state
+var draw_refusal := ""  ## why the pictures are not being published (their buffers would pass the memory budget); "" while they are
+var _mass_sum := {}  ## row -> the sum of the dish's bups' masses in STATS sample 0, while `_stats_fresh`
 var _entries_peak := 0  ## the most list entries asked for since the last shrink check
 var _entry_density := 0  ## the most entries a cloud slot in use had in the last iterations (decaying), from WORLD
 var _entries_last := 0  ## the most list entries a step of the last iteration that made lists asked for
@@ -372,7 +376,7 @@ func pipette(row: int, centre: Vector2, radius: float, dest: Variant = null, gri
 	_run_list(func(cl: int) -> void: _record_pipette(cl, bg, centre, radius, pd))
 	_read_back()
 	_event_rows.clear()
-	_stats_fresh = true
+	_mark_stats_fresh()
 	var moved := _ds(dst, GpuLayout.DS_MOVED_IN)
 	return {"new_row": dst, "moved": moved, "ids": _ids_from(_ds(dst, GpuLayout.DS_START) + before, moved)}
 
@@ -694,6 +698,8 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 			_refresh_stats()
 		return {"steps": 0, "overflow": _overflow}
 	steps = mini(steps, MAX_STEPS)
+	if not _stats_fresh:
+		_refresh_stats()  # (the births the iteration can have are bounded from the dishes' masses as they are now)
 	_set_step(delta)
 	_sync_tiles()
 	var events: Dictionary = plan.events if plan != null and plan.get("events") != null else {}
@@ -727,8 +733,8 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 		births += _ds(row, GpuLayout.DS_BIRTHS)
 	_deaths_per_step = maxf(float(deaths) / steps, _deaths_per_step * 0.9)
 	_births_per_step = maxf(float(births) / steps, _births_per_step * 0.9)
-	_stats_fresh = true
-	arena.maybe_shrink(_wd(GpuLayout.WD_SLOTS), _wd(GpuLayout.WD_CLOUD_SLOTS), _wd(GpuLayout.WD_HUSK_SLOTS), _entries_peak)
+	_mark_stats_fresh()
+	arena.maybe_shrink(_wd(GpuLayout.WD_SLOTS), _wd(GpuLayout.WD_CLOUD_SLOTS), _wd(GpuLayout.WD_HUSK_SLOTS), _entries_peak, maxi(births, deaths))
 	_entries_peak = 0
 	if arena.changed:
 		_after_growth()
@@ -740,6 +746,8 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 ## kernel (the round trip to take off). The results are the same as `run`'s; only the time differs.
 func profile_steps(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 	_apply_edits()
+	if not _stats_fresh:
+		_refresh_stats()
 	_set_step(delta)
 	_sync_tiles()
 	var events: Dictionary = plan.events if plan != null and plan.get("events") != null else {}
@@ -762,7 +770,7 @@ func profile_steps(steps: int, delta: float, plan: Variant = null) -> Dictionary
 	_event_rows.clear()
 	for row: int in _dishes:
 		_event_rows[row] = true
-	_stats_fresh = true
+	_mark_stats_fresh()
 	return out
 
 
@@ -922,7 +930,27 @@ func _record_stats(cl: int, sample: int, step: int) -> void:
 
 func _refresh_stats() -> void:
 	_run_list(func(cl: int) -> void: _record_stats(cl, 0, 0))
+	_mark_stats_fresh()
+
+
+## STATS sample 0 holds every running dish's state now: its mass sums are read, for `births_series`.
+func _mark_stats_fresh() -> void:
 	_stats_fresh = true
+	_mass_sum.clear()
+	if _dishes.is_empty():
+		return
+	var top := 0
+	for row: int in _dishes:
+		top = maxi(top, row + 1)
+	var bulk := PackedByteArray()
+	if _dishes.size() > MASS_READ_ROWS:
+		bulk = rd.buffer_get_data(arena.buf("STATS"), 0, top * GpuLayout.STATS_DISH_WORDS * 4)
+	for row: int in _dishes:
+		var at := (row * GpuLayout.STATS_DISH_WORDS + GpuLayout.ST_MASS) * 4
+		if bulk.is_empty():
+			_mass_sum[row] = rd.buffer_get_data(arena.buf("STATS"), at, 4).decode_float(0)
+		else:
+			_mass_sum[row] = bulk.decode_float(at)
 
 
 # ---- the world's events ------------------------------------------------------------------------------------------------------------
@@ -1004,34 +1032,92 @@ func _upload_events(ev: Dictionary) -> void:
 
 # ---- room ---------------------------------------------------------------------------------------------------------------------------
 
-## Grows what an iteration of `steps` steps could pass: the record slots to the bound of every dish's segment after
-## `steps` doublings (a bup divides at most once a step, and never past its dish's cap); the event ring to the bound of its births; the
-## clouds and husks, while that bound is small (under EVENT_EXACT_MOST, and the slots under HARD_BOUND_MOST), to a hard bound: each
-## step's deaths are at most its bups (the same bound), each death and plankton husk makes at most a cloud or a husk, and each husk lets go
-## at most min(12, steps x (delta / a quarter of its life + 1)) pieces; past it, to an estimate of what the steps until the next
-## compaction append (a kernel that finds a buffer full raises the overflow flag and keeps inside it). False, with OVERFLOW_BUDGET set and
-## the reason in `errors`, when the room would pass the memory budget.
+## The most a bup's mass can grow in one step of `delta` seconds, as a factor: it grows by GROWTH_RATE x metabolism x mass x delta, the
+## metabolism gene at most its range's top with all three ceiling raises (Genome.REACH_FACTOR_3), less what the raises cost (REACH_COST each;
+## a donor, the acetate key and a starving bup give up more, never less), and by no more than its reserve pays for. With the game's constants
+## and a step of 20 s (the longest) it is 1 + (ln 2 / 2400 s) x (2.0 x 1.5) x 0.85 x 20 s = 1.0147.
+static func growth_factor_max(delta: float) -> float:
+	var metabolism_top: float = Genome.GENES["metabolism"][1] * Genome.REACH_FACTOR_3
+	return 1.0 + Cell.GROWTH_RATE * metabolism_top * maxf(0.2, 1.0 - Genome.REACH_COST * 3.0) * maxf(delta, 0.0)
+
+
+## The least mass a bup that divides has: it divides only when its mass is at least its birth mass plus ADD_MASS_FACTOR x its size gene
+## squared, so at least that, with the size gene at the bottom of its range: 0.5 x 2.0^2 = 2.
+static func division_mass_min() -> float:
+	var size_least: float = Genome.GENES["size"][0]
+	return Cell.ADD_MASS_FACTOR * size_least * size_least
+
+
+## The most bups a dish of `count` bups holds at the start of each of `steps` steps and after the last (`steps` + 1 numbers, the first
+## `count`), when the sum of their masses is `mass` (negative: not known) and the dish keeps at most `cap`. The bound is the bups' mass and
+## nothing else, because a bup divides only above a mass and mass does not appear from nowhere:
+##   - A division splits a mass in two (the parent keeps a share and the daughter has the rest, or is lost), and a bup's mass grows at most
+##     by `growth_factor_max` a step, so the dish's total mass at the start of step j is at most mass x G^j (it falls with starvation and deaths).
+##   - A bup divides at most once a step, and only with at least `division_mass_min` of mass, so the births of step j are at most the bups
+##     there are, and at most that total mass over that least mass: min(N_j, mass x G^j / 2).
+##   - So N_(j+1) <= N_j + min(N_j, mass x G^j / 2), and at most `cap`.
+## The bound a bup's own doubling gives (N_(j+1) <= 2 N_j) is what holds without the mass; with it a dish whose bups weigh about 7 on
+## average (3.5 times the least that divides) can at most double twice and then add 3.5 times its bups a step, so 14 steps from 5,000 bups
+## are at most about 240,000, not 82 million. A bup that has just divided could divide again in the very next step at the longest step
+## (it needs 1.4% more mass and the fastest growth gives 1.5%), so no bound from the time between divisions holds at the speeds where
+## the step is longest; the mass bound does.
+static func births_series(count: int, mass: float, cap: int, steps: int, delta: float) -> PackedInt64Array:
+	var out := PackedInt64Array()
+	out.resize(steps + 1)
+	var n := mini(count, cap)
+	out[0] = n
+	var total := mass * (1.0 + MASS_SUM_MARGIN)
+	var g := growth_factor_max(delta)
+	var least := division_mass_min()
+	for j in steps:
+		var births := n
+		if mass >= 0.0:
+			births = mini(n, int(minf(total / least, 4.0e18)))
+			total *= g
+		n = mini(cap, n + births)
+		out[j + 1] = n
+	return out
+
+
+## The step length (seconds) an iteration's room is worked out for: the one set, or the longest there is while none is.
+func step_length() -> float:
+	return _delta if _delta > 0.0 else Governor.MAX_STEP
+
+
+## The mass sum of dish `row` at the start of an iteration, or -1.0 when it is not known (the dish is not in the last STATS sample).
+func mass_of(row: int) -> float:
+	return float(_mass_sum[row]) if _stats_fresh and _mass_sum.has(row) else -1.0
+
+
+## Grows what an iteration of `steps` steps could pass: the record slots to the bound of every dish's segment after `steps` steps
+## (`births_series`: a bup divides at most once a step and only with mass to divide, and never past its dish's cap); the event ring to the bound of
+## its births; the clouds and husks, while that bound is small (under EVENT_EXACT_MOST, and the slots under HARD_BOUND_MOST), to a hard bound:
+## each step's deaths are at most its bups (the same bound), each death and plankton husk makes at most a cloud or a husk, and each husk lets
+## go at most min(12, steps x (delta / a quarter of its life + 1)) pieces; past it, to an estimate of what the steps until the next
+## compaction append (a kernel that finds a buffer full raises the overflow flag and keeps inside it). The ring, when it is sized from
+## what the last iterations had, still grows only to the bound. False, with OVERFLOW_BUDGET set and the reason in `errors`, when the room
+## would pass the memory budget.
 func _ensure_room(steps: int, ev: Dictionary) -> bool:
 	var need := 0
+	var most := 0
 	var bound := 0
 	var counted := 0
+	var delta := step_length()
 	for row: int in _dishes:
 		var cd: CoreDish = _dishes[row]
 		var n := _ds(row, GpuLayout.DS_COUNT)
 		counted += n
-		need += _align(mini(cd.cap, n << mini(steps, 30)))
-		var b := 0
+		var series := births_series(n, mass_of(row), cd.cap, steps, delta)
+		need += _align(series[steps])
+		most += _align(maxi(cd.cap, n))
 		for j in steps:
-			b += mini(cd.cap, n << mini(j, 30))
-			if b >= EVENT_EXACT_MOST:
-				break
-		bound += b
+			bound += series[j]
 	var refused: Array[String] = []
-	if not arena.ensure_slots(maxi(need, _wd(GpuLayout.WD_SLOTS))):
+	if not arena.ensure_slots(maxi(need, _wd(GpuLayout.WD_SLOTS)), maxi(most, _wd(GpuLayout.WD_SLOTS))):
 		refused.append("record slots %d" % maxi(need, _wd(GpuLayout.WD_SLOTS)))
 	var exact := bound < EVENT_EXACT_MOST
-	var events := bound if exact else maxi(EVENT_EXACT_MOST, int(4.0 * maxf(_births_per_step, _deaths_per_step) * steps))
-	var grown := arena.ensure_events(maxi(events, EVENT_FLOOR))
+	var events := bound if exact else mini(bound, maxi(EVENT_EXACT_MOST, int(4.0 * maxf(_births_per_step, _deaths_per_step) * steps)))
+	var grown := arena.ensure_events(maxi(events, EVENT_FLOOR), maxi(bound, EVENT_FLOOR))
 	if grown < 0:
 		refused.append("events %d" % events)
 	elif grown > 0:
@@ -1602,8 +1688,15 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 	var n := _ds(row, GpuLayout.DS_COUNT)
 	var rows := maxi(1, (n + GpuLayout.PAYLOAD_TEX_WIDTH - 1) / GpuLayout.PAYLOAD_TEX_WIDTH)
 	var texels := rows * GpuLayout.PAYLOAD_TEX_WIDTH
-	arena.ensure_draw(texels, cd.grid.n * cd.grid.n)
+	var drawn := arena.ensure_draw(texels, cd.grid.n * cd.grid.n)
 	_after_growth()
+	if not drawn:
+		var why := "SimCore: the pictures' buffers for %d bups and a field of %d cells would pass the memory budget of %d bytes: not published" % [n, cd.grid.n * cd.grid.n, limits.memory_budget_bytes]
+		if draw_refusal == "":
+			errors.append(why)  # (once while it lasts: the thread reports it as the refused iteration, so the game shows the memory banner)
+		draw_refusal = why
+		return out
+	draw_refusal = ""
 	_free_retired()
 	var nn := cd.grid.n
 	var w: int

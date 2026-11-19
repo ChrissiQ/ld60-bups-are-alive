@@ -26,6 +26,7 @@ const uint RECORD_WORDS = 28u;
 const uint R_DIVISIONS = 20u;
 const uint R_DONOR = 14u;
 const uint R_HARM = 15u;
+const uint R_MASS = 6u;
 const uint R_METABOLISM = 10u;
 const uint R_MUTATIONS = 19u;
 const uint R_MUTATOR = 13u;
@@ -33,7 +34,7 @@ const uint R_REACH = 12u;
 const uint R_SENSE = 9u;
 const uint R_SIZE = 11u;
 const uint R_SPEED = 8u;
-const uint STATS_SUMS = 11u;
+const uint STATS_SUMS = 12u;
 const uint WD_LEDGER = 10u;
 const uint WD_SLOTS = 0u;
 
@@ -73,6 +74,7 @@ void stats_block(uint blk, uint d) {
 		v[8] = ((int(BUPS[b + R_REACH] + 0.5) >> 8) & 3) == 2 ? 1.0 : 0.0;  // (the bups with the acetate key)
 		v[9] = BUPS[b + R_DIVISIONS];
 		v[10] = BUPS[b + R_DONOR];  // (1 for a donor, 0 for the rest)
+		v[11] = BUPS[b + R_MASS];
 	}
 	for (int k = 0; k < SUMS; k++) sm[k * 256 + int(l)] = v[k];
 	barrier();

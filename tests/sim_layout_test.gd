@@ -102,6 +102,7 @@ func _payload() -> void:
 
 
 func _sizes() -> void:
+	TestUtil.check(L.ST_MASS == 12 and L.STATS_SUMS == 12, "a sample's sums are 12 words, the last the bups' mass (the births bound reads it)")
 	TestUtil.check(L.STATS_DISH_WORDS == 272 and L.STATS_ITER_SAMPLES == 16, "a dish's STATS row is 17 samples of 16 words")
 	TestUtil.check(L.D_MAX == 1024 and L.BLK_SLOTS == 1 << L.BLK_SHIFT and L.BLK_SLOTS == 256 and L.NO_DISH == 0xFFFFFFFF, "D_MAX, the block size and the no-dish value")
 	TestUtil.check(L.PIPDST_WORDS == 1, "PIPDST is one uint a slot")
