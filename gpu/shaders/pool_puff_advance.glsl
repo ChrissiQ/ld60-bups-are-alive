@@ -14,6 +14,7 @@ const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
 const uint DP_CELLS = 1u;
+const uint DP_CLOUD_SPREAD = 22u;
 const uint DP_FIELD_BASE = 0u;
 const uint DP_HANDOVER = 4u;
 const uint DP_RADIUS = 3u;
@@ -28,7 +29,6 @@ const uint DS_WORDS = 32u;
 const uint NO_DISH = 4294967295u;
 const uint PUFF_ROW_BASE = 1065353216u;
 const int P_CELLS = 1;
-const int P_CLOUD_SPREAD = 70;
 const uint RECORD_WORDS = 28u;
 const uint WD_CLOUD_SLOTS = 1u;
 const uint WD_LEDGER = 10u;
@@ -89,7 +89,7 @@ void f(uint k) {
 	uint o = k * 8u;
 	if (PUFF[o + 5] < 0.5) return;
 	uint d = floatBitsToUint(PUFF[o + 5]) - PUFF_ROW_BASE;
-	float v = PUFF[o + 3] + P[P_CLOUD_SPREAD];
+	float v = PUFF[o + 3] + DPF(d, DP_CLOUD_SPREAD);
 	PUFF[o + 3] = v;
 	float mass = PUFF[o + 2];
 	if (mass <= 1e-9) { PUFF[o + 5] = 0.0; return; }

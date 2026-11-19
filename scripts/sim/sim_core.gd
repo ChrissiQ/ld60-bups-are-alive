@@ -54,7 +54,6 @@ var _flipped := false  ## the records' and block table's halves are swapped (BUP
 var _consts := {}
 var _p := PackedFloat32Array()
 var _delta := -1.0
-var _diffusion := -1.0
 var _dishes := {}  ## row -> CoreDish
 var _world := PackedByteArray()  ## WORLD as read after the last sync (and as the host has written it since)
 var _dstate := PackedByteArray()  ## DSTATE likewise
@@ -1106,9 +1105,6 @@ func _make_room(row: int, s: DishSpec, grid: DishGrid, count: int, clouds := 0, 
 	cd.seed32 = (s.seed ^ (s.seed >> 32)) & 0xFFFFFFFF
 	_after_growth()
 	_dishes[row] = cd
-	if _diffusion < 0.0:
-		_diffusion = s.diffusion()
-	assert(is_equal_approx(_diffusion, s.diffusion()), "SimCore: the dishes of a pool share the medium")
 	_put_dishp(row)
 	var celldish := PackedInt32Array()
 	celldish.resize(cells)
@@ -1842,7 +1838,6 @@ func _set_step(delta: float) -> void:
 	put.call("moves", 1.0)
 	put.call("sub", delta)
 	put.call("death_chance", minf(float(_consts["death_rate"]) * delta, 1.0))
-	put.call("cloud_spread", 2.0 * maxf(_diffusion, 0.0) * delta)
 	put.call("death_puff", _p[GpuLayout.p_slot("death_give")])
 	put.call("conj_chance", 1.0 - exp(-float(_consts["conj_rate"]) * delta))
 	_upload_p()
@@ -1860,7 +1855,8 @@ func _put_dishp(row: int) -> void:
 	var s := cd.spec
 	var g := cd.grid
 	var delta := _delta if _delta > 0.0 else Dish.MAX_STEP
-	var k_total := _diffusion * delta / (g.spacing * g.spacing)
+	var diffusion := s.diffusion()  # the dish's own medium
+	var k_total := diffusion * delta / (g.spacing * g.spacing)
 	cd.iterations = maxi(2, 2 * ceili(k_total / 0.4))
 	var dp := arena.zeros(GpuLayout.DP_WORDS * 4)
 	var u := func(w: int, v: int) -> void: dp.encode_u32(w * 4, v)
@@ -1880,6 +1876,7 @@ func _put_dishp(row: int) -> void:
 	u.call(GpuLayout.DP_FLAGS, cd.flags)
 	fl.call(GpuLayout.DP_K_TOTAL, k_total)
 	fl.call(GpuLayout.DP_K, k_total / cd.iterations)
+	fl.call(GpuLayout.DP_CLOUD_SPREAD, 2.0 * diffusion * delta)
 	u.call(GpuLayout.DP_ITERATIONS, cd.iterations)
 	u.call(GpuLayout.DP_CLOUD_QUOTA, s.cloud_quota)
 	u.call(GpuLayout.DP_HUSK_QUOTA, s.husk_quota)

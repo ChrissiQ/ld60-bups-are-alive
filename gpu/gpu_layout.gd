@@ -155,7 +155,7 @@ const HUSK_QUERIES := 4  ## the places one `husk_near` call asks about (HNQ: x, 
 const HN_WORDS := 8  ## a husk question's answer (HNR, uint words): the nearest's squared distance (float bits; 0xFFFFFFFF none), its slot + 1 (0 none), then its x, y, energy, age and pieces let go (float bits), a spare 0
 const PUFF_ROW_BASE := 0x3F800000  ## a cloud's word 5 (and its event's) is the float whose bits are this plus its dish's row: 1.0 and up, so "alive" stays `>= 0.5` and 0.0 is a free slot (no denormals, which a copy through a float register could flush)
 
-## DISHP[d]: host to device, uploaded when changed. Floats and uints by their bits; words 22-31 are spare.
+## DISHP[d]: host to device, uploaded when changed. Floats and uints by their bits; words 23-31 are spare.
 const DP_WORDS := 32
 const DP_FIELD_BASE := 0  ## uint: the 256-aligned base of the dish's cells in each field buffer
 const DP_CELLS := 1  ## uint: cells across
@@ -179,6 +179,7 @@ const DP_NUMBER := 18  ## uint: the dish's number (the number events carry, EV_D
 const DP_SEED := 19  ## uint: the initial seed of a new or loaded dish (the running copy is DS_SEED)
 const DP_STEP := 20  ## uint: the initial step of a new or loaded dish (the running copy is DS_STEP)
 const DP_NOISE_REFERENCE := 21  ## float: the dish's receptor-noise scale for chemotaxis
+const DP_CLOUD_SPREAD := 22  ## float: a cloud's spread in a step (2 D dt, D the dish's own diffusion: the medium is a dish's, not the pool's)
 const DPF_STATIONARY := 0  ## the bits of DP_FLAGS (the bit's place, not its mask)
 const DPF_DEATH_HUSKS := 1
 const DPF_PLANKTON_HUSKS := 2
@@ -327,7 +328,6 @@ const P_SLOTS := {
 	"bins_across": [67, "dish"],
 	"motion_step": [68, "const"],
 	"motion_structure": [69, "const"],
-	"cloud_spread": [70, "batch"],  # a cloud's spread in a step (2 D dt)
 	"puff_capacity": [71, "dish"],  # cloud slots
 	"entry_capacity": [72, "dish"],  # places in the lists of clouds by square
 	"bins": [73, "dish"],

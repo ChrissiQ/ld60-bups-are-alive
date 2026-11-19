@@ -4,8 +4,8 @@ extends SceneTree
 ##  - the record: 28 words, each of R_* named once (0-27), no word or constant naming a dish (a bup's dish is its segment);
 ##  - ids: one world-wide positive 63-bit number (ID_MAX 2^63 - 1), no dish in it; R_ID_HI is its high word; WORLD holds the next id (WD_NEXT_ID_LO/HI);
 ##  - an event's step word (ED_STEP, and a birth's EB_STEP): 13 low bits step, 19 high bits dish number, 13 + 19 = 32; MAX_STEPS_PER_BATCH (1024) fits in 13 bits;
-##  - DISHP: 32 words = 128 B; DP_* name 22 distinct words 0-21 (10 spare, 22-31 unused); six DPF_* flags in 0-6 (bit 4 spare);
-##    it names seed, step, k_total, iterations, noise_reference and radius;
+##  - DISHP: 32 words = 128 B; DP_* name 23 distinct words 0-22 (9 spare, 23-31 unused); six DPF_* flags in 0-6 (bit 4 spare);
+##    it names seed, step, k_total, iterations, cloud_spread, noise_reference and radius;
 ##  - DSTATE: 32 words; DS_* name 25 distinct words 0-24 (24-31 the energy ledger's four sums), including moved_in and moved_out;
 ##  - WORLD: 16 words, 13 named (the totals the kernels bound their loops by are uints there, not floats in P); payload: 4 words = 16 B, id texture 2 words = 8 B, colour bytes inside the fourth word above its spare low byte;
 ##  - STATS per dish: 16 words x (1 + 16) = 272 words;
@@ -20,7 +20,7 @@ func _init() -> void:
 	_record_has_no_dish(constants)
 	_ids()
 	_event_step()
-	_table(constants, "DP_", 22, L.DP_WORDS, "DISHP")
+	_table(constants, "DP_", 23, L.DP_WORDS, "DISHP")
 	_table(constants, "DS_", 25, L.DS_WORDS, "DSTATE")
 	_table(constants, "WD_", 16, L.WD_WORDS, "WORLD")
 	_dishp(constants)
@@ -78,7 +78,7 @@ func _event_step() -> void:
 
 func _dishp(constants: Dictionary) -> void:
 	TestUtil.check(L.DP_WORDS * 4 == 128, "a DISHP row is 128 bytes")
-	for name in ["DP_SEED", "DP_STEP", "DP_K_TOTAL", "DP_ITERATIONS", "DP_NOISE_REFERENCE", "DP_RADIUS", "DP_NUMBER", "DP_LIMIT", "DP_CAP", "DP_FLAGS"]:
+	for name in ["DP_SEED", "DP_STEP", "DP_K_TOTAL", "DP_ITERATIONS", "DP_NOISE_REFERENCE", "DP_CLOUD_SPREAD", "DP_RADIUS", "DP_NUMBER", "DP_LIMIT", "DP_CAP", "DP_FLAGS"]:
 		TestUtil.check(constants.has(name), "DISHP has no %s" % name)
 	var bits := {}
 	for name: String in constants:

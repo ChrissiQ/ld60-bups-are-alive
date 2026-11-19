@@ -176,7 +176,7 @@ void f(uint k) {
 	uint o = k * 8u;
 	if (PUFF[o + 5] < 0.5) return;
 	uint d = floatBitsToUint(PUFF[o + 5]) - PUFF_ROW_BASE;
-	float v = PUFF[o + 3] + P[P_CLOUD_SPREAD];
+	float v = PUFF[o + 3] + DPF(d, DP_CLOUD_SPREAD);
 	PUFF[o + 3] = v;
 	float mass = PUFF[o + 2];
 	if (mass <= 1e-9) { PUFF[o + 5] = 0.0; return; }
