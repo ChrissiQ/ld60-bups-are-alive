@@ -8,6 +8,7 @@ extends SceneTree
 const WATCHED := 12  ## bups put on the watch list in the busy state
 const WAIT_MSEC := 300000  ## the longest the busy world is waited for
 const SCALES := [100, 150, 250]
+const PLANKTON_WAIT_MSEC := 10000  ## the longest the free-setup preview's plankton are waited for
 
 
 func _initialize() -> void:
@@ -84,6 +85,11 @@ func _free_setup(out: String) -> void:
 	await _frames(240)
 	var d: Dish = setup.dish
 	var expected := int(round(d.bloom_per_day() * Dish.PLANKTON_MEAN_LIFE / 86400.0))
+	# The plankton go in after a pause in real time (FreeSetup.PLANKTON_SETTLE_SECONDS) and show from a later snapshot: a window that is
+	# not held to the display's rate runs many frames in that time, so wait for them by the clock, not by frames.
+	var waited := Time.get_ticks_msec()
+	while d.plankton.size() < expected and Time.get_ticks_msec() - waited < PLANKTON_WAIT_MSEC:
+		await process_frame
 	print("PACK free setup preview: %d plankton in the snapshot, steady state asked for %d (derived: bloom_per_day * mean life / 86400), %d bups" % [d.plankton.size(), expected, d.population()])
 	await _shot(out, "free_setup")
 	await _leave(setup)
