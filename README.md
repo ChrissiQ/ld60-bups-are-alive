@@ -2,7 +2,7 @@
 
 A small laboratory where you watch bacteria-like creatures ("bups") eat, swim, divide and evolve, with the real-world scales (micrometres, seconds) and a realistic model underneath. Play the guided experiments, or use free mode to set up any dish you like.
 
-The game is Godot 4.7 (GDScript). The simulation runs on the GPU (compute shaders in `gpu/`, driven from `scripts/sim/` through Godot's `RenderingDevice`), so the game needs a GPU that supports compute. The only C++ is the family-tree store (`LineageStore`, a GDExtension in `native/`), which has to be compiled for your operating system; prebuilt libraries are included in releases.
+The game is Godot 4.7 (GDScript). The simulation runs on the GPU (compute shaders in `gpu/`, driven from `scripts/sim/` through Godot's `RenderingDevice`), so the game needs a GPU that supports compute. The only C++ is the family-tree store and the graphics-memory query (`LineageStore` and `GpuMemory`, a GDExtension in `native/`), which has to be compiled for your operating system; prebuilt libraries are included in releases.
 
 ## Play it
 

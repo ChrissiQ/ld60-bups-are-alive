@@ -1,7 +1,8 @@
 class_name MemoryWatch
 extends RefCounted
 ## Keeps the pool's working memory budget (`PoolLimits.memory_budget_bytes`, which the arena reads) in step with the memory the machine has
-## free. The budget worked out at start (`PoolLimits.budget_for`) is the ceiling; while the game runs the machine is read again on a timer
+## free (on a card with memory of its own, the card's: the budget the system gives the process and what it uses). The budget worked out at
+## start (`PoolLimits.budget_for`) is the ceiling; while the game runs the machine is read again on a timer
 ## (`tick`, every INTERVAL_MSEC) and before a growth (`before_growth`, at most every MIN_GAP_MSEC), and the working budget follows:
 ##  - it falls at once when what is free no longer covers what the pool may still take (`PoolLimits.working_budget_for`);
 ##  - it rises again only when the figure has come back by at least RAISE_STEP of the ceiling (so a reading that flickers does not make
@@ -40,17 +41,6 @@ func _init(p_limits: PoolLimits, p_reader: Callable) -> void:
 func tick(now_msec: int, held: int) -> void:
 	if now_msec >= _next_msec:
 		_read(now_msec, held)
-
-
-## A new ceiling (the memory setting changed): the working budget is worked out again at once, so a lower ceiling takes hold now and a higher one
-## as far as the free memory allows.
-func set_ceiling(new_ceiling: int, now_msec: int, held: int) -> void:
-	ceiling = new_ceiling
-	var limits: PoolLimits = _limits.get_ref()
-	if limits != null and limits.memory_budget_bytes > ceiling:
-		limits.memory_budget_bytes = ceiling
-		lowered += 1
-	_read(now_msec, held)
 
 
 ## Before a growth: reads again unless a read is under MIN_GAP_MSEC old.

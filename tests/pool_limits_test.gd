@@ -6,7 +6,11 @@ extends SceneTree
 ##  - what a machine has free is `free` on Windows and macOS (never the engine's `available`: Windows' commit limit, macOS's free swap
 ##    added), `MemAvailable` on Linux when it is read, else `free`; a figure the engine gives as -1 is unknown;
 ##  - 16 GiB shared: 0.4 x 16 = 6.4 GiB; 8 GiB shared: 3.2 GiB; 64 GiB shared: the 8 GiB cap; 2 GiB: the 1 GiB floor;
-##  - memory of its own (discrete) or an adapter not known: at most the 2 GiB default whatever the system memory is (1 GiB when that is under 2.5 GiB);
+##  - memory of its own (discrete) or an adapter not known: CARD_SHARE 0.75 of what the card reports, its OS budget when given, else its
+##    dedicated memory (8 GiB card, no budget: 6 GiB; 8 GiB card, the OS gives 7: 5.25 GiB; 24 GiB card: the 8 GiB cap), and never over
+##    0.4 of the physical memory (8 GiB card on 8 GiB: 3.2 GiB); a card whose size is not read: the 2 GiB default;
+##  - on a card with a live budget and usage (usage counts what the pool holds), the working budget is held + 0.75 x (budget - usage):
+##    7 budget, 2 used, 1 held: 1 + 3.75 = 4.75; the system's free memory is then not used;
 ##  - physical memory not reported: the floor;
 ##  - working budget = held + 0.5 x free, between the floor and the ceiling: 6.4 ceiling, 1 held, 10 free: 6.0; 2 free: 2.0; 0.2 free: the floor;
 ##    free not reported: the ceiling; short when free is under a tenth of physical;
@@ -28,6 +32,7 @@ var _machine: MachineMemory
 func _init() -> void:
 	_meanings()
 	_budgets()
+	_cards()
 	_working()
 	_watch()
 	_classes()
@@ -38,8 +43,12 @@ func _init() -> void:
 	TestUtil.finish(self, "OK pool_limits_test")
 
 
-func _machine_of(physical: int, free: int, available: int, os_name: String, adapter: int, linux_available := -1) -> MachineMemory:
-	return MachineMemory.from_report({"physical": physical, "free": free, "available": available, "stack": -1}, os_name, adapter, linux_available)
+func _machine_of(physical: int, free: int, available: int, os_name: String, adapter: int, linux_available := -1, card := {}) -> MachineMemory:
+	return MachineMemory.from_report({"physical": physical, "free": free, "available": available, "stack": -1}, os_name, adapter, linux_available, card)
+
+
+func _card(dedicated: int, budget := 0, usage := 0, api := "dxgi") -> Dictionary:
+	return {"known": true, "dedicated": dedicated, "budget": budget, "usage": usage, "api": api}
 
 
 func _meanings() -> void:
@@ -65,12 +74,57 @@ func _budgets() -> void:
 	TestUtil.check(_near(PoolLimits.budget_for(_machine_of(16 * GIB, 1 * GIB, -1, MAC, INTEGRATED)), 6.4 * GIB), "the budget is the ceiling whatever is free now: the working budget follows what is free")
 	TestUtil.check(_near(PoolLimits.budget_for(_machine_of(8 * GIB, 5 * GIB, -1, WIN, INTEGRATED)), 3.2 * GIB), "8 GiB shared: 3.2 GiB")
 	TestUtil.check(PoolLimits.budget_for(_machine_of(64 * GIB, 50 * GIB, -1, WIN, INTEGRATED)) == 8 * GIB, "64 GiB shared: the cap")
-	TestUtil.check(PoolLimits.budget_for(_machine_of(32 * GIB, 20 * GIB, -1, WIN, DISCRETE)) == 2 * GIB, "a discrete card, 32 GiB of system memory: 2 GiB")
+	TestUtil.check(PoolLimits.budget_for(_machine_of(32 * GIB, 20 * GIB, -1, WIN, DISCRETE)) == 2 * GIB, "a discrete card of unknown size, 32 GiB of system memory: 2 GiB")
 	TestUtil.check(PoolLimits.budget_for(_machine_of(32 * GIB, 20 * GIB, -1, LIN, OTHER)) == 2 * GIB, "an adapter not known: 2 GiB")
-	TestUtil.check(_near(PoolLimits.budget_for(_machine_of(4 * GIB, 2 * GIB, -1, WIN, DISCRETE)), 1.6 * GIB), "a discrete card, 4 GiB of system memory: 0.4 x 4")
+	TestUtil.check(_near(PoolLimits.budget_for(_machine_of(4 * GIB, 2 * GIB, -1, WIN, DISCRETE)), 1.6 * GIB), "a discrete card of unknown size, 4 GiB of system memory: 0.4 x 4")
 	TestUtil.check(PoolLimits.budget_for(_machine_of(2 * GIB, 1 * GIB, -1, WIN, INTEGRATED)) == GIB, "2 GiB: the floor")
 	TestUtil.check(PoolLimits.budget_for(_machine_of(-1, -1, -1, "Other", OTHER)) == GIB, "nothing reported: the floor")
 	TestUtil.check(PoolLimits.budget_for(_machine_of(-1, 4 * GIB, -1, "Other", INTEGRATED)) == GIB, "no physical memory: the floor")
+
+
+func _cards() -> void:
+	var win := func(card: Dictionary, physical := 32 * GIB) -> MachineMemory: return _machine_of(physical, physical / 2, -1, WIN, DISCRETE, -1, card)
+	var m: MachineMemory = win.call(_card(8 * GIB, 7 * GIB, 2 * GIB))
+	TestUtil.check(m.card_dedicated == 8 * GIB and m.card_budget == 7 * GIB and m.card_usage == 2 * GIB and m.card_api == "dxgi", "the card's figures are kept")
+	TestUtil.check(_near(PoolLimits.budget_for(m), 5.25 * GIB), "8 GiB card, the system gives 7: 0.75 x 7")
+	TestUtil.check(_near(PoolLimits.budget_for(win.call(_card(8 * GIB))), 6.0 * GIB), "8 GiB card, no system budget: 0.75 x 8")
+	TestUtil.check(PoolLimits.budget_for(win.call(_card(24 * GIB, 22 * GIB))) == 8 * GIB, "24 GiB card: the cap")
+	TestUtil.check(_near(PoolLimits.budget_for(win.call(_card(8 * GIB), 8 * GIB)), 3.2 * GIB), "8 GiB card on 8 GiB of system memory: 0.4 x 8")
+	TestUtil.check(PoolLimits.budget_for(win.call(_card(1 * GIB))) == GIB, "a 1 GiB card: the floor")
+	TestUtil.check(PoolLimits.budget_for(win.call({"known": false})) == 2 * GIB, "a card of unknown size: 2 GiB")
+	TestUtil.check(PoolLimits.budget_for(win.call({"known": true, "dedicated": 0, "budget": 0, "usage": 0, "api": "dxgi"})) == 2 * GIB, "a card that reports 0: unknown")
+	var mac := _machine_of(16 * GIB, 10 * GIB, -1, MAC, INTEGRATED, -1, {"known": false})
+	TestUtil.check(mac.card_dedicated == -1 and mac.card_api == "" and _near(PoolLimits.budget_for(mac), 6.4 * GIB), "a Mac: no card figures, 0.4 of the memory it shares")
+	var shared := _machine_of(16 * GIB, 10 * GIB, -1, WIN, INTEGRATED, -1, _card(512 * 1024 * 1024))
+	TestUtil.check(_near(PoolLimits.budget_for(shared), 6.4 * GIB), "an integrated adapter's small dedicated figure does not count: its memory is the system's")
+	var unknown_type := _machine_of(16 * GIB, 10 * GIB, -1, LIN, OTHER, -1, _card(12 * GIB, 0, 0, "vulkan"))
+	TestUtil.check(unknown_type.shared == 0 and _near(PoolLimits.budget_for(unknown_type), 6.4 * GIB), "an adapter type not given but a card size read: a card (0.75 x 12 = 9, held to 0.4 x 16)")
+	TestUtil.check(m.card_usage == 2 * GIB and _machine_of(16 * GIB, 8 * GIB, -1, LIN, DISCRETE, -1, _card(8 * GIB, 0, 3 * GIB, "vulkan")).card_usage == -1, "a usage without a budget is not kept")
+	var live: MachineMemory = win.call(_card(8 * GIB, 7 * GIB, 2 * GIB))
+	TestUtil.check(_near(PoolLimits.working_budget_for(live, GIB, 6 * GIB), 4.75 * GIB), "live card: 1 held + 0.75 x (7 - 2)")
+	TestUtil.check(PoolLimits.working_budget_for(live, GIB, int(4.5 * GIB)) == int(4.5 * GIB), "held to the ceiling")
+	live.card_usage = 7 * GIB
+	TestUtil.check(PoolLimits.working_budget_for(live, 3 * GIB, 6 * GIB) == 3 * GIB, "the card full: what the pool holds")
+	live.card_usage = 8 * GIB
+	TestUtil.check(PoolLimits.working_budget_for(live, 0, 6 * GIB) == GIB, "over its budget: the floor")
+	var nolive: MachineMemory = win.call(_card(8 * GIB))
+	TestUtil.check(PoolLimits.working_budget_for(nolive, GIB, 6 * GIB) == 6 * GIB and PoolLimits.working_budget_for(nolive, GIB, 6 * GIB) != PoolLimits.working_budget_for(live, GIB, 6 * GIB), "no live card figures: the system's free memory decides (16 GiB free: the ceiling)")
+	var w := _watch_card()
+	TestUtil.check(w, "the watch follows a card's live budget")
+
+
+func _watch_card() -> bool:
+	var limits := PoolLimits.new()
+	limits.memory_budget_bytes = int(5.25 * GIB)
+	var m := _machine_of(32 * GIB, 16 * GIB, -1, WIN, DISCRETE, -1, _card(8 * GIB, 7 * GIB, 1 * GIB))
+	_machine = m
+	var w := MemoryWatch.new(limits, _read)
+	w.tick(0, GIB)
+	var ok := limits.memory_budget_bytes == int(5.25 * GIB)  # 1 + 0.75 x 6 = 5.5, held to the ceiling 5.25
+	_machine = _machine_of(32 * GIB, 16 * GIB, -1, WIN, DISCRETE, -1, _card(8 * GIB, 4 * GIB, 3 * GIB))  # another program took the card's memory
+	w.tick(5000, GIB)
+	ok = ok and _near(limits.memory_budget_bytes, 1.75 * GIB)  # 1 + 0.75 x 1
+	return ok
 
 
 func _working() -> void:
@@ -92,6 +146,7 @@ func _read() -> MachineMemory:
 
 
 func _watch() -> void:
+	_clock_reads = 0
 	var limits := PoolLimits.new()
 	limits.memory_budget_bytes = int(6.4 * GIB)
 	var w := MemoryWatch.new(limits, _read)
@@ -132,7 +187,7 @@ func _classes() -> void:
 	var B := PoolLimits.MACHINE_BELOW
 	TestUtil.check(PoolLimits.classify(_machine_of(16 * GIB, 10 * GIB, -1, MAC, INTEGRATED)) == E, "16 GiB shared: enough")
 	TestUtil.check(PoolLimits.classify(_machine_of(8 * GIB, 5 * GIB, -1, WIN, INTEGRATED)) == E, "8 GiB shared: enough (3.2 GiB budget)")
-	TestUtil.check(PoolLimits.classify(_machine_of(32 * GIB, 20 * GIB, -1, WIN, DISCRETE)) == E, "discrete card, 32 GiB: enough (2 GiB budget)")
+	TestUtil.check(PoolLimits.classify(_machine_of(32 * GIB, 20 * GIB, -1, WIN, DISCRETE)) == E, "discrete card of unknown size, 32 GiB: enough (2 GiB budget)")
 	TestUtil.check(PoolLimits.classify(_machine_of(4 * GIB, 2 * GIB, -1, WIN, INTEGRATED)) == L, "4 GiB shared: low (1.6 GiB budget)")
 	TestUtil.check(PoolLimits.classify(_machine_of(-1, -1, -1, "Other", OTHER)) == L, "nothing reported: low")
 	TestUtil.check(PoolLimits.classify(_machine_of(2 * GIB, 1 * GIB, -1, WIN, INTEGRATED)) == B, "2 GiB: below the minimum")

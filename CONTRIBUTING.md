@@ -21,7 +21,7 @@ Follow "Build and run from source" in the [README](README.md). The C++ lineage s
 - **Tests:** add or update a test for behaviour you change. The interface tests are quick and catch most slips (`ui_lint_test`, `strings_test`, `fonts_test`, `screens_test`, `settings_test`, `toolbar_test`, `free_mode_test`, `tutorial_test`); the simulation tests need a GPU and are slow, so run the ones your change can affect. How to run them is under "Tests" below. Please do not leave temporary test files behind.
 - **Model changes:** the model lives in the GPU kernels (`gpu/kernels*.gd`) and nowhere else; regenerate the shaders and run the windowed tests under `tests/sim/`. See "The simulation" in `AGENTS.md`.
 - **Motion table:** `scripts/motion_table.gd` is generated (`tools/gen_motion_table.gd`, about 5 minutes). Regenerate it when `motion_table_test` says it is stale.
-- **C++ changes** (only `LineageStore` is C++): rebuild for your platform and say in the pull request that the C++ changed; the other platforms' libraries come from the release workflow.
+- **C++ changes** (only `LineageStore` and `GpuMemory` are C++): rebuild for your platform and say in the pull request that the C++ changed; the other platforms' libraries come from the release workflow.
 
 `AGENTS.md` has the full list of project conventions and gotchas (it is written for coding agents, but it is just as useful for people).
 

@@ -298,7 +298,6 @@ def component_section():
         ("Section heading", "SectionButton, TraySection", "Collapses its content; has a chevron; dragged by its heading to a new place in the tray"),
         ("Yes or no setting", "ToggleRow", "On/Off, with a description below"),
         ("Number setting", "SettingRow", "Number, with slider or field"),
-        ("Choice setting", "MemoryRow", "One of Auto, Low or Number in segments, with the number row shown only for Number and a description below"),
         ("Warning", "WarningIcon with Warning text", "Coral icon and text"),
         ("Dish tab", "ChoiceButton in DishStrip", "A running dish in the top bar: its small picture (the dish, with its bups as brighter where denser) and its number; the dish in view is lit, the count of dishes beside the tabs. Only the tabs in view are made, so a thousand dishes scroll as a screenful does"),
         ("Long list", "Freezer rows, dish tabs", "Rows or tabs of one size, made only where they are in view; a spacer stands for the rest"),

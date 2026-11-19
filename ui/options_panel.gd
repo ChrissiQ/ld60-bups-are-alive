@@ -7,7 +7,6 @@ extends PanelPage
 @onready var scale_row: SettingRow = $Box/Scroll/Rows/ScaleRow
 @onready var scroll_row: SettingRow = $Box/Scroll/Rows/ScrollRow
 @onready var motion_toggle: ToggleRow = $Box/Scroll/Rows/MotionToggle  ## ticked: the operating system decides, and the switch shows what it says
-@onready var memory_row: MemoryRow = $Box/Scroll/Rows/MemoryRow  ## the memory the simulation may use: Auto, Low or a number of GB
 @onready var reset_button: Button = $Box/Actions/ResetButton  ## one reset for every setting on the panel
 
 var _syncing := false
@@ -29,9 +28,6 @@ func _ready() -> void:
 	scale_row.value_changed.connect(func(v: float) -> void:
 		if not _syncing:
 			UserSettings.set_ui_scale(v / 100.0))
-	memory_row.changed.connect(func(mode: String, gb: float) -> void:
-		if not _syncing:
-			UserSettings.set_memory(mode, gb))
 	reset_button.tooltip_text = Strings.t("options.reset_tip")
 	reset_button.pressed.connect(func() -> void:
 		UserSettings.reset()
@@ -47,7 +43,6 @@ func _sync() -> void:
 	_show_motion()
 	scale_row.set_value_silently(UserSettings.ui_scale * 100.0)
 	scroll_row.set_value_silently(UserSettings.scroll_speed * 100.0)
-	memory_row.show_setting(UserSettings.memory_mode, UserSettings.memory_gb)
 	_syncing = false
 
 

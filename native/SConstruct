@@ -2,6 +2,8 @@
 # Builds the native part of Bups Are Alive (a Godot GDExtension). Run `scons` in this folder.
 env = SConscript("godot-cpp/SConstruct")
 env.Append(CPPPATH=["src/"])
+if env["platform"] == "windows":
+	env.Append(LIBS=["dxgi"])  # GpuMemory reads the adapter's memory through DXGI
 sources = Glob("src/*.cpp")
 library = env.SharedLibrary("bin/libbups{}{}".format(env["suffix"], env["SHLIBSUFFIX"]), source=sources)
 Default(library)

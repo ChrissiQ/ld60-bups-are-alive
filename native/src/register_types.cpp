@@ -1,5 +1,6 @@
 #include "register_types.h"
 
+#include "gpu_memory.h"
 #include "lineage_store.h"
 
 #include <gdextension_interface.h>
@@ -13,6 +14,7 @@ void initialize_bups_module(ModuleInitializationLevel p_level) {
 		return;
 	}
 	GDREGISTER_CLASS(LineageStore);
+	GDREGISTER_CLASS(GpuMemory);
 }
 
 void uninitialize_bups_module(ModuleInitializationLevel p_level) {

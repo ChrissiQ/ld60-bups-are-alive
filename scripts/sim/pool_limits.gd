@@ -12,15 +12,13 @@ const WARN_FRACTION := 0.90  ## the share of the memory budget at which the game
 const BUDGET_SHARE := 0.4  ## of the memory the buffers may share with the system (the whole of it when the graphics memory is the system's): the host side's copies of a dish's grid and the rest of the process add up to a quarter on top, which keeps the process near half of the memory
 const BUDGET_FLOOR := 1024 * 1024 * 1024  ## the least: the pool has to hold a few big dishes
 const BUDGET_CAP := 8 * 1024 * 1024 * 1024  ## the most: more than any dish or crowd the interface allows needs
-const DISCRETE_BUDGET := 2 * 1024 * 1024 * 1024  ## the budget when the adapter has memory of its own (or is not known to be integrated): the engine does not report how much it has, and a 4 GB card has to hold the interface's drawing besides
-const GROW_SHARE := 0.5  ## of the memory free now, what the pool may take on top of what it holds
+const CARD_SHARE := 0.75  ## of what the system lets the process use on a card with memory of its own (the card's budget, else its dedicated memory), the share the buffers may take: the rest holds the interface's drawing, the engine's own textures and what other programs use; the same share of what is still free bounds a growth
+const DISCRETE_BUDGET := 2 * 1024 * 1024 * 1024  ## the budget for a card with memory of its own whose size could not be read (the native query is not there or the driver did not answer): a 4 GB card has to hold the interface's drawing besides
+const GROW_SHARE := 0.5  ## of the system memory free now (a card with a live budget uses CARD_SHARE of its own free memory instead), what the pool may take on top of what it holds
 const SHORT_FREE_SHARE := 0.1  ## of the physical memory: below this much free the machine is short and the pool gives back what it uses little
 const LOW_BUPS := 500000  ## low-memory mode: the most bups a dish may be given as its limit (about 0.5 GB of buffers a dish at its limit)
 const LOW_DISHES := 10  ## low-memory mode: the most dishes running at once
 const LOW_GRID := 200  ## low-memory mode: the most cells across a dish's nutrient grid (about 21 MB a dish)
-const MEMORY_AUTO := "auto"  ## the memory setting: the machine's own budget (`budget_for`)
-const MEMORY_LOW := "low"  ## the memory setting: low-memory mode whatever the machine has
-const MEMORY_CUSTOM := "custom"  ## the memory setting: the ceiling is the number of GB the player gave
 const GIB := 1024 * 1024 * 1024
 const WARN_NEAR := "near"
 const WARN_STALLED := "stalled"
@@ -33,8 +31,6 @@ const ENOUGH_BUDGET := 2 * 1024 * 1024 * 1024  ## a budget under this cannot hol
 
 var d_max := GpuLayout.D_MAX  ## dish rows (fixed by the layout)
 var memory_budget_bytes := 6 * 1024 * 1024 * 1024  ## what the arena may hold now (the working budget); `from_settings` works the game's out from what the machine reports (`budget_for`) and the memory watch moves it, the tests set their own
-var memory_mode := MEMORY_AUTO  ## the memory setting in force (`set_memory`)
-var memory_gb := 0.0  ## with MEMORY_CUSTOM, the ceiling in GB
 var machine: MachineMemory  ## what the machine reported when the limits were made (null in the tests)
 var watch: MemoryWatch  ## keeps `memory_budget_bytes` in step with the free memory (null: it stays where it is set)
 var payload_rows := 64  ## rows of PAYLOAD_TEX_WIDTH texels the payload textures start with
@@ -48,71 +44,57 @@ static func from_settings() -> PoolLimits:
 	UserSettings.load_once()
 	var limits := PoolLimits.new()
 	limits.frame_queue_size = int(ProjectSettings.get_setting("rendering/rendering_device/vsync/frame_queue_size", 2))
-	limits.machine = MachineMemory.read(RenderingServer.get_video_adapter_type())
-	limits.memory_mode = UserSettings.memory_mode
-	limits.memory_gb = UserSettings.memory_gb
-	limits.memory_budget_bytes = ceiling_for(limits.machine, limits.memory_mode, limits.memory_gb)
+	limits.machine = MachineMemory.read(RenderingServer.get_video_adapter_type(), MachineMemory.card_handles())
+	limits.memory_budget_bytes = budget_for(limits.machine)
 	return limits
 
 
-## Puts the memory setting in force while the simulation runs (the sim thread calls this): the ceiling the watch keeps the working budget
-## under becomes `ceiling_for`, and the working budget follows it at once (lowered now; raised when the machine's free memory allows).
-func set_memory(mode: String, gb: float, now_msec: int, held: int) -> void:
-	memory_mode = mode
-	memory_gb = gb
-	var m := machine if machine != null else MachineMemory.new()
-	var ceiling := ceiling_for(m, mode, gb)
-	if watch != null:
-		watch.set_ceiling(ceiling, now_msec, held)
-	elif machine != null or mode == MEMORY_CUSTOM:  # (limits made by hand, as the tests make them, keep their own budget unless a number is given)
-		memory_budget_bytes = ceiling
-
-
-## Makes the watch that keeps the working budget in step with the free memory; the adapter's type is what `from_settings` read.
+## Makes the watch that keeps the working budget in step with the free memory; the adapter's type and the card's handles are what
+## `from_settings` read (on the main thread: the sim thread reads the machine again with them).
 func start_watch() -> void:
 	if machine == null or watch != null:
 		return
 	var adapter := machine.adapter_type
-	watch = MemoryWatch.new(self, func() -> MachineMemory: return MachineMemory.read(adapter))
+	var handles := machine.handles
+	watch = MemoryWatch.new(self, func() -> MachineMemory: return MachineMemory.read(adapter, handles))
 
 
-## The budget for a machine: BUDGET_SHARE of its physical memory when the graphics memory is the system's, at most DISCRETE_BUDGET when the
-## adapter has memory of its own or is not known (a setting can raise it), then held between BUDGET_FLOOR and BUDGET_CAP. Physical memory
-## not reported: the floor.
+## The budget for a machine. Graphics memory that is the system's: BUDGET_SHARE of the physical memory. Otherwise (a card with memory of its
+## own, or an adapter not known to be integrated): CARD_SHARE of what the system lets the process use of the card (`card_budget`; else
+## `card_dedicated`), DISCRETE_BUDGET when the card's size is not known, and never more than BUDGET_SHARE of the physical memory when that is
+## known (the host side's copies of the buffers live there). Held between BUDGET_FLOOR and BUDGET_CAP; nothing usable reported: the floor.
 static func budget_for(m: MachineMemory) -> int:
-	if m.physical <= 0:
+	if m.shared == 1:
+		if m.physical <= 0:
+			return BUDGET_FLOOR
+		return clampi(int(BUDGET_SHARE * m.physical), BUDGET_FLOOR, BUDGET_CAP)
+	var card := m.card_budget if m.card_budget > 0 else m.card_dedicated
+	var budget := CARD_SHARE * card if card > 0 else float(DISCRETE_BUDGET)
+	if m.physical > 0:
+		budget = minf(budget, BUDGET_SHARE * m.physical)
+	elif card <= 0:
 		return BUDGET_FLOOR
-	var budget := BUDGET_SHARE * m.physical
-	if m.shared != 1:
-		budget = minf(budget, DISCRETE_BUDGET)
 	return clampi(int(budget), BUDGET_FLOOR, BUDGET_CAP)
 
 
-## The ceiling the setting gives for a machine: MEMORY_CUSTOM is `gb` GB (never under BUDGET_FLOOR; the only way past the default a card with
-## memory of its own gets), MEMORY_AUTO and MEMORY_LOW are `budget_for` (low-memory mode limits what a dish may ask for, not the buffers' ceiling).
-static func ceiling_for(m: MachineMemory, mode: String, gb: float) -> int:
-	if mode == MEMORY_CUSTOM and gb > 0.0:
-		return maxi(int(gb * GIB), BUDGET_FLOOR)
-	return budget_for(m)
-
-
-## Whether low-memory mode is on: the setting says low, or (automatic) the machine is not classed enough, or (a number) the ceiling given is
-## under ENOUGH_BUDGET, which cannot hold the largest dish.
-static func is_low_memory(m: MachineMemory, mode: String, gb: float) -> bool:
-	match mode:
-		MEMORY_LOW:
-			return true
-		MEMORY_CUSTOM:
-			return ceiling_for(m, mode, gb) < ENOUGH_BUDGET
+## Whether low-memory mode is on for a machine: it is not classed enough.
+static func is_low_memory(m: MachineMemory) -> bool:
 	return classify(m) != MACHINE_ENOUGH
 
 
-## The working budget with `held` bytes in the buffers and the machine as it is now: what the pool holds plus GROW_SHARE of what is free,
-## held between BUDGET_FLOOR and `ceiling`. Free memory not reported: the ceiling.
+## The working budget with `held` bytes in the buffers and the machine as it is now: what the pool holds plus what it may still take, held
+## between BUDGET_FLOOR and `ceiling`. On a card with memory of its own that reports a live budget and usage (usage counts what the pool
+## holds), what it may still take is CARD_SHARE of the budget not yet used; otherwise GROW_SHARE of the system memory free. Neither
+## reported: the ceiling.
 static func working_budget_for(m: MachineMemory, held: int, ceiling: int) -> int:
-	if m.available <= 0:
+	var more := -1
+	if m.shared == 0 and m.card_budget > 0 and m.card_usage >= 0:
+		more = int(CARD_SHARE * maxi(m.card_budget - m.card_usage, 0))
+	elif m.available > 0:
+		more = int(GROW_SHARE * m.available)
+	if more < 0:
 		return ceiling
-	return clampi(held + int(GROW_SHARE * m.available), mini(BUDGET_FLOOR, ceiling), ceiling)
+	return clampi(held + more, mini(BUDGET_FLOOR, ceiling), ceiling)
 
 
 ## Whether the machine is short of memory: what is free is under SHORT_FREE_SHARE of the physical memory (false when either is not reported).

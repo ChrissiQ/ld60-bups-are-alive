@@ -24,7 +24,6 @@ extends RefCounted
 
 const KIND_INSPECT := &"inspect"  ## tests and tools: args {call: Callable(core: SimCore, rows: Dictionary client -> core row)}; the reply's value is what it returns
 const KIND_WORLD_SEED := &"world_seed"  ## args {seed}: the world's seed (new dishes' seeds are drawn from it and their number)
-const KIND_MEMORY := &"memory"  ## args {mode, gb}: the memory setting changed (WorldClient.set_memory)
 const KIND_BEGIN_GAME := &"begin_game"  ## args {game_began}: a new game (WorldClient.begin_game): the numbers start again, the family tree's times count from it
 const HUSK_VIEW_MSEC := 100  ## the least real time between two reads of the main dish's husks (dish.gd's HUSK_REFRESH_MSEC)
 const FIELD_VIEW_MSEC := 100  ## the least real time between two field pictures (dish.gd's HAZE_REFRESH_MSEC)
@@ -705,8 +704,6 @@ func _handle(cmd: SimCommand) -> void:
 			_save_all(cmd.reply)
 		KIND_WORLD_SEED:
 			_core.world_seed = int(a["seed"])
-		KIND_MEMORY:
-			limits.set_memory(String(a["mode"]), float(a["gb"]), Time.get_ticks_msec(), _core.arena.bytes_now())
 		KIND_BEGIN_GAME:
 			_core.begin_game()
 			_game_began = float(a["game_began"])

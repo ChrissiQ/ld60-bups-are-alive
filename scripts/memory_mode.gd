@@ -1,9 +1,8 @@
 class_name MemoryMode
 extends RefCounted
 ## Low-memory mode as the game's screens see it: whether it is on, and what it limits (`PoolLimits.LOW_*`). It follows what the machine reported when
-## the game started and the player's memory setting (`UserSettings.memory_mode`), so changing the setting changes it at once. A dish that is already
-## over a limit (a saved one, one thawed, or one made before the setting changed) runs as it is and cannot be given more: the ranges offered for it
-## end at what it has.
+## the game started: it is on when the machine is not classed enough (`PoolLimits.classify`), and the player does not choose it. A dish that is
+## already over a limit (a saved one or one thawed) runs as it is and cannot be given more: the ranges offered for it end at what it has.
 
 ## What the machine reported at start. Null until read; the simulation's start sets it to what it read itself (`SimService`), and the tests set a
 ## made-up machine here.
@@ -16,13 +15,12 @@ static var last_notice := ""
 ## The machine's report (read now when nothing has set it).
 static func report() -> MachineMemory:
 	if machine == null:
-		machine = MachineMemory.read(RenderingServer.get_video_adapter_type())
+		machine = MachineMemory.read(RenderingServer.get_video_adapter_type(), MachineMemory.card_handles())
 	return machine
 
 
 static func is_low() -> bool:
-	UserSettings.load_once()
-	return PoolLimits.is_low_memory(report(), UserSettings.memory_mode, UserSettings.memory_gb)
+	return PoolLimits.is_low_memory(report())
 
 
 ## Whether the machine itself is below the least the game is made for (what the first notice is about).

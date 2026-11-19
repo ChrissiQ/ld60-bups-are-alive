@@ -48,16 +48,6 @@ func started() -> bool:
 	return _world != null
 
 
-func _ready() -> void:
-	UserSettings.listen_memory(_memory_changed)
-
-
-## The memory setting changed: the running simulation follows (a world not made yet reads the setting when it starts).
-func _memory_changed() -> void:
-	if _world != null:
-		_world.set_memory(UserSettings.memory_mode, UserSettings.memory_gb)
-
-
 func _process(_delta: float) -> void:
 	if _world != null:
 		_world.poll()

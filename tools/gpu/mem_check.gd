@@ -1,5 +1,5 @@
 extends SceneTree
-## Where the pooled world's graphics memory runs out on the machine it runs on (the memory budget's rule). For macOS only: it reads `vm_stat`, `footprint` and `sysctl`. Windowed, through the run lock, one mode a run:
+## Where the pooled world's graphics memory runs out on the machine it runs on (the memory budget's rule). The `info` mode runs on any system (it prints the native card query's figures and the budget the game chooses from them); the other modes are for macOS only: they read `vm_stat`, `footprint` and `sysctl`. Windowed, through the run lock, one mode a run:
 ##   RUN_TIMEOUT=900 tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tools/gpu/mem_check.gd -- <mode> [stage] [stages]
 ## modes: info (what the machine reports), slots (bups added `stage` thousand a time in one pool), dishes (empty 400x400 dishes added `stage` at a time),
 ## bigbuf (single buffers and a growth by copy, to see what a big buffer costs while it is made and after it is freed).
@@ -43,6 +43,9 @@ func _initialize() -> void:
 	var is_game := mode in ["title", "default", "ten", "big"]
 	if not is_game:
 		_info()
+		if OS.get_name() != "macOS":
+			quit(0)
+			return
 	_base_swap = _swap_used()
 	_base_pageouts = int(_vm().get("pageouts", 0))
 	_base_footprint = _footprint()
@@ -99,12 +102,33 @@ func _pressure() -> String:
 	return m.get_string(1) + "% free" if m != null else "?"
 
 
+## The native card query as the game reads it (the main device's handles, which `MachineMemory.card_handles` reads) and from the local device
+## the simulation runs on, and what budget the game then chooses.
+func _card_info() -> void:
+	print("INFO GpuMemory class present: %s" % ClassDB.class_exists("GpuMemory"))
+	var handles := MachineMemory.card_handles()
+	print("INFO card handles (main device): %s" % str(handles))
+	print("INFO GpuMemory.query (main device handles): %s" % str(MachineMemory.query_card(handles)))
+	var local := RenderingServer.create_local_rendering_device()
+	if local != null:
+		var h := handles.duplicate()
+		h["logical"] = local.get_driver_resource(RenderingDevice.DRIVER_RESOURCE_LOGICAL_DEVICE, RID(), 0)
+		h["physical"] = local.get_driver_resource(RenderingDevice.DRIVER_RESOURCE_PHYSICAL_DEVICE, RID(), 0)
+		h["instance"] = local.get_driver_resource(RenderingDevice.DRIVER_RESOURCE_TOPMOST_OBJECT, RID(), 0)
+		print("INFO local device handles: %s" % str(h))
+		print("INFO GpuMemory.query (local device handles): %s" % str(MachineMemory.query_card(h)))
+	var m := MachineMemory.read(RenderingServer.get_video_adapter_type(), handles)
+	print("INFO MachineMemory: %s" % str(m.to_dict()))
+	print("INFO PoolLimits.budget_for = %.2f GiB, class %s, low-memory mode %s" % [float(PoolLimits.budget_for(m)) / GIB, PoolLimits.classify(m), PoolLimits.is_low_memory(m)])
+
+
 ## What the machine reports that the game can read.
 func _info() -> void:
 	var mi := OS.get_memory_info()
 	print("INFO OS.get_memory_info: %s" % str(mi))
 	print("INFO adapter: %s %s, type %d (0 other, 1 integrated, 2 discrete, 3 virtual, 4 cpu)" % [RenderingServer.get_video_adapter_vendor(), RenderingServer.get_video_adapter_name(), RenderingServer.get_video_adapter_type()])
 	print("INFO api %s %s; driver %s" % [RenderingServer.get_video_adapter_api_version(), DisplayServer.get_name(), RenderingServer.get_current_rendering_driver_name()])
+	_card_info()
 	var rd := RenderingServer.create_local_rendering_device()
 	if rd == null:
 		print("INFO no local device")
@@ -126,7 +150,8 @@ func _info() -> void:
 			print("INFO %s = %d" % [c, rd.limit_get(ClassDB.class_get_integer_constant("RenderingDevice", c))])
 	print("INFO rd memory: total %d, buffers %d, textures %d" % [rd.get_memory_usage(RenderingDevice.MEMORY_TOTAL), rd.get_memory_usage(RenderingDevice.MEMORY_BUFFERS), rd.get_memory_usage(RenderingDevice.MEMORY_TEXTURES)])
 	print("INFO RS info: video mem used %d, buffer mem used %d" % [RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_VIDEO_MEM_USED), RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_BUFFER_MEM_USED)])
-	print("INFO sysctl: %s" % _exec("/usr/sbin/sysctl", ["-n", "hw.memsize"]).strip_edges())
+	if OS.get_name() == "macOS":
+		print("INFO sysctl: %s" % _exec("/usr/sbin/sysctl", ["-n", "hw.memsize"]).strip_edges())
 
 
 func _core() -> SimCore:
