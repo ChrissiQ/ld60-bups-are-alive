@@ -12,8 +12,12 @@ extends RefCounted
 ## - Each is imported in a different, view-compatible format (payload RGBA32UI as RGBA32I, ids RG32UI as RG32I, the RGBA8 pictures as
 ##   sRGB): on Metal `texture_create_from_extension` wraps a native texture of the same format without retaining it, and freeing the
 ##   wrapper would free the simulation's texture twice (a crash at exit); a different format makes the driver build a view with its own
-##   count, which is safe to free. A picture's Texture2DRD reads its sRGB import through a view in RGBA8 (the texture storage makes one
-##   for a format with an sRGB twin), so the canvas reads its bytes as they are and filters them as the other pictures.
+##   count, which is safe to free.
+## - A picture's Texture2DRD does not hold the import but a texture the main device made itself (`_owned`, the import's size and format),
+##   into which the import is copied on the main device whenever a new publish is shown: the canvas makes a view of the texture it is
+##   given (an sRGB read), and on Direct3D 12 a view of an imported texture is refused, as it has no allocation of its own. The
+##   Texture2DRD reads the owned sRGB texture through a view in RGBA8 (the texture storage makes one for a format with an sRGB twin), so
+##   the canvas reads its bytes as they are and filters them as the other pictures.
 ## - The simulation writes a texture again only once the main side last used it more than `frame_queue_size` + 1 frames ago, so the main
 ##   side tells it which texture of each kind it used on which frame (`take_bound`; SimCore.texture_bound), every frame, the payload's
 ##   included whether or not a build read it (so the simulation's count of frames moves on).
@@ -65,6 +69,7 @@ var _sets := {}  ## "kernel|index" -> uniform set
 var _inst := RID()  ## the MultiMesh buffer the sets bind
 var _imports := {}  ## kind -> {generation, size, rids: Array[RID] (imported), bound: Array[int] (the frame each was last used on), seqs: Array[int] (the publish each holds)}
 var _retired: Array = []  ## {rids: Array[RID], last: frame last used}
+var _owned := {}  ## picture kind -> {rid: the main device's own texture the canvas shows, size}
 var _shown := {}  ## kind -> the texture index published last
 var _pictures := {}  ## kind -> Texture2DRD (for the canvas)
 var _payload := PayloadInfo.new()
@@ -186,7 +191,7 @@ func offer(kind: String, index: int, generation: int, handles: PackedInt64Array,
 	_shown[kind] = index
 	_imports[kind]["seqs"][index] = seq
 	if _pictures.has(kind):
-		(_pictures[kind] as Texture2DRD).texture_rd_rid = _imports[kind]["rids"][index]
+		_on_device(_update_picture.bind(kind))
 
 
 ## The payload the simulation published last: its texture (and the ids' beside it), its bups and their dish.
@@ -236,8 +241,8 @@ func texture(kind: String) -> Texture2DRD:
 		return null
 	if not _pictures.has(kind):
 		var t := Texture2DRD.new()
-		t.texture_rd_rid = _imports[kind]["rids"][_shown.get(kind, 0)]
 		_pictures[kind] = t
+		_on_device(_update_picture.bind(kind))
 	return _pictures[kind]
 
 
@@ -389,6 +394,36 @@ func _import(kind: String, generation: int, handles: PackedInt64Array, size: Vec
 		_free_sets()
 	if kind == "payload":
 		_ensure_texels(size.x * size.y)
+
+
+## Copies the picture of `kind` shown now into the texture the canvas shows (made first, or again when the import's size changed).
+func _update_picture(kind: String) -> void:
+	if not _imports.has(kind) or not _pictures.has(kind):
+		return
+	var size: Vector2i = _imports[kind]["size"]
+	var source: RID = _imports[kind]["rids"][_shown.get(kind, 0)]
+	if not source.is_valid():
+		return
+	var own: Dictionary = _owned.get(kind, {})
+	if own.is_empty() or own["size"] != size:
+		if not own.is_empty():
+			_retired.append({"rids": [own["rid"]], "last": Engine.get_frames_drawn()})
+		var format := RDTextureFormat.new()
+		format.format = IMPORT_FORMATS[kind]
+		format.width = size.x
+		format.height = size.y
+		format.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_CAN_COPY_TO_BIT | RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
+		format.add_shareable_format(RenderingDevice.DATA_FORMAT_R8G8B8A8_SRGB)
+		format.add_shareable_format(RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM)
+		var made := rd.texture_create(format, RDTextureView.new())
+		if not made.is_valid():
+			errors.append("%s: the picture's own texture was not made" % kind)
+			_owned.erase(kind)
+			return
+		own = {"rid": made, "size": size}
+		_owned[kind] = own
+		(_pictures[kind] as Texture2DRD).texture_rd_rid = made
+	rd.texture_copy(source, own["rid"], Vector3.ZERO, Vector3.ZERO, Vector3(size.x, size.y, 1.0), 0, 0, 0, 0)
 
 
 func _retire(kind: String) -> void:
@@ -637,6 +672,9 @@ func let_go() -> void:
 		rids.append_array(_imports[kind]["rids"])
 	for r: Dictionary in _retired:
 		rids.append_array(r["rids"])
+	for kind: String in _owned:
+		rids.append(_owned[kind]["rid"])
+	_owned.clear()
 	_imports.clear()
 	_retired.clear()
 	_shown.clear()
@@ -677,6 +715,9 @@ func _release_now() -> void:
 	for r: Dictionary in _retired:
 		_free_textures(r["rids"])
 	_retired.clear()
+	for kind: String in _owned:
+		_free_textures([_owned[kind]["rid"]])
+	_owned.clear()
 	for kind: String in _imports:
 		_free_textures(_imports[kind]["rids"])
 	_imports.clear()
