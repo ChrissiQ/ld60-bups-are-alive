@@ -31,30 +31,67 @@ const ENTRIES_PER_SLOT := 12  ## the list entries a physical cloud slot starts w
 ## its cloud quota, so the quota's cut never fires before the cloud quota does.
 const ENTRIES_PER_CLOUD_MOST := 256
 
+## For the kernels that read the clouds after the step's commit (the probes): the fixed-point reads `slot_entry` needs to give an unlisted
+## square's clouds the mass a listed square's entries hold.
+const AFTER_COMMIT_FUNCS := "#define MASS_BEFORE_COMMIT\n" + GpuKernels.FIXED_FUNCS
+
 const POOL_CLOUD_FUNCS := """
-// the list of entries (a range of ENTD) of the square of dish d that holds a point
-void bin_list(uint d, float x, float y, out uint e0, out uint e1) {
+// the list of entries (a range of ENTD) of the square of dish d that holds a point; false when the square is not listed (no bup is near
+// it, see `pool_bin_mark`): the candidates are then the cloud slots 0 to e1, in index order, which `slot_entry` reads one by one
+bool bin_list(uint d, float x, float y, out uint e0, out uint e1) {
 	int nb = int(DPU(d, DP_BINS_ACROSS)); float bs = DPF(d, DP_BIN_SIZE), org = DPF(d, DP_RADIUS);
-	if (nb == 0) { e0 = 0u; e1 = 0u; return; }  // (a dish with no squares has no clouds)
+	if (nb == 0) { e0 = 0u; e1 = 0u; return true; }  // (a dish with no squares has no clouds)
 	int bx = clamp(int((x + org) / bs), 0, nb - 1), by = clamp(int((y + org) / bs), 0, nb - 1);
 	uint b = DPU(d, DP_BIN_BASE) + uint(by * nb + bx);
+#ifndef LISTED_ALL
+	if (BMARK[b] == 0u) { e0 = 0u; e1 = WORLD[WD_CLOUD_SLOTS]; return false; }
+#endif
 	e0 = BINS[b]; e1 = e0 + BINC[b];
+	return true;
 }
-// the clouds' concentration and gradient where a bup of dish d is, and the smallest sigma among the clouds that reach it
-void puffs_at_d(uint d, float x, float y, out float c, out float gx, out float gy, out float sigma) {
-	c = 0.0; gx = 0.0; gy = 0.0; sigma = 1e18;
-	uint e0, e1; bin_list(d, x, y, e0, e1);
-	for (uint e = e0; e < e1; e++) {
-		vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];  // x, y, mass, variance | reach^2, sigma, cloud index, 0
-		float dx = x - r0.x, dy = y - r0.y, r2 = fma(dy, dy, dx * dx);
-		if (r2 <= r1.x) {
-			float v = r0.w;
-			float ci = r0.z / (6.2831853 * v) * exp(-r2 * 0.5 / v);
-			c += ci; gx -= ci * dx / v; gy -= ci * dy / v;
-			sigma = min(sigma, r1.y);
-		}
+// the cloud slot e as an entry of dish d would hold it (x, y, mass, variance | reach^2, sigma, cloud index, 0), for the read of an unlisted
+// square; false when the slot is no cloud of dish d with a reach
+bool slot_entry(uint e, uint d, out vec4 r0, out vec4 r1) {
+	uint o = e * 8u;
+	r0 = vec4(0.0); r1 = vec4(0.0);
+	if (PUFF[o + 5] < 0.5 || floatBitsToUint(PUFF[o + 5]) - PUFF_ROW_BASE != d || !(PUFF[o + 6] > 0.0)) return false;
+	float m = PUFF[o + 2];
+#ifdef MASS_BEFORE_COMMIT
+	// a read after the step's commit: the entry holds the mass the cloud had when the lists were built, so what the commit took is put back
+	float dm = FIX20(PDHI[e], PDLO[e]);
+	if (dm > 0.0) m += dm * PSCALE[e];
+#endif
+	r0 = vec4(PUFF[o], PUFF[o + 1], m, PUFF[o + 3]); r1 = vec4(PUFF[o + 6], PUFF[o + 7], float(e), 0.0);
+	return true;
+}
+// the clouds' concentration and gradient where a bup of dish d is, and the smallest sigma among the clouds that reach it: the entries of its
+// square when that is listed, else the cloud slots in index order (kept out of the listed loop, which is the hot one)
+#define CLOUD_BODY \
+	float dx = x - r0.x, dy = y - r0.y, r2 = fma(dy, dy, dx * dx); \
+	if (r2 <= r1.x) { \
+		float v = r0.w; \
+		float ci = r0.z / (6.2831853 * v) * exp(-r2 * 0.5 / v); \
+		c += ci; gx -= ci * dx / v; gy -= ci * dy / v; \
+		sigma = min(sigma, r1.y); \
+	}
+void puffs_unlisted(uint d, float x, float y, inout float c, inout float gx, inout float gy, inout float sigma) {
+	uint e1 = WORLD[WD_CLOUD_SLOTS];
+	for (uint e = 0u; e < e1; e++) {
+		vec4 r0, r1;
+		if (!slot_entry(e, d, r0, r1)) continue;
+		CLOUD_BODY
 	}
 }
+void puffs_at_d(uint d, float x, float y, out float c, out float gx, out float gy, out float sigma) {
+	c = 0.0; gx = 0.0; gy = 0.0; sigma = 1e18;
+	uint e0, e1; bool listed = bin_list(d, x, y, e0, e1);
+	if (!listed) { puffs_unlisted(d, x, y, c, gx, gy, sigma); return; }
+	for (uint e = e0; e < e1; e++) {
+		vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];  // x, y, mass, variance | reach^2, sigma, cloud index, 0
+		CLOUD_BODY
+	}
+}
+#undef CLOUD_BODY
 """
 
 ## Whether a point of dish d may hold a cloud: inside the dish, in a cell whose centre is inside.
@@ -238,16 +275,84 @@ GRID_LOOP(f, WORLD[WD_CLOUD_SLOTS])
 """
 
 const K_POOL_BIN_CLEAR := """
-void f(uint b) { BINC[b] = 0u; }
+// pcs.pa 1: every square is to be listed (the marking passes are left out), 0: none yet
+void f(uint b) { BINC[b] = 0u; BMARK[b] = pcs.pa > 0.5 ? 1u : 0u; }
 GRID_LOOP(f, WORLD[WD_BINS])
 """
 
-## The lists: a cloud is entered in every square its reach covers, and a cloud with no reach (its peak is under its cut: spread thin or
+## The lists: a cloud is entered in every listed square its reach covers, and a cloud with no reach (its peak is under its cut: spread thin or
 ## eaten down, it is nothing a bup can tell from the medium or take from) in none. It keeps its slot and its mass until it has spread to
-## a cell and goes to the grid, but no list holds it, so no bup reads it: in a crowded dish most clouds are of this kind. The count and
-## the scatter both take a cloud's squares from the square root of the reach word the count has stored (word 6). The root of the stored
-## square can differ in its last bit from the reach it was squared from, and a count and a scatter that differed on a square would leave
-## which cloud a full square drops to the order the threads ran in.
+## a cell and goes to the grid, but no list holds it, so no bup reads it: in a crowded dish most clouds are of this kind. A square is
+## listed only when a bup can read it this step: `pool_bin_mark` marks the square each bup of a dish is in, and the two passes after it
+## (`pool_bin_wide_x`, `pool_bin_wide_y`) widen the marks by the squares a bup can swim in one step (the margin: at most the drift of a
+## step plus four standard deviations of its spread, at the fastest speed a gene can reach, in squares), so a bup finds its square listed;
+## a read that finds its square unlisted (a bup that was made or moved further, a probe far from every bup) takes its clouds from
+## the cloud slots instead, in index order, with the same test and the same values as an entry has, so it sums what the list would have
+## (`bin_list`, `slot_entry`; `pool_bin_misses` counts the bups that read so, in WD_FALLBACKS). The count and the scatter both take a cloud's squares from the square root
+## of the reach word the count has stored (word 6). The root of the stored square can differ in its last bit from the reach it was squared
+## from, and a count and a scatter that differed on a square would leave which cloud a full square drops to the order the threads ran in.
+const BIN_MARK_FUNCS := """
+// the squares round a bup that are listed: the margin of dish d (pcs.pa the distance in µm; pcs.pb 0 or more: that many squares instead, 1e8 or more: every square)
+int margin_of(uint d) {
+	int nb = int(DPU(d, DP_BINS_ACROSS));
+	if (pcs.pb >= 0.0) return min(nb - 1, int(min(pcs.pb, 1e6)));
+	return min(nb - 1, int(ceil(pcs.pa / DPF(d, DP_BIN_SIZE))));
+}
+"""
+
+const K_POOL_BIN_MARK := """
+void f(uint i, uint d, uint l) {
+	uint b = i * RECORD_WORDS;
+	int nb = int(DPU(d, DP_BINS_ACROSS)); float bs = DPF(d, DP_BIN_SIZE), org = DPF(d, DP_RADIUS);
+	if (nb == 0) return;
+	int bx = clamp(int((BUPS[b + R_X] + org) / bs), 0, nb - 1), by = clamp(int((BUPS[b + R_Y] + org) / bs), 0, nb - 1);
+	BMARK[DPU(d, DP_BIN_BASE) + uint(by * nb + bx)] = 1u;
+}
+BUP_LOOP(f)
+"""
+
+## The margin's widening, a pass along each axis (a square a thread: the dish of a square from BINDISH): BMARK to BMARK2 along a row, then
+## BMARK2 to BMARK along a column.
+const K_POOL_BIN_WIDE_X := """
+void f(uint b) {
+	uint d = BINDISH[b];
+	if (d == NO_DISH) return;
+	if (pcs.pb >= 1e8) { BMARK2[b] = 1u; return; }
+	int nb = int(DPU(d, DP_BINS_ACROSS)), m = margin_of(d); uint base = DPU(d, DP_BIN_BASE);
+	int l = int(b - base), bx = l % nb, by = l / nb;
+	uint hit = 0u;
+	for (int x = max(bx - m, 0); x <= min(bx + m, nb - 1) && hit == 0u; x++) hit = BMARK[base + uint(by * nb + x)];
+	BMARK2[b] = hit;
+}
+GRID_LOOP(f, WORLD[WD_BINS])
+"""
+
+const K_POOL_BIN_WIDE_Y := """
+void f(uint b) {
+	uint d = BINDISH[b];
+	if (d == NO_DISH) return;
+	int nb = int(DPU(d, DP_BINS_ACROSS)), m = margin_of(d); uint base = DPU(d, DP_BIN_BASE);
+	int l = int(b - base), bx = l % nb, by = l / nb;
+	uint hit = 0u;
+	for (int y = max(by - m, 0); y <= min(by + m, nb - 1) && hit == 0u; y++) hit = BMARK2[base + uint(y * nb + bx)];
+	BMARK[b] = hit;
+}
+GRID_LOOP(f, WORLD[WD_BINS])
+"""
+
+## The bups whose square is not listed when the swim has moved them (the reads of the demand and the apply that scan the cloud slots):
+## counted in WD_FALLBACKS. A read cannot count itself, an atomic add in the readers changes the arithmetic the compiler makes of them.
+const K_POOL_BIN_MISSES := """
+void f(uint i, uint d, uint l) {
+	uint b = i * RECORD_WORDS;
+	int nb = int(DPU(d, DP_BINS_ACROSS)); float bs = DPF(d, DP_BIN_SIZE), org = DPF(d, DP_RADIUS);
+	if (nb == 0) return;
+	int bx = clamp(int((BUPS[b + R_X] + org) / bs), 0, nb - 1), by = clamp(int((BUPS[b + R_Y] + org) / bs), 0, nb - 1);
+	if (BMARK[DPU(d, DP_BIN_BASE) + uint(by * nb + bx)] == 0u) atomicAdd(WORLD[WD_FALLBACKS], 1u);
+}
+BUP_LOOP(f)
+"""
+
 const K_POOL_BIN_COUNT := """
 void f(uint k) {
 	uint o = k * 8u;
@@ -263,7 +368,11 @@ void f(uint k) {
 	int nb = int(DPU(d, DP_BINS_ACROSS)); float bs = DPF(d, DP_BIN_SIZE), org = DPF(d, DP_RADIUS); uint base = DPU(d, DP_BIN_BASE);
 	int lx = clamp(int((x - reach + org) / bs), 0, nb - 1), hx = clamp(int((x + reach + org) / bs), 0, nb - 1);
 	int ly = clamp(int((y - reach + org) / bs), 0, nb - 1), hy = clamp(int((y + reach + org) / bs), 0, nb - 1);
-	for (int by = ly; by <= hy; by++) for (int bx = lx; bx <= hx; bx++) atomicAdd(BINC[base + uint(by * nb + bx)], 1u);
+	atomicAdd(WORLD[WD_ENTRIES_FULL], uint((hx - lx + 1) * (hy - ly + 1)));
+	for (int by = ly; by <= hy; by++) for (int bx = lx; bx <= hx; bx++) {
+		uint b = base + uint(by * nb + bx);
+		if (BMARK[b] != 0u) atomicAdd(BINC[b], 1u);
+	}
 }
 GRID_LOOP(f, WORLD[WD_CLOUD_SLOTS])
 """
@@ -307,13 +416,15 @@ GRID_LOOP(f, D_MAX)
 
 const K_POOL_BIN_ROOM := """
 void f(uint d) {
+	if (d == 0u) {  // what the lists would ask for with every square listed (the count's sum), whatever is listed now
+		uint full = WORLD[WD_ENTRIES_FULL];
+		WORLD[WD_ENTRIES_FULL] = 0u;
+		atomicMax(WORLD[WD_ENTRIES_PEAK], full);
+		atomicMax(WORLD[WD_ENTRY_DENSITY], (full + max(WORLD[WD_CLOUD_SLOTS], 1u) - 1u) / max(WORLD[WD_CLOUD_SLOTS], 1u));
+	}
 	if (((DPU(d, DP_FLAGS) >> DPF_RUNNING) & 1u) == 0u) return;
 	uint nbins = DPU(d, DP_BINS_ACROSS) * DPU(d, DP_BINS_ACROSS);
 	if (nbins == 0u) return;
-	uint last = DPU(d, DP_BIN_BASE) + nbins - 1u;
-	uint end = BINS[last] + BINC[last];  // (before the cut, which empties only this dish's own bins: what the lists ask for up to this dish)
-	atomicMax(WORLD[WD_ENTRIES_PEAK], end);
-	atomicMax(WORLD[WD_ENTRY_DENSITY], (end + max(WORLD[WD_CLOUD_SLOTS], 1u) - 1u) / max(WORLD[WD_CLOUD_SLOTS], 1u));
 	if (cut_from(d, false, WORLD[WD_ENTRY_CAPACITY]) > 0u) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; }
 }
 GRID_LOOP(f, D_MAX)
@@ -335,6 +446,7 @@ void f(uint k) {
 	int ly = clamp(int((y - reach + org) / bs), 0, nb - 1), hy = clamp(int((y + reach + org) / bs), 0, nb - 1);
 	for (int by = ly; by <= hy; by++) for (int bx = lx; bx <= hx; bx++) {
 		uint b = base + uint(by * nb + bx);
+		if (BMARK[b] == 0u) continue;
 		uint pos = atomicAdd(BCUR[b], 1u);
 		if (pos < BINS[b] + BINC[b]) ENT[pos] = k;  // (a cut bin has a count of 0: no entry)
 	}
@@ -580,14 +692,19 @@ static func _register_pool(out: Dictionary) -> void:
 	GpuKernels.add(out, "pool_puff_clear", K_POOL_PUFF_CLEAR, ["WORLD", "PDLO", "PDHI", "PSCALE"])
 	GpuKernels.add(out, "pool_puff_scale", K_POOL_PUFF_SCALE, ["WORLD", "PUFF", "PDLO", "PDHI", "PSCALE"], fixed)
 	GpuKernels.add(out, "pool_puff_commit", K_POOL_PUFF_COMMIT, ["WORLD", "PUFF", "PDLO", "PDHI", "PSCALE"], fixed)
-	GpuKernels.add(out, "pool_bin_clear", K_POOL_BIN_CLEAR, ["WORLD", "BINC"])
-	GpuKernels.add(out, "pool_bin_count", K_POOL_BIN_COUNT, ["P", "WORLD", "DISHP", "PUFF", "BINC"])
+	GpuKernels.add(out, "pool_bin_clear", K_POOL_BIN_CLEAR, ["WORLD", "BINC", "BMARK"])
+	var mark := BIN_MARK_FUNCS
+	GpuKernels.add(out, "pool_bin_mark", K_POOL_BIN_MARK, ["WORLD", "BLKDISH", "DSTATE", "DISHP", "BUPS", "BMARK"])
+	GpuKernels.add(out, "pool_bin_misses", K_POOL_BIN_MISSES, ["WORLD", "BLKDISH", "DSTATE", "DISHP", "BUPS", "BMARK"])
+	GpuKernels.add(out, "pool_bin_wide_x", K_POOL_BIN_WIDE_X, ["WORLD", "DISHP", "BINDISH", "BMARK", "BMARK2"], mark)
+	GpuKernels.add(out, "pool_bin_wide_y", K_POOL_BIN_WIDE_Y, ["WORLD", "DISHP", "BINDISH", "BMARK", "BMARK2"], mark)
+	GpuKernels.add(out, "pool_bin_count", K_POOL_BIN_COUNT, ["P", "WORLD", "DISHP", "PUFF", "BINC", "BMARK"])
 	GpuKernels.add_grid_scan(out, "pool_bn", "BINC", "BINS", "BSUM", "BOFF", "WORLD[WD_BINS]", ["WORLD"])
 	var cut := "const uint ENTRIES_PER_CLOUD_MOST = %du;\n" % ENTRIES_PER_CLOUD_MOST + BIN_CUT_FUNCS
 	GpuKernels.add(out, "pool_bin_cut", K_POOL_BIN_CUT, ["WORLD", "DSTATE", "DISHP", "BINS", "BINC"], cut)
 	GpuKernels.add(out, "pool_bin_room", K_POOL_BIN_ROOM, ["WORLD", "DSTATE", "DISHP", "BINS", "BINC"], cut)
 	GpuKernels.add(out, "pool_bin_cursor", K_POOL_BIN_CURSOR, ["WORLD", "BINS", "BCUR"])
-	GpuKernels.add(out, "pool_bin_scatter", K_POOL_BIN_SCATTER, ["WORLD", "DISHP", "PUFF", "BINS", "BINC", "BCUR", "ENT"])
+	GpuKernels.add(out, "pool_bin_scatter", K_POOL_BIN_SCATTER, ["WORLD", "DISHP", "PUFF", "BINS", "BINC", "BCUR", "ENT", "BMARK"])
 	GpuKernels.add(out, "pool_bin_sort", K_POOL_BIN_SORT, ["WORLD", "PUFF", "BINS", "BINC", "ENT", "ENTD"])
 	GpuKernels.add(out, "pool_pmark", K_POOL_PMARK, ["WORLD", "PUFF", "PAL"])
 	GpuKernels.add_grid_scan(out, "pool_pf", "PAL", "PEXC", "PSUM", "POFF", "WORLD[WD_CLOUD_SLOTS]", ["WORLD"])
@@ -596,9 +713,9 @@ static func _register_pool(out: Dictionary) -> void:
 	GpuKernels.add(out, "pool_psetcount", K_POOL_PSETCOUNT, ["WORLD", "PAL", "PEXC"])
 	GpuKernels.add(out, "pool_cloud_live", K_POOL_CLOUD_LIVE, ["WORLD", "DSTATE", "PUFF", "CLIVE"], "", 64, types)
 	GpuKernels.add(out, "pool_cloud_cadence", K_POOL_CLOUD_CADENCE, ["DSTATE", "DISHP", "CLIVE"], "", 64, types)
-	GpuKernels.add(out, "pool_probe", K_POOL_PROBE, ["DISHP", "ENTD", "BINS", "BINC", "PQ", "PR"], POOL_CLOUD_FUNCS)
-	GpuKernels.add(out, "pool_probe_full", K_POOL_PROBE_FULL, ["P", "TABLE", "DISHP", "EFF", "ENTD", "BINS", "BINC", "SPQ", "SPR"],
-		GpuKernelsField.POOL_READF + GpuKernelsField.LOOKUP_FUNCS + POOL_CLOUD_FUNCS + POOL_STEER_FUNCS, 64, {"SPQ": "float", "SPR": "float"})
+	GpuKernels.add(out, "pool_probe", K_POOL_PROBE, ["WORLD", "DISHP", "ENTD", "BINS", "BINC", "BMARK", "PUFF", "PDLO", "PDHI", "PSCALE", "PQ", "PR"], AFTER_COMMIT_FUNCS + POOL_CLOUD_FUNCS)
+	GpuKernels.add(out, "pool_probe_full", K_POOL_PROBE_FULL, ["P", "WORLD", "TABLE", "DISHP", "EFF", "ENTD", "BINS", "BINC", "BMARK", "PUFF", "PDLO", "PDHI", "PSCALE", "SPQ", "SPR"],
+		AFTER_COMMIT_FUNCS + GpuKernelsField.POOL_READF + GpuKernelsField.LOOKUP_FUNCS + POOL_CLOUD_FUNCS + POOL_STEER_FUNCS, 64, {"SPQ": "float", "SPR": "float"})
 	assert(GpuLayout.D_MAX == 1024, "pool_death_bases takes four rows a thread of one group of 256")
 	GpuKernels.add(out, "pool_death_bases", K_POOL_DEATH_BASES, ["P", "DSTATE", "DISHP", "CBASE"], DEATH_FUNCS, 256, types)
 	GpuKernels.add(out, "pool_death_clouds", K_POOL_DEATH_CLOUDS, ["P", "WORLD", "BLKDISH", "DSTATE", "DISHP", "BUPS", "SURV", "EXCS", "PUFF", "INSIDE", "DPLO", "DPHI", "CBASE"], fixed + POOL_DEP_FUNCS + DEATH_FUNCS, 64, types)

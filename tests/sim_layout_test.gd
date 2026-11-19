@@ -22,7 +22,7 @@ func _init() -> void:
 	_event_step()
 	_table(constants, "DP_", 23, L.DP_WORDS, "DISHP")
 	_table(constants, "DS_", 25, L.DS_WORDS, "DSTATE")
-	_table(constants, "WD_", 16, L.WD_WORDS, "WORLD")
+	_table(constants, "WD_", 18, L.WD_WORDS, "WORLD")
 	_dishp(constants)
 	_dstate()
 	_payload()

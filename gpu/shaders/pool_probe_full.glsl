@@ -4,14 +4,20 @@
 layout(local_size_x = 64) in;
 layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs;
 layout(set = 0, binding = 0, std430) buffer B_P { float P[]; };
-layout(set = 0, binding = 1, std430) buffer B_TABLE { float TABLE[]; };
-layout(set = 0, binding = 2, std430) buffer B_DISHP { uint DISHP[]; };
-layout(set = 0, binding = 3, std430) buffer B_EFF { float EFF[]; };
-layout(set = 0, binding = 4, std430) buffer B_ENTD { vec4 ENTD[]; };
-layout(set = 0, binding = 5, std430) buffer B_BINS { uint BINS[]; };
-layout(set = 0, binding = 6, std430) buffer B_BINC { uint BINC[]; };
-layout(set = 0, binding = 7, std430) buffer B_SPQ { float SPQ[]; };
-layout(set = 0, binding = 8, std430) buffer B_SPR { float SPR[]; };
+layout(set = 0, binding = 1, std430) buffer B_WORLD { uint WORLD[]; };
+layout(set = 0, binding = 2, std430) buffer B_TABLE { float TABLE[]; };
+layout(set = 0, binding = 3, std430) buffer B_DISHP { uint DISHP[]; };
+layout(set = 0, binding = 4, std430) buffer B_EFF { float EFF[]; };
+layout(set = 0, binding = 5, std430) buffer B_ENTD { vec4 ENTD[]; };
+layout(set = 0, binding = 6, std430) buffer B_BINS { uint BINS[]; };
+layout(set = 0, binding = 7, std430) buffer B_BINC { uint BINC[]; };
+layout(set = 0, binding = 8, std430) buffer B_BMARK { uint BMARK[]; };
+layout(set = 0, binding = 9, std430) buffer B_PUFF { float PUFF[]; };
+layout(set = 0, binding = 10, std430) buffer B_PDLO { uint PDLO[]; };
+layout(set = 0, binding = 11, std430) buffer B_PDHI { uint PDHI[]; };
+layout(set = 0, binding = 12, std430) buffer B_PSCALE { float PSCALE[]; };
+layout(set = 0, binding = 13, std430) buffer B_SPQ { float SPQ[]; };
+layout(set = 0, binding = 14, std430) buffer B_SPR { float SPR[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -32,6 +38,7 @@ const uint DS_STEP = 8u;
 const uint DS_WORDS = 32u;
 const uint NO_DISH = 4294967295u;
 const uint PROBE_FLOATS = 5u;
+const uint PUFF_ROW_BASE = 1065353216u;
 const int P_CELLS = 1;
 const int P_DETECTION_FLOOR = 9;
 const int P_GRADIENT_NOISE = 11;
@@ -44,6 +51,7 @@ const int P_MOTION_NS = 25;
 const int P_MOTION_S0 = 31;
 const int P_REFERENCE_SENSE = 12;
 const uint RECORD_WORDS = 28u;
+const uint WD_CLOUD_SLOTS = 1u;
 const uint WD_LEDGER = 10u;
 const uint WD_SLOTS = 0u;
 
@@ -67,6 +75,13 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define BLOCK_LOOP(F) void main() { uint nb_ = (WORLD[WD_SLOTS] + BLK_SLOTS - 1u) >> BLK_SHIFT; for (uint k_ = gl_WorkGroupID.x; k_ < nb_; k_ += gl_NumWorkGroups.x) { F(k_, BLKDISH[k_]); barrier(); } }
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
 #define LEDGER(d, t, amount) { if (WORLD[WD_LEDGER] != 0u) { float rest_ = (amount); uint lo_ = (d) * DS_WORDS + DS_LEDGER + 2u * (t), hi_ = lo_ + 1u; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); uint old_ = atomicAdd(DSTATE[lo_], q_); if (old_ + q_ < old_) atomicAdd(DSTATE[hi_], 1u); } } }
+#define MASS_BEFORE_COMMIT
+
+#define ADD64(LO, HI, cell, q_) { uint old_ = atomicAdd(LO[cell], q_); if (old_ + q_ < old_) atomicAdd(HI[cell], 1u); }
+#define ADD_FIXED30(LO, HI, cell, amount) { float rest_ = amount; while (rest_ > 0.0) { float part_ = min(rest_, 3.9); rest_ -= part_; uint q_ = uint(part_ * 1073741824.0 + 0.5); ADD64(LO, HI, cell, q_) } }
+#define ADD_FIXED20(LO, HI, cell, amount) { float rest_ = amount; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); ADD64(LO, HI, cell, q_) } }
+#define FIX30(HI, LO) (float(HI) * 4.0 + float(LO) * 9.313225746154785e-10)
+#define FIX20(HI, LO) (float(HI) * 4096.0 + float(LO) * 9.5367431640625e-7)
 
 // the field's concentration (and its gradient) at a point of dish d, bilinear in the snapshot
 void readf_d(uint d, float x, float y, out float c, out float gx, out float gy) {
@@ -111,29 +126,55 @@ void lookup(float s, float eps, out float f, out float along, out float across) 
 	}
 }
 
-// the list of entries (a range of ENTD) of the square of dish d that holds a point
-void bin_list(uint d, float x, float y, out uint e0, out uint e1) {
+// the list of entries (a range of ENTD) of the square of dish d that holds a point; false when the square is not listed (no bup is near
+// it, see `pool_bin_mark`): the candidates are then the cloud slots 0 to e1, in index order, which `slot_entry` reads one by one
+bool bin_list(uint d, float x, float y, out uint e0, out uint e1) {
 	int nb = int(DPU(d, DP_BINS_ACROSS)); float bs = DPF(d, DP_BIN_SIZE), org = DPF(d, DP_RADIUS);
-	if (nb == 0) { e0 = 0u; e1 = 0u; return; }  // (a dish with no squares has no clouds)
+	if (nb == 0) { e0 = 0u; e1 = 0u; return true; }  // (a dish with no squares has no clouds)
 	int bx = clamp(int((x + org) / bs), 0, nb - 1), by = clamp(int((y + org) / bs), 0, nb - 1);
 	uint b = DPU(d, DP_BIN_BASE) + uint(by * nb + bx);
+#ifndef LISTED_ALL
+	if (BMARK[b] == 0u) { e0 = 0u; e1 = WORLD[WD_CLOUD_SLOTS]; return false; }
+#endif
 	e0 = BINS[b]; e1 = e0 + BINC[b];
+	return true;
 }
-// the clouds' concentration and gradient where a bup of dish d is, and the smallest sigma among the clouds that reach it
-void puffs_at_d(uint d, float x, float y, out float c, out float gx, out float gy, out float sigma) {
-	c = 0.0; gx = 0.0; gy = 0.0; sigma = 1e18;
-	uint e0, e1; bin_list(d, x, y, e0, e1);
-	for (uint e = e0; e < e1; e++) {
-		vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];  // x, y, mass, variance | reach^2, sigma, cloud index, 0
-		float dx = x - r0.x, dy = y - r0.y, r2 = fma(dy, dy, dx * dx);
-		if (r2 <= r1.x) {
-			float v = r0.w;
-			float ci = r0.z / (6.2831853 * v) * exp(-r2 * 0.5 / v);
-			c += ci; gx -= ci * dx / v; gy -= ci * dy / v;
-			sigma = min(sigma, r1.y);
-		}
+// the cloud slot e as an entry of dish d would hold it (x, y, mass, variance | reach^2, sigma, cloud index, 0), for the read of an unlisted
+// square; false when the slot is no cloud of dish d with a reach
+bool slot_entry(uint e, uint d, out vec4 r0, out vec4 r1) {
+	uint o = e * 8u;
+	r0 = vec4(0.0); r1 = vec4(0.0);
+	if (PUFF[o + 5] < 0.5 || floatBitsToUint(PUFF[o + 5]) - PUFF_ROW_BASE != d || !(PUFF[o + 6] > 0.0)) return false;
+	float m = PUFF[o + 2];
+#ifdef MASS_BEFORE_COMMIT
+	// a read after the step's commit: the entry holds the mass the cloud had when the lists were built, so what the commit took is put back
+	float dm = FIX20(PDHI[e], PDLO[e]);
+	if (dm > 0.0) m += dm * PSCALE[e];
+#endif
+	r0 = vec4(PUFF[o], PUFF[o + 1], m, PUFF[o + 3]); r1 = vec4(PUFF[o + 6], PUFF[o + 7], float(e), 0.0);
+	return true;
+}
+// the clouds' concentration and gradient where a bup of dish d is, and the smallest sigma among the clouds that reach it: the entries of its
+// square when that is listed, else the cloud slots in index order (kept out of the listed loop, which is the hot one)
+#define CLOUD_BODY 	float dx = x - r0.x, dy = y - r0.y, r2 = fma(dy, dy, dx * dx); 	if (r2 <= r1.x) { 		float v = r0.w; 		float ci = r0.z / (6.2831853 * v) * exp(-r2 * 0.5 / v); 		c += ci; gx -= ci * dx / v; gy -= ci * dy / v; 		sigma = min(sigma, r1.y); 	}
+void puffs_unlisted(uint d, float x, float y, inout float c, inout float gx, inout float gy, inout float sigma) {
+	uint e1 = WORLD[WD_CLOUD_SLOTS];
+	for (uint e = 0u; e < e1; e++) {
+		vec4 r0, r1;
+		if (!slot_entry(e, d, r0, r1)) continue;
+		CLOUD_BODY
 	}
 }
+void puffs_at_d(uint d, float x, float y, out float c, out float gx, out float gy, out float sigma) {
+	c = 0.0; gx = 0.0; gy = 0.0; sigma = 1e18;
+	uint e0, e1; bool listed = bin_list(d, x, y, e0, e1);
+	if (!listed) { puffs_unlisted(d, x, y, c, gx, gy, sigma); return; }
+	for (uint e = e0; e < e1; e++) {
+		vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];  // x, y, mass, variance | reach^2, sigma, cloud index, 0
+		CLOUD_BODY
+	}
+}
+#undef CLOUD_BODY
 
 float erfc_fit(float x) {
 	float z = abs(x), t = 1.0 / (1.0 + 0.5 * z);

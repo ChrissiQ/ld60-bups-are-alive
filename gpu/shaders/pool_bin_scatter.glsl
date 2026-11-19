@@ -10,6 +10,7 @@ layout(set = 0, binding = 3, std430) buffer B_BINS { uint BINS[]; };
 layout(set = 0, binding = 4, std430) buffer B_BINC { uint BINC[]; };
 layout(set = 0, binding = 5, std430) buffer B_BCUR { uint BCUR[]; };
 layout(set = 0, binding = 6, std430) buffer B_ENT { uint ENT[]; };
+layout(set = 0, binding = 7, std430) buffer B_BMARK { uint BMARK[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -65,6 +66,7 @@ void f(uint k) {
 	int ly = clamp(int((y - reach + org) / bs), 0, nb - 1), hy = clamp(int((y + reach + org) / bs), 0, nb - 1);
 	for (int by = ly; by <= hy; by++) for (int bx = lx; bx <= hx; bx++) {
 		uint b = base + uint(by * nb + bx);
+		if (BMARK[b] == 0u) continue;
 		uint pos = atomicAdd(BCUR[b], 1u);
 		if (pos < BINS[b] + BINC[b]) ENT[pos] = k;  // (a cut bin has a count of 0: no entry)
 	}

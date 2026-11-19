@@ -637,7 +637,7 @@ static func _register_pool(out: Dictionary) -> void:
 	GpuKernels.add_grid_scan(out, "pool_conj_scan", "DCNT", "DOFF", "GSUM", "GOFF", CONJ_BUCKETS_EXPR.replace("CONJ_MIN_BUCKETS", "%du" % CONJ_MIN_BUCKETS), ["WORLD"])
 	GpuKernels.add(out, "pool_conj_scatter", K_POOL_CONJ_SCATTER, ["WORLD", "BLKDISH", "DSTATE", "CBKT", "DOFF", "DLIST"], conj, 64, t)
 	GpuKernels.add(out, "pool_conj_apply", K_POOL_CONJ_APPLY, ["P", "BUPS", "WORLD", "BLKDISH", "DSTATE", "DCNT", "DOFF", "DLIST", "DBIT"], conj, 64, t)
-	GpuKernels.add(out, "pool_apply_count", pool_apply_count(), ["P", "WORLD", "BLKDISH", "DSTATE", "DISHP", "BUPS", "EFF", "WANT", "WANTC", "CELLOF", "SCALE", "ENTD", "BINS", "BINC", "PSCALE", "OWNER", "CONC", "CONC2B", "WANT2", "CELL2", "AWLO", "AWHI", "ADLO", "ADHI", "CLOUDC", "CBKT", "DCNT", "DBIT"],
+	GpuKernels.add(out, "pool_apply_count", pool_apply_count(), ["P", "WORLD", "BLKDISH", "DSTATE", "DISHP", "BUPS", "EFF", "WANT", "WANTC", "CELLOF", "SCALE", "ENTD", "BINS", "BINC", "BMARK", "PUFF", "PSCALE", "OWNER", "CONC", "CONC2B", "WANT2", "CELL2", "AWLO", "AWHI", "ADLO", "ADHI", "CLOUDC", "CBKT", "DCNT", "DBIT"],
 		GpuKernels.FIXED_FUNCS + GpuKernelsField.POOL_READF + GpuKernelsClouds.POOL_CLOUD_FUNCS + conj, 64, t)
 	GpuKernels.add(out, "pool_ac_conj_life", pool_ac_conj_life(), ["P", "BUPS", "CHILD", "SURV", "KID", "WORLD", "BLKDISH", "DSTATE", "DISHP", "WANT2", "CELL2", "SCALE2", "CBKT", "DCNT", "DOFF", "DLIST", "DBIT"], conj + FLAG_FUNC, 64, t)
 	GpuKernels.add(out, "pool_donor_life", pool_donor_life(), ["P", "BUPS", "CHILD", "SURV", "KID", "WORLD", "BLKDISH", "DSTATE", "DISHP", "DOFF", "DLIST"], conj + FLAG_FUNC, 64, t)

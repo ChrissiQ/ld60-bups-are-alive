@@ -6,9 +6,12 @@ layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs
 layout(set = 0, binding = 0, std430) buffer B_WORLD { uint WORLD[]; };
 layout(set = 0, binding = 1, std430) buffer B_DISHP { uint DISHP[]; };
 layout(set = 0, binding = 2, std430) buffer B_PUFF { float PUFF[]; };
-layout(set = 0, binding = 3, std430) buffer B_INSIDE { int INSIDE[]; };
-layout(set = 0, binding = 4, std430) buffer B_FAINTLO { uint FAINTLO[]; };
-layout(set = 0, binding = 5, std430) buffer B_FAINTHI { uint FAINTHI[]; };
+layout(set = 0, binding = 3, std430) buffer B_PDLO { uint PDLO[]; };
+layout(set = 0, binding = 4, std430) buffer B_PDHI { uint PDHI[]; };
+layout(set = 0, binding = 5, std430) buffer B_PSCALE { float PSCALE[]; };
+layout(set = 0, binding = 6, std430) buffer B_INSIDE { int INSIDE[]; };
+layout(set = 0, binding = 7, std430) buffer B_FAINTLO { uint FAINTLO[]; };
+layout(set = 0, binding = 8, std430) buffer B_FAINTHI { uint FAINTHI[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -59,21 +62,26 @@ const float FAINT_UNIT = 4096.0;
 #define FIX30(HI, LO) (float(HI) * 4.0 + float(LO) * 9.313225746154785e-10)
 #define FIX20(HI, LO) (float(HI) * 4096.0 + float(LO) * 9.5367431640625e-7)
 
+// an amount (at most 2^34 FAINT_UNIT) added to a sum in fixed point whole: the part over 4 to the high word, the rest to the low
+#define ADD_FIXED_WIDE(LO, HI, cell, amount) { float a_ = amount; float h_ = floor(a_ * 0.25); float r_ = a_ - h_ * 4.0; if (h_ > 0.0) atomicAdd(HI[cell], uint(h_)); ADD64(LO, HI, cell, uint(r_ * 1073741824.0)) }
 void f(uint k) {
 	uint o = k * 8u, d = uint(pcs.pa);
 	if (PUFF[o + 5] < 0.5 || floatBitsToUint(PUFF[o + 5]) - PUFF_ROW_BASE != d) return;
-	if (!(PUFF[o + 6] <= 0.0) || PUFF[o + 7] <= 0.0) return;  // (listed, or not yet looked at by the lists)
-	float x = PUFF[o], y = PUFF[o + 1], mass = PUFF[o + 2], v = PUFF[o + 3];
+	if (PUFF[o + 7] <= 0.0) return;  // (not yet looked at by the lists)
+	// the mass the cloud had when the step's lists were built: what the commit took off it is put back
+	float dm = FIX20(PDHI[k], PDLO[k]);
+	float x = PUFF[o], y = PUFF[o + 1], mass = PUFF[o + 2] + (dm > 0.0 ? dm * PSCALE[k] : 0.0), v = PUFF[o + 3];
 	if (!(mass > 0.0) || !(v > 0.0)) return;
 	int n = int(DPU(d, DP_CELLS)); float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS); uint base = DPU(d, DP_FIELD_BASE);
-	int x0 = max(0, int(floor((x + org) / sp - 0.5))), x1 = min(n - 1, int(ceil((x + org) / sp - 0.5)));
-	int y0 = max(0, int(floor((y + org) / sp - 0.5))), y1 = min(n - 1, int(ceil((y + org) / sp - 0.5)));
+	float reach = PUFF[o + 6] > 0.0 ? sqrt(PUFF[o + 6]) : 0.0;
+	int x0 = max(0, int(floor((x - reach + org) / sp - 0.5))), x1 = min(n - 1, int(ceil((x + reach + org) / sp - 0.5)));
+	int y0 = max(0, int(floor((y - reach + org) / sp - 0.5))), y1 = min(n - 1, int(ceil((y + reach + org) / sp - 0.5)));
 	for (int cy = y0; cy <= y1; cy++) for (int cx = x0; cx <= x1; cx++) {
 		uint l = uint(cy * n + cx);
 		if (INSIDE[base + l] == 0) continue;
 		float dx = (float(cx) + 0.5) * sp - org - x, dy = (float(cy) + 0.5) * sp - org - y;
 		float c = mass / (6.2831853 * v) * exp(-(dx * dx + dy * dy) * 0.5 / v) * FAINT_UNIT;
-		ADD_FIXED30(FAINTLO, FAINTHI, l, c)
+		ADD_FIXED_WIDE(FAINTLO, FAINTHI, l, c)
 	}
 }
 GRID_LOOP(f, WORLD[WD_CLOUD_SLOTS])

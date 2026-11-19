@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://c338drkl3u4og"
+path="res://.godot/imported/pool_swim_demand_all.glsl-7d7d6d22aeb7553fdde7014720e060e2.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_swim_demand_all.glsl"
+dest_files=["res://.godot/imported/pool_swim_demand_all.glsl-7d7d6d22aeb7553fdde7014720e060e2.res"]
+
+[params]
+

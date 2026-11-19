@@ -30,6 +30,7 @@ const uint NO_DISH = 4294967295u;
 const int P_CELLS = 1;
 const uint RECORD_WORDS = 28u;
 const uint WD_CLOUD_SLOTS = 1u;
+const uint WD_ENTRIES_FULL = 16u;
 const uint WD_ENTRIES_PEAK = 14u;
 const uint WD_ENTRY_CAPACITY = 13u;
 const uint WD_ENTRY_DENSITY = 15u;
@@ -82,13 +83,15 @@ uint cut_from(uint d, bool own, uint limit) {
 }
 
 void f(uint d) {
+	if (d == 0u) {  // what the lists would ask for with every square listed (the count's sum), whatever is listed now
+		uint full = WORLD[WD_ENTRIES_FULL];
+		WORLD[WD_ENTRIES_FULL] = 0u;
+		atomicMax(WORLD[WD_ENTRIES_PEAK], full);
+		atomicMax(WORLD[WD_ENTRY_DENSITY], (full + max(WORLD[WD_CLOUD_SLOTS], 1u) - 1u) / max(WORLD[WD_CLOUD_SLOTS], 1u));
+	}
 	if (((DPU(d, DP_FLAGS) >> DPF_RUNNING) & 1u) == 0u) return;
 	uint nbins = DPU(d, DP_BINS_ACROSS) * DPU(d, DP_BINS_ACROSS);
 	if (nbins == 0u) return;
-	uint last = DPU(d, DP_BIN_BASE) + nbins - 1u;
-	uint end = BINS[last] + BINC[last];  // (before the cut, which empties only this dish's own bins: what the lists ask for up to this dish)
-	atomicMax(WORLD[WD_ENTRIES_PEAK], end);
-	atomicMax(WORLD[WD_ENTRY_DENSITY], (end + max(WORLD[WD_CLOUD_SLOTS], 1u) - 1u) / max(WORLD[WD_CLOUD_SLOTS], 1u));
 	if (cut_from(d, false, WORLD[WD_ENTRY_CAPACITY]) > 0u) { WORLD[WD_OVERFLOW] = 1u; DS(d, DS_OVERFLOW) = 1u; }
 }
 GRID_LOOP(f, D_MAX)

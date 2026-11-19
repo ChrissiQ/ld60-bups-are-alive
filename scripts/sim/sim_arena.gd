@@ -33,6 +33,7 @@ const BUFFERS := {
 	"AWLO": ["cell", 4, true, 0], "AWHI": ["cell", 4, true, 0], "ADLO": ["cell", 4, true, 0], "ADHI": ["cell", 4, true, 0],
 	"DPLO": ["cell", 4, true, 0], "DPHI": ["cell", 4, true, 0],
 	"BINC": ["bin", 4, false, 0], "BINS": ["bin", 4, false, 0], "BCUR": ["bin", 4, false, 0],
+	"BMARK": ["bin", 4, false, 0], "BMARK2": ["bin", 4, false, 0], "BINDISH": ["bin", 4, true, 0xFF],
 	"PUFF": ["cloud", 32, true, 0], "PUFF2": ["cloud", 32, false, 0], "PDLO": ["cloud", 4, false, 0], "PDHI": ["cloud", 4, false, 0],
 	"PSCALE": ["cloud", 4, false, 0], "PAL": ["cloud", 4, false, 0], "PEXC": ["cloud", 4, false, 0],
 	"ENT": ["entry", 4, false, 0], "ENTD": ["entry", 32, false, 0],

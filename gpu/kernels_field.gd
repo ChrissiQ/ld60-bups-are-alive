@@ -404,6 +404,22 @@ void add_fixed(uint cell, float w, int which) { // what is wanted (0), what is r
 	else ADD_FIXED30(ALO, AHI, cell, w)
 }
 void add_puff_demand(uint k, float mass) { ADD_FIXED20(PDLO, PDHI, k, mass) }
+// each cloud that reaches a point (r0, r1: x, y, mass, variance | reach^2, sigma, cloud index, 0) is asked for its share of what the bup wants
+#define CLOUD_BODY \
+	float ddx = x - r0.x, ddy = y - r0.y, r2 = fma(ddy, ddy, ddx * ddx); \
+	if (r2 <= r1.x) { \
+		uint k = uint(r1.z); \
+		float ci = r0.z / (6.2831853 * r0.w) * exp(-r2 * 0.5 / r0.w); \
+		add_puff_demand(k, wc * ci / cc); \
+	}
+void demand_unlisted(uint d, float x, float y, float wc, float cc) {
+	uint e1 = WORLD[WD_CLOUD_SLOTS];
+	for (uint e = 0u; e < e1; e++) {
+		vec4 r0, r1;
+		if (!slot_entry(e, d, r0, r1)) continue;
+		CLOUD_BODY
+	}
+}
 void f(uint i, uint d, uint l) {
 	uint b = i * RECORD_WORDS;
 	float x = BUPS[b + R_X], y = BUPS[b + R_Y], energy = BUPS[b + R_ENERGY], mass = BUPS[b + R_MASS], metab = BUPS[b + R_METABOLISM], yld = exp(-BUPS[b + R_HARM]) / sqrt(BUPS[b + R_METABOLISM]);
@@ -430,15 +446,11 @@ void f(uint i, uint d, uint l) {
 				}
 				if (wc > 0.0 && cc > 0.0) {
 					WANTC[i] = wc;
-					uint e0, e1; bin_list(d, x, y, e0, e1);
-					for (uint e = e0; e < e1; e++) {
+					uint e0, e1; bool listed = bin_list(d, x, y, e0, e1);
+					if (!listed) demand_unlisted(d, x, y, wc, cc);
+					else for (uint e = e0; e < e1; e++) {
 						vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];
-						float ddx = x - r0.x, ddy = y - r0.y, r2 = fma(ddy, ddy, ddx * ddx);
-						if (r2 <= r1.x) {
-							uint k = uint(r1.z);
-							float ci = r0.z / (6.2831853 * r0.w) * exp(-r2 * 0.5 / r0.w);
-							add_puff_demand(k, wc * ci / cc);
-						}
+						CLOUD_BODY
 					}
 				}
 			}
@@ -498,6 +510,22 @@ void add_fixed2(uint cell, float w, int which) { // the acetate wanted (0) and l
 	if (which == 0) ADD_FIXED30(AWLO, AWHI, cell, w)
 	else ADD_FIXED30(ADLO, ADHI, cell, w)
 }
+// what each cloud that reaches a point (r0, r1: x, y, mass, variance | reach^2, sigma, cloud index, 0) gives the bup, added to `got`
+#define CLOUD_BODY \
+	float ddx = x - r0.x, ddy = y - r0.y, r2 = fma(ddy, ddy, ddx * ddx); \
+	if (r2 <= r1.x) { \
+		uint k = uint(r1.z); \
+		float ci = r0.z / (6.2831853 * r0.w) * exp(-r2 * 0.5 / r0.w); \
+		got += wc * ci / cc * PSCALE[k]; \
+	}
+void apply_unlisted(uint d, float x, float y, float wc, float cc, inout float got) {
+	uint e1 = WORLD[WD_CLOUD_SLOTS];
+	for (uint e = 0u; e < e1; e++) {
+		vec4 r0, r1;
+		if (!slot_entry(e, d, r0, r1)) continue;
+		CLOUD_BODY
+	}
+}
 void f(uint i, uint d, uint l) {
 	uint b = i * RECORD_WORDS;
 	float wg = WANT[i], wc = WANTC[i];
@@ -511,15 +539,11 @@ void f(uint i, uint d, uint l) {
 		float got = wg > 0.0 ? wg * SCALE[CELLOF[i]] : 0.0;
 		if (wc > 0.0) {
 			float cc, pgx, pgy, psig; puffs_at_d(d, x, y, cc, pgx, pgy, psig);
-			uint e0, e1; bin_list(d, x, y, e0, e1);
-			for (uint e = e0; e < e1; e++) {
+			uint e0, e1; bool listed = bin_list(d, x, y, e0, e1);
+			if (!listed) apply_unlisted(d, x, y, wc, cc, got);
+			else for (uint e = e0; e < e1; e++) {
 				vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];
-				float ddx = x - r0.x, ddy = y - r0.y, r2 = fma(ddy, ddy, ddx * ddx);
-				if (r2 <= r1.x) {
-					uint k = uint(r1.z);
-					float ci = r0.z / (6.2831853 * r0.w) * exp(-r2 * 0.5 / r0.w);
-					got += wc * ci / cc * PSCALE[k];
-				}
+				CLOUD_BODY
 			}
 		}
 		float let_go = 0.0;
@@ -626,12 +650,12 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "pool_feed", K_POOL_FEED, cell_b + ["CONC", "WGT"])
 	GpuKernels.add(out, "pool_clear", K_POOL_CLEAR, cell_b + ["DLO", "DHI", "RLO", "RHI", "ALO", "AHI"])
 	GpuKernels.add(out, "pool_snapshot", K_POOL_SNAPSHOT, cell_b + ["CONC", "OWNER", "EFF"])
-	GpuKernels.add(out, "pool_swim", _pooled_swim(), bup_b + ["BUPS", "EFF", "TABLE", "ENTD", "BINS", "BINC"], POOL_READF + LOOKUP_FUNCS + GpuKernelsClouds.POOL_CLOUD_FUNCS)
-	GpuKernels.add(out, "pool_demand", K_POOL_DEMAND, bup_b + ["BUPS", "EFF", "OWNER", "CONC", "WANT", "WANTC", "CELLOF", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "ENTD", "BINS", "BINC", "PDLO", "PDHI"], fixed + POOL_READF + POOL_READC + GpuKernelsClouds.POOL_CLOUD_FUNCS)
-	GpuKernels.add(out, "pool_swim_demand", pool_swim_demand(), bup_b + ["BUPS", "EFF", "TABLE", "OWNER", "CONC", "WANT", "WANTC", "CLOUDC", "CELLOF", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "ENTD", "BINS", "BINC", "PDLO", "PDHI"],
+	GpuKernels.add(out, "pool_swim", _pooled_swim(), bup_b + ["BUPS", "EFF", "TABLE", "ENTD", "BINS", "BINC", "BMARK", "PUFF"], POOL_READF + LOOKUP_FUNCS + GpuKernelsClouds.POOL_CLOUD_FUNCS)
+	GpuKernels.add(out, "pool_demand", K_POOL_DEMAND, bup_b + ["BUPS", "EFF", "OWNER", "CONC", "WANT", "WANTC", "CELLOF", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "ENTD", "BINS", "BINC", "BMARK", "PUFF", "PDLO", "PDHI"], fixed + POOL_READF + POOL_READC + GpuKernelsClouds.POOL_CLOUD_FUNCS)
+	GpuKernels.add(out, "pool_swim_demand", pool_swim_demand(), bup_b + ["BUPS", "EFF", "TABLE", "OWNER", "CONC", "WANT", "WANTC", "CLOUDC", "CELLOF", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "ENTD", "BINS", "BINC", "BMARK", "PUFF", "PDLO", "PDHI"],
 		fixed + POOL_READF + POOL_READC + LOOKUP_FUNCS + GpuKernelsClouds.POOL_CLOUD_FUNCS)
 	GpuKernels.add(out, "pool_cells", K_POOL_CELLS, cell_b + ["CONC", "OWNER", "DLO", "DHI", "RLO", "RHI", "ALO", "AHI", "SCALE"], fixed)
-	GpuKernels.add(out, "pool_apply", K_POOL_APPLY, bup_b + ["BUPS", "EFF", "WANT", "WANTC", "CELLOF", "SCALE", "ENTD", "BINS", "BINC", "PSCALE", "OWNER", "CONC", "CONC2B", "WANT2", "CELL2", "AWLO", "AWHI", "ADLO", "ADHI"], fixed + POOL_READF + GpuKernelsClouds.POOL_CLOUD_FUNCS)
+	GpuKernels.add(out, "pool_apply", K_POOL_APPLY, bup_b + ["BUPS", "EFF", "WANT", "WANTC", "CELLOF", "SCALE", "ENTD", "BINS", "BINC", "BMARK", "PUFF", "PSCALE", "OWNER", "CONC", "CONC2B", "WANT2", "CELL2", "AWLO", "AWHI", "ADLO", "ADHI"], fixed + POOL_READF + GpuKernelsClouds.POOL_CLOUD_FUNCS)
 	GpuKernels.add(out, "pool_ac_cells", K_POOL_AC_CELLS, cell_b + ["CONC2", "CONC2B", "AWLO", "AWHI", "ADLO", "ADHI", "SCALE2"], fixed)
 	GpuKernels.add(out, "pool_ac_apply", K_POOL_AC_APPLY, bup_b + ["BUPS", "WANT2", "CELL2", "SCALE2"])
 	GpuKernels.add(out, "pool_dep_land", K_POOL_DEP_LAND, cell_b + ["EFF", "CONC", "DPLO", "DPHI"], fixed)

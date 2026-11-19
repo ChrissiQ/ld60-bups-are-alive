@@ -6,22 +6,14 @@ layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs
 layout(set = 0, binding = 0, std430) buffer B_DISHP { uint DISHP[]; };
 layout(set = 0, binding = 1, std430) buffer B_CONC { float CONC[]; };
 layout(set = 0, binding = 2, std430) buffer B_INSIDE { int INSIDE[]; };
-layout(set = 0, binding = 3, std430) buffer B_ENTD { vec4 ENTD[]; };
-layout(set = 0, binding = 4, std430) buffer B_BINS { uint BINS[]; };
-layout(set = 0, binding = 5, std430) buffer B_BINC { uint BINC[]; };
-layout(set = 0, binding = 6, std430) buffer B_VIEW { float VIEW[]; };
-layout(set = 0, binding = 7, std430) buffer B_FAINTLO { uint FAINTLO[]; };
-layout(set = 0, binding = 8, std430) buffer B_FAINTHI { uint FAINTHI[]; };
+layout(set = 0, binding = 3, std430) buffer B_VIEW { float VIEW[]; };
+layout(set = 0, binding = 4, std430) buffer B_FAINTLO { uint FAINTLO[]; };
+layout(set = 0, binding = 5, std430) buffer B_FAINTHI { uint FAINTHI[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
-const uint DP_BINS_ACROSS = 6u;
-const uint DP_BIN_BASE = 5u;
-const uint DP_BIN_SIZE = 7u;
 const uint DP_CELLS = 1u;
 const uint DP_FIELD_BASE = 0u;
-const uint DP_RADIUS = 3u;
-const uint DP_SPACING = 2u;
 const uint DP_WORDS = 32u;
 const uint DS_COUNT = 1u;
 const uint DS_LEDGER = 24u;
@@ -63,56 +55,10 @@ const float FAINT_UNIT = 4096.0;
 #define FIX30(HI, LO) (float(HI) * 4.0 + float(LO) * 9.313225746154785e-10)
 #define FIX20(HI, LO) (float(HI) * 4096.0 + float(LO) * 9.5367431640625e-7)
 
-// the list of entries (a range of ENTD) of the square of dish d that holds a point
-void bin_list(uint d, float x, float y, out uint e0, out uint e1) {
-	int nb = int(DPU(d, DP_BINS_ACROSS)); float bs = DPF(d, DP_BIN_SIZE), org = DPF(d, DP_RADIUS);
-	if (nb == 0) { e0 = 0u; e1 = 0u; return; }  // (a dish with no squares has no clouds)
-	int bx = clamp(int((x + org) / bs), 0, nb - 1), by = clamp(int((y + org) / bs), 0, nb - 1);
-	uint b = DPU(d, DP_BIN_BASE) + uint(by * nb + bx);
-	e0 = BINS[b]; e1 = e0 + BINC[b];
-}
-// the clouds' concentration and gradient where a bup of dish d is, and the smallest sigma among the clouds that reach it
-void puffs_at_d(uint d, float x, float y, out float c, out float gx, out float gy, out float sigma) {
-	c = 0.0; gx = 0.0; gy = 0.0; sigma = 1e18;
-	uint e0, e1; bin_list(d, x, y, e0, e1);
-	for (uint e = e0; e < e1; e++) {
-		vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];  // x, y, mass, variance | reach^2, sigma, cloud index, 0
-		float dx = x - r0.x, dy = y - r0.y, r2 = fma(dy, dy, dx * dx);
-		if (r2 <= r1.x) {
-			float v = r0.w;
-			float ci = r0.z / (6.2831853 * v) * exp(-r2 * 0.5 / v);
-			c += ci; gx -= ci * dx / v; gy -= ci * dy / v;
-			sigma = min(sigma, r1.y);
-		}
-	}
-}
-
 void f(uint l) {
-	uint d = uint(pcs.pa), n = DPU(d, DP_CELLS), c = DPU(d, DP_FIELD_BASE) + l;
+	uint d = uint(pcs.pa), c = DPU(d, DP_FIELD_BASE) + l;
 	float v = CONC[c];
-	if (INSIDE[c] != 0) {
-		int ni = int(n), cx = int(l % n), cy = int(l / n), nb = int(DPU(d, DP_BINS_ACROSS));
-		float sp = DPF(d, DP_SPACING), org = DPF(d, DP_RADIUS), bs = DPF(d, DP_BIN_SIZE);
-		float x = (float(cx) + 0.5) * sp - org, y = (float(cy) + 0.5) * sp - org;
-		int cbx = clamp(int((x + org) / bs), 0, nb - 1), cby = clamp(int((y + org) / bs), 0, nb - 1);
-		int nx0 = max(cbx - 3, 0), nx1 = min(cbx + 3, nb - 1), ny0 = max(cby - 3, 0), ny1 = min(cby + 3, nb - 1);
-		uint base = DPU(d, DP_BIN_BASE);
-		for (int by = ny0; by <= ny1; by++) for (int bx = nx0; bx <= nx1; bx++) {
-			uint b = base + uint(by * nb + bx);
-			for (uint e = BINS[b]; e < BINS[b] + BINC[b]; e++) {
-				vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];  // x, y, mass, variance | reach^2
-				float reach = sqrt(r1.x);
-				int lx = clamp(int((r0.x - reach + org) / bs), 0, nb - 1), ly = clamp(int((r0.y - reach + org) / bs), 0, nb - 1);
-				if (bx != max(lx, nx0) || by != max(ly, ny0)) continue;
-				int x0 = max(0, int(floor((r0.x - reach + org) / sp - 0.5))), x1 = min(ni - 1, int(ceil((r0.x + reach + org) / sp - 0.5)));
-				int y0 = max(0, int(floor((r0.y - reach + org) / sp - 0.5))), y1 = min(ni - 1, int(ceil((r0.y + reach + org) / sp - 0.5)));
-				if (cx < x0 || cx > x1 || cy < y0 || cy > y1) continue;
-				float dx = x - r0.x, dy = y - r0.y;
-				v += r0.z / (6.2831853 * r0.w) * exp(-(dx * dx + dy * dy) * 0.5 / r0.w);
-			}
-		}
-		v += FIX30(FAINTHI[l], FAINTLO[l]) / FAINT_UNIT;
-	}
+	if (INSIDE[c] != 0) v += FIX30(FAINTHI[l], FAINTLO[l]) / FAINT_UNIT;
 	VIEW[c] = v;
 }
 GRID_LOOP(f, DPU(uint(pcs.pa), DP_CELLS) * DPU(uint(pcs.pa), DP_CELLS))

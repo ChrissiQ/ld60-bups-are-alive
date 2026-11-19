@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://c5orwt1g7wxyl"
+path="res://.godot/imported/pool_apply_count_all.glsl-6bf2d13ff4a10090724b0ce2d2eb1baa.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_apply_count_all.glsl"
+dest_files=["res://.godot/imported/pool_apply_count_all.glsl-6bf2d13ff4a10090724b0ce2d2eb1baa.res"]
+
+[params]
+

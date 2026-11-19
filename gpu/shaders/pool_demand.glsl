@@ -24,8 +24,10 @@ layout(set = 0, binding = 17, std430) buffer B_AHI { uint AHI[]; };
 layout(set = 0, binding = 18, std430) buffer B_ENTD { vec4 ENTD[]; };
 layout(set = 0, binding = 19, std430) buffer B_BINS { uint BINS[]; };
 layout(set = 0, binding = 20, std430) buffer B_BINC { uint BINC[]; };
-layout(set = 0, binding = 21, std430) buffer B_PDLO { uint PDLO[]; };
-layout(set = 0, binding = 22, std430) buffer B_PDHI { uint PDHI[]; };
+layout(set = 0, binding = 21, std430) buffer B_BMARK { uint BMARK[]; };
+layout(set = 0, binding = 22, std430) buffer B_PUFF { float PUFF[]; };
+layout(set = 0, binding = 23, std430) buffer B_PDLO { uint PDLO[]; };
+layout(set = 0, binding = 24, std430) buffer B_PDHI { uint PDHI[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -44,6 +46,7 @@ const uint DS_START = 0u;
 const uint DS_STEP = 8u;
 const uint DS_WORDS = 32u;
 const uint NO_DISH = 4294967295u;
+const uint PUFF_ROW_BASE = 1065353216u;
 const int P_CELLS = 1;
 const int P_DELTA = 5;
 const int P_HALF_SATURATION = 24;
@@ -56,6 +59,7 @@ const uint R_MASS = 6u;
 const uint R_METABOLISM = 10u;
 const uint R_X = 1u;
 const uint R_Y = 2u;
+const uint WD_CLOUD_SLOTS = 1u;
 const uint WD_LEDGER = 10u;
 const uint WD_SLOTS = 0u;
 
@@ -127,29 +131,55 @@ void readc_d(uint d, float x, float y, int own, out float c, out float own_share
 	if (OWNER[i0 + n + 1] == own) own_share += tx * ty;
 }
 
-// the list of entries (a range of ENTD) of the square of dish d that holds a point
-void bin_list(uint d, float x, float y, out uint e0, out uint e1) {
+// the list of entries (a range of ENTD) of the square of dish d that holds a point; false when the square is not listed (no bup is near
+// it, see `pool_bin_mark`): the candidates are then the cloud slots 0 to e1, in index order, which `slot_entry` reads one by one
+bool bin_list(uint d, float x, float y, out uint e0, out uint e1) {
 	int nb = int(DPU(d, DP_BINS_ACROSS)); float bs = DPF(d, DP_BIN_SIZE), org = DPF(d, DP_RADIUS);
-	if (nb == 0) { e0 = 0u; e1 = 0u; return; }  // (a dish with no squares has no clouds)
+	if (nb == 0) { e0 = 0u; e1 = 0u; return true; }  // (a dish with no squares has no clouds)
 	int bx = clamp(int((x + org) / bs), 0, nb - 1), by = clamp(int((y + org) / bs), 0, nb - 1);
 	uint b = DPU(d, DP_BIN_BASE) + uint(by * nb + bx);
+#ifndef LISTED_ALL
+	if (BMARK[b] == 0u) { e0 = 0u; e1 = WORLD[WD_CLOUD_SLOTS]; return false; }
+#endif
 	e0 = BINS[b]; e1 = e0 + BINC[b];
+	return true;
 }
-// the clouds' concentration and gradient where a bup of dish d is, and the smallest sigma among the clouds that reach it
-void puffs_at_d(uint d, float x, float y, out float c, out float gx, out float gy, out float sigma) {
-	c = 0.0; gx = 0.0; gy = 0.0; sigma = 1e18;
-	uint e0, e1; bin_list(d, x, y, e0, e1);
-	for (uint e = e0; e < e1; e++) {
-		vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];  // x, y, mass, variance | reach^2, sigma, cloud index, 0
-		float dx = x - r0.x, dy = y - r0.y, r2 = fma(dy, dy, dx * dx);
-		if (r2 <= r1.x) {
-			float v = r0.w;
-			float ci = r0.z / (6.2831853 * v) * exp(-r2 * 0.5 / v);
-			c += ci; gx -= ci * dx / v; gy -= ci * dy / v;
-			sigma = min(sigma, r1.y);
-		}
+// the cloud slot e as an entry of dish d would hold it (x, y, mass, variance | reach^2, sigma, cloud index, 0), for the read of an unlisted
+// square; false when the slot is no cloud of dish d with a reach
+bool slot_entry(uint e, uint d, out vec4 r0, out vec4 r1) {
+	uint o = e * 8u;
+	r0 = vec4(0.0); r1 = vec4(0.0);
+	if (PUFF[o + 5] < 0.5 || floatBitsToUint(PUFF[o + 5]) - PUFF_ROW_BASE != d || !(PUFF[o + 6] > 0.0)) return false;
+	float m = PUFF[o + 2];
+#ifdef MASS_BEFORE_COMMIT
+	// a read after the step's commit: the entry holds the mass the cloud had when the lists were built, so what the commit took is put back
+	float dm = FIX20(PDHI[e], PDLO[e]);
+	if (dm > 0.0) m += dm * PSCALE[e];
+#endif
+	r0 = vec4(PUFF[o], PUFF[o + 1], m, PUFF[o + 3]); r1 = vec4(PUFF[o + 6], PUFF[o + 7], float(e), 0.0);
+	return true;
+}
+// the clouds' concentration and gradient where a bup of dish d is, and the smallest sigma among the clouds that reach it: the entries of its
+// square when that is listed, else the cloud slots in index order (kept out of the listed loop, which is the hot one)
+#define CLOUD_BODY 	float dx = x - r0.x, dy = y - r0.y, r2 = fma(dy, dy, dx * dx); 	if (r2 <= r1.x) { 		float v = r0.w; 		float ci = r0.z / (6.2831853 * v) * exp(-r2 * 0.5 / v); 		c += ci; gx -= ci * dx / v; gy -= ci * dy / v; 		sigma = min(sigma, r1.y); 	}
+void puffs_unlisted(uint d, float x, float y, inout float c, inout float gx, inout float gy, inout float sigma) {
+	uint e1 = WORLD[WD_CLOUD_SLOTS];
+	for (uint e = 0u; e < e1; e++) {
+		vec4 r0, r1;
+		if (!slot_entry(e, d, r0, r1)) continue;
+		CLOUD_BODY
 	}
 }
+void puffs_at_d(uint d, float x, float y, out float c, out float gx, out float gy, out float sigma) {
+	c = 0.0; gx = 0.0; gy = 0.0; sigma = 1e18;
+	uint e0, e1; bool listed = bin_list(d, x, y, e0, e1);
+	if (!listed) { puffs_unlisted(d, x, y, c, gx, gy, sigma); return; }
+	for (uint e = e0; e < e1; e++) {
+		vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];  // x, y, mass, variance | reach^2, sigma, cloud index, 0
+		CLOUD_BODY
+	}
+}
+#undef CLOUD_BODY
 
 void add_fixed(uint cell, float w, int which) { // what is wanted (0), what is read (1) and the own cell's share of it (2), summed per cell
 	if (which == 0) ADD_FIXED30(DLO, DHI, cell, w)
@@ -157,6 +187,16 @@ void add_fixed(uint cell, float w, int which) { // what is wanted (0), what is r
 	else ADD_FIXED30(ALO, AHI, cell, w)
 }
 void add_puff_demand(uint k, float mass) { ADD_FIXED20(PDLO, PDHI, k, mass) }
+// each cloud that reaches a point (r0, r1: x, y, mass, variance | reach^2, sigma, cloud index, 0) is asked for its share of what the bup wants
+#define CLOUD_BODY 	float ddx = x - r0.x, ddy = y - r0.y, r2 = fma(ddy, ddy, ddx * ddx); 	if (r2 <= r1.x) { 		uint k = uint(r1.z); 		float ci = r0.z / (6.2831853 * r0.w) * exp(-r2 * 0.5 / r0.w); 		add_puff_demand(k, wc * ci / cc); 	}
+void demand_unlisted(uint d, float x, float y, float wc, float cc) {
+	uint e1 = WORLD[WD_CLOUD_SLOTS];
+	for (uint e = 0u; e < e1; e++) {
+		vec4 r0, r1;
+		if (!slot_entry(e, d, r0, r1)) continue;
+		CLOUD_BODY
+	}
+}
 void f(uint i, uint d, uint l) {
 	uint b = i * RECORD_WORDS;
 	float x = BUPS[b + R_X], y = BUPS[b + R_Y], energy = BUPS[b + R_ENERGY], mass = BUPS[b + R_MASS], metab = BUPS[b + R_METABOLISM], yld = exp(-BUPS[b + R_HARM]) / sqrt(BUPS[b + R_METABOLISM]);
@@ -183,15 +223,11 @@ void f(uint i, uint d, uint l) {
 				}
 				if (wc > 0.0 && cc > 0.0) {
 					WANTC[i] = wc;
-					uint e0, e1; bin_list(d, x, y, e0, e1);
-					for (uint e = e0; e < e1; e++) {
+					uint e0, e1; bool listed = bin_list(d, x, y, e0, e1);
+					if (!listed) demand_unlisted(d, x, y, wc, cc);
+					else for (uint e = e0; e < e1; e++) {
 						vec4 r0 = ENTD[e * 2u], r1 = ENTD[e * 2u + 1u];
-						float ddx = x - r0.x, ddy = y - r0.y, r2 = fma(ddy, ddy, ddx * ddx);
-						if (r2 <= r1.x) {
-							uint k = uint(r1.z);
-							float ci = r0.z / (6.2831853 * r0.w) * exp(-r2 * 0.5 / r0.w);
-							add_puff_demand(k, wc * ci / cc);
-						}
+						CLOUD_BODY
 					}
 				}
 			}

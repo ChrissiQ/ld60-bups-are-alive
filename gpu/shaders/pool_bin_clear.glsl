@@ -5,6 +5,7 @@ layout(local_size_x = 64) in;
 layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs;
 layout(set = 0, binding = 0, std430) buffer B_WORLD { uint WORLD[]; };
 layout(set = 0, binding = 1, std430) buffer B_BINC { uint BINC[]; };
+layout(set = 0, binding = 2, std430) buffer B_BMARK { uint BMARK[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -45,5 +46,6 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
 #define LEDGER(d, t, amount) { if (WORLD[WD_LEDGER] != 0u) { float rest_ = (amount); uint lo_ = (d) * DS_WORDS + DS_LEDGER + 2u * (t), hi_ = lo_ + 1u; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); uint old_ = atomicAdd(DSTATE[lo_], q_); if (old_ + q_ < old_) atomicAdd(DSTATE[hi_], 1u); } } }
 
-void f(uint b) { BINC[b] = 0u; }
+// pcs.pa 1: every square is to be listed (the marking passes are left out), 0: none yet
+void f(uint b) { BINC[b] = 0u; BMARK[b] = pcs.pa > 0.5 ? 1u : 0u; }
 GRID_LOOP(f, WORLD[WD_BINS])

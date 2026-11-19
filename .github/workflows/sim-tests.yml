@@ -3,7 +3,7 @@
 # which makes no release unless this passes. It does not run on pushes.
 #
 # The tests are the ones that need no values recorded on another machine:
-#   isolation, permutation, field_padding, continuation, conjugation_isolation, medium_isolation:
+#   isolation, permutation, field_padding, continuation, conjugation_isolation, medium_isolation, near_lists:
 #     each compares runs made on the one device, word for word (conjugation_isolation also expects a
 #     dish's donors to grow in number, which is not derived for any device);
 #   invariants, stats: exact counts, and sums within the tolerances the tests state;
@@ -70,7 +70,7 @@ jobs:
       - name: Run the tests
         run: |
           failed=""
-          for t in isolation permutation field_padding continuation conjugation_isolation medium_isolation invariants stats faint_view; do
+          for t in isolation permutation field_padding continuation conjugation_isolation medium_isolation near_lists invariants stats faint_view; do
             log="$RUNNER_TEMP/${t}_test.log"
             echo "::group::${t}_test"
             timeout -k 30 "$TEST_TIMEOUT" xvfb-run -a -s "-screen 0 1280x720x24" \

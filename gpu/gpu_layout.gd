@@ -223,7 +223,7 @@ const LG_LIFE := 3  ## a death's reserve and body less what it gives back; a let
 const LG_TERMS := 4
 
 ## WORLD: one row of the world's totals (uints).
-const WD_WORDS := 16
+const WD_WORDS := 18
 const WD_SLOTS := 0  ## the slots in use (the sum of the aligned segment lengths)
 const WD_CLOUD_SLOTS := 1
 const WD_HUSK_SLOTS := 2
@@ -240,6 +240,8 @@ const WD_NEXT_ID_HI := 12
 const WD_ENTRY_CAPACITY := 13  ## the physical list entries (ENT holds a word and ENTD two vec4s each): the room of `pool_bin_room`, set by the host
 const WD_ENTRIES_PEAK := 14  ## the most entries the lists asked for (before the room's cut) since the host last read it and set it to 0
 const WD_ENTRY_DENSITY := 15  ## the most entries a cloud slot in use averaged at the same time (rounded up), reset with WD_ENTRIES_PEAK
+const WD_ENTRIES_FULL := 16  ## the entries every cloud would have if every square were listed: summed by the count, taken (and zeroed) by `pool_bin_room`, which records it as the lists' ask
+const WD_FALLBACKS := 17  ## the bups that, after the swim, were in a square not listed, so that their demand and apply took their clouds from the cloud slots (a count since the world was made, wrapping)
 
 ## The payload textures (a bup's picture, written sim-side after `finalize`): PAYLOAD (RGBA32UI, PAYLOAD_TEX_WIDTH wide) and the ids (RG32UI).
 const PL_WORDS := 4

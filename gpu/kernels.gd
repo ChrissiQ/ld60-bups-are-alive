@@ -16,7 +16,7 @@ const TYPES := {
 	"OWNER": "int", "INSIDE": "int", "DLO": "uint", "DHI": "uint", "RLO": "uint", "RHI": "uint", "ALO": "uint", "AHI": "uint",
 	"SCALE": "float", "TABLE": "float", "WGT": "float", "CNT": "uint", "SURV": "uint", "KID": "uint", "EXCS": "uint", "EXCK": "uint",
 	"PUFF": "float", "PUFF2": "float", "PUFF_V": "vec4", "PUFF2_V": "vec4", "PCNT": "uint", "PDLO": "uint", "PDHI": "uint", "PSCALE": "float",
-	"BINC": "uint", "BINS": "uint", "BCUR": "uint", "ENT": "uint", "ENTD": "vec4", "EVR": "int", "EVP": "float", "EVCC": "int", "EVCA": "float",
+	"BINC": "uint", "BINS": "uint", "BCUR": "uint", "BMARK": "uint", "BMARK2": "uint", "BINDISH": "uint", "ENT": "uint", "ENTD": "vec4", "EVR": "int", "EVP": "float", "EVCC": "int", "EVCA": "float",
 	"PQ": "float", "PR": "float", "DPLO": "uint", "DPHI": "uint", "WANTC": "float", "PAL": "uint", "PEXC": "uint",
 	# the second food (acetate): its grid (and the copy diffusion needs), the bups' wants and the places they take from, the per-cell sums of what is wanted and let go (2^30 to the unit, two words each) and the share of the want each cell can give
 	"CONC2": "float", "CONC2B": "float", "WANT2": "float", "CELL2": "int", "AWLO": "uint", "AWHI": "uint", "ADLO": "uint", "ADHI": "uint", "SCALE2": "float",
@@ -210,6 +210,10 @@ const FIXED_FUNCS := """
 const FRACTIONS := GpuLayout.FRACTIONS
 
 
+const ALL_LISTED_READERS := ["pool_swim", "pool_demand", "pool_swim_demand", "pool_apply", "pool_apply_count"]
+const LISTED_ANCHOR := "// the list of entries (a range of ENTD)"
+
+
 ## Every kernel: name -> {"source": the text of its .glsl file (the comment line, `#[compute]`, then the GLSL), "buffers": the names
 ## bound in order, "local_size": threads per group}.
 static func all() -> Dictionary:
@@ -222,6 +226,13 @@ static func all() -> Dictionary:
 	GpuKernelsDraw.register(out)
 	GpuKernelsCore.register(out)
 	GpuKernelsView.register(out)
+	# the readers of the cloud lists again for a step whose squares are all listed (`SimCore._lists_marked` false): the read of an unlisted
+	# square is left out of them, so they are the code of a read that has no such square to find
+	for reader: String in ALL_LISTED_READERS:
+		var k: Dictionary = out[reader]
+		var src: String = k["source"]
+		assert(src.contains(LISTED_ANCHOR), "kernel %s has no cloud list functions" % reader)
+		out[reader + "_all"] = {"source": src.replace(LISTED_ANCHOR, "#define LISTED_ALL\n" + LISTED_ANCHOR), "buffers": k["buffers"], "local_size": k["local_size"]}
 	return out
 
 

@@ -8,6 +8,7 @@ layout(set = 0, binding = 1, std430) buffer B_WORLD { uint WORLD[]; };
 layout(set = 0, binding = 2, std430) buffer B_DISHP { uint DISHP[]; };
 layout(set = 0, binding = 3, std430) buffer B_PUFF { float PUFF[]; };
 layout(set = 0, binding = 4, std430) buffer B_BINC { uint BINC[]; };
+layout(set = 0, binding = 5, std430) buffer B_BMARK { uint BMARK[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -31,6 +32,7 @@ const int P_CLOUD_CUT = 65;
 const int P_DETECTION_FLOOR = 9;
 const uint RECORD_WORDS = 28u;
 const uint WD_CLOUD_SLOTS = 1u;
+const uint WD_ENTRIES_FULL = 16u;
 const uint WD_LEDGER = 10u;
 const uint WD_SLOTS = 0u;
 
@@ -69,6 +71,10 @@ void f(uint k) {
 	int nb = int(DPU(d, DP_BINS_ACROSS)); float bs = DPF(d, DP_BIN_SIZE), org = DPF(d, DP_RADIUS); uint base = DPU(d, DP_BIN_BASE);
 	int lx = clamp(int((x - reach + org) / bs), 0, nb - 1), hx = clamp(int((x + reach + org) / bs), 0, nb - 1);
 	int ly = clamp(int((y - reach + org) / bs), 0, nb - 1), hy = clamp(int((y + reach + org) / bs), 0, nb - 1);
-	for (int by = ly; by <= hy; by++) for (int bx = lx; bx <= hx; bx++) atomicAdd(BINC[base + uint(by * nb + bx)], 1u);
+	atomicAdd(WORLD[WD_ENTRIES_FULL], uint((hx - lx + 1) * (hy - ly + 1)));
+	for (int by = ly; by <= hy; by++) for (int bx = lx; bx <= hx; bx++) {
+		uint b = base + uint(by * nb + bx);
+		if (BMARK[b] != 0u) atomicAdd(BINC[b], 1u);
+	}
 }
 GRID_LOOP(f, WORLD[WD_CLOUD_SLOTS])

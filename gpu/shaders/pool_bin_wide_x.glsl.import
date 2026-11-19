@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://dockwb3g4aufa"
+path="res://.godot/imported/pool_bin_wide_x.glsl-3a695261a0fc3feca81a8f0df56d39f9.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_bin_wide_x.glsl"
+dest_files=["res://.godot/imported/pool_bin_wide_x.glsl-3a695261a0fc3feca81a8f0df56d39f9.res"]
+
+[params]
+

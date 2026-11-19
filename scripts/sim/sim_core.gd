@@ -95,6 +95,10 @@ var _scratch_bytes := 0
 var lone_field := false  ## checks only: a step runs the lone feed and diffusion passes (ping-pong, then pool_land_copy) in place of pool_fdiff (tools/gpu/fused_check.gd)
 var _tile_rounds := PackedInt32Array()  ## the tiles of pool_fdiff that run in each round (a prefix of TILES)
 var _tile_key := PackedInt32Array()  ## what TILES was built from: each dish's row, cells across and iterations
+var _lists_marked := false  ## whether the step being recorded lists only the squares near a bup (`_marks_pay`)
+const MARKS_BUPS_PER_CLOUD := 2  ## the marks pay while the record slots in use number under this many a cloud slot ...
+const MARKS_SQUARES_PER_CLOUD := 100  ## ... and the squares number under this many a cloud slot
+var list_margin_override := -1.0  ## checks only: -1 the squares round each bup a step can reach are listed when the marks pay (`_marks_pay`), else every square; -2 every square, with no marks; 0 or more that many squares round each bup; 1e8 or more every square of a dish
 var lone_passes := false  ## checks only: a step runs the lone kernels in place of the fused passes, in the same order (tools/gpu/fused_check.gd)
 var lone_order: Array = ["pool_ac_apply", "pool_conj_apply", "pool_life"]  ## what the lone passes run in place of pool_ac_conj_life and pool_donor_life (a check can change it to show that it would see a wrong order)
 
@@ -288,6 +292,10 @@ func remove_dish(row: int) -> PackedInt64Array:
 	cells.fill(0xFF)
 	rd.buffer_update(arena.buf("CELLDISH"), cd.base * 4, cells.size(), cells)
 	arena.free_cells(cd.base, cd.cells)
+	var squares := PackedByteArray()
+	squares.resize(cd.bins * 4)
+	squares.fill(0xFF)
+	rd.buffer_update(arena.buf("BINDISH"), cd.bin_base * 4, squares.size(), squares)
 	arena.free_bins(cd.bin_base, cd.bins)
 	_dishes.erase(row)
 	_event_rows.erase(row)
@@ -820,6 +828,7 @@ func _sync_tiles() -> void:
 
 ## The step `s` of a batch, in the order of kernels_life.gd's header.
 func _record_step(cl: int, s: int) -> void:
+	_lists_marked = _marks_pay()
 	var bg := _bup_groups()
 	var cg := _groups(arena.cell_top)
 	var hg := _groups(maxi(_wd(GpuLayout.WD_CLOUD_SLOTS), 64))
@@ -852,14 +861,17 @@ func _record_step(cl: int, s: int) -> void:
 	if lone_field:
 		_disp(cl, "pool_clear", cg)
 	_disp(cl, "pool_puff_clear", hg)
+	var reads := "" if _lists_marked else "_all"
 	for kname: String in (["pool_swim", "pool_demand"] if lone_passes else ["pool_swim_demand"]):
-		_disp(cl, kname, bg)
+		_disp(cl, kname + reads, bg)
+	if _lists_marked:
+		_disp(cl, "pool_bin_misses", bg)
 	_disp(cl, "pool_cells", cg)
 	_disp(cl, "pool_puff_scale", hg)
 	var buckets := GpuKernelsLife.conj_buckets(slots)
 	_disp(cl, "pool_conj_clear", maxi(bg, _groups(buckets)))
 	for kname: String in (["pool_apply", "pool_conj_count"] if lone_passes else ["pool_apply_count"]):
-		_disp(cl, kname, bg)
+		_disp(cl, kname if kname == "pool_conj_count" else kname + reads, bg)
 	_disp(cl, "pool_puff_commit", hg)
 	_disp(cl, "pool_ac_cells", cg)
 	_scan(cl, "pool_conj_scan", buckets)
@@ -908,10 +920,17 @@ func _record_step(cl: int, s: int) -> void:
 
 
 ## The clouds' lookup lists made afresh from the clouds as they are (every step makes them before anything reads them; the words a cloud
-## keeps for them, its reach and sigma, are worked out from its mass and spread alone).
+## keeps for them, its reach and sigma, are worked out from its mass and spread alone), for the squares near a bup only when the marks pay
+## (`_marks_pay`): the squares are marked (each bup's own, widened by `_list_margin_um()` or by `list_margin_override`), and the count and the
+## scatter skip the rest; otherwise every square is listed.
 func _record_lists(cl: int, hg: int) -> void:
 	var bins := maxi(arena.bin_top, 1)
-	_disp(cl, "pool_bin_clear", _groups(bins))
+	_disp(cl, "pool_bin_clear", _groups(bins), 0.0 if _lists_marked else 1.0)
+	if _lists_marked:
+		_disp(cl, "pool_bin_mark", _bup_groups())
+		var reach := _list_margin_um()
+		_disp(cl, "pool_bin_wide_x", _groups(bins), reach, list_margin_override)
+		_disp(cl, "pool_bin_wide_y", _groups(bins), reach, list_margin_override)
 	_disp(cl, "pool_bin_count", hg)
 	_scan(cl, "pool_bn", bins)
 	_disp(cl, "pool_bin_cut", D_MAX / 64)
@@ -920,6 +939,29 @@ func _record_lists(cl: int, hg: int) -> void:
 	_disp(cl, "pool_bin_cursor", _groups(bins))
 	_disp(cl, "pool_bin_scatter", hg)
 	_disp(cl, "pool_bin_sort", _groups(bins))
+
+
+## Whether the lists of the coming step list only the squares near a bup. The marking passes cost a pass over every square and the
+## reads that can meet an unlisted square carry the code for it, which a dense dish (many bups to a cloud) or a dish of many squares
+## and few clouds pays for and does not get back: when the marks do not pay, every square is listed, as the lists were made before
+## marks, and the reads are the ones without that code. Either way a read sums what the list would; only the work differs. Judged from
+## the counts of the last read-back, so a step after a change may use the other mode: no result depends on it.
+func _marks_pay() -> bool:
+	if list_margin_override >= 0.0:
+		return true
+	if list_margin_override < -1.5:
+		return false
+	var clouds := _wd(GpuLayout.WD_CLOUD_SLOTS)
+	return _wd(GpuLayout.WD_SLOTS) < MARKS_BUPS_PER_CLOUD * clouds and arena.bin_top <= MARKS_SQUARES_PER_CLOUD * clouds
+
+
+## How far a bup is taken to be able to get from where it was at the start of a step, in µm: `0.25 v delta + 4 v sqrt(3 delta)`, v the
+## fastest speed any gene can reach (the speed gene's bound with every raise): the squares that far round each bup are listed. A read
+## past it takes its clouds from the cloud slots, so this sets the cost of the lists, not what a bup reads.
+func _list_margin_um() -> float:
+	var vmax := float((_consts["gene_max"] as Array)[0]) * float(_consts["reach_factor_3"])
+	var delta := maxf(_delta, 0.0)
+	return 0.25 * vmax * delta + 4.0 * vmax * sqrt(3.0 * delta)
 
 
 ## The per-dish stats over the layout now into sample `sample` of each running dish's STATS row, taken after step `step` of the batch.
@@ -1209,6 +1251,11 @@ func _make_room(row: int, s: DishSpec, grid: DishGrid, count: int, clouds := 0, 
 		celldish[c] = row
 	var b := celldish.to_byte_array()
 	rd.buffer_update(arena.buf("CELLDISH"), cd.base * 4, b.size(), b)
+	var squares := PackedInt32Array()
+	squares.resize(bins)
+	squares.fill(row)
+	var sq := squares.to_byte_array()
+	rd.buffer_update(arena.buf("BINDISH"), cd.bin_base * 4, sq.size(), sq)
 	_set_wd(GpuLayout.WD_CELLS, arena.cell_top)
 	_set_wd(GpuLayout.WD_BINS, arena.bin_top)
 	return true
@@ -1335,7 +1382,9 @@ func _drop_cloud(row: int, x: float, y: float, energy: float, v: float) -> bool:
 		cut[r] = _ds(r, GpuLayout.DS_ENTRIES_CUT)
 	_run_list(func(cl: int) -> void:
 		_disp(cl, "pool_ev_puffs", 1, 0.0)
-		_record_lists(cl, _groups(maxi(_wd(GpuLayout.WD_CLOUD_SLOTS) + 1, 64))))
+		var hg := _groups(maxi(_wd(GpuLayout.WD_CLOUD_SLOTS) + 1, 64))
+		_record_lists(cl, hg)
+		_disp(cl, "pool_puff_clear", hg))  # (the lists hold the clouds' masses as they are now: nothing is left of a commit to put back)
 	for r: int in cut:
 		if _ds(r, GpuLayout.DS_ENTRIES_CUT) != cut[r]:
 			var ds := dstate_row(r)
