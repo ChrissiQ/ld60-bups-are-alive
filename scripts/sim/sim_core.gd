@@ -77,6 +77,13 @@ var _frame := 0  ## the main side's frame count as last told
 var _retired_textures: Array = []  ## {kind, rids, last_seq, last_use, made, moved_on} of each set of textures made afresh, freed once unused (`_free_retired`)
 var textures_remade := {}  ## kind -> sets of textures made afresh so far, each kept until unused (for checks)
 var publish_seq := 0  ## the number of the last publish that wrote a texture
+var cpu_handover := false  ## the main device cannot import this device's textures (Vulkan: every local device is a device of its own): `publish` makes no textures and keeps the bytes of what it publishes in `handed` for the host to carry to the main device (ViewRenderer.cpu_handover)
+var handed := {}  ## with `cpu_handover`, the last publish's bytes: "payload" and "ids" (the bups' used texels), "haze" and "steer" (RGBA8, a cell each), "thumbs" (the atlas's tile rows in use, with "thumb_rows" their number)
+var handed_usec := 0  ## what `_read_handed` has cost so far (microseconds), the reads made and the bytes they took
+var handed_calls := 0
+var handed_bytes := 0
+var _handover_scratch := RID()  ## where `_read_handed` gathers the publish's parts
+var _handover_scratch_bytes := 0
 var _temp_sets: Array[RID] = []  ## the copy kernels' sets of one publish
 var _profile: Variant = null  ## while `profile_steps` runs: kernel name -> Array of µs, each dispatch its own submit
 var _scratch := RID()  ## where `read_parts` gathers what it reads (up to SCRATCH_KEEP bytes)
@@ -167,6 +174,9 @@ func release() -> void:
 	if _scratch.is_valid():
 		rd.free_rid(_scratch)
 		_scratch = RID()
+	if _handover_scratch.is_valid():
+		rd.free_rid(_handover_scratch)
+		_handover_scratch = RID()
 	if arena != null:
 		arena.free_all()
 	ShaderSet.free_all(rd, _made)
@@ -1595,11 +1605,21 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 	arena.ensure_draw(texels, cd.grid.n * cd.grid.n)
 	_after_growth()
 	_free_retired()
-	var w := _free_texture("payload", Vector2i(GpuLayout.PAYLOAD_TEX_WIDTH, rows))
 	var nn := cd.grid.n
-	var fw := _free_texture("haze", Vector2i(nn, nn)) if view.want_field_view else -1
-	var sw := _free_texture("steer", Vector2i(nn, nn)) if view.want_field_view else -1
-	var tw := _free_texture("thumbs", Vector2i(GpuKernelsDraw.THUMB_ATLAS, GpuKernelsDraw.THUMB_ATLAS)) if view.want_thumbnails else -1
+	var w: int
+	var fw: int
+	var sw: int
+	var tw: int
+	if cpu_handover:  # (no textures: the picture is read from the buffers it is laid out in, and the index is only the sign of "written")
+		w = 0
+		fw = 0 if view.want_field_view else -1
+		sw = fw
+		tw = 0 if view.want_thumbnails else -1
+	else:
+		w = _free_texture("payload", Vector2i(GpuLayout.PAYLOAD_TEX_WIDTH, rows))
+		fw = _free_texture("haze", Vector2i(nn, nn)) if view.want_field_view else -1
+		sw = _free_texture("steer", Vector2i(nn, nn)) if view.want_field_view else -1
+		tw = _free_texture("thumbs", Vector2i(GpuKernelsDraw.THUMB_ATLAS, GpuKernelsDraw.THUMB_ATLAS)) if view.want_thumbnails else -1
 	if w < 0 and fw < 0 and sw < 0 and tw < 0:
 		return out
 	if fw >= 0 or sw >= 0:
@@ -1611,7 +1631,8 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 	_run_list(func(cl: int) -> void:
 		if w >= 0:
 			_disp(cl, "pool_payload", _groups(texels), float(row))
-			_copy(cl, "pool_copy_payload", {"PAYTEX": _textures["payload"][w], "IDS": _textures["ids"][w]}, GpuLayout.PAYLOAD_TEX_WIDTH, texels)
+			if not cpu_handover:
+				_copy(cl, "pool_copy_payload", {"PAYTEX": _textures["payload"][w], "IDS": _textures["ids"][w]}, GpuLayout.PAYLOAD_TEX_WIDTH, texels)
 		if tracking:
 			_disp_track(cl, row)
 		if fw >= 0 or sw >= 0:
@@ -1620,16 +1641,20 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 			_disp(cl, "pool_view", _groups(nn * nn), float(row))
 		if fw >= 0:
 			_disp(cl, "pool_haze", _groups(nn * nn), float(row), view.haze.x, view.haze.y, view.haze.z)
-			_copy_pix(cl, "HAZEPIX", _textures["haze"][fw], nn, nn * nn)
+			if not cpu_handover:
+				_copy_pix(cl, "HAZEPIX", _textures["haze"][fw], nn, nn * nn)
 		if sw >= 0:
 			_disp(cl, "pool_steer_map", _groups(nn * nn), float(row))
-			_copy_pix(cl, "STEERPIX", _textures["steer"][sw], nn, nn * nn)
+			if not cpu_handover:
+				_copy_pix(cl, "STEERPIX", _textures["steer"][sw], nn, nn * nn)
 		if tw >= 0:
 			var tiles := D_MAX * GpuKernelsDraw.THUMB_TILE * GpuKernelsDraw.THUMB_TILE
 			_disp(cl, "pool_thumb_clear", _groups(tiles))
 			_disp(cl, "pool_thumb_splat", _bup_groups())
 			_disp(cl, "pool_thumb_resolve", _groups(tiles))
-			_copy_pix(cl, "THUMBS", _textures["thumbs"][tw], GpuKernelsDraw.THUMB_ATLAS, GpuKernelsDraw.THUMB_ATLAS * GpuKernelsDraw.THUMB_ATLAS), false)
+			if not cpu_handover: _copy_pix(cl, "THUMBS", _textures["thumbs"][tw], GpuKernelsDraw.THUMB_ATLAS, GpuKernelsDraw.THUMB_ATLAS * GpuKernelsDraw.THUMB_ATLAS), false)
+	if cpu_handover:
+		_read_handed(n, nn, w >= 0, fw >= 0, sw >= 0, tw >= 0)
 	for t: RID in _temp_sets:
 		if rd.uniform_set_is_valid(t):
 			rd.free_rid(t)
@@ -1641,6 +1666,8 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 		return out
 	publish_seq += 1
 	for kind: String in out:
+		if cpu_handover:
+			break
 		var i: int = out[kind]
 		_texture_seqs[kind][i] = publish_seq
 		_texture_used[kind][i] = -1
@@ -1649,6 +1676,54 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 	if tracking:
 		out["tracked"] = _took_track(view.track)
 	return out
+
+
+## With `cpu_handover`: reads what the publish wrote into `handed`, in one copy and one wait, and only the part in use (the payload's and the
+## ids' `n` texels, the atlas's tile rows of the dishes in the pool).
+func _read_handed(n: int, nn: int, payload: bool, haze: bool, steer: bool, thumbs: bool) -> void:
+	handed = {}
+	var started := Time.get_ticks_usec()
+	var parts: Array = []  ## [kind, buffer, bytes]
+	if payload:
+		parts.append(["payload", "PAYLOAD", n * GpuLayout.PAYLOAD_BYTES])
+		parts.append(["ids", "IDTEX", n * GpuLayout.IDT_BYTES])
+	if haze:
+		parts.append(["haze", "HAZEPIX", nn * nn * 4])
+	if steer:
+		parts.append(["steer", "STEERPIX", nn * nn * 4])
+	if thumbs:
+		var across := GpuKernelsDraw.THUMB_ATLAS / GpuKernelsDraw.THUMB_TILE
+		var most := 0
+		for row: int in _dishes:
+			most = maxi(most, row)
+		var tile_rows := most / across + 1
+		handed["thumb_rows"] = tile_rows
+		parts.append(["thumbs", "THUMBS", tile_rows * GpuKernelsDraw.THUMB_TILE * GpuKernelsDraw.THUMB_ATLAS * 4])
+	var total := 0
+	for p: Array in parts:
+		total += int(p[2])
+	if total == 0:
+		for p: Array in parts:
+			handed[p[0]] = PackedByteArray()
+		return
+	if total > _handover_scratch_bytes:
+		if _handover_scratch.is_valid():
+			rd.free_rid(_handover_scratch)
+		_handover_scratch_bytes = maxi(total, int(_handover_scratch_bytes * 1.5))
+		_handover_scratch = rd.storage_buffer_create(_handover_scratch_bytes)
+	var at := 0
+	for p: Array in parts:
+		if int(p[2]) > 0:
+			rd.buffer_copy(arena.buf(p[1]), _handover_scratch, 0, at, int(p[2]))
+		at += int(p[2])
+	var data := rd.buffer_get_data(_handover_scratch, 0, total)
+	at = 0
+	for p: Array in parts:
+		handed[p[0]] = data.slice(at, at + int(p[2]))
+		at += int(p[2])
+	handed_usec += Time.get_ticks_usec() - started
+	handed_calls += 1
+	handed_bytes += total
 
 
 ## The main side used texture `index` of `kind`, holding publish `seq`, on its frame `frame` (see the header: every use is told, with the

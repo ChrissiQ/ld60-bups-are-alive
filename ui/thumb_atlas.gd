@@ -18,7 +18,10 @@ func tick(w: WorldClient) -> void:
 	var info := w.latest().thumbs
 	if info != null and info.texture_index >= 0 and (_info == null or info.seq != _info.seq):
 		var handles: Dictionary = (w.backend.texture_handles() as Dictionary).get("thumbs", {})
-		if not handles.is_empty():
+		if not info.bytes.is_empty():
+			_view.hand_over_picture("thumbs", info.bytes, Vector2i(GpuKernelsDraw.THUMB_ATLAS, info.tile_rows * GpuKernelsDraw.THUMB_TILE), info.seq)
+			_info = info
+		elif not handles.is_empty():
 			_view.offer("thumbs", info.texture_index, int(handles["generation"]), PackedInt64Array(handles["handles"]), Vector2i(int(handles["width"]), int(handles["height"])), info.seq)
 			_info = info
 	_view.tick()

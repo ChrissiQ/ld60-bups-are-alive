@@ -6,5 +6,7 @@ extends RefCounted
 
 var texture_index := -1  ## the atlas's texture (-1: none yet)
 var seq := 0  ## the number of the publish that wrote it (SimCore.publish_seq)
+var bytes := PackedByteArray()  ## with ViewRenderer.cpu_handover: the atlas's first `tile_rows` rows of tiles (SimCore.handed), in place of a shared texture
+var tile_rows := 0
 var version := 0  ## counts the atlases published
 var tiles: Dictionary = {}  ## client row -> its tile in this atlas (the simulation's own row for the dish when the atlas was written: ViewRenderer.thumbnail_region)

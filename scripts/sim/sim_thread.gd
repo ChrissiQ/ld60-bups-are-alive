@@ -90,6 +90,7 @@ var _pipettes: Array = []  ## pipettes waiting for their new dish's grid, made o
 var _tick_usec := 0  ## when the last set_time command was drained
 var _busy_ema := 0.0  ## ms: the iterations' busy time, smoothed
 var _grids := {}  ## the grid a pipette from the main view's dish would give its new dish, made ahead on the worker pool (`_make_grid_ahead`): key (`_grid_key`) -> {task, made}
+var cpu_handover := false  ## the pictures reach the main device as bytes, not as shared textures (ViewRenderer.cpu_handover, taken on the main thread); set before `start`
 var _mass_um := 0.0  ## a bup's drawn length per unit of mass (SimConstants' mass_um)
 
 
@@ -97,6 +98,7 @@ func _init(p_limits: PoolLimits = null, p_store: Object = null) -> void:
 	limits = p_limits if p_limits != null else PoolLimits.new()
 	store = p_store
 	worker = ResultWorker.new(store)
+	cpu_handover = ViewRenderer.cpu_handover()
 
 
 func start() -> void:
@@ -172,6 +174,7 @@ func _error(what: String) -> void:
 
 func _run() -> void:
 	_core = SimCore.new(limits)
+	_core.cpu_handover = cpu_handover
 	_set_status("device", _core.rd.get_device_name() if _core.rd != null else "")
 	if not _core.errors.is_empty():
 		for e in _core.errors:
@@ -523,7 +526,9 @@ func _publish() -> void:
 	v.track = PackedInt64Array((_questions.get(_view.row, {}) as Dictionary).get("tracked", []))
 	_give_bound()
 	var out := _core.publish(v)
-	_take_handles()
+	if not cpu_handover:
+		_take_handles()
+	var handed := _core.handed
 	_husks_owed = _view.want_husks and not (now - _husk_msec >= HUSK_VIEW_MSEC or _view_dirty)
 	if _view.want_husks and not _husks_owed:
 		_husk_msec = now
@@ -535,6 +540,9 @@ func _publish() -> void:
 		p.sim_time = governor.clock
 		p.row = _view.row
 		p.generation = int((_handles.get("payload", {}) as Dictionary).get("generation", 0))
+		if cpu_handover:
+			p.bytes = handed["payload"]
+			p.id_bytes = handed["ids"]
 		p.seq = _core.publish_seq
 		p.places = _places(out.get("tracked", {}))
 		_payload = p
@@ -550,6 +558,9 @@ func _publish() -> void:
 		f.steer_index = out.get("steer", _field_view.steer_index if same else -1)
 		f.steer_seq = _core.publish_seq if out.has("steer") else (_field_view.steer_seq if same else 0)
 		f.version = _field_version
+		if cpu_handover:  # (a kind not written this time keeps its last picture, which the main side has: its publish number is the old one)
+			f.haze_bytes = handed["haze"] if out.has("haze") else (_field_view.haze_bytes if same else PackedByteArray())
+			f.steer_bytes = handed["steer"] if out.has("steer") else (_field_view.steer_bytes if same else PackedByteArray())
 		_field_view = f
 	if out.has("thumbs"):
 		_thumbs_msec = now
@@ -558,6 +569,9 @@ func _publish() -> void:
 		t.seq = _core.publish_seq
 		t.version = (_thumbs.version if _thumbs != null else 0) + 1
 		t.tiles = _rows.duplicate()
+		if cpu_handover:
+			t.bytes = handed["thumbs"]
+			t.tile_rows = int(handed["thumb_rows"])
 		_thumbs = t
 	_view_dirty = false
 

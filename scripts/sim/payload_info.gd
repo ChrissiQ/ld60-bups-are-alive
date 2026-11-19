@@ -10,5 +10,7 @@ var generation := 0  ## changes when the textures are re-made at another size
 var seq := 0  ## the number of the publish that wrote it (SimCore.publish_seq), which the main side gives back with each use
 var handles := PackedInt64Array()  ## the payload textures' native handles on the simulation's device (ViewRenderer.driver_handles), all SimCore.TEXTURES
 var id_handles := PackedInt64Array()  ## the id textures' likewise
+var bytes := PackedByteArray()  ## with ViewRenderer.cpu_handover: the payload's `count` texels (SimCore.handed), in place of the handles
+var id_bytes := PackedByteArray()  ## the ids' `count` texels likewise
 var size := Vector2i()  ## the textures' size in texels (GpuLayout.PAYLOAD_TEX_WIDTH wide)
 var places := {}  ## id -> Vector3(x, y, drawn length in µm), dish-local, of the bups the dish asks after (its selected and hovered) in this payload

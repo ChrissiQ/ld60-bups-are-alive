@@ -132,11 +132,17 @@ func process() -> void:
 	_take(w, handles)
 	var field := w.latest().field_view
 	var haze: Dictionary = handles.get("haze", {})
-	if field != null and field.texture_index >= 0 and field.seq != _offered_field and not haze.is_empty():
+	if field != null and field.texture_index >= 0 and field.seq != _offered_field and not field.haze_bytes.is_empty():
+		view.hand_over_picture("haze", field.haze_bytes, Vector2i(field.n, field.n), field.seq)
+		_offered_field = field.seq
+	elif field != null and field.texture_index >= 0 and field.seq != _offered_field and not haze.is_empty():
 		view.offer("haze", field.texture_index, int(haze["generation"]), PackedInt64Array(haze["handles"]), Vector2i(int(haze["width"]), int(haze["height"])), field.seq)
 		_offered_field = field.seq
 	var steer: Dictionary = handles.get("steer", {})
-	if field != null and field.steer_index >= 0 and field.steer_seq != _offered_steer and not steer.is_empty():
+	if field != null and field.steer_index >= 0 and field.steer_seq != _offered_steer and not field.steer_bytes.is_empty():
+		view.hand_over_picture("steer", field.steer_bytes, Vector2i(field.n, field.n), field.steer_seq)
+		_offered_steer = field.steer_seq
+	elif field != null and field.steer_index >= 0 and field.steer_seq != _offered_steer and not steer.is_empty():
 		view.offer("steer", field.steer_index, int(steer["generation"]), PackedInt64Array(steer["handles"]), Vector2i(int(steer["width"]), int(steer["height"])), field.steer_seq)
 		_offered_steer = field.steer_seq
 	draw_bups_view()
@@ -226,6 +232,8 @@ func _ensure_view(w: WorldClient) -> bool:
 ## The publish `p` with the payload's and the ids' native handles and size (the backend's `texture_handles`); null when the textures were
 ## made again since it was published.
 static func _with_handles(p: PayloadInfo, handles: Dictionary) -> PayloadInfo:
+	if not p.bytes.is_empty() or ViewRenderer.cpu_handover():
+		return p  # (handed over as bytes: nothing to import)
 	var pay: Dictionary = handles.get("payload", {})
 	var ids: Dictionary = handles.get("ids", {})
 	if pay.is_empty() or ids.is_empty() or int(pay["generation"]) != p.generation:

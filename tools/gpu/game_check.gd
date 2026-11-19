@@ -554,6 +554,14 @@ func _perf(bups: int, radius: float, speed: float, seconds: float) -> void:
 		await g.frame(speed, false)
 	frame_ms.clear()
 	_last_usec = 0
+	await g.inspect(func(core: SimCore, _rows: Dictionary) -> int:
+		core.handed_usec = 0
+		core.handed_calls = 0
+		core.handed_bytes = 0
+		return 0)
+	ViewRenderer.handover_usec = 0
+	ViewRenderer.handover_calls = 0
+	ViewRenderer.handover_bytes = 0
 	var t0 := Time.get_ticks_msec()
 	var w0 := d.time
 	while Time.get_ticks_msec() - t0 < seconds * 1000.0:
@@ -564,5 +572,7 @@ func _perf(bups: int, radius: float, speed: float, seconds: float) -> void:
 			frame_ms.append((now - _last_usec) / 1000.0)
 		_last_usec = now
 	var real := (Time.get_ticks_msec() - t0) / 1000.0
+	var handed: Array = await g.inspect(func(core: SimCore, _rows: Dictionary) -> Array: return [core.handed_usec, core.handed_calls, core.handed_bytes])
+	print("HANDOVER cpu=%s sim thread: %.2f ms a read over %d reads (%.2f MB a read); main thread: %.2f ms a handover over %d handovers (%.2f MB a handover)" % [ViewRenderer.cpu_handover(), handed[0] / 1000.0 / maxi(1, handed[1]), handed[1], handed[2] / 1.0e6 / maxi(1, handed[1]), ViewRenderer.handover_usec / 1000.0 / maxi(1, ViewRenderer.handover_calls), ViewRenderer.handover_calls, ViewRenderer.handover_bytes / 1.0e6 / maxi(1, ViewRenderer.handover_calls)])
 	TestUtil.show(frame_ms.size() > 0 and d.time > w0, "perf: the dish ran and was drawn (%d frames)" % frame_ms.size())
 	print("PERF bups=%d (%d at the end) radius=%.0f speed=x%.0f: frame ms p50 %.2f p95 %.2f p99 %.2f max %.2f, achieved x%.0f over %.0f s, timing %s" % [bups, d.population(), radius, speed, _pct(frame_ms, 0.5), _pct(frame_ms, 0.95), _pct(frame_ms, 0.99), _pct(frame_ms, 1.0), (d.time - w0) / real, real, g.world.latest().timing])

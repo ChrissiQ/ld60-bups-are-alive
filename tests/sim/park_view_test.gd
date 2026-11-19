@@ -11,7 +11,8 @@ extends SceneTree
 ##    100 µm from each of dish 1's bups): no answer of dish 1's view names a bup of dish 2, and none names a bup at all (dish 1 has none
 ##    there). Its view draws nothing until dish 1's own payload is taken (its payload's count is 0 or its row is dish 1's).
 ## O  The pointer then on one of dish 1's own bups finds it within 40 frames (the pick works after the return).
-## T  Textures made afresh are kept until the main side is done with them, then freed, never left behind (SimCore.textures_remade counts
+## T  (Shared textures only: with the byte handover (ViewRenderer.cpu_handover) the simulation makes none and T holds trivially.)
+##    Textures made afresh are kept until the main side is done with them, then freed, never left behind (SimCore.textures_remade counts
 ##    them, retired_textures() the ones waiting). Dish 2 has 3,000 bups (two payload rows of 2,048) and a grid of 200 cells across, dish 1
 ##    40 bups and 100 cells, both with the medium shown: (1) once dish 1 is drawn (dish 2 was published while it was added) the payload has
 ##    been made afresh at least once (dish 2's two rows after dish 1's one); (2) the switch to dish 2 makes the haze and the steering map
@@ -43,7 +44,7 @@ func _run() -> void:
 	g.look_at(a, 0.5)
 	TestUtil.show(await g.wait_picture(a), "U dish 1's picture is drawn")
 	var retired_before: Array = await _retired()
-	TestUtil.show(int(retired_before[0].get("payload", 0)) >= 1, "T the payload was made afresh for dish 2's two rows (%s)" % [retired_before[0]])
+	TestUtil.show(ViewRenderer.cpu_handover() or int(retired_before[0].get("payload", 0)) >= 1, "T the payload was made afresh for dish 2's two rows (%s)" % [retired_before[0]])
 	a.park()
 	b.unpark()
 	g.look_at(b, 0.5)
@@ -51,7 +52,7 @@ func _run() -> void:
 	await g.run_frames(60, 1.0, false)
 	await g.settle()
 	var retired_there: Array = await _retired()
-	TestUtil.show(_made(retired_there, "haze") > _made(retired_before, "haze") and _made(retired_there, "steer") > _made(retired_before, "steer") and (retired_there[1] as Dictionary).is_empty(), "T the switch to dish 2 made the haze and the map afresh (%s, was %s); none waiting after 60 frames: %s" % [retired_there[0], retired_before[0], retired_there[1]])
+	TestUtil.show(ViewRenderer.cpu_handover() or _made(retired_there, "haze") > _made(retired_before, "haze") and _made(retired_there, "steer") > _made(retired_before, "steer") and (retired_there[1] as Dictionary).is_empty(), "T the switch to dish 2 made the haze and the map afresh (%s, was %s); none waiting after 60 frames: %s" % [retired_there[0], retired_before[0], retired_there[1]])
 	var mine := await g.gather(a)
 	var theirs := await g.gather(b)
 	var spot := _spot(theirs, mine)
@@ -96,7 +97,7 @@ func _run() -> void:
 	await g.run_frames(40)
 	var retired_back: Array = await _retired()
 	var haze := a.drawing.view.texture("haze") if a.drawing.view != null else null
-	TestUtil.show(_made(retired_back, "haze") > _made(retired_there, "haze") and _made(retired_back, "steer") > _made(retired_there, "steer") and (retired_back[1] as Dictionary).is_empty(), "T back on dish 1 the haze and the map were made afresh again (%s); none waiting after the paused frames: %s" % [retired_back[0], retired_back[1]])
+	TestUtil.show(ViewRenderer.cpu_handover() or _made(retired_back, "haze") > _made(retired_there, "haze") and _made(retired_back, "steer") > _made(retired_there, "steer") and (retired_back[1] as Dictionary).is_empty(), "T back on dish 1 the haze and the map were made afresh again (%s); none waiting after the paused frames: %s" % [retired_back[0], retired_back[1]])
 	TestUtil.show(haze != null and haze.texture_rd_rid.is_valid(), "T dish 1's view has its haze to draw again (%s)" % [haze.texture_rd_rid if haze != null else "none"])
 	TestUtil.finish(self, "OK park_view_test")
 

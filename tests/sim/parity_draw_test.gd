@@ -16,9 +16,10 @@ extends SceneTree
 ##    tables' difference (11 at most, measured).
 ## S  The 40 fixture bups of queries_info.txt, each selected in turn: Dish.bup_steering (the tracked answer's way and chance) within 1e-5
 ##    of the fixture's bup_steering in each of x, y and the chance.
-## Paused, each answer is waited for with ParityGame.answer_now.
+## Paused, each answer is waited for with ParityGame.answer_now (a steering answer, until it has come).
 
 const STEER_ALPHA_TOLERANCE := 12  ## alpha units of 255: the measured worst 11 of the table difference, and one more
+const ANSWER_FRAMES_MOST := 120  ## frames a selected bup's steering answer is waited for past `answer_now`: a bound for an answer that never comes, not a measured time
 
 var g: ParityGame
 var dish: Dish
@@ -118,6 +119,10 @@ func _steering() -> void:
 		var pooled := ParityGame.pooled_id(dish.number, id)
 		dish.selected.bup = pooled
 		await g.answer_now()
+		for wait in ANSWER_FRAMES_MOST:  # (this checks the value; how soon an answer comes is parity_pick_latency_test's)
+			if (dish._answers.get("steer", {}) as Dictionary).has(pooled):
+				break
+			await g.frame()
 		var got := dish.bup_steering(pooled)
 		var tracked := ((dish._answers.get("steer", {}) as Dictionary).has(pooled))
 		var off := maxf(absf(got.x - want.x), maxf(absf(got.y - want.y), absf(got.z - want.z)))
