@@ -36,7 +36,7 @@ const VW_NEAR := 12
 const VW_FINDS := 13  ## 1: find the bups VW_FIND (FINDS ids, the low word then the high; an unused one all ones)
 const VW_FIND := 14
 const FINDS := 2  ## the bups whose place is looked up a frame (the selected and the hovered: their rings)
-const VW_DENSITY := VW_FIND + 2 * FINDS  ## 0: the capsules for every bup; DENSITY_NEAREST, DENSITY_BILINEAR or DENSITY_ROD: the bups under their least footprint are splatted (below), not drawn
+const VW_DENSITY := VW_FIND + 2 * FINDS  ## 0: the capsules for every bup; 1: the bups under their least footprint are splatted (below), not drawn
 const VW_DEN_W := VW_DENSITY + 1  ## the density picture's size in pixels (the camera's rectangle over the pixel)
 const VW_DEN_H := VW_DENSITY + 2
 const VW_WORDS := VW_DEN_H + 1
@@ -64,10 +64,8 @@ const VO_WORDS := VO_LARGE + 1
 ## Each tap does atomicMax(key) on word 5, key = an 8-bit score above the bup's 24-bit colour; the score is a hash of the bup's index (the
 ## same for all its taps, so a bup is one contender) times its share of that pixel, so a bup that barely touches a pixel rarely wins it and
 ## a bup that covers it often does. A bup competes in each pixel it touches. density_resolve writes the picture the canvas draws over the
-## dish: the winner's colour with the coverage.
-const DENSITY_NEAREST := 1  ## the whole footprint on the pixel the bup's middle lies in
-const DENSITY_BILINEAR := 2  ## the footprint shared among the four pixels whose middles are nearest (a square pixel's worth of it spread as it overlaps them)
-const DENSITY_ROD := 3  ## the footprint as two such squares along the bup's axis, each half its area (the rod a capsule of the least size is)
+## dish: the winner's colour with the coverage. A bup's footprint is shared among the four pixels whose middles are nearest it (bilinear
+## taps: a square pixel's worth of it spread as it overlaps them).
 const DENSITY_ALPHA_SCALE := 1024
 const DENSITY_WORDS := 6  ## the words a pixel: word 4 the L sum, word 5 the winner's key (words 0-3 unused)
 
@@ -296,16 +294,7 @@ void f(uint k) {
 	uint c = px[PL_COLOR];
 	uvec3 rgb = uvec3((c >> PL_RED_SHIFT) & 255u, (c >> PL_GREEN_SHIFT) & 255u, (c >> PL_BLUE_SHIFT) & 255u);
 	WIN_HASH = hash_u(k);
-	uint mode = VP[VW_DENSITY];
-	if (mode == DENSITY_NEAREST) {
-		put(ivec2(floor(u)), area, rgb);
-	} else if (mode == DENSITY_BILINEAR) {
-		tent(u, area, rgb);
-	} else {
-		vec2 along = vec2(cos(shape.y), sin(shape.y)) * (0.25 * length_px);
-		tent(u - along, 0.5 * area, rgb);
-		tent(u + along, 0.5 * area, rgb);
-	}
+	tent(u, area, rgb);
 }
 GRID_LOOP(f, VP[VW_COUNT])
 """
@@ -337,7 +326,7 @@ static func declarations() -> String:
 		names.append(String(key))
 	names.sort()
 	for name: String in names:
-		if (name.begins_with("VW_") or name.begins_with("VO_") or name == "FINDS" or name in ["DENSITY_NEAREST", "DENSITY_BILINEAR", "DENSITY_ROD", "DENSITY_ALPHA_SCALE", "DENSITY_WORDS"]) and constants[name] is int:
+		if (name.begins_with("VW_") or name.begins_with("VO_") or name == "FINDS" or name in ["DENSITY_ALPHA_SCALE", "DENSITY_WORDS"]) and constants[name] is int:
 			text += "const uint %s = %du;\n" % [name, constants[name]]
 	return text
 

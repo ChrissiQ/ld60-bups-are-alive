@@ -21,9 +21,6 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define BUP_RECORD_THREAD BUP_THREAD uint b = i * RECORD_WORDS;
 #define CELL_THREAD uint i = gl_GlobalInvocationID.x; if (i >= uint(P[P_CELLS] * P[P_CELLS])) return;
 const uint DENSITY_ALPHA_SCALE = 1024u;
-const uint DENSITY_BILINEAR = 2u;
-const uint DENSITY_NEAREST = 1u;
-const uint DENSITY_ROD = 3u;
 const uint DENSITY_WORDS = 6u;
 const uint FINDS = 2u;
 const uint VO_D2 = 1u;

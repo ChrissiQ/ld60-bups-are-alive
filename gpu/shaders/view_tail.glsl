@@ -47,9 +47,6 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define CELL_LOOP(F, BOUND) void main() { uint n_ = (BOUND); for (uint c_ = gl_GlobalInvocationID.x; c_ < n_; c_ += GRID_STRIDE) { uint d_ = CELLDISH[c_]; if (d_ == NO_DISH) continue; uint l_ = c_ - DPU(d_, DP_FIELD_BASE), m_ = DPU(d_, DP_CELLS); if (l_ < m_ * m_) F(c_, d_, l_); } }
 #define LEDGER(d, t, amount) { if (WORLD[WD_LEDGER] != 0u) { float rest_ = (amount); uint lo_ = (d) * DS_WORDS + DS_LEDGER + 2u * (t), hi_ = lo_ + 1u; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); uint old_ = atomicAdd(DSTATE[lo_], q_); if (old_ + q_ < old_) atomicAdd(DSTATE[hi_], 1u); } } }
 const uint DENSITY_ALPHA_SCALE = 1024u;
-const uint DENSITY_BILINEAR = 2u;
-const uint DENSITY_NEAREST = 1u;
-const uint DENSITY_ROD = 3u;
 const uint DENSITY_WORDS = 6u;
 const uint FINDS = 2u;
 const uint VO_D2 = 1u;

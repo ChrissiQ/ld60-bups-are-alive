@@ -64,7 +64,6 @@ var profiling := false
 ## footprint is drawn as a capsule, so there is no jump where a bup crosses. Set with `set_density`: the game's main view turns it on
 ## (DishDrawing._ensure_view); a view made for a tool or a test has it off, which draws every bup as a capsule.
 var density := false
-var density_taps := GpuKernelsView.DENSITY_BILINEAR  ## GpuKernelsView.DENSITY_NEAREST, DENSITY_BILINEAR or DENSITY_ROD (a footprint on one pixel, shared by four, or as a rod of two such)
 
 var _local := false  ## a local device (tools): its work is submitted and waited for, not run with the frame
 var _den_made := {}  ## the density kernels, made the first time density mode is switched on
@@ -134,7 +133,7 @@ func can_draw() -> bool:
 	return rd != null and _made.size() == KERNELS.size()
 
 
-## Density mode on or off (`taps`: GpuKernelsView.DENSITY_NEAREST, DENSITY_BILINEAR or DENSITY_ROD). The density kernels are made the first time it is
+## Density mode on or off. The density kernels are made the first time it is
 ## switched on; if they do not build, `density_ready` stays false and the capsule drawing goes on whatever the switch says.
 ## The view's and the density mode's kernel definitions, taken once a run and together (GpuKernels.all writes every kernel's text, about
 ## 17 ms [measured, M1 Pro]: not once a dish, and not once for each of the two sets).
@@ -149,9 +148,8 @@ static func _take_defs() -> void:
 	_copy_defs["pool_copy_payload"] = all["pool_copy_payload"]
 
 
-func set_density(on: bool, taps := GpuKernelsView.DENSITY_BILINEAR) -> void:
+func set_density(on: bool) -> void:
 	density = on
-	density_taps = taps
 	if not on or rd == null or not _den_made.is_empty():
 		return
 	_take_defs()
@@ -356,7 +354,7 @@ func draw_into(camera: Rect2, pixel_um: float, target: RID, capacity: int, multi
 		return  # (no payload yet, or none since `let_go`: a question asked waits for one)
 	var count := mini(_payload.count, _imports["payload"]["size"].x * _imports["payload"]["size"].y)
 	var dens := density_ready()
-	var mode := density_taps if dens else 0
+	var mode := 1 if dens else 0
 	var den_size := Vector2i(maxi(ceili(camera.size.x / pixel_um - 0.001), 1), maxi(ceili(camera.size.y / pixel_um - 0.001), 1)) if dens else Vector2i.ZERO
 	var view_key := [camera, pixel_um, _payload.row, _imports["payload"]["generation"], mode]
 	var slots := count
