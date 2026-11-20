@@ -14,6 +14,14 @@ extends RefCounted
 ##   frame and 2 in the next whenever the owed time's fraction of a step sits near a whole step, and those frames show no new picture.
 ## - Steps of an iteration: as many as are owed, at most what fits T_ITER_MS at the measured cost of a step, MAX_STEPS, and the bounds
 ##   the caller gives (the room the pool can grow to, the history samples an iteration can hold).
+## - Cost of a step: an iteration costs `fixed_ms + k x step_ms` (the wait, the read-backs and the tail do not depend on k), so one
+##   iteration's time over its steps overstates a step by `fixed_ms / k`, and at k = 1 it stays above what lets k rise (T_ITER_MS over that
+##   is 1). The two are learned apart from iterations of different k: the slope between an iteration and the one before it at another
+##   k (`_ref_k`, `_ref_run`), weighted by how far apart the two k are. Until a slope is known the cost of a step is the iteration's time
+##   over its steps. When no pair has been seen for PROBE_EVERY iterations the next one runs another k: half of the usual below it, or, at k = 1
+##   or with no slope yet, more than it (up to what 2 x T_ITER_MS allows at the pessimistic cost), and only where the iteration would not be
+##   split by frames anyway. T_ITER_MS bounds the steps' time alone; the fixed cost comes on top, so an iteration takes at most
+##   `fixed_ms + T_ITER_MS` (plus the answer and publish the caller adds), and a probe up at most `fixed_ms + 2 x T_ITER_MS`.
 ## - Catch-up in single frames' worth: below MAX_STEP a display frame owes `frame_steps()` steps (1 at 120 Hz) and every iteration publishes
 ##   one picture the display shows for a frame. After a late iteration k > 1 frames' worth are owed; run as one merged iteration they give
 ##   one publish for k frames, so k - 1 frames show nothing new for good. When the sim keeps up (a frame's steps cost, on the slow mean, within a display frame,
@@ -27,7 +35,7 @@ extends RefCounted
 const MAX_STEP := Dish.MAX_STEP  ## s: the longest world step
 const STEPS_PER_SECOND := 120.0  ## steps per simulated second at x1 (a step of 1/120 s)
 const MAX_FRAME_SECONDS := 0.1  ## the longest frame the sim catches up on (Main.MAX_FRAME_SECONDS)
-const T_ITER_MS := 25.0  ## [placeholder] the longest an iteration's steps should take
+const T_ITER_MS := 50.0  ## [placeholder] the longest an iteration's steps should take (the fixed cost of an iteration is not counted)
 const MAX_STEPS := GpuLayout.MAX_STEPS_PER_BATCH
 const OWED_ITERATIONS := 2.0  ## the most time owed, in iterations of the most steps the governor allows now
 const MEAN_WEIGHT := 0.02  ## the newest iteration's weight in the slow mean of a step's cost (about 50 iterations)
@@ -35,6 +43,9 @@ const KEEP_UP_SHARE := 1.0  ## of a display frame: the most a frame's steps may 
 const SPLIT_OWED_MOST := 3  ## frames' worth owed up to which catch-up runs frame by frame (the display keeps one shown and two waiting)
 const OWED_TOLERANCE := 1e-6  ## of a step: what a sum of frame lengths may miss a whole step by and still owe it
 const EMA_WEIGHT := 0.25  ## the newest iteration's weight in the cost of a step
+const PROBE_EVERY := 16  ## iterations without a pair of different k after which the next one runs another k
+const SLOPE_WEIGHT := 0.5  ## the weight of a slope between two k that differ by their whole size (weighted by the relative difference)
+const SLOPE_MIN_SPREAD := 0.25  ## the relative difference of two k under which a first slope is not taken (the noise would be the slope)
 const SLOW_FRAME := 1.15
 const FAST_FRAME := 1.05
 const SLOW_FRAMES := 3
@@ -47,7 +58,12 @@ var paused := true
 var target := 0.0  ## s: the world time the frames have asked for
 var clock := 0.0  ## s: the world time the steps have reached
 var steps_total := 0  ## the world steps run so far
-var step_ms_ema := T_ITER_MS  ## ms: the cost of a step, as the iterations measured it (starts at one step an iteration)
+var step_ms_ema := T_ITER_MS  ## ms: the cost of a step, as the iterations measured it (starts at one step an iteration; once a slope is known, the slope)
+var fixed_ms := 0.0  ## ms: the cost of an iteration that does not depend on its steps (0 until a slope is known)
+var slope_known := false
+var _ref_k := 0  ## the steps of the iteration the next one is compared with
+var _ref_run := 0.0  ## ms: its time (smoothed over the iterations since at the same k)
+var _since_pair := 0  ## iterations since a slope was taken
 var step_ms_mean := T_ITER_MS  ## ms: the cost of a step on a slow mean (MEAN_WEIGHT): what `keeping_up` reads
 var duty := 1.0
 var dropped := 0.0  ## s of owed time dropped by the cap, in all
@@ -75,7 +91,7 @@ func set_time(p_speed: float, p_paused: bool, real_dt: float) -> void:
 		_pace_carry = 0.0
 		return
 	target += speed * clampf(paced(real_dt), 0.0, MAX_FRAME_SECONDS)
-	var most := OWED_ITERATIONS * float(steps_by_time()) * delta()
+	var most := OWED_ITERATIONS * float(steps_by_cost()) * delta()
 	if target - clock > most:
 		dropped += target - clock - most
 		target = clock + most
@@ -106,8 +122,26 @@ func owed_steps() -> int:
 
 
 ## The most steps an iteration may take by time alone: T_ITER at the measured cost of a step, at least one, at most MAX_STEPS.
-func steps_by_time() -> int:
+func steps_by_cost() -> int:
 	return clampi(int(floor(T_ITER_MS / maxf(step_ms_ema, 1e-3))), 1, MAX_STEPS)
+
+
+## The most steps the next iteration may take by time: `steps_by_cost`, or the other k of a probe when one is due (see the header).
+func steps_by_time() -> int:
+	var k := steps_by_cost()
+	if _since_pair < PROBE_EVERY or not _may_probe():
+		return k
+	if slope_known and k >= 2:
+		return maxi(1, k / 2)
+	if slope_known:
+		return k
+	return clampi(maxi(k + 1, int(floor(2.0 * T_ITER_MS / maxf(step_ms_ema, 1e-3)))), 1, MAX_STEPS)
+
+
+## A probe changes k, which splits nothing: not while a display frame's own steps are what the iteration is (below MAX_STEP, within the split).
+func _may_probe() -> bool:
+	var each := frame_steps()
+	return each == 0 or owed_steps() > SPLIT_OWED_MOST * each
 
 
 ## The steps of the next iteration: the owed ones, within the time bound and the caller's bounds (`room`: the most the pool can grow for;
@@ -144,9 +178,36 @@ func advanced(k: int, step_delta: float, busy_ms: float) -> void:
 	steps_total += k
 	if target < clock:
 		target = clock
-	var per := busy_ms / k
-	step_ms_ema = per if step_ms_ema <= 0.0 else step_ms_ema + EMA_WEIGHT * (per - step_ms_ema)
+	var probed := _since_pair >= PROBE_EVERY
+	_learn(k, busy_ms)
+	if probed:
+		_since_pair = 0  # (the iteration that was due to probe was the probe, whether or not it gave a slope: the next runs the usual k)
+
+
+## One iteration of `k` steps took `run_ms`: the slope against the iteration before at another k, or the time per step while none is known.
+func _learn(k: int, run_ms: float) -> void:
+	var per := run_ms / k
 	step_ms_mean += MEAN_WEIGHT * (per - step_ms_mean)
+	_since_pair += 1
+	if _ref_k > 0 and k != _ref_k:
+		var rel := absf(float(k - _ref_k)) / float(maxi(k, _ref_k))
+		var s := (run_ms - _ref_run) / float(k - _ref_k)
+		if s > 0.0 and (slope_known or rel >= SLOPE_MIN_SPREAD):
+			s = minf(s, minf(per, _ref_run / float(_ref_k)))  # (a fixed cost is not negative)
+			step_ms_ema = s if not slope_known else step_ms_ema + SLOPE_WEIGHT * rel * (s - step_ms_ema)
+			slope_known = true
+			_since_pair = 0
+		_ref_k = k
+		_ref_run = run_ms
+	elif _ref_k == k:
+		_ref_run += EMA_WEIGHT * (run_ms - _ref_run)
+	else:
+		_ref_k = k
+		_ref_run = run_ms
+	if slope_known:
+		fixed_ms = maxf(0.0, _ref_run - step_ms_ema * float(_ref_k))
+	else:
+		step_ms_ema = per if step_ms_ema <= 0.0 else step_ms_ema + EMA_WEIGHT * (per - step_ms_ema)
 
 
 ## The clock moves on `k` steps with nothing run (a world with no dish): nothing is learned about a step's cost.

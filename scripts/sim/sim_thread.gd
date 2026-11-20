@@ -358,7 +358,7 @@ func _iterate(k: int) -> float:
 	var item := _results(ran, d, t0, samples if ran > 0 else [])
 	var busy := (Time.get_ticks_usec() - start) / 1000.0
 	_last_timing = {
-		"iteration_ms": busy, "steps": ran, "step_ms_ema": governor.step_ms_ema, "duty": governor.duty,
+		"iteration_ms": busy, "steps": ran, "step_ms_ema": governor.step_ms_ema, "fixed_ms": governor.fixed_ms, "duty": governor.duty,
 		"sync_ms": float(res.get("gpu_usec", 0)) / 1000.0, "record_ms": float(res.get("record_usec", 0)) / 1000.0,
 		"publish_ms": item["publish_ms"], "readback_ms": item["readback_ms"], "answer_ms": item["answer_ms"],
 		"rest_ms": governor.rest_ms(busy), "run_ms": run_ms,

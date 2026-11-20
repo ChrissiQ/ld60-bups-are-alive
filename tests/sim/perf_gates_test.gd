@@ -59,7 +59,7 @@ extends SceneTree
 ##   iteration and the rest after it; the new dish's grid was made ahead for the main view's dish (SimThread._make_grid_ahead), so the
 ##   retarget is done at once, one pipette pass; the worker answers after the iteration it holds (its lineage), and the main thread sees
 ##   the reply at its next frame: <= the longest iteration seen + its rest + the pass + the worker's lineage + a display frame]. The
-##   bound of T_ITER + sync is a placeholder (Governor.T_ITER_MS 25 ms is a target for an iteration's steps, not a bound on one: a 1M
+##   bound of T_ITER + sync is a placeholder (Governor.T_ITER_MS is a target for an iteration's steps, not a bound on one: a 1M
 ##   step alone is longer) and is printed beside it. The screen's side of the reply (a Dish adopting the receiver, as Main._finish_pipette does, and drawing it: its MultiMesh made for
 ##   twice the payload's count, at most the limit's): adopt < one display frame and no frame of the 20 after it over 3 display frames
 ##   [derived: adopt only sets fields and sends commands; the drawing makes its instance buffer once, for the moved bups, and its view
