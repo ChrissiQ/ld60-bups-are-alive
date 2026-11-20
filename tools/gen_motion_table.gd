@@ -27,7 +27,7 @@ extends SceneTree
 ## (a dish of one pooled world) carries in its own row of the dish table.
 ##
 ## One crowd's drift in a weak gradient is mostly sampling error (about 0.0026 of speed a cell), so the table is the average of
-## many runs, one per seed, and where the drift is small it is not read from the average cell by cell. For s up to FIT_S_MAX and
+## many runs, one per seed, and where the drift is smallest it is not read from the average cell by cell. For s up to FIT_S_MAX and
 ## eps from FIT_EPS_MIN up the drift is a straight line through zero in s (the response of a swimmer to a weak signal is
 ## linear), k(eps) * s, with k fitted to all the averaged rows there together (_fit) and smooth and falling in eps; below
 ## that eps the drift is not linear in s (the lines bend) and it is the average itself, and above that s it is large enough to be.
@@ -350,7 +350,7 @@ static func _spread(read: Dictionary, start: Dictionary, alive: Array) -> Array:
 
 const FIT_EPS_MIN := 0.03  ## the fit covers the lattice's eps from here up ...
 const FIT_DEGREE := 4  ## the degree of the polynomial in ln eps that ln k is fitted with
-const FIT_S_MAX := 0.02  ## ... and s up to here (drift is a straight line through zero in s there)
+const FIT_S_MAX := 0.01  ## ... and s up to here: the widest range where the rows agree with a line through zero to within the s.e. of the averages (chi² per degree of freedom near 1, printed by every combine); a fit that disagrees with the averages adds more error than it removes. FIT_S_MAX = 0 switches the fit off
 
 
 ## Averages the partials in `dir` and writes the table.
@@ -529,6 +529,8 @@ func _fit(drift: Array, sem: Array, s_measured: Array, e_axis: Array) -> Array:
 	for i in s_measured.size():
 		if s_measured[i] <= FIT_S_MAX + 1e-9:
 			rows.append(i)
+	if rows.is_empty():
+		return e_axis.map(func(_e: float) -> float: return -1.0)
 	var first := 0
 	while e_axis[first] < FIT_EPS_MIN - 1e-9:
 		first += 1
@@ -677,6 +679,8 @@ func _report(s_axis: Array, e_axis: Array, drift: Array, mean: Array, sem: Array
 				in_fit.append(sem[i][j])
 	for line: Array in [["fit region", in_fit], ["cells with drift < 0.01", weak], ["all measured cells", every]]:
 		var list: Array = line[1].duplicate()
+		if list.is_empty():
+			continue
 		list.sort()
 		print("s.e. of the average, %s (%d cells): median %.5f, 90th percentile %.5f, max %.5f of swim speed" % [line[0], list.size(), list[list.size() / 2], list[int(list.size() * 0.9)], list[-1]])
 	print("fit: eps, raw k +- s.e., fitted k, chi² of the rows about the fitted line / rows")
@@ -699,7 +703,7 @@ func _report(s_axis: Array, e_axis: Array, drift: Array, mean: Array, sem: Array
 		sum_chi += chi
 		cells += rows
 		print("  %6.4f  %8.3f +- %6.3f  %8.3f  %6.1f / %d" % [e_axis[j], num / den, 1.0 / sqrt(den), slopes[j], chi, rows])
-	print("fit residuals: chi² %.1f over %d cells (about %d expected for a perfect model with %d parameters)" % [sum_chi, cells, cells, e_axis.size()])
+	print("fit residuals: chi² %.1f over %d cells, %d degrees of freedom (chi² per degree of freedom %.2f; about 1 when the line agrees with the averages to within noise)" % [sum_chi, cells, cells - FIT_DEGREE - 1, sum_chi / maxf(cells - FIT_DEGREE - 1, 1)])
 	print("drift as a share of speed x1000 (rows s, columns eps):")
 	print("  s \\ eps " + " ".join(e_axis.map(func(e: float) -> String: return "%5.3f" % e)))
 	for i in s_axis.size():
