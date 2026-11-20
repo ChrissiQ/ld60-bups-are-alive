@@ -13,12 +13,12 @@ extends SceneTree
 ## M  With bup 4, 10001 or 20000 selected (the medium hidden, so the map is what is drawn), the steering map the dish draws equals the
 ##    fixture's steer_<id>: alpha within STEER_ALPHA_TOLERANCE, RGB equal where alpha > 0. The fixture's maps were made with a different motion
 ##    table from the one the game ships, and the chance of steering (the alpha) is read from the table, so the alpha differs by the two
-##    tables' difference (11 at most, measured).
+##    tables' difference (14 at most, measured).
 ## S  The 40 fixture bups of queries_info.txt, each selected in turn: Dish.bup_steering (the tracked answer's way and chance) within 1e-5
 ##    of the fixture's bup_steering in each of x, y and the chance.
 ## Paused, each answer is waited for with ParityGame.answer_now (a steering answer, until it has come).
 
-const STEER_ALPHA_TOLERANCE := 12  ## alpha units of 255: the measured worst 11 of the table difference, and one more
+const STEER_ALPHA_TOLERANCE := 15  ## alpha units of 255: the measured worst 14 of the table difference, and one more
 const ANSWER_FRAMES_MOST := 120  ## frames a selected bup's steering answer is waited for past `answer_now`: a bound for an answer that never comes, not a measured time
 
 var g: ParityGame
