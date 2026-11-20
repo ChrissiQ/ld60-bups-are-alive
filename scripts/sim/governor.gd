@@ -21,7 +21,10 @@ extends RefCounted
 ##   over its steps. When no pair has been seen for PROBE_EVERY iterations the next one runs another k: half of the usual below it, or, at k = 1
 ##   or with no slope yet, more than it (up to what 2 x T_ITER_MS allows at the pessimistic cost), and only where the iteration would not be
 ##   split by frames anyway. T_ITER_MS bounds the steps' time alone; the fixed cost comes on top, so an iteration takes at most
-##   `fixed_ms + T_ITER_MS` (plus the answer and publish the caller adds), and a probe up at most `fixed_ms + 2 x T_ITER_MS`.
+##   `fixed_ms + T_ITER_MS` (plus the answer and publish the caller adds), and a probe up at most `fixed_ms + 2 x T_ITER_MS`. A cost that rises
+##   between pairs (a dish filling) is taken at once: an iteration whose steps cost more than GROWTH_TOLERANCE x the cost known (over the
+##   fixed cost) sets it to what they cost, so the next one is shorter without waiting for a pair; that iteration restarts the pair and the fixed cost stays as it was (a pair across a rise
+##   would read the rise as fixed cost).
 ## - Catch-up in single frames' worth: below MAX_STEP a display frame owes `frame_steps()` steps (1 at 120 Hz) and every iteration publishes
 ##   one picture the display shows for a frame. After a late iteration k > 1 frames' worth are owed; run as one merged iteration they give
 ##   one publish for k frames, so k - 1 frames show nothing new for good. When the sim keeps up (a frame's steps cost, on the slow mean, within a display frame,
@@ -45,6 +48,7 @@ const OWED_TOLERANCE := 1e-6  ## of a step: what a sum of frame lengths may miss
 const EMA_WEIGHT := 0.25  ## the newest iteration's weight in the cost of a step
 const PROBE_EVERY := 16  ## iterations without a pair of different k after which the next one runs another k
 const SLOPE_WEIGHT := 0.5  ## the weight of a slope between two k that differ by their whole size (weighted by the relative difference)
+const GROWTH_TOLERANCE := 1.25  ## of the steps' time the cost known predicts (at least half of T_ITER_MS, so noise at a small k does not count): what an iteration's steps may take over it before the cost is raised to what they cost
 const SLOPE_MIN_SPREAD := 0.25  ## the relative difference of two k under which a first slope is not taken (the noise would be the slope)
 const SLOW_FRAME := 1.15
 const FAST_FRAME := 1.05
@@ -187,15 +191,28 @@ func advanced(k: int, step_delta: float, busy_ms: float) -> void:
 ## One iteration of `k` steps took `run_ms`: the slope against the iteration before at another k, or the time per step while none is known.
 func _learn(k: int, run_ms: float) -> void:
 	var per := run_ms / k
+	var grown := false
+	var took_slope := false
+	if slope_known:
+		# the steps cost more than they did (a dish filling): at the cost known the next iteration would run as long again, and a pair that would
+		# show it comes up to PROBE_EVERY iterations later, so what this iteration's steps cost (time over the fixed cost) is taken at once
+		var steps_ms := minf(run_ms - fixed_ms, run_ms)
+		if steps_ms > GROWTH_TOLERANCE * maxf(float(k) * step_ms_ema, 0.5 * T_ITER_MS):
+			step_ms_ema = steps_ms / float(k)
+			grown = true
 	step_ms_mean += MEAN_WEIGHT * (per - step_ms_mean)
 	_since_pair += 1
-	if _ref_k > 0 and k != _ref_k:
+	if grown:  # (a pair across a rise would read the rise as the slope or the fixed cost: this iteration starts the next pair)
+		_ref_k = k
+		_ref_run = run_ms
+	elif _ref_k > 0 and k != _ref_k:
 		var rel := absf(float(k - _ref_k)) / float(maxi(k, _ref_k))
 		var s := (run_ms - _ref_run) / float(k - _ref_k)
 		if s > 0.0 and (slope_known or rel >= SLOPE_MIN_SPREAD):
 			s = minf(s, minf(per, _ref_run / float(_ref_k)))  # (a fixed cost is not negative)
 			step_ms_ema = s if not slope_known else step_ms_ema + SLOPE_WEIGHT * rel * (s - step_ms_ema)
 			slope_known = true
+			took_slope = true
 			_since_pair = 0
 		_ref_k = k
 		_ref_run = run_ms
@@ -204,9 +221,9 @@ func _learn(k: int, run_ms: float) -> void:
 	else:
 		_ref_k = k
 		_ref_run = run_ms
-	if slope_known:
+	if took_slope:  # (only a pair sets it: between pairs a cost rising with the dish would otherwise be taken for a fixed one)
 		fixed_ms = maxf(0.0, _ref_run - step_ms_ema * float(_ref_k))
-	else:
+	elif not slope_known:
 		step_ms_ema = per if step_ms_ema <= 0.0 else step_ms_ema + EMA_WEIGHT * (per - step_ms_ema)
 
 

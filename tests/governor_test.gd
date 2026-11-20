@@ -55,6 +55,7 @@ func _init() -> void:
 	_samples()
 	_pacing()
 	_fixed_cost()
+	_fill_spike()
 	TestUtil.finish(self, "GOVERNOR TEST OK")
 
 
@@ -330,6 +331,7 @@ func _fixed_cost() -> void:
 	var stuck := Governor.new()
 	stuck.slope_known = true
 	stuck.step_ms_ema = 8.69
+	stuck.fixed_ms = 20.0
 	stuck._ref_k = 2
 	stuck._ref_run = 36.0
 	stuck._since_pair = Governor.PROBE_EVERY
@@ -346,6 +348,22 @@ func _fixed_cost() -> void:
 	var rc := _simulate(300, 20.0, cheap, 10.0, 0.0, 4)
 	var gc: Governor = rc["g"]
 	TestUtil.check(absf(gc.step_ms_ema - 1.5) <= 0.2 and _mean_tail(rc["ks"], 60) >= 10.0, "fixed cost 20 ms, step 1.5 ms (100k bups, Direct3D 12): slope %.2f, mean k %.1f" % [gc.step_ms_ema, _mean_tail(rc["ks"], 60)])
+
+
+## A dish filling: the cost of a step rises from 0.5 to 14 ms over 40 iterations (the population growing) while k is at what the cheap steps allowed.
+## The cost known between two pairs is stale while the dish fills; an iteration must not run at it for as long as the next pair takes (up to 16
+## iterations).
+func _fill_spike() -> void:
+	var fill := func(i: int) -> float: return 0.5 + 13.5 * clampf(float(i - 30) / 40.0, 0.0, 1.0)
+	var r := _simulate(160, 15.0, fill, 0.0, 0.0, 5)
+	var runs: Array = r["runs"]
+	var longest := 0.0
+	for t: float in runs.slice(30):
+		longest = maxf(longest, t)
+	var bound := 15.0 + 2.0 * Governor.T_ITER_MS
+	TestUtil.check(longest <= bound, "a dish filling (a step from 0.5 to 14 ms in 40 iterations): no iteration longer than fixed + 2 x T_ITER = %.0f ms (got %.0f ms)" % [bound, longest])
+	var g: Governor = r["g"]
+	TestUtil.check(absf(g.step_ms_ema - 14.0) <= 2.0, "after a dish has filled the cost of a step is the full one: %.2f ms (14)" % g.step_ms_ema)
 
 
 func _mean_tail(values: Array, n: int) -> float:
