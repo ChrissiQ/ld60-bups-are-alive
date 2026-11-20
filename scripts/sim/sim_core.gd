@@ -98,6 +98,9 @@ var _temp_sets: Array[RID] = []  ## the copy kernels' sets of one publish
 var _profile: Variant = null  ## while `profile_steps` runs: kernel name -> Array of µs, each dispatch its own submit
 var _scratch := RID()  ## where `read_parts` gathers what it reads (up to SCRATCH_KEEP bytes)
 var _scratch_bytes := 0
+var _husk_read := {}  ## the husk read `husk_view_request` has on its way: {row, id, most, count and list once they have arrived}
+var _husk_ids := 0
+var _husk_found := 0  ## the husks a read found past its bound, until a read is complete
 var lone_field := false  ## checks only: a step runs the lone feed and diffusion passes (ping-pong, then pool_land_copy) in place of pool_fdiff (tools/gpu/fused_check.gd)
 var _tile_rounds := PackedInt32Array()  ## the tiles of pool_fdiff that run in each round (a prefix of TILES)
 var _tile_key := PackedInt32Array()  ## what TILES was built from: each dish's row, cells across and iterations
@@ -251,6 +254,7 @@ func add_dish(spec: DishSpec, grid: DishGrid = null) -> int:
 ## Loads a dish that `gather` read (a thaw, a load): a new row (`at_row` when it is free, else the lowest free one), its segment at the
 ## end, its clouds and husks after the pool's, its run carrying on from its saved step. Returns the row, or -1.
 func load_dish(blob: DishBlob, at_row := -1) -> int:
+	_husk_read = {}
 	var row := at_row if at_row >= 0 and at_row < D_MAX and not _dishes.has(at_row) else _free_row()
 	if row < 0:
 		return -1
@@ -277,6 +281,7 @@ func load_dish(blob: DishBlob, at_row := -1) -> int:
 ## empty slots, its field block and squares free, its queued edits dropped (its row may be another dish's before the next batch).
 ## Returns the ids of its live bups (for LineageStore.release_dish).
 func remove_dish(row: int) -> PackedInt64Array:
+	_husk_read = {}
 	var ids := live_ids(row)
 	var cd: CoreDish = _dishes.get(row)
 	if cd == null:
@@ -1600,18 +1605,88 @@ func probe(row: int, points: PackedFloat32Array) -> PackedFloat32Array:
 
 ## Dish `row`'s live husks (alive, with a piece not yet let go: what the cull keeps) as 2D MultiMesh transforms, 8 floats each (a unit
 ## basis, the husk's place in the dish), in no set order: `pool_husk_view` packs them into HUSK2 (the cull's scratch, free between steps),
-## read back in one right-sized read (the dish's husk counter bounds them; a second read when it did not).
+## read back in one right-sized read (the dish's husk counter bounds them; a second read when it did not). The list is run by that read
+## and not by a submit and sync of its own: one wait for the card, not two.
 func husk_view(row: int) -> PackedFloat32Array:
-	var most := mini(_ds(row, GpuLayout.DS_HUSKS), _wd(GpuLayout.WD_HUSK_SLOTS)) if _dishes.has(row) else 0
+	_husk_read = {}
+	var most := _husk_most(row)
 	if most <= 0:
 		return PackedFloat32Array()
-	arena.put_small("HVC", arena.zeros(16))
-	_run_list(func(cl: int) -> void: _disp(cl, "pool_husk_view", _groups(_wd(GpuLayout.WD_HUSK_SLOTS)), float(row)), false)
+	_husk_dispatch(row)
 	var got := read_parts([["HVC", 0, 4], ["HUSK2", 0, most * 32]])
 	var n := (got[0] as PackedByteArray).decode_u32(0)
 	if n > most:
 		got[1] = read_parts([["HUSK2", 0, n * 32]])[0]
+	_husk_found = 0
 	return (got[1] as PackedByteArray).slice(0, n * 32).to_float32_array()
+
+
+## The most husks dish `row` can have to show: its husk counter (never past the slots in use), or what a read found it had when that
+## passed the counter.
+func _husk_most(row: int) -> int:
+	if not _dishes.has(row):
+		return 0
+	return mini(maxi(_ds(row, GpuLayout.DS_HUSKS), _husk_found), _wd(GpuLayout.WD_HUSK_SLOTS))
+
+
+## Records `pool_husk_view` for dish `row` (HVC counts them), not yet submitted.
+func _husk_dispatch(row: int) -> void:
+	arena.put_small("HVC", arena.zeros(16))
+	var cl := rd.compute_list_begin()
+	_disp(cl, "pool_husk_view", _groups(_wd(GpuLayout.WD_HUSK_SLOTS)), float(row))
+	rd.compute_list_end()
+
+
+## `husk_view` without the wait: records the view's kernel and the two reads (the list and its count) and returns at once; the card runs
+## them with the next work that is submitted (the next iteration's steps or reads) and the data is in `husk_view_take` after that. The
+## copies are made where the commands stand in line, before any later step uses HUSK2, so the list is the husks as they were now. False
+## when the read cannot be made that way (the caller then reads with `husk_view`); true also when one for `row` is still on its way.
+func husk_view_request(row: int) -> bool:
+	if not _husk_read.is_empty() and int(_husk_read["row"]) == row:
+		return true
+	_husk_ids += 1
+	var most := _husk_most(row)
+	_husk_read = {"row": row, "id": _husk_ids, "most": most}
+	if most <= 0:
+		return true
+	_husk_dispatch(row)
+	var id := _husk_ids
+	var failed := rd.buffer_get_data_async(arena.buf("HVC"), _husk_arrived.bind(id, "count"), 0, 4) != OK
+	failed = rd.buffer_get_data_async(arena.buf("HUSK2"), _husk_arrived.bind(id, "list"), 0, most * 32) != OK or failed
+	if failed:
+		_husk_read = {}
+	return not failed
+
+
+func _husk_arrived(data: PackedByteArray, id: int, part: String) -> void:
+	if int(_husk_read.get("id", -1)) == id:
+		_husk_read[part] = data
+
+
+## The list `husk_view_request` asked for dish `row`, once it has arrived; null while it is on its way, or when it was not complete (more
+## husks than the counter said: the next request is made for that many).
+func husk_view_take(row: int) -> Variant:
+	if _husk_read.is_empty() or int(_husk_read["row"]) != row:
+		return null
+	if int(_husk_read["most"]) <= 0:
+		_husk_read = {}
+		return PackedFloat32Array()
+	if not (_husk_read.has("count") and _husk_read.has("list")):
+		return null
+	var most := int(_husk_read["most"])
+	var n := (_husk_read["count"] as PackedByteArray).decode_u32(0)
+	var list: PackedByteArray = _husk_read["list"]
+	_husk_read = {}
+	if n > most:
+		_husk_found = n
+		return null
+	_husk_found = 0
+	return list.slice(0, n * 32).to_float32_array()
+
+
+## Drops a read that is on its way (it is not wanted any more, or its dish went).
+func husk_view_drop() -> void:
+	_husk_read = {}
 
 
 ## For each place of dish `row` (`places`: x, y, reach, up to GpuLayout.HUSK_QUERIES; dish-local µm), the nearest live husk within reach

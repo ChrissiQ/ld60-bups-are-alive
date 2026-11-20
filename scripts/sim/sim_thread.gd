@@ -427,7 +427,7 @@ func _results(steps: int, d: float, t0: float, samples: Array) -> Dictionary:
 	var refused := _refused
 	_refused = {}
 	var t_pub := Time.get_ticks_usec()
-	_publish()
+	_publish(steps > 0)
 	return {
 		"steps": steps, "delta": d, "t0": t0, "sim_time": governor.clock, "achieved": _achieved(), "paused": governor.paused,
 		"births": eb, "deaths": ed, "rows": rows, "stats": stats, "samples": samples, "worlds": worlds, "refused": refused,
@@ -507,7 +507,9 @@ func _give_bound() -> void:
 		_core.texture_bound(b[0], b[1], b[2], b[3])
 
 
-func _publish() -> void:
+## `later`: the husks may be read without waiting for them (an iteration of steps follows, and the card runs the read with it): the list
+## asked for in this publish is the snapshot's in the next one. A pass of no steps waits for them.
+func _publish(later: bool) -> void:
 	if _view == null or not _rows.has(_view.row):
 		_view_dirty = false
 		_husks_owed = false
@@ -529,9 +531,17 @@ func _publish() -> void:
 		_take_handles()
 	var handed := _core.handed
 	_husks_owed = _view.want_husks and not (now - _husk_msec >= HUSK_VIEW_MSEC or _view_dirty)
-	if _view.want_husks and not _husks_owed:
-		_husk_msec = now
-		_husk_view = {"row": _view.row, "version": int(_husk_view.get("version", 0)) + 1, "transforms": _core.husk_view(v.row)}
+	if not _view.want_husks:
+		_core.husk_view_drop()
+	else:
+		if later:
+			var arrived: Variant = _core.husk_view_take(v.row)
+			if arrived != null:
+				_husk_view = {"row": _view.row, "version": int(_husk_view.get("version", 0)) + 1, "transforms": arrived}
+		if not _husks_owed:
+			_husk_msec = now
+			if not (later and _core.husk_view_request(v.row)):
+				_husk_view = {"row": _view.row, "version": int(_husk_view.get("version", 0)) + 1, "transforms": _core.husk_view(v.row)}
 	if out.has("payload"):
 		var p := PayloadInfo.new()
 		p.texture_index = out["payload"]
