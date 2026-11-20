@@ -12,6 +12,8 @@ extends SceneTree
 
 const Gen := preload("res://tools/gen_motion_table.gd")
 const REGENERATE := "stale: run tools/gen_motion_table.gd (windowed: see its header)"
+const RISING_S_MAX := 0.3  ## up to here the drift never falls with s; past it, at low eps, it declines from its peak (a measurement)
+const MAX_DECLINE := 0.01  ## the most a row may fall below the one before, as a share of speed
 
 
 func _init() -> void:
@@ -61,13 +63,16 @@ func _check_table_shape() -> void:
 			even = even and absf(log(axis[i] / axis[i - 1]) - step) < 0.01 * step
 		TestUtil.check(even and step > 0.0, "an axis of the table is even in its logarithm (the kernel's lookup counts on it)")
 	var rising := true
+	var declining := true
 	var bounded := true
 	for i in ns:
 		for j in ne:
 			var k := i * ne + j
-			rising = rising and (i == 0 or MotionTable.DRIFT[k] >= MotionTable.DRIFT[k - ne] - 1e-9)
+			rising = rising and (i == 0 or MotionTable.S_AXIS[i] > RISING_S_MAX or MotionTable.DRIFT[k] >= MotionTable.DRIFT[k - ne] - 1e-9)
+			declining = declining and (i == 0 or MotionTable.DRIFT[k - ne] - MotionTable.DRIFT[k] <= MAX_DECLINE)
 			bounded = bounded and MotionTable.DRIFT[k] >= 0.0 and MotionTable.DRIFT[k] < 0.3 and MotionTable.D_ALONG[k] > 0.0 and MotionTable.D_ACROSS[k] > 0.0
-	TestUtil.check(rising, "a steeper slope never gives less drift")
+	TestUtil.check(rising, "a steeper slope never gives less drift up to s = %s" % RISING_S_MAX)
+	TestUtil.check(declining, "beyond that the drift declines, where it does, by less than %s of speed from one row to the next" % MAX_DECLINE)
 	TestUtil.check(bounded, "the table's drift is a share of speed under 0.3 and its diffusions are positive")
 
 

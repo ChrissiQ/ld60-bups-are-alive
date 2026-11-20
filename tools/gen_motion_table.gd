@@ -349,8 +349,8 @@ static func _spread(read: Dictionary, start: Dictionary, alive: Array) -> Array:
 # ---- from the measurements to the table ----------------------------------------------------------------
 
 const FIT_EPS_MIN := 0.03  ## the fit covers the lattice's eps from here up ...
-const FIT_DEGREE := 3  ## the degree of the polynomial in ln eps that ln k is fitted with
-const FIT_S_MAX := 0.03  ## ... and s up to here (drift is a straight line through zero in s there)
+const FIT_DEGREE := 4  ## the degree of the polynomial in ln eps that ln k is fitted with
+const FIT_S_MAX := 0.02  ## ... and s up to here (drift is a straight line through zero in s there)
 
 
 ## Averages the partials in `dir` and writes the table.
@@ -507,6 +507,8 @@ func _write(mean: Dictionary, sem: Dictionary, provenance: String, s_measured: A
 	text += "## Made from the average of independent runs of the generator's ramp set, one per seed (%s). Drift: the\n" % provenance
 	text += "## measured average where s > %s or eps < %s; where s <= %s and eps >= %s, a straight line through zero in s, k(eps) * s,\n" % [FIT_S_MAX, FIT_EPS_MIN, FIT_S_MAX, FIT_EPS_MIN]
 	text += "## with k fitted to the average of the rows there, non-increasing in eps and smooth (tools/gen_motion_table.gd, _fit).\n"
+	text += "## A cell that fell below the one before it by no more than noise is set equal to it; the declines past the drift's peak at\n"
+	text += "## high s and low eps are measured and kept.\n"
 	text += "## Row-major: the value for S_AXIS[i] and E_AXIS[j] is at index i * E_AXIS.size() + j.\n"
 	text += "const CONSTANTS_HASH := \"%s\"\nconst CODE_HASH := \"%s\"\n" % [MotionFingerprint.constants_hash(), MotionFingerprint.code_hash()]
 	text += _array("S_AXIS", s_axis) + _array("E_AXIS", e_axis) + _array("DRIFT", _flatten(drift))
@@ -613,24 +615,28 @@ func _solve(m: Array) -> Array:
 	return out
 
 
-## A steeper slope never gives less drift (the lookup and the test count on it). Each column is raised to its running maximum over
-## s. The values are averages whose s.e. is about 1e-4 (and the fit region's are exact lines), so a cell is raised only by about that
-## much, which a running maximum of single noisy measurements was not (it pulled every cell up to the highest noise before it).
-## Prints how many cells were raised, how many of those by no more than noise explains, and the largest rise in units of the cell's s.e.
+## Noise must not make a steeper slope give less drift. A cell below the one before it by no more than 3 s.e. of the average (the
+## s.e. is about 1e-4 of speed, and the fit region's cells are exact lines) is set equal to it. A larger fall is a measurement, not
+## noise: at high s and low eps the drift really declines past its peak (a swimmer on a ramp that steep spends its warm-up and window
+## near the ramp's end, and its tumbles are reined in), so those cells keep the measured values; a running maximum there would
+## replace a real decline of a few per cent of speed with a plateau.
+## Prints how many cells were raised (all of them by noise), and how many were left falling, with the largest fall in s.e.
 func _monotone_in_s(drift: Array, sem: Array, s_axis: Array, log_s_measured: Array) -> void:
 	var raised := 0
-	var noise := 0  # of the raised cells, those that were below the one before by no more than 3 s.e. (what noise explains)
+	var kept := 0
 	var worst := 0.0
 	for j in drift[0].size():
 		for i in range(1, s_axis.size()):
-			if drift[i][j] < drift[i - 1][j]:
+			var fall: float = drift[i - 1][j] - drift[i][j]
+			if fall > 0.0:
 				var se := maxf(_interpolate(log(s_axis[i]), log_s_measured, sem.map(func(line: Array) -> float: return line[j])), 1e-6)
-				worst = maxf(worst, (drift[i - 1][j] - drift[i][j]) / se)
-				if (drift[i - 1][j] - drift[i][j]) <= 3.0 * se:
-					noise += 1
-				drift[i][j] = drift[i - 1][j]
-				raised += 1
-	print("monotone in s: %d cells raised, %d of them by no more than 3 s.e., the largest by %.1f s.e." % [raised, noise, worst])
+				if fall <= 3.0 * se:
+					drift[i][j] = drift[i - 1][j]
+					raised += 1
+				else:
+					kept += 1
+					worst = maxf(worst, fall / se)
+	print("drift against s: %d cells raised to the one before (a fall of no more than 3 s.e.), %d left falling (the largest fall %.1f s.e.)" % [raised, kept, worst])
 
 
 ## How far the new drift is from the table this run started from (MotionTable as loaded), cell by cell in units of the cell's standard error
