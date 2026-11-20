@@ -62,7 +62,14 @@ func _ask(local: Vector2, slack: float, pixel: float, near := 0.0) -> Dictionary
 		await g.frame()
 	var seq := view.pick(local, slack, pixel, false, near)
 	await g.wait_until(func() -> bool: return int(view.answer(false).get("seq", -1)) == seq, 30)
-	return view.answer(false)
+	var a := view.answer(false)
+	if int(a.get("id", -1)) == ViewRenderer.UNRESOLVED:  # (handed over as bytes, with no ids: the simulation gives the picked bup's)
+		var reply := dish.world.ids_at(int(a["pub"]), PackedInt32Array([int(a["index"])]))
+		await g.wait_until(func() -> bool: return reply.is_done(), 120)
+		var ids: Variant = reply.value()
+		a = a.duplicate()
+		a["id"] = ids[0] if ids is PackedInt64Array and (ids as PackedInt64Array).size() == 1 and ids[0] >= 0 else ViewRenderer.UNRESOLVED
+	return a
 
 
 ## The bup a pick at `local` finds by the pick's rule over the records (in their order: the payload's), and how near the reach the
@@ -170,11 +177,13 @@ func _random_picks(records: PackedByteArray) -> void:
 			local = Vector2(f[i * GpuLayout.RECORD_WORDS + GpuLayout.R_X], f[i * GpuLayout.RECORD_WORDS + GpuLayout.R_Y]) + Vector2.from_angle(rng.randf() * TAU) * rng.randf() * 3.0
 		else:
 			local = Vector2.from_angle(rng.randf() * TAU) * ParityGame.FIXTURE_RADIUS * sqrt(rng.randf())
-		var view := dish.drawing.view
-		dish.cell_at(ParityGame.PLACE + local, slack)
-		var seq: int = view._pick_seq
-		await g.wait_until(func() -> bool: return int(view.answer(false).get("seq", -1)) == seq, 30)
-		var got := dish.cell_at(ParityGame.PLACE + local, slack)
+		var got := DishDrawing.UNKNOWN  # (asked until the picture answers, and the simulation gives the bup's id when the payload has none)
+		for tries in 120:
+			got = dish.drawing.pick(ParityGame.PLACE + local - dish.global_position, slack, false)
+			if got != DishDrawing.UNKNOWN:
+				break
+			await g.frame()
+		got = maxi(got, -1)
 		var at := _brute(records, local, slack, pixel)
 		var want := GpuLayout.id_of(records, at) if at >= 0 else -1
 		hits += 1 if want >= 0 else 0

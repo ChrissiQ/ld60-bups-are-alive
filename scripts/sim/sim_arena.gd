@@ -76,14 +76,15 @@ const TEXTURES_SHARED := [
 	["pixel", 2 * 4 * (SimCore.TEXTURES + 1)],  # haze and steer
 	["thumbs", GpuKernelsDraw.THUMB_ATLAS * GpuKernelsDraw.THUMB_ATLAS * 4 * (SimCore.TEXTURES + 1)],  # thumbnails
 ]
-## Handed over as bytes: the simulation's read-back buffer (SimCore._read_handed: what it publishes in one piece), and on the main device
-## the payload and ids textures with the two buffers that fill them, the view kernels' buffer and the pictures it draws.
+## Handed over as bytes: the simulation's copies of the last payloads' ids (SimCore.ID_RING of them), and on the main device the payload
+## texture and the ids' texture (which the view kernels bind and never read) with the buffer that fills the payload's, the view kernels'
+## buffer and the pictures it draws.
 const TEXTURES_HANDED := [
-	["texel", GpuLayout.PAYLOAD_BYTES + GpuLayout.IDT_BYTES],  # the read-back buffer
-	["texel", 2 * (GpuLayout.PAYLOAD_BYTES + GpuLayout.IDT_BYTES)],  # textures and staging buffers
+	["texel", GpuLayout.IDT_BYTES * SimCore.ID_RING],  # the ids kept
+	["texel", 2 * GpuLayout.PAYLOAD_BYTES + GpuLayout.IDT_BYTES],  # textures and the staging buffer
 	["texel", 4],  # ViewRenderer's VPD
-	["pixel", 2 * 4 * 2],  # haze and steer, read back and drawn
-	["thumbs", GpuKernelsDraw.THUMB_ATLAS * GpuKernelsDraw.THUMB_ATLAS * 4 * 2],  # thumbnails, read back and drawn
+	["pixel", 2 * 4],  # haze and steer, drawn
+	["thumbs", GpuKernelsDraw.THUMB_ATLAS * GpuKernelsDraw.THUMB_ATLAS * 4],  # thumbnails, drawn
 ]
 
 var rd: RenderingDevice

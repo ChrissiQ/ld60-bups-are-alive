@@ -79,6 +79,12 @@ func _drawn_at(dish: Dish, id: int) -> Variant:
 	if view == null:
 		return null
 	var p := view.payload()
+	if p != null and not p.bytes.is_empty():  # (handed over as bytes, with no ids: the place the payload gives the bup, if a texel of what was handed holds it)
+		var at: Variant = p.places.get(id)
+		for k in p.count:
+			if at != null and p.bytes.decode_float(k * GpuLayout.PAYLOAD_BYTES) == at.x and p.bytes.decode_float(k * GpuLayout.PAYLOAD_BYTES + 4) == at.y:
+				return Vector2(at.x, at.y)
+		return null
 	var imports: Dictionary = view._imports
 	if p == null or p.texture_index < 0 or not imports.has("payload") or not imports.has("ids"):
 		return null

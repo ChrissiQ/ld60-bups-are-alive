@@ -121,6 +121,16 @@ void f(uint k) {
 GRID_LOOP(f, uint(pcs.pb))
 """
 
+## The payload alone, for the main device's copy of what the simulation handed over as bytes (ViewRenderer): the same, without the ids.
+const K_COPY_PAYLOAD_ONLY := """
+layout(set = 0, binding = 1, rgba32ui) uniform restrict writeonly uimage2D PAYTEX;
+void f(uint k) {
+	uint w = uint(pcs.pa);
+	imageStore(PAYTEX, ivec2(int(k % w), int(k / w)), PAYLOAD[k]);
+}
+GRID_LOOP(f, uint(pcs.pb))
+"""
+
 const K_COPY_RGBA8 := """
 layout(set = 0, binding = 1, rgba8) uniform restrict writeonly image2D PIC;
 void f(uint k) {
@@ -133,6 +143,7 @@ GRID_LOOP(f, uint(pcs.pb))
 ## The image bindings of the copy kernels (binding -> the name SimCore binds a texture by), past their storage buffers.
 const IMAGE_BINDINGS := {
 	"pool_copy_payload": {2: "PAYTEX", 3: "IDS"},
+	"pool_copy_payload_only": {1: "PAYTEX"},
 	"pool_copy_rgba8": {1: "PIC"},
 }
 
@@ -149,4 +160,5 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "pool_track", K_TRACK, ["BUPS_U", "TQ", "TR"], "", 64, {"TQ": "uint", "TR": "uint"})
 	GpuKernels.add(out, "pool_slot_check", K_SLOT_CHECK, ["WORLD", "DNEXT", "DSTATE"], dn, 64, GpuKernelsLife.POOL_TYPES)
 	GpuKernels.add(out, "pool_copy_payload", K_COPY_PAYLOAD, ["PAYLOAD", "IDTEX"], "", 64, GpuKernelsDraw.POOL_DRAW_TYPES)
+	GpuKernels.add(out, "pool_copy_payload_only", K_COPY_PAYLOAD_ONLY, ["PAYLOAD"], "", 64, GpuKernelsDraw.POOL_DRAW_TYPES)
 	GpuKernels.add(out, "pool_copy_rgba8", K_COPY_RGBA8, ["PIX"], "", 64, t)

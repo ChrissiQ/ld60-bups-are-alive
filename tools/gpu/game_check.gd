@@ -11,7 +11,8 @@ extends SceneTree
 ##                                  freeze, thaw, trash; a save written and read through the game's codec and loaded again; the debug
 ##                                  log), in the game build
 ##   long [hours] [founders] [limit] [feed] [bloom]   x10,000 for `hours` sim-hours: frame times, memory, the population; MEM lines
-##   perf [bups] [radius] [speed] [seconds]           a dish filled with `bups` at once, drawn, at `speed`: frame times, achieved speed
+##   perf [bups] [radius] [speed] [seconds] [played]  a dish filled with `bups` at once, drawn, at `speed`: frame times, achieved speed; with
+##                                  `played` (the word) in water, with both husks and starvation on, as a game starts
 ## Prints "GAME CHECK OK" or the failures. A SCRIPT ERROR anywhere while it runs fails it (a Logger counts them); an ERROR line Godot
 ## prints is a failure too: grep the output for them.
 ##
@@ -128,7 +129,7 @@ func _run() -> void:
 		"long":
 			await _long(float(args[1]) if args.size() > 1 else 60.0)
 		"perf":
-			await _perf(int(args[1]) if args.size() > 1 else 100000, float(args[2]) if args.size() > 2 else 45000.0, float(args[3]) if args.size() > 3 else 10000.0, float(args[4]) if args.size() > 4 else 30.0)
+			await _perf(int(args[1]) if args.size() > 1 else 100000, float(args[2]) if args.size() > 2 else 45000.0, float(args[3]) if args.size() > 3 else 10000.0, float(args[4]) if args.size() > 4 else 30.0, args.has("played"))
 		_:
 			TestUtil.show(false, "no mode named %s" % mode)
 	if TestUtil.checks == 0:
@@ -541,12 +542,16 @@ func _long(hours: float) -> void:
 	report_frames("long")
 
 
-func _perf(bups: int, radius: float, speed: float, seconds: float) -> void:
+func _perf(bups: int, radius: float, speed: float, seconds: float, played := false) -> void:
 	if not await g.world_ready():
 		TestUtil.show(false, "the world's device was made")
 		return
 	var gates: GDScript = load("res://tests/sim/perf_gates_test.gd")
-	var d: Dish = await g.add(gates.filled_spec(bups, radius))
+	var spec: DishSpec = gates.filled_spec(bups, radius)
+	if played:
+		spec.medium_thickness = StartConditions.DEFAULT_MEDIUM_THICKNESS
+		spec.flags = (1 << GpuLayout.DPF_STATIONARY) | (1 << GpuLayout.DPF_DEATH_HUSKS) | (1 << GpuLayout.DPF_PLANKTON_HUSKS)
+	var d: Dish = await g.add(spec)
 	var view := g.camera.get_viewport_rect().size
 	g.look_at(d, minf(view.x, view.y) * 0.5 / radius)
 	await g.wait_picture(d)

@@ -35,6 +35,7 @@ const EVENT_EXACT_MOST := 1 << 21  ## past this bound of an iteration's births t
 const MAX_STEPS := GpuLayout.MAX_STEPS_PER_BATCH
 const MASS_SUM_MARGIN := 1.0e-3  ## the share the measured mass sum is raised by: the sums are float, in a fixed order, with a relative error far under this
 const MASS_READ_ROWS := 16  ## the most running dishes whose mass sum is read from their own rows of STATS; with more, STATS is read up to the highest row
+const ID_RING := 4  ## with `cpu_handover`, the payloads whose bups' ids `ids_at` can still give
 const TEXTURES := 10  ## shared textures of each kind: a publish's texture is held for WorldClient.WAITING_MOST + 6 publishes at one publish a display frame (it waits to be shown, is shown, is superseded by the next, then frame_queue_size + 2 frames), so the rest is room for a late frame
 const HARD_BOUND_MOST := 1 << 18  ## the cloud (and husk) slots past which an iteration's room is estimated instead of bounded [placeholder: about 135 MB of cloud buffers at 516 B a slot]
 const OVERFLOW_DEVICE := 1  ## `overflow()` bits: a kernel found a buffer full (WORLD's flag)
@@ -86,12 +87,13 @@ var cpu_handover := false:  ## the main device cannot import this device's textu
 		cpu_handover = v
 		if arena != null:
 			arena.cpu_handover = v  # (the memory budget counts the textures of the path in use)
-var handed := {}  ## with `cpu_handover`, the last publish's bytes: "payload" and "ids" (the bups' used texels), "haze" and "steer" (RGBA8, a cell each), "thumbs" (the atlas's tile rows in use, with "thumb_rows" their number)
+var handed := {}  ## with `cpu_handover`, the last publish's bytes: "payload" (the bups' used texels), "haze" and "steer" (RGBA8, a cell each), "thumbs" (the atlas's tile rows in use, with "thumb_rows" their number)
 var handed_usec := 0  ## what `_read_handed` has cost so far (microseconds), the reads made and the bytes they took
 var handed_calls := 0
 var handed_bytes := 0
-var _handover_scratch := RID()  ## where `_read_handed` gathers the publish's parts
-var _handover_scratch_bytes := 0
+var _id_ring: Array = []  ## with `cpu_handover`, the ids of the last ID_RING payloads published, on this device only: {buffer: RID, seq: the publish (0: none), count: its texels}, the oldest overwritten first
+var _id_ring_next := 0
+var _id_ring_bytes := 0  ## each slot's size
 var _temp_sets: Array[RID] = []  ## the copy kernels' sets of one publish
 var _profile: Variant = null  ## while `profile_steps` runs: kernel name -> Array of µs, each dispatch its own submit
 var _scratch := RID()  ## where `read_parts` gathers what it reads (up to SCRATCH_KEEP bytes)
@@ -186,9 +188,7 @@ func release() -> void:
 	if _scratch.is_valid():
 		rd.free_rid(_scratch)
 		_scratch = RID()
-	if _handover_scratch.is_valid():
-		rd.free_rid(_handover_scratch)
-		_handover_scratch = RID()
+	_free_id_ring()
 	if arena != null:
 		arena.free_all()
 	ShaderSet.free_all(rd, _made)
@@ -1811,6 +1811,8 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 	if out.is_empty():
 		return out
 	publish_seq += 1
+	if cpu_handover and out.has("payload"):
+		_keep_ids(n)
 	for kind: String in out:
 		if cpu_handover:
 			break
@@ -1824,19 +1826,26 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 	return out
 
 
-## With `cpu_handover`: reads what the publish wrote into `handed`, in one copy and one wait, and only the part in use (the payload's and the
-## ids' `n` texels, the atlas's tile rows of the dishes in the pool).
+## With `cpu_handover`: reads what the publish wrote into `handed`, only the part in use (the payload's `n` texels, the atlas's tile rows
+## of the dishes in the pool), each straight from the buffer it was written in: a request for each (`buffer_get_data_async`, which gives
+## the bytes the buffer held at the request's place in the commands, and costs less than the same read waited for) and one wait for
+## them all. The bups' ids stay on this device (`_keep_ids`): the main side draws from the payload and asks for the id of a bup it picked
+## (`ids_at`).
 func _read_handed(n: int, nn: int, payload: bool, haze: bool, steer: bool, thumbs: bool) -> void:
 	handed = {}
 	var started := Time.get_ticks_usec()
-	var parts: Array = []  ## [kind, buffer, bytes]
+	var asked := {}  ## kind -> its buffer and bytes, until the bytes have come
+	var read := func(kind: String, buffer: String, bytes: int) -> void:
+		handed[kind] = PackedByteArray()
+		if bytes > 0:
+			asked[kind] = [buffer, bytes]
+			rd.buffer_get_data_async(arena.buf(buffer), _handed_in.bind(kind, asked), 0, bytes)
 	if payload:
-		parts.append(["payload", "PAYLOAD", n * GpuLayout.PAYLOAD_BYTES])
-		parts.append(["ids", "IDTEX", n * GpuLayout.IDT_BYTES])
+		read.call("payload", "PAYLOAD", n * GpuLayout.PAYLOAD_BYTES)
 	if haze:
-		parts.append(["haze", "HAZEPIX", nn * nn * 4])
+		read.call("haze", "HAZEPIX", nn * nn * 4)
 	if steer:
-		parts.append(["steer", "STEERPIX", nn * nn * 4])
+		read.call("steer", "STEERPIX", nn * nn * 4)
 	if thumbs:
 		var across := GpuKernelsDraw.THUMB_ATLAS / GpuKernelsDraw.THUMB_TILE
 		var most := 0
@@ -1844,32 +1853,66 @@ func _read_handed(n: int, nn: int, payload: bool, haze: bool, steer: bool, thumb
 			most = maxi(most, row)
 		var tile_rows := most / across + 1
 		handed["thumb_rows"] = tile_rows
-		parts.append(["thumbs", "THUMBS", tile_rows * GpuKernelsDraw.THUMB_TILE * GpuKernelsDraw.THUMB_ATLAS * 4])
+		read.call("thumbs", "THUMBS", tile_rows * GpuKernelsDraw.THUMB_TILE * GpuKernelsDraw.THUMB_ATLAS * 4)
+	if not asked.is_empty():
+		rd.submit()
+		rd.sync()
+	for kind: String in asked.keys():  # (none expected: the requests are answered by the wait)
+		handed[kind] = rd.buffer_get_data(arena.buf(asked[kind][0]), 0, asked[kind][1])
 	var total := 0
-	for p: Array in parts:
-		total += int(p[2])
+	for kind: String in ["payload", "haze", "steer", "thumbs"]:
+		total += (handed.get(kind, PackedByteArray()) as PackedByteArray).size()
 	if total == 0:
-		for p: Array in parts:
-			handed[p[0]] = PackedByteArray()
 		return
-	if total > _handover_scratch_bytes:
-		if _handover_scratch.is_valid():
-			rd.free_rid(_handover_scratch)
-		_handover_scratch_bytes = maxi(total, int(_handover_scratch_bytes * 1.5))
-		_handover_scratch = rd.storage_buffer_create(_handover_scratch_bytes)
-	var at := 0
-	for p: Array in parts:
-		if int(p[2]) > 0:
-			rd.buffer_copy(arena.buf(p[1]), _handover_scratch, 0, at, int(p[2]))
-		at += int(p[2])
-	var data := rd.buffer_get_data(_handover_scratch, 0, total)
-	at = 0
-	for p: Array in parts:
-		handed[p[0]] = data.slice(at, at + int(p[2]))
-		at += int(p[2])
 	handed_usec += Time.get_ticks_usec() - started
 	handed_calls += 1
 	handed_bytes += total
+
+
+func _handed_in(data: PackedByteArray, kind: String, asked: Dictionary) -> void:
+	handed[kind] = data
+	asked.erase(kind)
+
+
+## With `cpu_handover`: the ids of the payload just published (number `publish_seq`) copied, on this device, into the ring's next slot.
+func _keep_ids(n: int) -> void:
+	var need := int(arena.sizes.get("IDTEX", 0))
+	if _id_ring.is_empty() or need > _id_ring_bytes:
+		_free_id_ring()
+		_id_ring_bytes = need
+		for i in ID_RING:
+			_id_ring.append({"buffer": rd.storage_buffer_create(need), "seq": 0, "count": 0})
+	var slot: Dictionary = _id_ring[_id_ring_next]
+	_id_ring_next = (_id_ring_next + 1) % ID_RING
+	slot["seq"] = publish_seq
+	slot["count"] = n
+	if n > 0:
+		rd.buffer_copy(arena.buf("IDTEX"), slot["buffer"], 0, 0, n * GpuLayout.IDT_BYTES)
+
+
+func _free_id_ring() -> void:
+	for slot: Dictionary in _id_ring:
+		rd.free_rid(slot["buffer"])
+	_id_ring.clear()
+	_id_ring_next = 0
+	_id_ring_bytes = 0
+
+
+## With `cpu_handover`: the ids of the bups at texels `indices` of payload number `seq`, as the payload held them (-1 for a texel or a
+## payload this no longer holds: the last ID_RING payloads are kept).
+func ids_at(seq: int, indices: PackedInt32Array) -> PackedInt64Array:
+	var out := PackedInt64Array()
+	out.resize(indices.size())
+	out.fill(-1)
+	for slot: Dictionary in _id_ring:
+		if int(slot["seq"]) != seq:
+			continue
+		for i in indices.size():
+			var k := indices[i]
+			if k >= 0 and k < int(slot["count"]):
+				var bytes := rd.buffer_get_data(slot["buffer"], k * GpuLayout.IDT_BYTES, GpuLayout.IDT_BYTES)
+				out[i] = bytes.decode_u32(GpuLayout.IDT_LO * 4) | (bytes.decode_u32(GpuLayout.IDT_HI * 4) << 32)
+	return out
 
 
 ## The main side used texture `index` of `kind`, holding publish `seq`, on its frame `frame` (see the header: every use is told, with the

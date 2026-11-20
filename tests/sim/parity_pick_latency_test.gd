@@ -16,6 +16,10 @@ extends SceneTree
 ##    is printed beside it: 2 expected.
 ##    [measured, M1 Pro, Metal, 120 Hz: 2 frames in all 50 trials, readback lag 1 frame drawn: the callback comes in the next frame drawn,
 ##    not frame_queue_size frames later.]
+##    Handed over as bytes (ViewRenderer.cpu_handover), the payload carries no ids: the answer names the picked texel and the simulation
+##    gives its bup's id (WorldClient.ids_at), which it does between two of its iterations: up to an iteration more, Governor.T_ITER_MS of
+##    steps and a publish's read (an allowance of 10 ms), and the hover takes the id a frame after. The bound there is 3 frames + 1 + that
+##    time in frames of the run's mean length.
 ##    A trial whose answer finds no bup there is not counted (none expected; their number is printed).
 ##    At x10,000 a bup moves hundreds of µm a frame, so the bup found is not the one under the pointer a frame later: the ring follows the
 ##    bup found (its place in the payload drawn once the dish asks after it), and two answers a frame apart name different bups. The
@@ -55,6 +59,8 @@ func _run() -> void:
 	var empty := 0
 	var slack := StageInput.PICK_SLACK_PIXELS * dish.pixel()
 	var last := Vector2.INF
+	var started := Time.get_ticks_usec()
+	var frames_at := Engine.get_process_frames()
 	for t in TRIALS:
 		var at := dish.global_position + Vector2.from_angle(rng.randf() * TAU) * 0.5 * dish.radius * sqrt(rng.randf())
 		while last.is_finite() and at.distance_to(last) <= 10.0 * Dish.HOVER_CLICK_PIXELS * dish.pixel():
@@ -82,8 +88,10 @@ func _run() -> void:
 		for f in 5:
 			await g.frame(10000.0, false)
 	var worst: int = latencies.max() if not latencies.is_empty() else -1
-	var late := latencies.filter(func(l: int) -> bool: return l < 0 or l > 3).size()
+	var frame_ms := (Time.get_ticks_usec() - started) / 1000.0 / maxi(1, Engine.get_process_frames() - frames_at)
+	var bound := 3 + (1 + ceili((Governor.T_ITER_MS + 10.0) / frame_ms) if ViewRenderer.cpu_handover() else 0)
+	var late := latencies.filter(func(l: int) -> bool: return l < 0 or l > bound).size()
 	var snap := g.world.latest()
 	print("     x10,000: achieved x%.0f, %d bups; ring latencies (frames) %s; readback lags (frames drawn, asked to answered) %s" % [snap.achieved_speed, dish.population(), latencies, lags])
-	TestUtil.show(latencies.size() + empty == TRIALS and latencies.size() >= TRIALS - 2 and late == 0, "R the hover ring within 3 frames of the pointer stopping: %d trials, worst %d frames, %d late, %d with no bup under the pointer" % [latencies.size(), worst, late, empty])
+	TestUtil.show(latencies.size() + empty == TRIALS and latencies.size() >= TRIALS - 2 and late == 0, "R the hover ring within %d frames of the pointer stopping (frames of %.1f ms): %d trials, worst %d frames, %d late, %d with no bup under the pointer" % [bound, frame_ms, latencies.size(), worst, late, empty])
 	TestUtil.finish(self, "OK parity_pick_latency_test")

@@ -18,6 +18,7 @@ const RIM := Color(0.45, 0.8, 0.6, 0.6)  ## its green-tinted glass rim
 const RIM_OUTER := Color(0.45, 0.8, 0.6, 0.2)  ## and the rim's faint outer line
 const THUMB_RIM_SIDES := 48  ## sides of a thumbnail's rim
 const UNKNOWN := -2  ## `pick`: the view has not yet answered a question asked there
+const ID_ASKS_OUT := 3  ## the questions about picked bups' ids `pick` keeps out to the simulation at once, of each kind (`_with_id`)
 const ASKED_KEPT := 16  ## the questions `pick` remembers of each kind, to know what an answer answers (an answer comes a few frames late)
 const MIN_INSTANCES := 1024  ## the fewest instances the bups' multimesh is made with
 
@@ -29,6 +30,9 @@ var husks_mesh: MultiMeshInstance2D = null  ## every live husk, as one instance 
 var overlay: Node2D = null  ## the selection and hover rings, drawn above the bups
 var _no_view := false  ## a view was tried and cannot draw here (no main device, or its kernels did not build)
 var _view_sent: Array = []  ## what the world was last told of the view
+var _id_asked := {true: [], false: []}  ## hover -> the questions to the simulation for a picked bup's id that are out, oldest first: {reply, answer} each
+var _id_asked_seq := {true: -1, false: -1}  ## hover -> the number of the newest answer whose bup's id was asked for
+var _id_known := {true: {}, false: {}}  ## hover -> the newest answer whose bup's id the simulation has given
 var _offered_payload := -1  ## the publish last given to the view
 var _asked := {true: [], false: []}  ## hover -> the questions `pick` asked lately, oldest first: [number, local, slack, pixel] each
 var _offered_field := -1
@@ -107,6 +111,9 @@ func release() -> void:
 	if view != null:
 		view.release()
 		view = null
+	_id_asked = {true: [], false: []}
+	_id_asked_seq = {true: -1, false: -1}
+	_id_known = {true: {}, false: {}}
 
 
 ## Redraws the dish only when something it shows may have changed: the picture of the medium is published a few times a
@@ -323,6 +330,8 @@ func pick(local: Vector2, slack: float, hover: bool) -> int:
 	if asked.size() > ASKED_KEPT:
 		asked.pop_front()
 	var a: Dictionary = view.answer(hover)
+	if not a.is_empty() and int(a["id"]) == ViewRenderer.UNRESOLVED:
+		a = _with_id(a, hover)  # (the payload came with no ids: the simulation gives the picked bup's)
 	if a.is_empty():
 		return UNKNOWN
 	for q: Array in asked:
@@ -330,6 +339,30 @@ func pick(local: Vector2, slack: float, hover: bool) -> int:
 			var here: bool = is_equal_approx(q[2], slack) and is_equal_approx(q[3], pixel) and (q[1] as Vector2).distance_to(local) <= Dish.HOVER_CLICK_PIXELS * pixel
 			return int(a["id"]) if here else UNKNOWN
 	return UNKNOWN
+
+
+## The newest answer of this kind whose bup's id is known, for a payload with no ids (the answer `a` carries the picked texel and the
+## publish, `ViewRenderer.answer`): asks the simulation for the bup of each new answer (at most ID_ASKS_OUT questions out of each kind) and
+## keeps the newest answer it has resolved. Empty until one is.
+func _with_id(a: Dictionary, hover: bool) -> Dictionary:
+	var out: Array = _id_asked[hover]
+	var waiting: Array = []
+	for w: Dictionary in out:
+		var reply := w["reply"] as SimReply
+		if not reply.is_done():
+			waiting.append(w)
+			continue
+		var ids: Variant = reply.value()
+		var answered := w["answer"] as Dictionary
+		if ids is PackedInt64Array and (ids as PackedInt64Array).size() == 1 and ids[0] >= 0 and int(answered["seq"]) > int((_id_known[hover] as Dictionary).get("seq", -1)):
+			var known := answered.duplicate()
+			known["id"] = ids[0]
+			_id_known[hover] = known
+	if dish.world != null and waiting.size() < ID_ASKS_OUT and int(a["seq"]) > int(_id_asked_seq[hover]):
+		_id_asked_seq[hover] = int(a["seq"])
+		waiting.append({"reply": dish.world.ids_at(int(a["pub"]), PackedInt32Array([int(a["index"])])), "answer": a})
+	_id_asked[hover] = waiting
+	return _id_known[hover]
 
 
 ## The nearest bup's distance from the last hover pick's point and how many lie within Dish.SOURCE_NEARBY of it ((-1, 0): none known).
@@ -353,6 +386,8 @@ func view_ring(id: int) -> Variant:
 	if at == null:
 		for hover in [true, false]:
 			var a: Dictionary = view.answer(hover)
+			if a.is_empty() or int(a["id"]) == ViewRenderer.UNRESOLVED:
+				a = _id_known[hover]
 			if not a.is_empty() and a["id"] == id:
 				at = Vector3(a["pos"].x, a["pos"].y, a["length"])
 				break

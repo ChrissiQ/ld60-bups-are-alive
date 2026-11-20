@@ -173,6 +173,13 @@ func set_world_seed(seed_value: int) -> void:
 	_send(SimThread.KIND_WORLD_SEED, {"seed": seed_value})
 
 
+## The ids of the bups at texels `indices` of the payload published as number `seq` (PayloadInfo.seq), when the pictures are handed over
+## as bytes and so carry no ids: the reply's value is a PackedInt64Array, an id each, -1 for a texel of a payload the simulation no longer
+## holds (it keeps the last SimCore.ID_RING).
+func ids_at(seq: int, indices: PackedInt32Array) -> SimReply:
+	return _send(SimThread.KIND_IDS_AT, {"seq": seq, "indices": indices}, true)
+
+
 ## Tests and tools: `call(core: SimCore, rows: client row -> core row)` runs on the sim thread between iterations; the reply's value is what
 ## it returns. Never for the game.
 func inspect(call: Callable) -> SimReply:

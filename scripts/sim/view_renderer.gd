@@ -31,10 +31,11 @@ extends RefCounted
 ##
 ## The CPU handover (`hand_over_picture`, `set_payload` with bytes): the simulation shares no textures, so there is nothing to reuse and
 ## nothing to tell it (`take_bound` stays empty). A picture's bytes go straight into its owned texture (`texture_update`; the atlas is
-## as tall as its rows of tiles in use). The payload's and ids' bytes (the texels in use only) go into two storage buffers and the
-## simulation's own copy kernel (`pool_copy_payload`) lays them into storage textures of this device (made again, larger, when the
+## as tall as its rows of tiles in use). The payload's bytes (the texels in use only) go into one storage buffer and the
+## simulation's own copy kernel (`pool_copy_payload_only`) lays them into a storage texture of this device (made again, larger, when the
 ## bups outgrow them), which the view kernels read through a view in the signed format as they read an import. A texture update has to
-## be whole, so the buffers take the part in use and the kernel does the rest. Each handover is made on the render thread before the
+## be whole, so the buffer takes the part in use and the kernel does the rest. The ids are not handed over: an answer's id is `UNRESOLVED` and
+## the caller asks the simulation for it (`WorldClient.ids_at`). Each handover is made on the render thread before the
 ## frame's compute lists.
 
 const TEXTURES := SimCore.TEXTURES
@@ -50,6 +51,7 @@ const IMPORT_FORMATS := {
 const KERNELS := ["view_count", "view_sums", "view_scatter", "view_tail", "view_pick", "view_pick2", "view_answer"]
 const MIN_SLOTS := Dish.RENDER_MIN_CAPACITY
 const NONE := 0xFFFFFFFF
+const UNRESOLVED := -2  ## an answer's "id" for a bup whose id the payload did not carry (`answer`)
 const MAX_GROUPS := 4096  ## the most groups view_count and view_scatter run with (each a run of texels)
 
 var rd: RenderingDevice
@@ -101,7 +103,8 @@ var _places := {}  ## id -> Vector3(x, y, length) from the last answer
 var _epoch := 0  ## counts `let_go`s: an answer to a build from before the last one is dropped
 static var force_cpu_handover := false  ## checks and tools: take the CPU handover whatever the driver (also `--cpu-handover` as a user argument of the run)
 static var _vulkan := -1  ## 1 when the main device is Vulkan (read once)
-var _ho := {}  ## the CPU handover's payload and ids: {rows, bases, views, stages (the buffers the bytes go into), set}
+var _handed := false  ## the payload came as bytes with no ids: the bups looked up by id are not looked up here, and a picked bup's id is for the caller to ask for (`answer`'s "index" and "pub")
+var _ho := {}  ## the CPU handover's payload texture and the ids' beside it (which no byte is ever written into): {rows, bases, views, stages (the buffer the payload's bytes go into), set}
 var _ho_generation := 0
 var _copy_made := {}  ## the copy kernel (staging buffers into the payload's textures), made with the first payload handed over
 static var _copy_defs := {}
@@ -145,7 +148,7 @@ static func _take_defs() -> void:
 		_defs[kname] = all[kname]
 	for kname: String in GpuKernelsView.DENSITY_KERNELS:
 		_den_defs[kname] = all[kname]
-	_copy_defs["pool_copy_payload"] = all["pool_copy_payload"]
+	_copy_defs["pool_copy_payload_only"] = all["pool_copy_payload_only"]
 
 
 func set_density(on: bool) -> void:
@@ -229,9 +232,10 @@ func set_payload(info: PayloadInfo) -> void:
 		return
 	if info.handles.is_empty():  # (handed over as bytes: SimCore.cpu_handover)
 		_payload = info
+		_handed = true
 		var t := Time.get_ticks_usec()
 		_on_device(_hand_payload.bind(info))
-		_count_handover(Time.get_ticks_usec() - t, info.bytes.size() + info.id_bytes.size())
+		_count_handover(Time.get_ticks_usec() - t, info.bytes.size())
 		return
 	offer("payload", info.texture_index, info.generation, info.handles, info.size, info.seq)
 	offer("ids", info.texture_index, info.generation, info.id_handles, info.size, info.seq)
@@ -366,7 +370,7 @@ func draw_into(camera: Rect2, pixel_um: float, target: RID, capacity: int, multi
 	# (density mode: the capsule kernels need not run while the last build of this view found no bup to draw as a capsule)
 	var skip: bool = dens and not _skipped_last and not _large.is_empty() and _large["key"] == view_key and int(_large["count"]) == 0
 	var rebuild: bool = build != _last_build
-	var asking: bool = _pick_request != null or (not _follow.is_empty() and (rebuild or _follow_asked))
+	var asking: bool = _pick_request != null or (not _follow.is_empty() and not _handed and (rebuild or _follow_asked))
 	if not rebuild and not asking:
 		return
 	_last_build = build
@@ -396,8 +400,9 @@ func pick(local: Vector2, slack: float, pixel_um: float, hover := false, near :=
 	return _pick_seq
 
 
-## The last answer to a pick (`hover` or a click's): {seq, id (-1: none), pos, length, nearest (-1: no bups), near, asked, frame}; empty
-## before the first.
+## The last answer to a pick (`hover` or a click's): {seq, id (-1: none; UNRESOLVED when the payload came with no ids), index (the texel of
+## the picked bup, -1: none), pub (the number of the payload it was picked in: PayloadInfo.seq), pos, length, nearest (-1: no bups), near,
+## asked, frame}; empty before the first.
 func answer(hover := false) -> Dictionary:
 	return _answers.get("hover" if hover else "click", {})
 
@@ -520,8 +525,7 @@ func _hand_payload(info: PayloadInfo) -> void:
 			return
 	if texels > 0:
 		rd.buffer_update(_ho["stages"][0], 0, info.bytes.size(), info.bytes)
-		rd.buffer_update(_ho["stages"][1], 0, info.id_bytes.size(), info.id_bytes)
-		var k: Dictionary = _copy_made["pool_copy_payload"]
+		var k: Dictionary = _copy_made["pool_copy_payload_only"]
 		var cl := rd.compute_list_begin()
 		rd.compute_list_bind_compute_pipeline(cl, k["pipeline"])
 		rd.compute_list_bind_uniform_set(cl, _ho["set"], 0)
@@ -560,21 +564,19 @@ func _make_handover(rows: int) -> void:
 			return
 		bases.append(base)
 		views.append(shared)
-	var stages: Array[RID] = [rd.storage_buffer_create(rows * w * GpuLayout.PAYLOAD_BYTES), rd.storage_buffer_create(rows * w * GpuLayout.IDT_BYTES)]
-	var k: Dictionary = _copy_made["pool_copy_payload"]
+	var stages: Array[RID] = [rd.storage_buffer_create(rows * w * GpuLayout.PAYLOAD_BYTES)]
+	var k: Dictionary = _copy_made["pool_copy_payload_only"]
 	var uniforms: Array[RDUniform] = []
-	for b in 2:
-		var u := RDUniform.new()
-		u.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
-		u.binding = b
-		u.add_id(stages[b])
-		uniforms.append(u)
-	for b in 2:  # (the copy kernel writes the unsigned textures themselves)
-		var u := RDUniform.new()
-		u.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
-		u.binding = 2 + b
-		u.add_id(bases[b])
-		uniforms.append(u)
+	var stage := RDUniform.new()
+	stage.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
+	stage.binding = 0
+	stage.add_id(stages[0])
+	uniforms.append(stage)
+	var image := RDUniform.new()  # (the copy kernel writes the unsigned texture itself)
+	image.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
+	image.binding = 1
+	image.add_id(bases[0])
+	uniforms.append(image)
 	_ho = {"rows": rows, "bases": bases, "views": views, "stages": stages, "set": rd.uniform_set_create(uniforms, k["shader"], 0)}
 	_ho_generation += 1
 	var bound: Array[int] = []
@@ -696,7 +698,7 @@ func _put_vp(count: int, camera: Rect2, pixel_um: float, slots: int, capacity: i
 	put_u.call(GpuKernelsView.VW_DENSITY, mode)
 	put_u.call(GpuKernelsView.VW_DEN_W, den_size.x)
 	put_u.call(GpuKernelsView.VW_DEN_H, den_size.y)
-	put_u.call(GpuKernelsView.VW_FINDS, 0 if _follow.is_empty() else 1)
+	put_u.call(GpuKernelsView.VW_FINDS, 0 if _follow.is_empty() or _handed else 1)
 	for s in GpuKernelsView.FINDS:
 		var id: int = _follow[s] if s < _follow.size() and _follow[s] >= 0 else -1
 		put_u.call(GpuKernelsView.VW_FIND + 2 * s + GpuLayout.IDT_LO, id & NONE)
@@ -711,7 +713,7 @@ func _build(count: int, target: RID, index: int, pick: Variant, view_key: Array,
 	if dens:
 		_ensure_density(den_size)
 	rd.buffer_update(_bufs["VP"], 0, _vp.size(), _vp)
-	var asking: bool = pick != null or not _follow.is_empty()
+	var asking: bool = pick != null or (not _follow.is_empty() and not _handed)
 	if asking:
 		var init := PackedInt32Array()
 		init.resize(GpuKernelsView.VO_WORDS)
@@ -742,9 +744,9 @@ func _build(count: int, target: RID, index: int, pick: Variant, view_key: Array,
 	if _local:
 		rd.submit()
 		rd.sync()
-		_on_answer(rd.buffer_get_data(_bufs["VOUT"], 0, GpuKernelsView.VO_WORDS * 4), view_key if rebuild else [], pick, asking, dens, -1, count)
+		_on_answer(rd.buffer_get_data(_bufs["VOUT"], 0, GpuKernelsView.VO_WORDS * 4), view_key if rebuild else [], pick, asking, dens, -1, count, _payload.seq)
 	else:
-		rd.buffer_get_data_async(_bufs["VOUT"], _on_answer.bind(view_key if rebuild else [], pick, asking, dens, _epoch, count), 0, GpuKernelsView.VO_WORDS * 4)
+		rd.buffer_get_data_async(_bufs["VOUT"], _on_answer.bind(view_key if rebuild else [], pick, asking, dens, _epoch, count, _payload.seq), 0, GpuKernelsView.VO_WORDS * 4)
 
 
 ## `cl` -1: (profiling on a local device) the kernel in a list and a submit of its own, timed.
@@ -832,7 +834,7 @@ func _free_sets() -> void:
 
 
 ## `view_key` empty: the build drew nothing (it only answered), so its visible count is not one.
-func _on_answer(data: PackedByteArray, view_key: Array, pick: Variant, asked: bool, dens := false, epoch := -1, bups := 0) -> void:
+func _on_answer(data: PackedByteArray, view_key: Array, pick: Variant, asked: bool, dens := false, epoch := -1, bups := 0, pub := -1) -> void:
 	if epoch >= 0 and epoch != _epoch:
 		return  # (asked before `let_go`: of a payload this view no longer holds)
 	var w := func(word: int) -> int: return data.decode_u32(word * 4)
@@ -854,16 +856,18 @@ func _on_answer(data: PackedByteArray, view_key: Array, pick: Variant, asked: bo
 	if pick == null:
 		return
 	var id := -1
+	var index := -1
 	var pos := Vector2.ZERO
 	var length := 0.0
 	if w.call(GpuKernelsView.VO_INDEX) != NONE:
 		var at := GpuKernelsView.VO_PICKED
-		id = w.call(at) | (w.call(at + 1) << 32)
+		index = w.call(GpuKernelsView.VO_INDEX)
+		id = UNRESOLVED if _handed else (w.call(at) | (w.call(at + 1) << 32))
 		pos = Vector2(f.call(at + 2), f.call(at + 3))
 		length = f.call(at + 4)
 	var nearest_bits: int = w.call(GpuKernelsView.VO_NEAREST)
 	_answers["hover" if pick["hover"] else "click"] = {
-		"seq": pick["seq"], "id": id, "pos": pos, "length": length, "nearest": -1.0 if nearest_bits == NONE else sqrt(f.call(GpuKernelsView.VO_NEAREST)),
+		"seq": pick["seq"], "id": id, "index": index, "pub": pub, "pos": pos, "length": length, "nearest": -1.0 if nearest_bits == NONE else sqrt(f.call(GpuKernelsView.VO_NEAREST)),
 		"near": w.call(GpuKernelsView.VO_NEAR), "asked": pick["asked"], "frame": Engine.get_frames_drawn(),
 	}
 
