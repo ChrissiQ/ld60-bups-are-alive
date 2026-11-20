@@ -10,6 +10,7 @@ extends SceneTree
 ## tests/sim/motion_test.gd, which runs the coarse model against the real one and checks the generator's calibration factor.
 ## A failure of 2 is fixed by running tools/gen_motion_table.gd (windowed, see its header) and committing the new table.
 
+const Gen := preload("res://tools/gen_motion_table.gd")
 const REGENERATE := "stale: run tools/gen_motion_table.gd (windowed: see its header)"
 
 
@@ -17,6 +18,7 @@ func _init() -> void:
 	_check_constants_are_classed()
 	_check_table_is_current()
 	_check_table_shape()
+	_check_weak_gradient_fit()
 	TestUtil.finish(self, "MOTION TABLE TESTS OK")
 
 
@@ -67,3 +69,22 @@ func _check_table_shape() -> void:
 			bounded = bounded and MotionTable.DRIFT[k] >= 0.0 and MotionTable.DRIFT[k] < 0.3 and MotionTable.D_ALONG[k] > 0.0 and MotionTable.D_ACROSS[k] > 0.0
 	TestUtil.check(rising, "a steeper slope never gives less drift")
 	TestUtil.check(bounded, "the table's drift is a share of speed under 0.3 and its diffusions are positive")
+
+
+## Where the generator fits the drift (a straight line through zero in s, k(eps) * s), the table holds exactly that, and k falls with eps.
+func _check_weak_gradient_fit() -> void:
+	var ne: int = MotionTable.E_AXIS.size()
+	var straight := true
+	var falling := true
+	var last_k := INF
+	for j in ne:
+		if MotionTable.E_AXIS[j] < Gen.FIT_EPS_MIN:
+			continue
+		var k: float = MotionTable.DRIFT[j] / MotionTable.S_AXIS[0]
+		for i in MotionTable.S_AXIS.size():
+			if MotionTable.S_AXIS[i] <= Gen.FIT_S_MAX:
+				straight = straight and absf(MotionTable.DRIFT[i * ne + j] / MotionTable.S_AXIS[i] - k) <= 1e-4 * k
+		falling = falling and k <= last_k
+		last_k = k
+	TestUtil.check(straight, "the drift is a straight line through zero in s where the generator fits one (eps from %s, s up to %s)" % [Gen.FIT_EPS_MIN, Gen.FIT_S_MAX])
+	TestUtil.check(falling, "the slope of that line never rises with eps")
