@@ -17,6 +17,7 @@ extends RefCounted
 ##     read again)
 ##   else: k = the governor's steps within the pool's room and the history samples; the dishes' world events for the window, the
 ##     questions due and the view; run (the steps, then the answers and the pictures, with the asked-after bups' places, in one list,
+##     split only where a step's diffusion rounds are, SimCore._record_step,
 ##     and DSTATE, STATS, the family events, the answers and the pictures read back with its one sync); push to the worker; rest. An
 ##     iteration the memory budget refuses (no step ran: the questions are answered and the pictures published all the same) puts the
 ##     dishes' worlds back as they were before its events, and the next tries are fewer steps, then one step at most every
@@ -542,7 +543,7 @@ func _published(v: ViewRequest, out: Dictionary, husks: Variant) -> void:
 	if not cpu_handover:
 		_take_handles()
 	var handed := _core.handed
-	_husks_owed = _view.want_husks and not v.want_husks
+	_husks_owed = _view.want_husks and (not v.want_husks or husks == null)  # (a list that came back incomplete is read again, made for the count it found)
 	if v.want_husks:
 		_husk_msec = now
 		if husks != null:

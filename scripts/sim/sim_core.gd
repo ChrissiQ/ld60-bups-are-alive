@@ -706,7 +706,8 @@ func set_field(row: int, values: PackedFloat32Array) -> void:
 
 # ---- the iteration ------------------------------------------------------------------------------------------------------------------
 
-## `steps` steps of `delta` seconds of every running dish, and what is asked of the state after them, in one submit and one wait: the
+## `steps` steps of `delta` seconds of every running dish, and what is asked of the state after them, in one submit and one wait (with the
+## field's own submits and waits before it when a step's diffusion rounds are split, `_record_step`): the
 ## steps are recorded, then the stats, the answers to `plan.questions` (`answer`'s) and the pictures of `plan.view` (`publish`'s), in one
 ## compute list; one read back (`_request`) takes WORLD, DSTATE, STATS, the family events, the answers and what the pictures hand over;
 ## submit; sync. `plan` (IterationPlan) carries each dish's world events, the history samples, the questions and the view. Returns {steps,
@@ -940,9 +941,9 @@ func _sync_tiles() -> void:
 
 ## The step `s` of a batch, in the order of kernels_life.gd's header, recorded into list `cl` (-1: each dispatch its own submit, for
 ## `profile_steps`). Returns the list the rest of the batch goes into: the field's diffusion rounds are split into submits of at most
-## FIELD_SUBMIT_MS each by the time a round's tile was measured to take (a dish of many rounds, a small one in water, has a step of
-## hundreds of ms of them, which in one submit leaves the interface's frames late), and each split ends the list, submits, waits and
-## begins a new one.
+## FIELD_SUBMIT_MS each by the time a round's tile was measured to take (many dishes of many rounds, small ones in water, make a step
+## of a hundred ms or more of them, 999 dishes of 300 µm about 140 ms, which in one submit leaves the interface's frames late), and each
+## split ends the list, submits, waits and begins a new one.
 func _record_step(cl: int, s: int) -> int:
 	_lists_marked = _marks_pay()
 	var bg := _bup_groups()
