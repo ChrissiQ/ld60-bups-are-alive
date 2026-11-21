@@ -3,8 +3,8 @@ extends SceneTree
 ## The Governor with a fake clock: the step length, the time owed,
 ## the steps of an iteration within T_ITER and the caller's bounds, the duty, the history samples.
 ##
-## Expected values [derived from the Governor's constants: MAX_STEP 20 s, 120 steps a simulated
-## second, T_ITER 50 ms (placeholder), frames capped at 0.1 s, owed time at most 2 iterations, duty -10% after 3 frames over 1.15 x the
+## Expected values [derived from the Governor's constants: MAX_STEP 20 s, a step at least one display frame of
+## simulated time (120 frames a second when the display is not known), T_ITER 50 ms (placeholder), frames capped at 0.1 s, owed time at most 2 iterations, duty -10% after 3 frames over 1.15 x the
 ## display frame and +5% for a frame within 1.05 x, EMA weight 0.25]:
 ##  - shortest_step with no display known (the fallback of 120 frames a second): x1 = 1/120 s, x600 = 5 s, x2,400 = 20 s, x10,000 = 20 s, x0 = 0; on
 ##    a 60 Hz display x1 = 1/60 s, x600 = 10 s; on 120 Hz x1 = 1/120 s. A new governor's delta() (stretch 1) is that shortest step, and does not
