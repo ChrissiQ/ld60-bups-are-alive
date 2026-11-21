@@ -345,7 +345,7 @@ func _iterate(k: int) -> float:
 		for client: int in before:  # (nothing ran: the window's bursts, releases and arrivals are owed to the next one, as if never asked)
 			(_worlds[client] as DishWorld).restore(before[client])
 		bursts.clear()
-		var why := "an iteration of %d steps was refused (%s)" % [k, _core.errors[-1] if not _core.errors.is_empty() else "?"]
+		var why := "an iteration of %d steps was refused (%s)" % [k, String(res.get("refused", "")) if String(res.get("refused", "")) != "" else "?"]
 		if _refusal == "":
 			_error(why)  # (once while it lasts: the next iterations ask for the same room and are refused alike)
 		_refusal = why

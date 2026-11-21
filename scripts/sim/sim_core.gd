@@ -713,8 +713,8 @@ func set_field(row: int, values: PackedFloat32Array) -> void:
 ## submit; sync. `plan` (IterationPlan) carries each dish's world events, the history samples, the questions and the view. Returns {steps,
 ## overflow, record_usec, gpu_usec, stats (STATS up to the highest running row), births and deaths (the steps' family events: EVB's and
 ## EVD's bytes in use), answers (`answer`'s), published (`publish`'s), answer_usec and publish_usec (the host's time on the answers and on
-## the pictures, before the list and after the sync), read_usec (on the read back)}; steps 0 when the room the steps need would pass the memory budget
-## (OVERFLOW_BUDGET is set, `errors` says so, no step ran; the questions are answered and the pictures published all the same). With no
+## the pictures, before the list and after the sync), read_usec (on the read back), refused (why the steps did not run, or "")}; steps 0 when the room the steps need would pass the memory budget
+## (OVERFLOW_BUDGET is set, `errors` and `refused` say so, no step ran; the questions are answered and the pictures published all the same). With no
 ## steps and no plan, the queued edits are made and the stats refreshed, and nothing else. An overflow a kernel finds (WORLD's flag) is not
 ## undone: the iteration cannot be done again from what the host holds (the records and fields change in place on the device), so
 ## `overflow()` keeps it and the kernels keep every read and write inside the buffers.
@@ -726,6 +726,7 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 		return {"steps": 0, "overflow": _overflow}
 	steps = clampi(steps, 0, MAX_STEPS)
 	var history := PackedByteArray()
+	var refused := ""
 	if steps > 0:
 		if not _stats_fresh:
 			_refresh_stats()  # (the births the iteration can have are bounded from the dishes' masses as they are now)
@@ -737,6 +738,7 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 		if _ensure_room(steps, ev):
 			_upload_events(ev)
 		else:
+			refused = errors[-1] if not errors.is_empty() else "the room the steps need"
 			steps = 0
 	var t_ask := Time.get_ticks_usec()
 	var questions: Array = plan.questions if plan != null and plan.get("questions") is Array else []
@@ -808,6 +810,7 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 		if arena.changed:
 			_after_growth()
 	out["overflow"] = _overflow
+	out["refused"] = refused
 	return out
 
 
@@ -2105,6 +2108,11 @@ func _publish_stage(view: ViewRequest, expect: int) -> Dictionary:
 	var rows := maxi(1, (expect + width - 1) / width)
 	var texels := rows * width
 	var drawn := arena.ensure_draw(texels, cd.grid.n * cd.grid.n, ((cd.cap + width - 1) / width) * width, view.want_thumbnails)
+	if not drawn and expect > count(row):  # (the room for the steps' births would pass the budget: the count now fits as it did before the steps grew it; a dish that grows past it is not drawn that time)
+		expect = count(row)
+		rows = maxi(1, (expect + width - 1) / width)
+		texels = rows * width
+		drawn = arena.ensure_draw(texels, cd.grid.n * cd.grid.n, ((cd.cap + width - 1) / width) * width, view.want_thumbnails)
 	_after_growth()
 	if not drawn:
 		var why := "SimCore: the pictures' buffers for %d bups and a field of %d cells would pass the memory budget of %d bytes: not published" % [expect, cd.grid.n * cd.grid.n, limits.memory_budget_bytes]
