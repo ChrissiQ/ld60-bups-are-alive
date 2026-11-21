@@ -210,12 +210,13 @@ func _client_on_fake() -> void:
 	for s in [1, 2]:
 		var p := PayloadInfo.new()
 		p.seq = s
+		p.sim_time = 20.0 * s
 		snap.payloads.append(p)
 	fake.serve(snap)
 	for i in 4:
 		w.poll()
 	var rate := w.picture_rate()
-	TestUtil.check(rate["shown"] == 2 and rate["published"] == 2 and rate["longest_hold_frames"] == 2, "two publishes in one snapshot: shown on two frames, the second still up two frames later (got %s)" % [rate])
+	TestUtil.check(rate["shown"] == 2 and rate["published"] == 2 and rate["longest_hold_frames"] == 2 and is_equal_approx(rate["sim_s_per_picture"], 20.0), "two publishes in one snapshot: shown on two frames, the second still up two frames later (got %s)" % [rate])
 
 
 func _service() -> void:

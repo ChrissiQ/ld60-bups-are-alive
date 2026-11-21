@@ -29,7 +29,7 @@ var _last_seq := -1
 var display_ms := 0.0  ## the display's frame (ms), from the screen's refresh rate, sent with every set_time for the governor's pacing (0: not known, no pacing)
 var _waiting: Array = []  ## publishes seen and not yet shown, oldest first (at most WAITING_MOST after a frame)
 var _shown: PayloadInfo = null
-var _new_pictures: Array = []  ## [msec, poll] of each frame that showed the main view a new publish, the last PICTURE_WINDOW_MSEC
+var _new_pictures: Array = []  ## [msec, poll, sim time] of each frame that showed the main view a new publish, the last PICTURE_WINDOW_MSEC
 var _arrivals: Array = []  ## msec of each publish that arrived, the last PICTURE_WINDOW_MSEC
 var _known_publish := -1  ## the newest publish seen
 var _refusals_taken := {}  ## row -> the snapshot that first carried the last refusal of it that was taken (timing["refused_seq"])
@@ -228,7 +228,7 @@ func poll() -> void:
 		_arrivals.append(now)
 	if step[0] != null:
 		_shown = step[0]
-		_new_pictures.append([now, _polls])
+		_new_pictures.append([now, _polls, (step[0] as PayloadInfo).sim_time])
 	_waiting = step[1]
 	_forget_pictures(now)
 	if snap == null or snap.seq <= 0 or snap.seq == _last_seq:
@@ -251,7 +251,7 @@ func poll() -> void:
 
 ## How often the main view's picture changed in the last PICTURE_WINDOW_MSEC: {shown (new pictures shown), published (publishes that
 ## arrived; more than shown when some were skipped), longest_hold_frames (the most frames one picture stayed up, the one up now
-## included)}.
+## included), sim_s_per_picture (the mean simulated time between them)}.
 func picture_rate() -> Dictionary:
 	_forget_pictures(Time.get_ticks_msec())
 	var longest := 0
@@ -259,7 +259,10 @@ func picture_rate() -> Dictionary:
 		longest = maxi(longest, int(_new_pictures[i][1]) - int(_new_pictures[i - 1][1]))
 	if not _new_pictures.is_empty():
 		longest = maxi(longest, _polls - int(_new_pictures[-1][1]))
-	return {"shown": _new_pictures.size(), "published": _arrivals.size(), "longest_hold_frames": longest}
+	var per := 0.0
+	if _new_pictures.size() > 1:
+		per = (float(_new_pictures[-1][2]) - float(_new_pictures[0][2])) / (_new_pictures.size() - 1)
+	return {"shown": _new_pictures.size(), "published": _arrivals.size(), "longest_hold_frames": longest, "sim_s_per_picture": per}
 
 
 func _forget_pictures(now: int) -> void:
