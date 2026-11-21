@@ -44,7 +44,7 @@ const OVERFLOW_BUDGET := 2  ## the room an iteration needed would pass the memor
 const SCRATCH_KEEP := 1 << 23  ## bytes: a read up to this goes through the kept scratch buffer; a larger one (a dish's records) through one made for it and freed after it, so no buffer outside the memory budget stays
 const EVENT_READ_MARGIN := 1.25  ## the room over the most events a step of the last iterations had that an iteration reads back with its sync ...
 const EVENT_READ_SLACK := 1024  ## ... and the events more (a step that had more has the rest read after)
-const COUNT_READ_MARGIN := 1.25  ## the room over a dish's births a step of the last iteration that its expected count is given (`_expected_count`)
+const COUNT_READ_MARGIN := 1.25  ## the share over a dish's births a step in its last iteration that `_expected_count` allows for each step to come
 
 var rd: RenderingDevice
 var limits: PoolLimits
@@ -2108,7 +2108,7 @@ func _publish_stage(view: ViewRequest, expect: int) -> Dictionary:
 	var rows := maxi(1, (expect + width - 1) / width)
 	var texels := rows * width
 	var drawn := arena.ensure_draw(texels, cd.grid.n * cd.grid.n, ((cd.cap + width - 1) / width) * width, view.want_thumbnails)
-	if not drawn and expect > count(row):  # (the room for the steps' births would pass the budget: the count now fits as it did before the steps grew it; a dish that grows past it is not drawn that time)
+	if not drawn and expect > count(row):  # (room for the steps' births would pass the budget: the buffers are made for the count now, and a dish that grows past it in the steps is not drawn that time)
 		expect = count(row)
 		rows = maxi(1, (expect + width - 1) / width)
 		texels = rows * width

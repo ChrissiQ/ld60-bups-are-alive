@@ -32,7 +32,7 @@ extends SceneTree
 ##    (7 > 3 x 2: merged, within T_ITER / 6 = 8: 7); with no display known 2 owed give 2.
 ##  - a fixed cost in the iteration (an iteration takes 20 ms + k x 8 ms: the fixed cost of Direct3D 12 with a low GPU clock, a step of a 2M-bup dish, plus 23 ms an iteration
 ##    outside the steps), x10,000 at 60 fps, started as the game starts (step cost 50 ms, so k = 1): [derived: run(1) = 28 ms is what
-##    the old rule charged a step, 50 / 28 = 1, and k = 1 reads 28 ms for ever (checked in the test); the new rule's probe, after PROBE_EVERY
+##    a rule charging the whole iteration to its steps would charge a step, 50 / 28 = 1, and k = 1 would read 28 ms for ever (checked in the test); the probe, after PROBE_EVERY
 ##    iterations of one k, runs 2 x T / cost = 2 steps (50 / 28 is 1, one more), the slope between k = 1 and 2 is 8 ms (exact: no noise),
 ##    and k = floor(50 / 8) = 6 from then on]: the slope is 8 ms (+-5%), the fixed cost 20 ms (+-10%), k is 6, no run longer than
 ##    20 + 2 x 50 = 120 ms (the probe's own bound; a steady iteration is 20 + 6 x 8 = 68 ms), and with +-3 ms noise on the run time the step estimate stays within 2 ms of 8
@@ -294,14 +294,14 @@ func _simulate(iterations: int, fixed: float, step_at: Callable, outside: float,
 
 func _fixed_cost() -> void:
 	var flat := func(_i: int) -> float: return 8.0
-	# the rule that charged the fixed cost to the steps (cost of a step = an iteration's time over its steps), here with fixed 20 ms and 8 ms a step:
+	# a rule charging the fixed cost to the steps (cost of a step = an iteration's time over its steps), here with fixed 20 ms and 8 ms a step:
 	# T_ITER / 28 = 1, and k = 1 reads 28 ms a step for ever
-	var old_ema := Governor.T_ITER_MS
-	var old_k := 1
+	var whole_ema := Governor.T_ITER_MS
+	var whole_k := 1
 	for i in 100:
-		old_k = maxi(1, int(floor(Governor.T_ITER_MS / old_ema)))
-		old_ema += Governor.EMA_WEIGHT * ((20.0 + old_k * 8.0) / old_k - old_ema)
-	TestUtil.check(old_k == 1, "the old rule locks at one step with a 20 ms fixed cost and 8 ms a step (k %d)" % old_k)
+		whole_k = maxi(1, int(floor(Governor.T_ITER_MS / whole_ema)))
+		whole_ema += Governor.EMA_WEIGHT * ((20.0 + whole_k * 8.0) / whole_k - whole_ema)
+	TestUtil.check(whole_k == 1, "a rule charging the whole iteration to its steps locks at one step with a 20 ms fixed cost and 8 ms a step (k %d)" % whole_k)
 	var r := _simulate(400, 20.0, flat, 23.0, 0.0, 1)
 	var g: Governor = r["g"]
 	var ks: Array = r["ks"]
@@ -393,7 +393,7 @@ func _latched_high() -> void:
 		"a cost taken too high at k = 1 comes down: slope %.2f ms (22), fixed %.2f ms (12), k %d (2)" % [g.step_ms_ema, g.fixed_ms, g.steps_by_cost()])
 	# a 2M-bup dish on Apple Silicon: 22 ms a step, 14 ms fixed, +-6 ms noise; k = floor(50 / 22) = 2. An iteration of one step (36 ms, under
 	# T_ITER) is no rise however low the fixed cost was learned, and at k = 1 the probe goes up, so noise does not hold k at 1 [measured, mean k
-	# over the last 300 of 8 seeds: 1.77; without either rule 1.00 to 1.15 (k held at 1); a pair's slope is off by up to 12 ms, so k is 1 for a
+	# over the last 300 of 8 seeds: 1.77; with neither the probe up at k = 1 nor the long-iteration test 1.00 to 1.15 (k held at 1); a pair's slope is off by up to 12 ms, so k is 1 for a
 	# share of the time]: the mean k is at least 1.5
 	var mac := func(_i: int) -> float: return 22.0
 	var rm := _simulate(600, 14.0, mac, 10.0, 6.0, 6)
