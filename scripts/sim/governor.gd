@@ -28,11 +28,12 @@ extends RefCounted
 ##   would read the rise as fixed cost).
 ## - Catch-up in single frames' worth: below MAX_STEP a display frame owes `frame_steps()` steps (1 at 120 Hz) and every iteration publishes
 ##   one picture the display shows for a frame. After a late iteration k > 1 frames' worth are owed; run as one merged iteration they give
-##   one publish for k frames, so k - 1 frames show nothing new for good. When the sim keeps up (a frame's steps cost, on the slow mean, within a display frame,
-##   resting included; one late iteration must not turn the split off just when it is needed, so this is not the fast EMA) and at most SPLIT_OWED_MOST frames' worth are owed (the pictures the display keeps: one shown and
-##   WorldClient.WAITING_MOST waiting; more would be dropped there), an iteration takes one frame's worth, so each frame owed has its own
-##   publish. Past either bound, or at MAX_STEP and above (a frame owes more than one iteration's worth anyway), the owed steps merge into one iteration
-##   and a world that cannot keep up slows together. The steps' arithmetic does not depend on how they are grouped.
+##   pictures at as many of their steps as display frames the last iteration took (SimThread._pictures_for), but all at once, after the
+##   whole iteration. When the sim keeps up (a frame's steps cost, on the slow mean, within a display frame, resting included; one late
+##   iteration must not turn the split off just when it is needed, so this is not the fast EMA) and at most SPLIT_OWED_MOST frames' worth
+##   are owed, an iteration takes one frame's worth, so each frame owed has its own publish as soon as its steps are done. Past either
+##   bound, or at MAX_STEP and above (a frame owes more than one iteration's worth anyway), the owed steps merge into one iteration and a
+##   world that cannot keep up slows together. The steps' arithmetic does not depend on how they are grouped.
 ## - Duty: three frames in a row longer than SLOW_FRAME x the display's frame lower it by DUTY_DOWN; each frame within FAST_FRAME of it
 ##   raises it by DUTY_UP; after an iteration that kept the thread busy `busy` ms it rests `busy x (1 / duty - 1)` ms.
 
@@ -44,7 +45,7 @@ const MAX_STEPS := GpuLayout.MAX_STEPS_PER_BATCH
 const OWED_ITERATIONS := 2.0  ## the most time owed, in iterations of the most steps the governor allows now
 const MEAN_WEIGHT := 0.02  ## the newest iteration's weight in the slow mean of a step's cost (about 50 iterations)
 const KEEP_UP_SHARE := 1.0  ## of a display frame: the most a frame's steps may cost on average (with rest) for the sim to count as keeping up
-const SPLIT_OWED_MOST := 3  ## frames' worth owed up to which catch-up runs frame by frame (the display keeps one shown and two waiting)
+const SPLIT_OWED_MOST := 3  ## frames' worth owed up to which catch-up runs frame by frame
 const OWED_TOLERANCE := 1e-6  ## of a step: what a sum of frame lengths may miss a whole step by and still owe it
 const EMA_WEIGHT := 0.25  ## the newest iteration's weight in the cost of a step
 const PROBE_EVERY := 16  ## iterations without a pair of different k after which the next one runs another k

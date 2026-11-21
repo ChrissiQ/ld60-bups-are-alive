@@ -4,8 +4,8 @@ extends SceneTree
 ## answer no pick, never a pick on the other dish's bups. Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/park_view_test.gd
 ##
-## Expected values [derived from the textures' reuse rule: SimCore.TEXTURES (10) of a kind, each written again
-## once the main side has used a newer one; 60 frames of x1 publish the other dish far more than 10 times]:
+## Expected values [derived from the textures' reuse rule: SimCore.PAYLOAD_TEXTURES (16) payload textures, each written again
+## once the main side has used a newer one; 60 frames of x1 publish the other dish far more than 16 times]:
 ## U  Dish 1 (40 founders) in view, then parked; dish 2 (2,000 founders) in view for 60 running frames, then paused and parked; dish 1
 ##    back in view. Over the next 40 frames the pointer rests, in dish 1's coordinates, where dish 2's first bups lie (a place more than
 ##    100 µm from each of dish 1's bups): no answer of dish 1's view names a bup of dish 2, and none names a bup at all (dish 1 has none

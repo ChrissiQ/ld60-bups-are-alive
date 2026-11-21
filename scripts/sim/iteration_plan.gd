@@ -12,4 +12,5 @@ var events := {}  ## row -> DishWorld.events() of the window (made by `SimCore._
 var event_capacity := 0  ## family events (births, and as many deaths) the iteration's ring holds; 0: the core sizes it
 var questions: Array = []  ## the dishes' questions answered after the steps (SimCore.answer's form)
 var view: ViewRequest = null  ## what to publish after the steps (SimCore.publish's; null: nothing)
+var pictures := 1  ## the bup pictures of the view's dish to publish, at evenly spaced steps, the last after the last step (at most GpuLayout.PICTURES_MOST and the steps; fewer when fewer shared textures are free)
 var publish: Variant = null

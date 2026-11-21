@@ -8,9 +8,9 @@ extends RefCounted
 ## The arena (SimArena) holds the buffers and grows them by 1.5 when an iteration's bound would pass 90% of one; a dish takes a row of
 ## the dish tables (DISHP, DSTATE), a segment of record slots (256-aligned, appended at the end and put in row order by the next step's
 ## compaction), a 256-aligned block of field cells and a run of cloud-list squares. An iteration (`run`) uploads the dishes' world events,
-## records its steps in one compute list in the order of `_record_step` (life's `pool_*` kernels in kernels_life.gd's order) and after
-## them the stats, the answers to the dishes' questions (`answer`) and the main dish's pictures (`publish`: into the next free shared
-## texture), requests one read back of WORLD, DSTATE, STATS, the family events, the answers and the pictures' bytes (`_request`), then
+## records its steps in one compute list in the order of `_record_step` (life's `pool_*` kernels in kernels_life.gd's order), with the
+## main dish's bups' picture after some of them when the plan asks for more than one picture (`_record_shot`), and after them the stats,
+## the answers to the dishes' questions (`answer`) and the main dish's pictures (`publish`: into the next free shared texture), requests one read back of WORLD, DSTATE, STATS, the family events, the answers and the pictures' bytes (`_request`), then
 ## submits and syncs once. The pipette is its own zero-step pass (`pipette`, a retarget); a dish leaves by `remove_dish` (its blocks become
 ## padding at once, its clouds and husks empty slots) and comes back by `load_dish` from what `gather` read; `resize` and `set_params`
 ## change a running dish. Reads of parts of the buffers go through a right-sized copy (`read_parts`, `_request`).
@@ -36,8 +36,9 @@ const EVENT_EXACT_MOST := 1 << 21  ## past this bound of an iteration's births t
 const MAX_STEPS := GpuLayout.MAX_STEPS_PER_BATCH
 const MASS_SUM_MARGIN := 1.0e-3  ## the share the measured mass sum is raised by: the sums are float, in a fixed order, with a relative error far under this
 const MASS_READ_ROWS := 16  ## the most running dishes whose mass sum is read from their own rows of STATS; with more, STATS is read up to the highest row
-const ID_RING := 8  ## with `cpu_handover`, the payloads whose bups' ids `ids_at` can still give: a payload's ids are asked for after it has waited to be shown (WorldClient.WAITING_MOST), been shown and picked in, the pick read back (a frame or frame_queue_size frames) and the question drained between two iterations, which at one publish a display frame is up to about 7 publishes after it
-const TEXTURES := 10  ## shared textures of each kind: a publish's texture is held for WorldClient.WAITING_MOST + 6 publishes at one publish a display frame (it waits to be shown, is shown, is superseded by the next, then frame_queue_size + 2 frames), so the rest is room for a late frame
+const ID_RING := WorldClient.WAITING_MOST + GpuLayout.PICTURES_MOST + 6  ## with `cpu_handover`, the payloads whose bups' ids `ids_at` can still give: a payload's ids are asked for after it has waited to be shown (at most WorldClient.WAITING_MOST publishes are ahead of it or behind it then), been shown and picked in, the pick read back (a frame or frame_queue_size frames) and the question drained between two iterations, in which the next iteration's pictures (GpuLayout.PICTURES_MOST) are published; the rest is room for a late frame
+const TEXTURES := 10  ## shared textures of each of haze, steer and thumbnails (one publish an iteration at most): a publish's texture is held for 7 publishes at one publish a display frame (it waits to be shown, is shown, is superseded by the next, then frame_queue_size + 2 frames), so the rest is room for a late frame
+const PAYLOAD_TEXTURES := WorldClient.WAITING_MOST + 8  ## shared textures of each of payload and ids: the main side holds at most WorldClient.WAITING_MOST + 6 (waiting, shown, superseded, then frame_queue_size + 2 frames), so an iteration's last picture always finds one; while the playout keeps pace (about one an iteration waiting when the next stages, a few cooling) the rest hold GpuLayout.PICTURES_MOST, and with fewer free an iteration publishes fewer pictures before its last
 const HARD_BOUND_MOST := 1 << 18  ## the cloud (and husk) slots past which an iteration's room is estimated instead of bounded [placeholder: about 135 MB of cloud buffers at 516 B a slot]
 const OVERFLOW_DEVICE := 1  ## `overflow()` bits: a kernel found a buffer full (WORLD's flag)
 const OVERFLOW_BUDGET := 2  ## the room an iteration needed would pass the memory budget: it was refused, nothing ran
@@ -77,7 +78,7 @@ var _entries_last := 0  ## the most list entries a step of the last iteration th
 var _deaths_per_step := 0.0  ## the most deaths a step of the last iterations had (all dishes), for the clouds' headroom
 var _births_per_step := 0.0
 var _last_steps := 0  ## the steps of the last iteration that stepped (a dish's DS_BIRTHS are that iteration's)
-var _textures := {}  ## kind -> Array of TEXTURES texture RIDs (publish)
+var _textures := {}  ## kind -> Array of `ring_of(kind)` texture RIDs (publish)
 var _texture_seqs := {}  ## kind -> Array: the publish each texture holds (-1: never written)
 var _texture_used := {}  ## kind -> Array: the last frame the main side told it used each texture on since it was last written
 var _superseded := {}  ## kind -> Array: the frame on which the main side first told of a newer publish of the kind than each texture holds (-1: not yet)
@@ -170,6 +171,8 @@ func _notification(what: int) -> void:
 				rd.free_rid(t)
 		if _scratch.is_valid():
 			rd.free_rid(_scratch)
+		for slot: Dictionary in _id_ring:
+			rd.free_rid(slot["buffer"])
 		if arena != null:
 			arena.free_all()
 		ShaderSet.free_all(rd, _made)
@@ -749,7 +752,9 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 	if husk_most > 0:
 		arena.put_small("HVC", arena.zeros(16))
 	var t_pub := Time.get_ticks_usec()
-	var pub := _publish_stage(view, _expected_count(view.row, steps) if view != null and _dishes.has(view.row) else 0)
+	var pictures: int = plan.pictures if plan != null and plan.get("pictures") is int else 1
+	var pub := _publish_stage(view, _expected_count(view.row, steps) if view != null and _dishes.has(view.row) else 0, steps, pictures)
+	var shots: Array = pub.get("shots", [])
 	var answer_usec := t_pub - t_ask
 	var publish_usec := Time.get_ticks_usec() - t_pub
 	var stats := steps > 0 or not _stats_fresh
@@ -760,11 +765,15 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 		if steps > 0:
 			_disp(cl, "pool_ev_begin", D_MAX / 64)
 			var samples := 0
+			var shot := 0
 			for s in steps:
 				cl = _record_step(cl, s)
 				if s < history.size() and history[s] != 0 and samples < GpuLayout.STATS_ITER_SAMPLES:
 					samples += 1
 					_record_stats(cl, samples, s)
+				if shot < shots.size() and int(shots[shot]["step"]) == s + 1:
+					_record_shot(cl, pub, shots[shot])
+					shot += 1
 		if stats:
 			_record_stats(cl, 0, maxi(steps - 1, 0))
 		_answers_record(cl, staged)
@@ -2091,8 +2100,10 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 
 ## Before the list: the pictures' buffers made for `expect` bups (the count the dish is expected to have when the kernels run: they write
 ## no further than the buffers hold), the free textures chosen and the small buffers the kernels read filled. {} when nothing is
-## published (none of the dish, its buffers past the memory budget, no texture free).
-func _publish_stage(view: ViewRequest, expect: int) -> Dictionary:
+## published (none of the dish, its buffers past the memory budget, no texture free). With `steps` steps before the pictures and
+## `pictures` > 1, up to `pictures` - 1 bup pictures more are made within the steps ("shots", `_record_shot`): `pictures` pictures in
+## all at evenly spaced steps, the last after the last step, fewer when fewer textures are free (the last picture's is chosen first).
+func _publish_stage(view: ViewRequest, expect: int, steps := 0, pictures := 1) -> Dictionary:
 	if view == null or not _dishes.has(view.row):
 		return {}
 	var row := view.row
@@ -2139,8 +2150,38 @@ func _publish_stage(view: ViewRequest, expect: int) -> Dictionary:
 	if tracking:
 		_put_track(view.track, 0)
 	var room := arena.draw_rows() * width
+	var shots: Array = []
+	if w >= 0:
+		var taken: Array = [w]
+		for j in mini(mini(pictures, GpuLayout.PICTURES_MOST), steps) - 1:
+			var i := j + 1 if cpu_handover else _free_texture("payload", Vector2i(width, maxi(rows, arena.draw_rows())), taken)
+			if i < 0:
+				break
+			taken.append(i)
+			shots.append({"w": i, "slot": j + 1 if cpu_handover else 0, "count_at": j + 1, "set": GpuLayout.ANSWER_SETS + j})
+		for j in shots.size():
+			var shot: Dictionary = shots[j]
+			shot["step"] = ((j + 1) * steps) / (shots.size() + 1)
+			shot["expect"] = mini(mini(_expected_count(row, shot["step"]), expect), room)
+			if tracking:
+				_put_track(view.track, shot["set"])
+		arena.put_small("PICN", arena.zeros(GpuLayout.PICTURES_MOST * 4))
 	return {"view": view, "row": row, "texels": texels, "room": room, "expect": mini(expect, room), "nn": nn, "w": w, "fw": fw, "sw": sw,
-		"tw": tw, "tracking": tracking}
+		"tw": tw, "tracking": tracking, "shots": shots}
+
+
+## A bup picture within the steps of the list `cl` (`shot`: one of `_publish_stage`'s "shots"), after the step it was chosen for: the
+## payload of the dish as the device has it then, into its own shared texture (or, on the byte path, its own slot of PAYLOAD and IDTEX),
+## its count into PICN and its tracked bups into its own set of TR.
+func _record_shot(cl: int, pub: Dictionary, shot: Dictionary) -> void:
+	var row: int = pub["row"]
+	var room: int = pub["room"]
+	_disp(cl, "pool_payload", _groups(pub["texels"]), float(row), float(room), float(shot["slot"]), float(shot["count_at"]))
+	if not cpu_handover:
+		var w: int = shot["w"]
+		_copy(cl, "pool_copy_payload", {"PAYTEX": _textures["payload"][w], "IDS": _textures["ids"][w]}, GpuLayout.PAYLOAD_TEX_WIDTH, room, float(row))
+	if pub["tracking"]:
+		_disp_track(cl, row, shot["set"])
 
 
 ## The pictures' kernels into the open list `cl` (nothing for a `pub` of {}). The payload and its copy run over the dish's bups as the
@@ -2186,8 +2227,17 @@ func _publish_record(cl: int, pub: Dictionary) -> void:
 func _publish_parts(pub: Dictionary, parts: Array, direct: Array) -> void:
 	if pub.is_empty():
 		return
+	var tracked := mini((pub["view"] as ViewRequest).track.size(), GpuLayout.TRACKED) * GpuLayout.ANSWER_BYTES
 	if pub["tracking"]:
-		parts.append(["TR0", "TR", 0, mini((pub["view"] as ViewRequest).track.size(), GpuLayout.TRACKED) * GpuLayout.ANSWER_BYTES])
+		parts.append(["TR0", "TR", 0, tracked])
+	var shots: Array = pub["shots"]
+	if not shots.is_empty():
+		parts.append(["PICN", "PICN", 0, GpuLayout.PICTURES_MOST * 4])
+	for shot: Dictionary in shots:
+		if pub["tracking"]:
+			parts.append(["TR%d" % shot["set"], "TR", int(shot["set"]) * GpuLayout.TRACKED * GpuLayout.ANSWER_BYTES, tracked])
+		if cpu_handover:
+			direct.append(["payload%d" % shot["slot"], "PAYLOAD", int(shot["slot"]) * int(pub["room"]) * GpuLayout.PAYLOAD_BYTES, int(shot["expect"]) * GpuLayout.PAYLOAD_BYTES])
 	if not cpu_handover:
 		return
 	var nn: int = pub["nn"]
@@ -2212,7 +2262,9 @@ func _thumb_rows() -> int:
 ## After the sync (and the read back of DSTATE): what `publish` returns, from what the list wrote and `got` (`_take`'s). With
 ## `cpu_handover` the handed-over bytes go to `handed`: the payload's texels of the dish's bups now (read on, with a wait, past what was
 ## expected), the pictures' pixels and the atlas's rows in use. A dish that outgrew the pictures' buffers in the steps is drawn only in
-## part, so its payload is not published this time (the next is made for its count).
+## part, so its payload is not published this time (the next is made for its count). The bup pictures made within the steps come first,
+## each a publish of its own with its own number, in "shots": {step (the steps run before it), payload (its texture index), count,
+## bytes (with `cpu_handover`), tracked}, oldest first; the rest of the dictionary is the last publish's.
 func _publish_take(pub: Dictionary, got: Dictionary) -> Dictionary:
 	var out := {}
 	if pub.is_empty():
@@ -2223,6 +2275,36 @@ func _publish_take(pub: Dictionary, got: Dictionary) -> Dictionary:
 			rd.free_rid(t)
 	_temp_sets.clear()
 	var view: ViewRequest = pub["view"]
+	var taken_shots: Array = []
+	var counts: PackedByteArray = got.get("PICN", PackedByteArray())
+	for shot: Dictionary in pub["shots"]:
+		var at: int = int(shot["count_at"]) * 4
+		var c := counts.decode_u32(at) if counts.size() >= at + 4 else -1
+		if c < 0 or c > int(pub["room"]):
+			continue  # (outgrew the buffers by then: drawn only in part)
+		var taken := {"step": shot["step"], "payload": shot["w"], "count": c}
+		if cpu_handover:
+			var payload: PackedByteArray = got.get("payload%d" % shot["slot"], PackedByteArray())
+			var bytes := c * GpuLayout.PAYLOAD_BYTES
+			var base := int(shot["slot"]) * int(pub["room"]) * GpuLayout.PAYLOAD_BYTES
+			if payload.size() >= bytes:
+				payload = payload.slice(0, bytes)
+			else:
+				payload.append_array(rd.buffer_get_data(arena.buf("PAYLOAD"), base + payload.size(), bytes - payload.size()))
+			taken["bytes"] = payload
+			handed_bytes += bytes
+		publish_seq += 1
+		taken["seq"] = publish_seq
+		if cpu_handover:
+			_keep_ids(c, int(shot["slot"]) * int(pub["room"]))
+		else:
+			var i: int = shot["w"]
+			_texture_seqs["payload"][i] = publish_seq
+			_texture_used["payload"][i] = -1
+			_superseded["payload"][i] = -1
+		if pub["tracking"]:
+			taken["tracked"] = _took_track(view.track, got.get("TR%d" % shot["set"], PackedByteArray()))
+		taken_shots.append(taken)
 	var n := count(pub["row"])
 	var w: int = pub["w"] if n <= int(pub["room"]) else -1
 	if cpu_handover:
@@ -2245,14 +2327,16 @@ func _publish_take(pub: Dictionary, got: Dictionary) -> Dictionary:
 		var total := 0
 		for kind: String in ["payload", "haze", "steer", "thumbs"]:
 			total += (handed.get(kind, PackedByteArray()) as PackedByteArray).size()
-		if total > 0:
+		if total > 0 or not taken_shots.is_empty():
 			handed_usec += Time.get_ticks_usec() - started
 			handed_calls += 1
 			handed_bytes += total
 	for pair: Array in [["payload", w], ["haze", pub["fw"]], ["steer", pub["sw"]], ["thumbs", pub["tw"]]]:
 		if int(pair[1]) >= 0:
 			out[pair[0]] = pair[1]
-	if out.is_empty():
+	if not taken_shots.is_empty():
+		out["shots"] = taken_shots
+	if out.is_empty() or out.keys() == ["shots"]:
 		return out
 	publish_seq += 1
 	if cpu_handover and out.has("payload"):
@@ -2260,19 +2344,22 @@ func _publish_take(pub: Dictionary, got: Dictionary) -> Dictionary:
 	for kind: String in out:
 		if cpu_handover:
 			break
+		if kind == "shots":
+			continue
 		var i: int = out[kind]
 		_texture_seqs[kind][i] = publish_seq
 		_texture_used[kind][i] = -1
 		_superseded[kind][i] = -1
-		_next_texture[kind] = (i + 1) % TEXTURES
+		_next_texture[kind] = (i + 1) % ring_of(kind)
 	if pub["tracking"] and w >= 0:
 		out["tracked"] = _took_track(view.track, got.get("TR0", PackedByteArray()))
 	return out
 
 
-## With `cpu_handover`: the ids of the payload just published (number `publish_seq`) copied, on this device, into the ring's next slot.
-func _keep_ids(n: int) -> void:
-	var need := int(arena.sizes.get("IDTEX", 0))
+## With `cpu_handover`: the ids of the payload just published (number `publish_seq`, from texel `first` of IDTEX: its slot) copied, on this
+## device, into the ring's next slot.
+func _keep_ids(n: int, first := 0) -> void:
+	var need := arena.draw_rows() * GpuLayout.PAYLOAD_TEX_WIDTH * GpuLayout.IDT_BYTES  # (a slot of IDTEX)
 	if _id_ring.is_empty() or need > _id_ring_bytes:
 		_free_id_ring()
 		_id_ring_bytes = need
@@ -2283,7 +2370,7 @@ func _keep_ids(n: int) -> void:
 	slot["seq"] = publish_seq
 	slot["count"] = n
 	if n > 0:
-		rd.buffer_copy(arena.buf("IDTEX"), slot["buffer"], 0, 0, n * GpuLayout.IDT_BYTES)
+		rd.buffer_copy(arena.buf("IDTEX"), slot["buffer"], first * GpuLayout.IDT_BYTES, 0, n * GpuLayout.IDT_BYTES)
 
 
 func _free_id_ring() -> void:
@@ -2325,7 +2412,7 @@ func texture_bound(kind: String, index: int, frame: int, seq: int) -> void:
 			r["moved_on"] = frame
 	if not _retired_textures.is_empty():
 		_free_retired()  # (a paused world publishes nothing for a while: the main side's frames still let them go)
-	if not _texture_seqs.has(kind) or index < 0 or index >= TEXTURES:
+	if not _texture_seqs.has(kind) or index < 0 or index >= ring_of(kind):
 		return
 	var seqs: Array = _texture_seqs[kind]
 	_texture_used[kind][index] = maxi(int(_texture_used[kind][index]), frame)
@@ -2333,7 +2420,7 @@ func texture_bound(kind: String, index: int, frame: int, seq: int) -> void:
 		return
 	_seen_seq[kind] = seq
 	var gone: Array = _superseded[kind]
-	for i in TEXTURES:
+	for i in ring_of(kind):
 		if int(seqs[i]) >= 0 and int(seqs[i]) < seq and int(gone[i]) < 0:
 			gone[i] = frame
 
@@ -2343,7 +2430,14 @@ func textures(kind: String) -> Array:
 	return _textures.get(kind, [])
 
 
-func _free_texture(kind: String, size: Vector2i) -> int:
+## How many shared textures of `kind` there are (PAYLOAD_TEXTURES for the bups' payload and ids, TEXTURES for the rest).
+static func ring_of(kind: String) -> int:
+	return PAYLOAD_TEXTURES if kind == "payload" or kind == "ids" else TEXTURES
+
+
+## A free texture of `kind` (-1: none), not one of `taken` (indices chosen for this publish already), made anew at `size` first if the
+## kind's are smaller.
+func _free_texture(kind: String, size: Vector2i, taken: Array = []) -> int:
 	var remake := not _textures.has(kind)
 	if not remake:
 		var f := rd.texture_get_format(_textures[kind][0])
@@ -2353,8 +2447,11 @@ func _free_texture(kind: String, size: Vector2i) -> int:
 		if kind == "payload":
 			_make_textures("ids", size)
 	var start: int = _next_texture.get(kind, 0)
-	for k in TEXTURES:
-		var i := (start + k) % TEXTURES
+	var ring := ring_of(kind)
+	for k in ring:
+		var i := (start + k) % ring
+		if taken.has(i):
+			continue
 		if int(_texture_seqs[kind][i]) < 0:
 			return i
 		var gone := int(_superseded[kind][i])
@@ -2377,12 +2474,12 @@ func _make_textures(kind: String, size: Vector2i) -> void:
 	fmt.format = {"payload": RenderingDevice.DATA_FORMAT_R32G32B32A32_UINT, "ids": RenderingDevice.DATA_FORMAT_R32G32_UINT}.get(kind, RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM)
 	fmt.usage_bits = RenderingDevice.TEXTURE_USAGE_STORAGE_BIT | RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
 	var made: Array = []
-	for k in TEXTURES:
+	for k in ring_of(kind):
 		made.append(rd.texture_create(fmt, RDTextureView.new()))
 	_textures[kind] = made
 	for table: Dictionary in [_texture_seqs, _texture_used, _superseded]:
 		var a: Array = []
-		a.resize(TEXTURES)
+		a.resize(ring_of(kind))
 		a.fill(-1)
 		table[kind] = a
 	_next_texture[kind] = 0
@@ -2394,7 +2491,7 @@ func _make_textures(kind: String, size: Vector2i) -> void:
 func _retire_textures(kind: String, rids: Array) -> void:
 	var last_seq := -1
 	var last_use := -1
-	for i in TEXTURES:
+	for i in ring_of(kind):
 		last_seq = maxi(last_seq, int(_texture_seqs[kind][i]))
 		last_use = maxi(last_use, int(_texture_used[kind][i]))
 	_retired_textures.append({"kind": kind, "rids": rids, "last_seq": last_seq, "last_use": last_use, "made": _frame, "moved_on": -1})

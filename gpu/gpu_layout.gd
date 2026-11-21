@@ -113,6 +113,8 @@ const PROBES_MOST := 64  ## the points a set of probes answers (SPQ: x, y, speed
 ## The sets of questions one list answers: FRQ, TQ, TR, SPQ, SPR, HNQ and HNR hold this many, each set at its own place (the set's
 ## index x what a set takes). An iteration answers a dish's questions in a set of their own and the publish's tracked bups in set 0.
 const ANSWER_SETS := 8
+const PICTURES_MOST := 6  ## the most bup pictures an iteration publishes (one after each of that many evenly spaced steps, the last always among them: SimCore.run); PICN holds the count of each
+const TRACK_SETS := ANSWER_SETS + PICTURES_MOST - 1  ## TQ and TR's sets: ANSWER_SETS, then one for each bup picture before an iteration's last (its tracked bups as that picture has them)
 const MAX_ERASE := 64  ## eraser discs in one frame (ERASE: x, y, radius, strength each)
 
 # ---- the stats samples (STATS; uint words, floats by their bits) ------------------------------------------------------------------------

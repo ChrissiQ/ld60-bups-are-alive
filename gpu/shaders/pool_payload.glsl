@@ -9,6 +9,7 @@ layout(set = 0, binding = 2, std430) buffer B_BUPS { float BUPS[]; };
 layout(set = 0, binding = 3, std430) buffer B_BUPS_U { uint BUPS_U[]; };
 layout(set = 0, binding = 4, std430) buffer B_PAYLOAD { uvec4 PAYLOAD[]; };
 layout(set = 0, binding = 5, std430) buffer B_IDTEX { uint IDTEX[]; };
+layout(set = 0, binding = 6, std430) buffer B_PICN { uint PICN[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -87,7 +88,8 @@ vec3 from_hsv(float h, float s, float v) {
 
 uint byte_of(float v) { return uint(clamp(v * 255.0 + 0.5, 0.0, 255.0)); }
 void f(uint k) {
-	uint d = uint(pcs.pa);
+	uint d = uint(pcs.pa), o = uint(pcs.pc) * uint(pcs.pb) + k;
+	if (k == 0u) PICN[uint(pcs.pd)] = DS(d, DS_COUNT);
 	uvec4 px = uvec4(0u);
 	uint lo = 0u, hi = 0u;
 	if (k < DS(d, DS_COUNT)) {
@@ -101,7 +103,7 @@ void f(uint k) {
 			lo = BUPS_U[b + R_ID_LO]; hi = BUPS_U[b + R_ID_HI];
 		}
 	}
-	PAYLOAD[k] = px;
-	IDTEX[k * 2u + IDT_LO] = lo; IDTEX[k * 2u + IDT_HI] = hi;
+	PAYLOAD[o] = px;
+	IDTEX[o * 2u + IDT_LO] = lo; IDTEX[o * 2u + IDT_HI] = hi;
 }
 GRID_LOOP(f, min(((DS(uint(pcs.pa), DS_COUNT) + PAYLOAD_TEX_WIDTH - 1u) / PAYLOAD_TEX_WIDTH) * PAYLOAD_TEX_WIDTH, uint(pcs.pb)))

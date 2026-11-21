@@ -51,15 +51,16 @@ const BUFFERS := {
 	"EVCC": ["fixed", GpuLayout.EV_CELLS_CAPACITY * 4, false, 0], "EVCA": ["fixed", GpuLayout.EV_CELLS_CAPACITY * 4, false, 0],
 	"TILES": ["fixed", D_MAX * TILES_MOST * 4, false, 0],
 	"EDC": ["fixed", 16, false, 0], "EDA": ["fixed", 16, false, 0], "FRQ": ["fixed", GpuLayout.ANSWER_SETS * GpuLayout.FRACTIONS * 4, false, 0],
-	"TQ": ["fixed", GpuLayout.ANSWER_SETS * GpuLayout.TQ_WORDS * 4, false, 0], "TR": ["fixed", GpuLayout.ANSWER_SETS * GpuLayout.TRACKED * GpuLayout.ANSWER_BYTES, false, 0],
+	"TQ": ["fixed", GpuLayout.TRACK_SETS * GpuLayout.TQ_WORDS * 4, false, 0], "TR": ["fixed", GpuLayout.TRACK_SETS * GpuLayout.TRACKED * GpuLayout.ANSWER_BYTES, false, 0],
 	"SPQ": ["fixed", GpuLayout.ANSWER_SETS * GpuLayout.PROBES_MOST * 16, false, 0], "SPR": ["fixed", GpuLayout.ANSWER_SETS * GpuLayout.PROBES_MOST * GpuLayout.PROBE_FLOATS * 4, false, 0],
 	"HVC": ["fixed", 16, false, 0], "HNQ": ["fixed", GpuLayout.ANSWER_SETS * GpuLayout.HUSK_QUERIES * 16, false, 0], "HNR": ["fixed", GpuLayout.ANSWER_SETS * GpuLayout.HUSK_QUERIES * GpuLayout.HN_WORDS * 4, false, 0],
 }
 
-## The pictures' buffers, made when something is first published: name -> [class, bytes a unit] (classes "texel": the main dish's payload
-## texels; "view": the pool's cells; "pixel": the main dish's cells; "fixed").
+## The pictures' buffers, made when something is first published: name -> [class, bytes a unit] (classes "slot texel": the main dish's
+## payload texels, `picture_slots()` times over; "view": the pool's cells; "pixel": the main dish's cells; "fixed").
 const DRAW_BUFFERS := {
-	"PAYLOAD": ["texel", GpuLayout.PAYLOAD_BYTES], "IDTEX": ["texel", GpuLayout.IDT_BYTES], "VIEW": ["view", 4], "HAZEPIX": ["pixel", 4],
+	"PAYLOAD": ["slot texel", GpuLayout.PAYLOAD_BYTES], "IDTEX": ["slot texel", GpuLayout.IDT_BYTES], "PICN": ["fixed", GpuLayout.PICTURES_MOST * 4],
+	"VIEW": ["view", 4], "HAZEPIX": ["pixel", 4],
 	"STEERPIX": ["pixel", 4], "FAINTLO": ["pixel", 4], "FAINTHI": ["pixel", 4], "VQ": ["fixed", 16],
 	"THUMBN": ["fixed", D_MAX * GpuKernelsDraw.THUMB_TILE * GpuKernelsDraw.THUMB_TILE * 4], "THUMBMAX": ["fixed", D_MAX * 4],
 	"THUMBS": ["fixed", GpuKernelsDraw.THUMB_ATLAS * GpuKernelsDraw.THUMB_ATLAS * 4],
@@ -68,15 +69,16 @@ const DRAW_BUFFERS := {
 ## What the pictures take besides DRAW_BUFFERS, as [class, bytes a unit] (the classes of DRAW_BUFFERS; "fixed": the bytes), by how the pictures
 ## reach the main device (`cpu_handover`, SimCore.cpu_handover). Both devices draw on the one graphics memory, so both are counted.
 ## "thumbs" is a fixed size, there once the thumbnails have been asked for (`thumbs`: with a second dish running).
-## Shared textures: SimCore.TEXTURES of each kind on the simulation's device (the main device imports them without a copy), one of each
-## haze, steer and thumbnail picture the main device draws, and the main device's per-texel buffer of the view kernels.
+## Shared textures: `SimCore.ring_of(kind)` of each kind on the simulation's device (the main device imports them without a copy), one of
+## each haze, steer and thumbnail picture the main device draws, and the main device's per-texel buffer of the view kernels.
 const TEXTURES_SHARED := [
-	["texel", (GpuLayout.PAYLOAD_BYTES + GpuLayout.IDT_BYTES) * SimCore.TEXTURES],  # payload and ids
+	["texel", (GpuLayout.PAYLOAD_BYTES + GpuLayout.IDT_BYTES) * SimCore.PAYLOAD_TEXTURES],  # payload and ids
 	["texel", 4],  # ViewRenderer's VPD
 	["pixel", 2 * 4 * (SimCore.TEXTURES + 1)],  # haze and steer
 	["thumbs", GpuKernelsDraw.THUMB_ATLAS * GpuKernelsDraw.THUMB_ATLAS * 4 * (SimCore.TEXTURES + 1)],  # thumbnails
 ]
-## Handed over as bytes: the simulation's copies of the last payloads' ids (SimCore.ID_RING of them), and on the main device the payload
+## Handed over as bytes (besides the extra slots of PAYLOAD and IDTEX, `picture_slots`): the simulation's copies of the last payloads' ids
+## (SimCore.ID_RING of them), and on the main device the payload
 ## texture and the ids' texture (which the view kernels bind and never read) with the buffer that fills the payload's, the view kernels'
 ## buffer and the pictures it draws.
 const TEXTURES_HANDED := [
@@ -110,6 +112,7 @@ var _low_since := {}  ## class -> msec since which it has used less than SHRINK_
 var _event_shrink_to := 0  ## the ring's size `ensure_events` makes it at the next iteration's start (0: none)
 var _texels := 0
 var _pixels := 0
+var _slots_made := 0  ## `picture_slots()` when the pictures' buffers were last made
 var growths := {}  ## class -> how many times it grew (the debug log's pool figures)
 var asked := {}  ## class ("slot", "cloud", "husk", "entry", "event") -> the most `ensure_*` was asked for it since it was last busy or shrunk: a shrink never goes below room for it
 
@@ -162,7 +165,7 @@ func _bytes_of(nm: String) -> int:
 		"entry": return entry_cap * unit
 		"husk": return husk_cap * unit
 		"event": return event_cap * unit
-		"texel": return _texels * unit
+		"slot texel": return _texels * unit * picture_slots()
 		"view": return cell_cap * unit
 		"pixel": return _pixels * unit
 	return unit
@@ -344,7 +347,7 @@ func ensure_events(events: int, most := 0) -> int:
 ## once for each row of bups. Only the buffers whose size changed are made again.
 func ensure_draw(texels: int, pixels: int, most_texels := 0, with_thumbs := false) -> bool:
 	var new_thumbs := thumbs or with_thumbs
-	var grow := not bufs.has("PAYLOAD") or texels > _texels or pixels > _pixels or new_thumbs != thumbs
+	var grow := not bufs.has("PAYLOAD") or texels > _texels or pixels > _pixels or new_thumbs != thumbs or _slots_made != picture_slots()
 	if not grow:
 		return true
 	if limits.watch != null:
@@ -365,6 +368,7 @@ func ensure_draw(texels: int, pixels: int, most_texels := 0, with_thumbs := fals
 	_texels = want
 	_pixels = new_pixels
 	thumbs = new_thumbs
+	_slots_made = picture_slots()
 	_grew("draw")
 	for nm: String in DRAW_BUFFERS:
 		var bytes := maxi(16, ((_bytes_of(nm) + 15) / 16) * 16)
@@ -374,9 +378,15 @@ func ensure_draw(texels: int, pixels: int, most_texels := 0, with_thumbs := fals
 	return true
 
 
-## The rows of payload texels the pictures' buffers hold (what the shared textures are as tall as at least).
+## The rows of payload texels the pictures' buffers hold in a slot (what the shared textures are as tall as at least).
 func draw_rows() -> int:
 	return _texels / GpuLayout.PAYLOAD_TEX_WIDTH
+
+
+## The pictures PAYLOAD and IDTEX hold, a slot each: on the byte path every bup picture of an iteration is read back after its one sync,
+## so each needs its own (GpuLayout.PICTURES_MOST); a shared texture is written in the list right after its picture, so one slot serves.
+func picture_slots() -> int:
+	return GpuLayout.PICTURES_MOST if cpu_handover else 1
 
 
 ## The bytes the pictures take for a payload of `texels`, a field of `pixels` cells and a pool of `cells` field cells: their buffers and
@@ -387,7 +397,7 @@ func draw_bytes(texels: int, pixels: int, cells: int, with_thumbs := false) -> i
 		var e: Array = DRAW_BUFFERS[nm]
 		var unit: int = e[1]
 		match e[0]:
-			"texel": total += texels * unit
+			"slot texel": total += texels * unit * picture_slots()
 			"view": total += cells * unit
 			"pixel": total += pixels * unit
 			_: total += unit

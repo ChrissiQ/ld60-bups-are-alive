@@ -12,7 +12,7 @@ extends RefCounted
 ##   simulation reads back the bytes of what it published, only the part in use (SimCore.cpu_handover), and this side puts them
 ##   into textures of its own (the last section). `force_cpu_handover` or the user argument `--cpu-handover` takes this path on any driver.
 ##
-## Imported textures (SimCore.TEXTURES of each kind, written by SimCore.publish after its sync):
+## Imported textures (`SimCore.ring_of(kind)` of each kind, written by SimCore.publish after its sync):
 ## - The simulation hands over, for each kind, its textures' native handles (`driver_handles`, called on its own thread), their size and
 ##   a generation that changes whenever it made them afresh; `offer` says which of them it published last.
 ## - Each is imported in a different, view-compatible format (payload RGBA32UI as RGBA32I, ids RG32UI as RG32I, the RGBA8 pictures as
@@ -38,7 +38,6 @@ extends RefCounted
 ## the caller asks the simulation for it (`WorldClient.ids_at`). Each handover is made on the render thread before the
 ## frame's compute lists.
 
-const TEXTURES := SimCore.TEXTURES
 const KINDS := ["payload", "ids", "haze", "steer", "thumbs"]
 const PICTURE_KINDS := ["haze", "steer", "thumbs"]  ## RGBA8 pictures the canvas draws
 const IMPORT_FORMATS := {
@@ -202,7 +201,7 @@ static func driver_handles(sim_rd: RenderingDevice, rids: Array) -> PackedInt64A
 	return out
 
 
-## The simulation published texture `index` of `kind` (`handles`: all TEXTURES of the kind, of `generation`, each `size`; `seq` the
+## The simulation published texture `index` of `kind` (`handles`: all `SimCore.ring_of(kind)` of the kind, of `generation`, each `size`; `seq` the
 ## publish's number, which `take_bound` gives back with each use). A new generation is imported here and the old one freed once it is no
 ## longer in use.
 func offer(kind: String, index: int, generation: int, handles: PackedInt64Array, size: Vector2i, seq := -1) -> void:
@@ -210,7 +209,7 @@ func offer(kind: String, index: int, generation: int, handles: PackedInt64Array,
 		return
 	var cur: Dictionary = _imports.get(kind, {})
 	if cur.is_empty() or cur["generation"] != generation:
-		if handles.size() != TEXTURES:
+		if handles.size() != SimCore.ring_of(kind):
 			return
 		if not cur.is_empty():
 			_retire(kind)
@@ -324,7 +323,7 @@ func texture(kind: String) -> Texture2DRD:
 func imported_texture(kind: String, index: int) -> RID:
 	if _hand_pictures.has(kind):
 		return _owned.get(kind, {}).get("rid", RID())
-	if not _imports.has(kind) or index < 0 or index >= TEXTURES:
+	if not _imports.has(kind) or index < 0 or index >= (_imports[kind]["rids"] as Array).size():
 		return RID()
 	return _imports[kind]["rids"][index]
 
@@ -461,10 +460,10 @@ func _import(kind: String, generation: int, handles: PackedInt64Array, size: Vec
 			errors.append("%s: texture %d of generation %d was not imported" % [kind, rids.size(), generation])
 		rids.append(t)
 	var bound: Array[int] = []
-	bound.resize(TEXTURES)
+	bound.resize(rids.size())
 	bound.fill(-1000)
 	var seqs: Array[int] = []
-	seqs.resize(TEXTURES)
+	seqs.resize(rids.size())
 	seqs.fill(-1)
 	_imports[kind] = {"generation": generation, "size": size, "rids": rids, "bound": bound, "seqs": seqs}
 	if kind == "payload" or kind == "ids":
@@ -579,15 +578,16 @@ func _make_handover(rows: int) -> void:
 	uniforms.append(image)
 	_ho = {"rows": rows, "bases": bases, "views": views, "stages": stages, "set": rd.uniform_set_create(uniforms, k["shader"], 0)}
 	_ho_generation += 1
+	var ring := SimCore.ring_of("payload")
 	var bound: Array[int] = []
-	bound.resize(TEXTURES)
+	bound.resize(ring)
 	bound.fill(-1000)
 	var seqs: Array[int] = []
-	seqs.resize(TEXTURES)
+	seqs.resize(ring)
 	seqs.fill(-1)
 	for kind: String in ["payload", "ids"]:
 		var view_rids: Array[RID] = []
-		view_rids.resize(TEXTURES)
+		view_rids.resize(ring)
 		view_rids.fill(views[0 if kind == "payload" else 1])
 		_imports[kind] = {"generation": _ho_generation, "size": Vector2i(w, rows), "rids": view_rids, "bound": bound.duplicate(), "seqs": seqs.duplicate()}
 	_free_sets()

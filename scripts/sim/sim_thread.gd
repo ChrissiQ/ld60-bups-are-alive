@@ -16,7 +16,8 @@ extends RefCounted
 ##     answered, pictures, a snapshot); then sleep until the next command (or, when that pass left the husks unread, until they may be
 ##     read again)
 ##   else: k = the governor's steps within the pool's room and the history samples; the dishes' world events for the window, the
-##     questions due and the view; run (the steps, then the answers and the pictures, with the asked-after bups' places, in one list,
+##     questions due and the view (with as many bup pictures, at evenly spaced steps, as display frames the last iteration spanned:
+##     `_pictures_for`); run (the steps, then the answers and the pictures, with the asked-after bups' places, in one list,
 ##     split only where a step's diffusion rounds are, SimCore._record_step,
 ##     and DSTATE, STATS, the family events, the answers and the pictures read back with its one sync); push to the worker; rest. An
 ##     iteration the memory budget refuses (no step ran: the questions are answered and the pictures published all the same) puts the
@@ -97,6 +98,8 @@ var _busy_ema := 0.0  ## ms: the iterations' busy time, smoothed
 var _grids := {}  ## the grid a pipette from the main view's dish would give its new dish, made ahead on the worker pool (`_make_grid_ahead`): key (`_grid_key`) -> {task, made}
 var cpu_handover := false  ## the pictures reach the main device as bytes, not as shared textures (ViewRenderer.cpu_handover, taken on the main thread); set before `start`
 var _mass_um := 0.0  ## a bup's drawn length per unit of mass (SimConstants' mass_um)
+var _iterate_usec := 0  ## when the last iteration began
+var _period_ms := 0.0  ## ms between the last two iterations' beginnings (0: not known)
 
 
 func _init(p_limits: PoolLimits = null, p_store: Object = null) -> void:
@@ -313,9 +316,13 @@ static func _align(v: int) -> int:
 func _iterate(k: int) -> float:
 	var d := governor.delta()
 	var t0 := governor.clock
+	var began := Time.get_ticks_usec()
+	_period_ms = (began - _iterate_usec) / 1000.0 if _iterate_usec > 0 else 0.0
+	_iterate_usec = began
 	var plan := IterationPlan.new()
 	plan.k = k
 	plan.delta = d
+	plan.pictures = _pictures_for(k)
 	var sampled := Governor.sample_steps(t0, k, d, DishHistory.INTERVAL, GpuLayout.STATS_ITER_SAMPLES)
 	var flags := PackedByteArray()
 	flags.resize(k)
@@ -379,6 +386,16 @@ func _iterate(k: int) -> float:
 	return busy
 
 
+## The bup pictures an iteration of `k` steps publishes: one a display frame the iterations take (the last one's period, from beginning
+## to beginning: the next iteration's pictures arrive about that much later, so the display can show one a frame in between), at least
+## one, at most GpuLayout.PICTURES_MOST and `k`; only the last while the interface's frames run long (the governor's duty under 1), as
+## each picture shown costs the main device a build of the view, which with many bups takes the frames past the display's.
+func _pictures_for(k: int) -> int:
+	if k <= 1 or governor.display_ms <= 0.0 or _period_ms <= 0.0 or governor.duty < 1.0:
+		return 1
+	return clampi(floori(_period_ms / governor.display_ms), 1, mini(k, GpuLayout.PICTURES_MOST))
+
+
 ## A pass of no steps: the queued edits are made, the stats are current, the questions due are answered and the pictures go out, in one
 ## list, and a snapshot shows what the commands did.
 func _quiet_pass() -> void:
@@ -436,11 +453,11 @@ func _results(steps: int, d: float, t0: float, samples: Array, res: Dictionary, 
 	var refused := _refused
 	_refused = {}
 	var t_pub := Time.get_ticks_usec()
-	_published(plan.view, res.get("published", {}), res.get("husk_list"))
+	var payloads := _published(plan.view, res.get("published", {}), res.get("husk_list"), t0, d)
 	return {
 		"steps": steps, "delta": d, "t0": t0, "sim_time": governor.clock, "achieved": _achieved(), "paused": governor.paused,
 		"births": eb, "deaths": ed, "rows": rows, "stats": stats, "samples": samples, "worlds": worlds, "refused": refused,
-		"payload": _payload, "field_view": _field_view, "thumbs": _thumbs, "husk_view": _husk_view, "readback_ms": readback_ms,
+		"payload": _payload, "payloads": payloads, "field_view": _field_view, "thumbs": _thumbs, "husk_view": _husk_view, "readback_ms": readback_ms,
 		"publish_ms": (Time.get_ticks_usec() - t_pub + int(res.get("publish_usec", 0))) / 1000.0, "answer_ms": answer_ms, "game_began": _game_began,
 	}
 
@@ -533,12 +550,15 @@ func _view_request() -> ViewRequest:
 
 
 ## After the list: what it published of `v` (`out`: SimCore.run's "published") as the snapshot's pictures, and the husks' list the list
-## read when `v` asked for it (`husks`: SimCore.run's "husk_list"; null when not read or not complete).
-func _published(v: ViewRequest, out: Dictionary, husks: Variant) -> void:
+## read when `v` asked for it (`husks`: SimCore.run's "husk_list"; null when not read or not complete). Returns the bup pictures
+## published, oldest first (those made within the steps, each at the time of its step from the window's start `t0` in steps of `d`,
+## then the last).
+func _published(v: ViewRequest, out: Dictionary, husks: Variant, t0: float, d: float) -> Array:
+	var payloads: Array = []
 	if v == null or _view == null or not _rows.has(_view.row):
 		_view_dirty = false
 		_husks_owed = false
-		return
+		return payloads
 	var now := Time.get_ticks_msec()
 	if not cpu_handover:
 		_take_handles()
@@ -548,18 +568,33 @@ func _published(v: ViewRequest, out: Dictionary, husks: Variant) -> void:
 		_husk_msec = now
 		if husks != null:
 			_husk_view = {"row": _view.row, "version": int(_husk_view.get("version", 0)) + 1, "transforms": husks}
+	var generation := int((_handles.get("payload", {}) as Dictionary).get("generation", 0))
+	for shot: Dictionary in out.get("shots", []):
+		var q := PayloadInfo.new()
+		q.texture_index = shot["payload"]
+		q.count = shot["count"]
+		q.sim_time = t0 + int(shot["step"]) * d
+		q.row = _view.row
+		q.generation = generation
+		if cpu_handover:
+			q.bytes = shot["bytes"]
+		q.seq = shot["seq"]
+		q.places = _places(shot.get("tracked", {}))
+		payloads.append(q)
+		_payload = q
 	if out.has("payload"):
 		var p := PayloadInfo.new()
 		p.texture_index = out["payload"]
 		p.count = _core.count(v.row)
 		p.sim_time = governor.clock
 		p.row = _view.row
-		p.generation = int((_handles.get("payload", {}) as Dictionary).get("generation", 0))
+		p.generation = generation
 		if cpu_handover:
 			p.bytes = handed["payload"]
 		p.seq = _core.publish_seq
 		p.places = _places(out.get("tracked", {}))
 		_payload = p
+		payloads.append(p)
 	if out.has("haze") or out.has("steer"):
 		_field_msec = now
 		_field_version += 1
@@ -588,6 +623,7 @@ func _published(v: ViewRequest, out: Dictionary, husks: Variant) -> void:
 			t.tile_rows = int(handed["thumb_rows"])
 		_thumbs = t
 	_view_dirty = false
+	return payloads
 
 
 ## Where the bups the main view's dish asks after (its selected and hovered: WorldClient.ask's "tracked") are in the payload just published

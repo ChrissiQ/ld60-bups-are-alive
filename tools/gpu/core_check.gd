@@ -17,8 +17,8 @@ extends SceneTree
 ##    the cell under the centre, leaving d / r of what it held (d its centre's distance) [derived].
 ## C4 publish: the payload, id, haze, steering and thumbnail textures read back equal the storage buffers the kernels wrote, word for word
 ##    [derived]. The reuse rule [derived: a texture never written is free; a written one is free once the main side has told of a newer
-##    publish in use, on a frame more than frame_queue_size + 1 frames before the newest frame it told of]: with no use told, TEXTURES
-##    publishes take TEXTURES different textures and the next publishes nothing; told that the newest is in use on frame 10, nothing is
+##    publish in use, on a frame more than frame_queue_size + 1 frames before the newest frame it told of]: with no use told,
+##    SimCore.PAYLOAD_TEXTURES publishes take that many different payload textures and the next publishes nothing; told that the newest is in use on frame 10, nothing is
 ##    published on frame 10 nor on 10 + frame_queue_size + 1, and every kind is on 10 + frame_queue_size + 2, none into the newest's texture.
 ## C5 lasting clouds: a dish of 20 mm (400 µm cells: a burst's cloud lives about 25 steps, a death's about 40) with 2,000 founders, a bloom
 ##    of 10 and every flag but plankton husks, alone and among seven random others: equal after every 20 of 300 steps (a plankton floats
@@ -213,11 +213,12 @@ func c4_publish() -> void:
 	ok(px.decode_u32(GpuLayout.PL_X * 4) == recs.decode_u32(GpuLayout.R_X * 4) and px.decode_u32(GpuLayout.PL_Y * 4) == recs.decode_u32(GpuLayout.R_Y * 4), "C4 the first texel is the first bup's place")
 	var taken := {got["payload"]: true}
 	var last := got
-	for i in SimCore.TEXTURES - 1:
+	var ring := SimCore.ring_of("payload")
+	for i in ring - 1:
 		last = core.publish(view)
 		if last.has("payload"):
 			taken[last["payload"]] = true
-	ok(taken.size() == SimCore.TEXTURES, "C4 with no use told, %d publishes take %d different textures (%d)" % [SimCore.TEXTURES, SimCore.TEXTURES, taken.size()])
+	ok(taken.size() == ring, "C4 with no use told, %d publishes take %d different textures (%d)" % [ring, ring, taken.size()])
 	ok(core.publish(view).is_empty(), "C4 then, with no newer publish in use on the main side, nothing is published")
 	var newest := core.publish_seq
 	var fq := core.limits.frame_queue_size

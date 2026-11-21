@@ -45,18 +45,21 @@ const THUMB_TILE := 64  ## a dish's thumbnail tile: THUMB_TILE x THUMB_TILE texe
 const THUMB_ATLAS := 2048  ## the atlas's width and height in texels: THUMB_ATLAS / THUMB_TILE tiles a row, so D_MAX tiles fill it
 const POOL_DRAW_TYPES := {
 	"PAYLOAD": "uvec4", "IDTEX": "uint", "VIEW": "float", "VQ": "float", "HAZEPIX": "uint", "STEERPIX": "uint", "FAINTLO": "uint", "FAINTHI": "uint",
-	"THUMBN": "uint", "THUMBMAX": "uint", "THUMBS": "uint",
+	"THUMBN": "uint", "THUMBMAX": "uint", "THUMBS": "uint", "PICN": "uint",
 }
 
 ## The main-view dish's records as picture words, one thread a texel of dish row `pcs.pa`'s bups, for the whole last row of the texture
 ## and no further than the `pcs.pb` texels the buffers hold (the count is DSTATE's when the kernel runs, after the steps of its list,
 ## which the host does not know when it sizes them): a dead bup (the marker R_PY = -2 that `life` leaves until `compact`) and the texels
 ## past the dish's bups are zero (length 0: nothing drawn). The length is the body's true length, with no minimum and no trail; the angle
-## is where it faces.
+## is where it faces. The picture goes into slot `pcs.pc` of PAYLOAD and IDTEX (`pcs.pb` texels a slot: an iteration's pictures each
+## have their own on the byte path, SimArena.picture_slots), and the count it was made from into PICN[`pcs.pd`] (the host zeroes it
+## first, so a dish with no bups reads 0).
 const K_POOL_PAYLOAD := COLOUR_FUNCS + """
 uint byte_of(float v) { return uint(clamp(v * 255.0 + 0.5, 0.0, 255.0)); }
 void f(uint k) {
-	uint d = uint(pcs.pa);
+	uint d = uint(pcs.pa), o = uint(pcs.pc) * uint(pcs.pb) + k;
+	if (k == 0u) PICN[uint(pcs.pd)] = DS(d, DS_COUNT);
 	uvec4 px = uvec4(0u);
 	uint lo = 0u, hi = 0u;
 	if (k < DS(d, DS_COUNT)) {
@@ -70,8 +73,8 @@ void f(uint k) {
 			lo = BUPS_U[b + R_ID_LO]; hi = BUPS_U[b + R_ID_HI];
 		}
 	}
-	PAYLOAD[k] = px;
-	IDTEX[k * 2u + IDT_LO] = lo; IDTEX[k * 2u + IDT_HI] = hi;
+	PAYLOAD[o] = px;
+	IDTEX[o * 2u + IDT_LO] = lo; IDTEX[o * 2u + IDT_HI] = hi;
 }
 GRID_LOOP(f, min(((DS(uint(pcs.pa), DS_COUNT) + PAYLOAD_TEX_WIDTH - 1u) / PAYLOAD_TEX_WIDTH) * PAYLOAD_TEX_WIDTH, uint(pcs.pb)))
 """
@@ -199,7 +202,7 @@ static func _register_pool(out: Dictionary) -> void:
 	var tile := "const uint THUMB_TILE = %du;\nconst uint THUMB_ATLAS = %du;\n" % [THUMB_TILE, THUMB_ATLAS]
 	var view_buffers := ["DISHP", "OWNER", "INSIDE", "VIEW"]
 	assert(GpuLayout.D_MAX == (THUMB_ATLAS / THUMB_TILE) * (THUMB_ATLAS / THUMB_TILE), "the atlas holds one tile a dish row")
-	GpuKernels.add(out, "pool_payload", K_POOL_PAYLOAD, ["P", "DSTATE", "BUPS", "BUPS_U", "PAYLOAD", "IDTEX"], "", 64, POOL_DRAW_TYPES)
+	GpuKernels.add(out, "pool_payload", K_POOL_PAYLOAD, ["P", "DSTATE", "BUPS", "BUPS_U", "PAYLOAD", "IDTEX", "PICN"], "", 64, POOL_DRAW_TYPES)
 	var faint := "const float FAINT_UNIT = %.1f;\n" % FAINT_UNIT + GpuKernels.FIXED_FUNCS
 	GpuKernels.add(out, "pool_view_faint_clear", K_POOL_VIEW_FAINT_CLEAR, ["DISHP", "FAINTLO", "FAINTHI"], "", 64, POOL_DRAW_TYPES)
 	GpuKernels.add(out, "pool_view_faint", K_POOL_VIEW_FAINT, ["WORLD", "DISHP", "PUFF", "PDLO", "PDHI", "PSCALE", "INSIDE", "FAINTLO", "FAINTHI"], faint, 64, POOL_DRAW_TYPES)

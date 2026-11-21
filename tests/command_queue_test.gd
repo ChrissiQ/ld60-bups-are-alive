@@ -211,6 +211,7 @@ func _client_on_fake() -> void:
 		var p := PayloadInfo.new()
 		p.seq = s
 		p.sim_time = 20.0 * s
+		p.row = row
 		snap.payloads.append(p)
 	fake.serve(snap)
 	for i in 4:

@@ -190,9 +190,10 @@ func _iteration(item: Dictionary) -> void:
 	for row: int in _worlds:
 		snap.worlds[row] = _worlds[row][0]
 	var published: PayloadInfo = item["payload"]
-	if published != null and published.seq > _payload_seq:
-		_payload_seq = published.seq
-		_payloads.append([published, _seq])
+	for p: PayloadInfo in item.get("payloads", [published] if published != null else []):
+		if p.seq > _payload_seq:
+			_payload_seq = p.seq
+			_payloads.append([p, _seq])
 	snap.payloads = _payloads.map(func(p: Array) -> PayloadInfo: return p[0])
 	snap.payload = published
 	snap.field_view = item["field_view"]

@@ -38,8 +38,8 @@ extends SceneTree
 ##     CPU backend's) [measured baseline]; measured x10,000, x10,000 and x9,997 [measured].
 ##   x1: 1,000 and 100,000 bups, 45 mm, x1, 60 s: the share of display frames in which a new payload is shown; >= 0.99 is the gate. The
 ##     sim steps Governor.STEPS_PER_SECOND (120) times a simulated second, so on a 120 Hz display every frame can have a new one [derived];
-##     this script shows the payload WorldClient's playout gives each frame (one publish a frame in order, at most WAITING_MOST (2) waiting:
-##     publishes that land together are shown on the frames after), as the game does: 1.000 at 1,000 and at 100,000, no frame without a new
+##     this script shows the payload WorldClient's playout gives each frame (oldest first, at most one a frame: publishes that land
+##     together are shown on the frames after; tests/playout_test.gd checks the rule), as the game does: 1.000 at 1,000 and at 100,000, no frame without a new
 ##     payload in 7,200 [measured; at 1,000, 348 frames brought no publish and 359 brought two, and the waiting publishes covered every
 ##     one].
 ##     Edit to visible (paused, a source placed, 8 times): frames until a snapshot shows it, <= 2 frames + one iteration [derived], the baseline's 1 frame
@@ -233,73 +233,6 @@ func _gate_checks() -> void:
 	TestUtil.show(gate_d(900.0) and not gate_d(899.0), "gate D: speed >= x900")
 	TestUtil.show(gate_interface(10.33, 9.3, 10.33, 9.31) and not gate_interface(10.34, 9.3, 10.33, 9.31), "interface: p95 no worse than the 20-dish baseline's")
 	TestUtil.show(not gate_interface(9.0, 9.32, 10.33, 9.31), "interface: the mean no worse than the 20-dish baseline's")
-	_playout_checks()
-
-
-## WorldClient.playout on synthetic arrivals (publishes per frame), expected values derived from the rule (the oldest is shown, at most two wait,
-## the oldest of more are skipped):
-## - [1, 1, 0, 2] x 25 (an iteration ending just after a poll every fourth frame): showing the newest changes the picture in 75 of 100
-##   frames; the playout misses only the first empty frame (nothing was waiting yet; from the first double on one always is): 99 of 100.
-## - [1, 0, 1, 1, 2] x 20 (the empty frame some frames before the double): the newest 80 of 100; the playout 99 (the first empty frame).
-## - [1, 1, 0, 1] x 25 (a publish truly missing every fourth frame): 75 of 100 either way (no publish is there to show).
-## - [2, 2, 0, 0] x 25 (two doubles, then two empty frames): the newest changes in 50 of 100 frames; two waiting cover both empty frames, so
-##   the playout changes the picture in all 100 (with one waiting the second double skips a publish and the second empty frame is a miss: 75).
-## - [3]: the oldest is shown, the other two wait; [4]: the second is shown, the oldest skipped, the newest two wait.
-## - Every publish shown is shown at most WAITING_MOST frames after the frame it arrived in, and the picture never goes back to an older one.
-func _playout_checks() -> void:
-	var late := _played_out([1, 1, 0, 2], 25)
-	TestUtil.show(late["newest"] == 75 and late["shown"] == 99, "playout: late iterations [1,1,0,2]: newest 75, playout 99 of 100 (got %d, %d)" % [late["newest"], late["shown"]])
-	var apart := _played_out([1, 0, 1, 1, 2], 20)
-	TestUtil.show(apart["newest"] == 80 and apart["shown"] == 99, "playout: [1,0,1,1,2]: newest 80, playout 99 of 100 (got %d, %d)" % [apart["newest"], apart["shown"]])
-	var gaps := _played_out([1, 1, 0, 1], 25)
-	TestUtil.show(gaps["newest"] == 75 and gaps["shown"] == 75, "playout: missing publishes [1,1,0,1]: 75 of 100 either way (got %d, %d)" % [gaps["newest"], gaps["shown"]])
-	var pairs := _played_out([2, 2, 0, 0], 25)
-	TestUtil.show(pairs["newest"] == 50 and pairs["shown"] == 100, "playout: two doubles then two empty frames [2,2,0,0]: newest 50, playout 100 of 100 (got %d, %d)" % [pairs["newest"], pairs["shown"]])
-	var all_runs: Array = [late, apart, gaps, pairs]
-	TestUtil.show(all_runs.all(func(r: Dictionary) -> bool: return r["late"] == 0 and r["back"] == 0), "playout: no publish shown more than %d frames after it came, never an older one" % WorldClient.WAITING_MOST)
-	var three := WorldClient.playout([], [_publish(1), _publish(2), _publish(3)])
-	TestUtil.show(three[0] != null and (three[0] as PayloadInfo).seq == 1 and three[1].size() == 2 and (three[1][0] as PayloadInfo).seq == 2 and (three[1][1] as PayloadInfo).seq == 3, "playout: three at once show the oldest, the other two wait")
-	var four := WorldClient.playout([], [_publish(1), _publish(2), _publish(3), _publish(4)])
-	TestUtil.show(four[0] != null and (four[0] as PayloadInfo).seq == 2 and four[1].size() == 2 and (four[1][0] as PayloadInfo).seq == 3 and (four[1][1] as PayloadInfo).seq == 4, "playout: four at once show the second, the oldest is skipped, the newest two wait")
-
-
-static func _publish(seq: int) -> PayloadInfo:
-	var p := PayloadInfo.new()
-	p.seq = seq
-	return p
-
-
-## `pattern` (publishes arriving each frame) repeated `times`: {newest: frames whose newest publish changed, shown: frames whose shown
-## publish changed, late: publishes shown more than WAITING_MOST frames after they came, back: frames that showed an older publish}.
-static func _played_out(pattern: Array, times: int) -> Dictionary:
-	var seq := 0
-	var came := {}  ## seq -> frame it arrived
-	var waiting: Array = []
-	var shown := -1
-	var out := {"newest": 0, "shown": 0, "late": 0, "back": 0}
-	var frame := 0
-	for t in times:
-		for n: int in pattern:
-			var arrived: Array = []
-			for k in n:
-				seq += 1
-				came[seq] = frame
-				arrived.append(_publish(seq))
-			if n > 0:
-				out["newest"] += 1
-			var step := WorldClient.playout(waiting, arrived)
-			waiting = step[1]
-			if step[0] != null:
-				var s: int = (step[0] as PayloadInfo).seq
-				if s < shown:
-					out["back"] += 1
-				if s != shown:
-					out["shown"] += 1
-					if frame - int(came[s]) > WorldClient.WAITING_MOST:
-						out["late"] += 1
-				shown = s
-			frame += 1
-	return out
 
 
 # ---- the speed column: measured through the sim thread ---------------------------------------------------------------------------
