@@ -1,6 +1,6 @@
 extends SceneTree
-## The performance gates, against figures measured on the game before the pooled world: `tools/gpu/baseline/perf_pre_pool.json` (A, B, E
-## and the interface) and `tools/gpu/baseline/perf_pre_pool_husks.json` (F, G and x1, every dish with both husk kinds and starvation on);
+## The performance gates, against figures measured on the game before the pooled world: `tools/gpu/baseline/perf_pre_pool.json` (A, B, C100,
+## C48, D, E and the interface) and `tools/gpu/baseline/perf_pre_pool_husks.json` (F, G and x1, every dish with both husk kinds and starvation on);
 ## each file's `environment` says on what.
 ##
 ## Scenario letters (the baseline's keys, the gates' names): A, one 90 mm dish of 1,000,000 bups on the game screen; B, that dish with 940,000
@@ -41,8 +41,8 @@ extends SceneTree
 ##     this script shows the payload WorldClient's playout gives each frame (one publish a frame in order, at most WAITING_MOST (2) waiting:
 ##     publishes that land together are shown on the frames after), as the game does: 1.000 at 1,000 and at 100,000, no frame without a new
 ##     payload in 7,200 [measured; at 1,000, 348 frames brought no publish and 359 brought two, and the waiting publishes covered every
-##     one]. Edit to
-##     visible (paused, a source placed, 8 times): frames until a snapshot shows it, <= 2 frames + one iteration [derived], the baseline's 1 frame
+##     one].
+##     Edit to visible (paused, a source placed, 8 times): frames until a snapshot shows it, <= 2 frames + one iteration [derived], the baseline's 1 frame
 ##     [measured baseline, a pixel hash].
 ##   The interface column (frame p95 and worst on the game screen) is measured by tests/sim/interface_gate.gd; the main frames printed here
 ##   are this script's (no game screen), for reference only.

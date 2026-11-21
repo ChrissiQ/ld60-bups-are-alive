@@ -9,8 +9,8 @@
    "G": "nearly empty dishes (by number of bups: 50, 200, 1000)",
    "x1": "the game at x1: how often the picture changes, and how soon an edit shows"
   },
-  "same_sitting_control": {
-   "what": "scenario F with husks and starvation off, measured in the same sitting as the runs here, against perf_pre_pool.json's F (x309, p95 64.66 ms)",
+  "control": {
+   "what": "scenario F with husks and starvation off, measured alongside the runs here, under the same conditions, against perf_pre_pool.json's F (x309, p95 64.66 ms)",
    "runs": [
     {
      "achieved_speed": 309.2,
