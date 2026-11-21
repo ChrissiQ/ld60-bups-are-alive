@@ -297,6 +297,8 @@ func update_pointer() -> void:
 	var stamp := [viewport.get_mouse_position(), camera.position, camera.zoom, dish.get_instance_id(), dish.time, dish.edit_count, dish.radius, tool, _dragging, viewport.gui_get_hovered_control() != null, tool_options.nutrient_count(), tool_options.brush_radius(), dish.pick_mode]
 	if stamp == _pointer_stamp:
 		return
+	if dish.click_pending():  # (a moving view, as when following, would otherwise move the hover off the click's point every frame and lose the click)
+		return
 	_pointer_stamp = stamp
 	dish.clear_hover()
 	dish.clear_place_preview()

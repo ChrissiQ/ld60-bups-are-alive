@@ -333,6 +333,16 @@ func _initialize() -> void:
 	TestUtil.check(not m.inspector.note_divisions(bup + 1, {"divisions": 9}), "another bup shown does not flash")
 	TestUtil.check(m.inspector.info_panel.visible and m.inspector.name_row.visible and m.inspector.name_row.name_label.text.contains("bup #") and m.inspector.info_text.get_parsed_text().contains("divisions"), "info panel shows the selected bup, named with its number ('%s')" % m.inspector.name_row.name_label.text)
 	m.stage_input.toggle_follow()
+	var waiting_at: Vector2 = m.dish.global_position + Vector2(m.dish.radius * 1.5, 0.0)
+	m.dish.hover_at(waiting_at, 0.0)
+	m.dish._hover_waiting = true
+	m.dish._click_at = waiting_at
+	m.camera.position += Vector2(5.0, 0.0)
+	m.stage_input.update_pointer()
+	TestUtil.check(m.dish.click_pending() and m.dish._hover_waiting and m.dish._hover_pos == waiting_at, "a click outside the dish waiting for its answer keeps the hover on its point while the view moves")
+	m.camera.position -= Vector2(5.0, 0.0)
+	m.dish._click_at = Vector2.INF
+	m.dish.clear_hover()
 	_click(m, centre + Vector2(-250, -250))
 	await process_frame
 	TestUtil.check(m.dish.selected.bup == -1 and m.stage_input.following_id == -1, "clicking empty space deselects and ends the follow")

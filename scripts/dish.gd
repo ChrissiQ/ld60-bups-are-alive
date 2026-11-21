@@ -1059,6 +1059,11 @@ func select_at(world_pos: Vector2, slack: float = 0.0) -> void:
 	selected.set_to(hovered)
 
 
+## Whether a click waits for the picture to answer what is under it (`select_at`): until it does, the hover stays on the click's point.
+func click_pending() -> bool:
+	return _click_at.is_finite()
+
+
 ## Whether the hover was answered at (nearly) this point (what it found may be nothing).
 func _hover_is_at(world_pos: Vector2) -> bool:
 	return _hover_known and _hover_pos.distance_to(world_pos) <= HOVER_CLICK_PIXELS * pixel()
