@@ -6,8 +6,8 @@ extends SceneTree
 ## tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 2560x1440 -s tests/sim/interface_gate.gd
 ## Args (after --): `dishes=N` (default 999), `seconds=N` (the window, default 30), `scenario=E` (gate E's frame p95, below), `scenario=A` or `scenario=B` (gates A and B, at the end of this header).
 ## A run counts only as the scene the baseline measured: the window 2560 x 1440 when the frames begin and when they end, and the pointer
-## never over a bup (a hover card and its picks are not in the baseline). A run in a larger window with the pointer over the dish gives
-## a p95 of 12.3-12.9 ms where this scene gives 9.0 [measured]; such a run fails as void.
+## never over a bup (a hover card and its picks are not in the baseline): a run in a larger window with the pointer over the dish gave a
+## p95 3-4 ms above this scene's [measured]; such a run fails as void.
 ##
 ## `scenario=E`: gate E's frame bound measured the way its baseline was (the game screen,
 ## ONE dish of 45 mm and a 100,000 limit filled to the limit at once (perf_gates_test.filled_spec, put on the screen's own dish through a
@@ -26,10 +26,13 @@ extends SceneTree
 ##
 ## Expected values:
 ## - The bound is `gate_interface` of perf_gates_test.gd: the p95 and the mean no worse than the baseline's scenario with 20 dishes of 48 x 48 cells (C48;
-##   the same grids; perf_pre_pool.json: mean 9.31 ms, p95 10.33, max 14.48). This screen's frames at 994 dishes were p50 8.34, p95 8.96-9.10,
-##   worst 11.1-11.35 ms [measured, asked x100]; at x10,000 asked the main thread's part is the same (the sim is on its own
-##   thread), so p95 about 9 ms is expected [derived]: inside both bounds.
-## - The dishes are 300 um with 100 bups at their limit (gate C's dishes). The speed reached is printed (gate C's own figure is perf_gates_test's).
+##   the same grids; perf_pre_pool.json: mean 9.31 ms, p95 10.33, max 14.48).
+## - The dishes are the game's defaults (StartConditions.new(): water, both husk kinds and starvation on) at 300 um, with 100 bups at their
+##   limit and nutrient and feed at the setup maxima. A frame is the main thread's part, but the simulation's work shares the card: in
+##   water such a dish runs 129 diffusion rounds a 20 s step, and the 999 dishes' step is about 140 ms of GPU work, mostly those rounds,
+##   which SimCore splits into submits of at most FIELD_SUBMIT_MS so the frames get the card between them. Measured: p95 8.73 and 8.75 ms,
+##   mean 8.33, worst 11.4-12.2, speed reached x108-109 [measured, two processes]; with a step's rounds in one submit the p95 is 12.6-12.8
+##   ms [measured]. Expected to pass both bounds. The speed reached is printed, not gated.
 ##
 ## `scenario=A` and `scenario=B` (gates A and B): the frame bound at a million bups, measured as the baseline's two big scenes were (the game
 ## screen, the dishes filled to their limits at once, nutrient and feed at the setup maxima, asked x10,000, 12 s settle, 30 s of frames at
