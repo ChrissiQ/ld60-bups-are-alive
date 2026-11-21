@@ -44,6 +44,7 @@ const OVERFLOW_BUDGET := 2  ## the room an iteration needed would pass the memor
 const SCRATCH_KEEP := 1 << 23  ## bytes: a read up to this goes through the kept scratch buffer; a larger one (a dish's records) through one made for it and freed after it, so no buffer outside the memory budget stays
 const EVENT_READ_MARGIN := 1.25  ## the room over the most events a step of the last iterations had that an iteration reads back with its sync ...
 const EVENT_READ_SLACK := 1024  ## ... and the events more (a step that had more has the rest read after)
+const FIELD_SUBMIT_MS := 4.0  ## the most GPU time the field's diffusion rounds of a step are given in one submit: under half a display frame at 120 Hz, so the interface's frames get the card between submits [measured at 999 dishes of 300 µm in water, Apple Silicon, Metal: submits of about 4 ms gave a frame p95 of 8.7 ms, of about 9 ms 9.3 ms, the step's 140 ms of rounds in one submit 12.6-12.8 ms; the 4 ms submits cost 2-3% of the speed]
 const COUNT_READ_MARGIN := 1.25  ## the share over a dish's births a step in its last iteration that `_expected_count` allows for each step to come
 
 var rd: RenderingDevice
@@ -105,6 +106,8 @@ var _scratch_bytes := 0
 var _husk_found := 0  ## the husks a read found past its bound, until a read is complete
 var lone_field := false  ## checks only: a step runs the lone feed and diffusion passes (ping-pong, then pool_land_copy) in place of pool_fdiff (tools/gpu/fused_check.gd)
 var _tile_rounds := PackedInt32Array()  ## the tiles of pool_fdiff that run in each round (a prefix of TILES)
+var _split_usec := 0  ## the time `run`'s list spent in the field's own submits and waits (counted as the card's, not the recording's)
+var _round_tile_ms := 0.0  ## the GPU time of a diffusion round, a tile, as the field's own submits measured it (0: not known yet; `_record_step`)
 var _tile_key := PackedInt32Array()  ## what TILES was built from: each dish's row, cells across and iterations
 var _lists_marked := false  ## whether the step being recorded lists only the squares near a bup (`_marks_pay`)
 const MARKS_BUPS_PER_CLOUD := 2  ## the marks pay while the record slots in use number under this many a cloud slot ...
@@ -750,13 +753,14 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 	var publish_usec := Time.get_ticks_usec() - t_pub
 	var stats := steps > 0 or not _stats_fresh
 	var t0 := Time.get_ticks_usec()
+	_split_usec = 0
 	if stats or not (staged["sets"] as Array).is_empty() or not pub.is_empty() or husk_most > 0:
 		var cl := rd.compute_list_begin()
 		if steps > 0:
 			_disp(cl, "pool_ev_begin", D_MAX / 64)
 			var samples := 0
 			for s in steps:
-				_record_step(cl, s)
+				cl = _record_step(cl, s)
 				if s < history.size() and history[s] != 0 and samples < GpuLayout.STATS_ITER_SAMPLES:
 					samples += 1
 					_record_stats(cl, samples, s)
@@ -787,7 +791,7 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 	_apply_read_back(got["WORLD"], got["DSTATE"])
 	if stats:
 		_mark_stats_fresh(got["STATS"])
-	var out := {"steps": steps, "record_usec": t1 - t0, "gpu_usec": t2 - t1, "stats": got["STATS"], "births": PackedByteArray(), "deaths": PackedByteArray()}
+	var out := {"steps": steps, "record_usec": t1 - t0 - _split_usec, "gpu_usec": t2 - t1 + _split_usec, "stats": got["STATS"], "births": PackedByteArray(), "deaths": PackedByteArray()}
 	var deaths := 0
 	var births := 0
 	if steps > 0:
@@ -878,7 +882,7 @@ func profile_steps(steps: int, delta: float, plan: Variant = null) -> Dictionary
 	_profile.erase("pool_slot_check")
 	_disp(-1, "pool_ev_begin", D_MAX / 64)
 	for s in steps:
-		_record_step(-1, s)
+		var _cl := _record_step(-1, s)
 	_record_stats(-1, 0, steps - 1)
 	var out: Dictionary = _profile
 	_profile = null
@@ -934,8 +938,12 @@ func _sync_tiles() -> void:
 	rd.buffer_update(arena.buf("TILES"), 0, bytes.size(), bytes)
 
 
-## The step `s` of a batch, in the order of kernels_life.gd's header.
-func _record_step(cl: int, s: int) -> void:
+## The step `s` of a batch, in the order of kernels_life.gd's header, recorded into list `cl` (-1: each dispatch its own submit, for
+## `profile_steps`). Returns the list the rest of the batch goes into: the field's diffusion rounds are split into submits of at most
+## FIELD_SUBMIT_MS each by the time a round's tile was measured to take (a dish of many rounds, a small one in water, has a step of
+## hundreds of ms of them, which in one submit leaves the interface's frames late), and each split ends the list, submits, waits and
+## begins a new one.
+func _record_step(cl: int, s: int) -> int:
 	_lists_marked = _marks_pay()
 	var bg := _bup_groups()
 	var cg := _groups(arena.cell_top)
@@ -960,8 +968,24 @@ func _record_step(cl: int, s: int) -> void:
 			_disp(cl, "pool_diffuse2_" + ab, _groups(bound), float(pass_i), float(bound))
 		_disp(cl, "pool_land_copy", cg)
 	else:
+		var tiles := 0  ## the tiles recorded since the last submit, and whether all of them are diffusion rounds (the first submit holds the step's kernels before them)
+		var rounds_only := false
 		for r in _tile_rounds.size():
+			if cl >= 0 and tiles > 0 and (_round_tile_ms <= 0.0 or (tiles + _tile_rounds[r]) * _round_tile_ms > FIELD_SUBMIT_MS):
+				var t0 := Time.get_ticks_usec()
+				rd.compute_list_end()
+				rd.submit()
+				rd.sync()
+				var waited := Time.get_ticks_usec() - t0
+				_split_usec += waited
+				if rounds_only:
+					var per := waited / 1000.0 / tiles
+					_round_tile_ms = per if _round_tile_ms <= 0.0 else lerpf(_round_tile_ms, per, 0.25)
+				cl = rd.compute_list_begin()
+				tiles = 0
+				rounds_only = true
 			_disp(cl, "pool_fdiff", _tile_rounds[r], float(r), float(_tile_rounds[r]))
+			tiles += _tile_rounds[r]
 	_disp(cl, "pool_puff_advance", hg)
 	_disp(cl, "pool_dep_land", cg)
 	_disp(cl, "pool_snapshot", cg)
@@ -1025,6 +1049,7 @@ func _record_step(cl: int, s: int) -> void:
 		_disp(cl, "pool_husk_copy", _groups(hint * 8))
 		_disp(cl, "pool_husk_set_count", 1)
 	_world_step += 1
+	return cl
 
 
 ## The clouds' lookup lists made afresh from the clouds as they are (every step makes them before anything reads them; the words a cloud
