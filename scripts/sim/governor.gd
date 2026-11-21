@@ -19,9 +19,10 @@ extends RefCounted
 ##   is 1). The two are learned apart from iterations of different k: the slope between an iteration and the one before it at another
 ##   k (`_ref_k`, `_ref_run`), weighted by how far apart the two k are. Until a slope is known the cost of a step is the iteration's time
 ##   over its steps. When no pair has been seen for PROBE_EVERY iterations the next one runs another k: half of the usual below it, or, at k = 1
-##   or with no slope yet, more than it (up to what 2 x T_ITER_MS allows at the pessimistic cost), and only where the iteration would not be
-##   split by frames anyway. T_ITER_MS bounds the steps' time alone; the fixed cost comes on top, so an iteration takes at most
-##   `fixed_ms + T_ITER_MS` (plus the answer and publish the caller adds), and a probe up at most `fixed_ms + 2 x T_ITER_MS`. A cost that rises
+##   or with no slope yet, more than it (up to what 2 x T_ITER_MS allows at the pessimistic cost, at least one more), and only where the
+##   iteration would not be split by frames anyway. T_ITER_MS bounds the steps' time alone; the fixed cost comes on top, so an iteration takes at most
+##   `fixed_ms + T_ITER_MS` (plus the answer and publish the caller adds), and a probe up at most `fixed_ms + 2 x T_ITER_MS` (two steps where
+##   one takes longer than T_ITER_MS). At k = 1 the probe up is what lets a cost taken too high (one slow iteration while a dish fills) come down. A cost that rises
 ##   between pairs (a dish filling) is taken at once: an iteration whose steps cost more than GROWTH_TOLERANCE x the cost known (over the
 ##   fixed cost) sets it to what they cost, so the next one is shorter without waiting for a pair; that iteration restarts the pair and the fixed cost stays as it was (a pair across a rise
 ##   would read the rise as fixed cost).
@@ -137,8 +138,6 @@ func steps_by_time() -> int:
 		return k
 	if slope_known and k >= 2:
 		return maxi(1, k / 2)
-	if slope_known:
-		return k
 	return clampi(maxi(k + 1, int(floor(2.0 * T_ITER_MS / maxf(step_ms_ema, 1e-3)))), 1, MAX_STEPS)
 
 

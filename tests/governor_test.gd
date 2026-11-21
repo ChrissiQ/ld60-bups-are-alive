@@ -37,7 +37,8 @@ extends SceneTree
 ##    and k = floor(50 / 8) = 6 from then on]: the slope is 8 ms (+-5%), the fixed cost 20 ms (+-10%), k is 6, no run longer than
 ##    20 + 2 x 50 = 120 ms (the probe's own bound; a steady iteration is 20 + 6 x 8 = 68 ms), and with +-3 ms noise on the run time the step estimate stays within 2 ms of 8
 ##    ms and k within 2 to 12 (a probe halves k). The cost of a step rising from 2 to 8 ms (the dish growing), the estimate follows to 8 ms within
-##    1 ms by the end; a 100k dish with a 20 ms fixed cost and a 1.5 ms step settles at the slope 1.5 ms and k of 10 or more.
+##    1 ms by the end; a 100k dish with a 20 ms fixed cost and a 1.5 ms step settles at the slope 1.5 ms and k of 10 or more; a cost taken
+##    too high at k = 1 comes down (`_latched_high`).
 ##  - history samples (interval 120 s): from 0 with 10 steps of 20 s, one sample after step index 5; from 100 s with 3 steps, after index 0;
 ##    at most 16 an iteration: from 0, steps of 20 s allow 101 steps (the 17th sample would fall after step index 101).
 
@@ -56,6 +57,7 @@ func _init() -> void:
 	_pacing()
 	_fixed_cost()
 	_fill_spike()
+	_latched_high()
 	TestUtil.finish(self, "GOVERNOR TEST OK")
 
 
@@ -364,6 +366,31 @@ func _fill_spike() -> void:
 	TestUtil.check(longest <= bound, "a dish filling (a step from 0.5 to 14 ms in 40 iterations): no iteration longer than fixed + 2 x T_ITER = %.0f ms (got %.0f ms)" % [bound, longest])
 	var g: Governor = r["g"]
 	TestUtil.check(absf(g.step_ms_ema - 14.0) <= 2.0, "after a dish has filled the cost of a step is the full one: %.2f ms (14)" % g.step_ms_ema)
+
+
+
+## A cost taken too high (one slow iteration while a dish filled set it to 57 ms a step, so k = floor(50 / 57) = 1) while a step really costs
+## 22 ms over a fixed 12 ms. At k = 1 the probe runs 2 steps, the pair (1, 2) gives the slope 22 ms exactly, and the cost moves a quarter of
+## the way to it (SLOPE_WEIGHT 0.5 x the relative difference 0.5) once a pair, every PROBE_EVERY + 1 iterations [derived: 35 x 0.75^n is
+## under 0.5 ms after 15 pairs, 255 iterations; from 25 ms down k is 2 and the probes go to 1, with the same weight]: after 300 iterations
+## the cost is within 0.5 ms of 22, the fixed cost within 1 ms of 12, and k is floor(50 / 22) = 2.
+func _latched_high() -> void:
+	var g := Governor.new()
+	g.slope_known = true
+	g.step_ms_ema = 57.0
+	g.fixed_ms = 0.0
+	g._ref_k = 1
+	g._ref_run = 34.0
+	g.speed = 10000.0
+	g.paused = false
+	var k := 0
+	for i in 300:
+		g.target = g.clock + 100.0 * g.delta()
+		k = g.steps()
+		g.advanced(k, g.delta(), 12.0 + 22.0 * k)
+	g.target = g.clock + 100.0 * g.delta()
+	TestUtil.check(absf(g.step_ms_ema - 22.0) <= 0.5 and absf(g.fixed_ms - 12.0) <= 1.0 and g.steps_by_cost() == 2,
+		"a cost taken too high at k = 1 comes down: slope %.2f ms (22), fixed %.2f ms (12), k %d (2)" % [g.step_ms_ema, g.fixed_ms, g.steps_by_cost()])
 
 
 func _mean_tail(values: Array, n: int) -> float:
