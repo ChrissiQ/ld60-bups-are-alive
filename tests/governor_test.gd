@@ -484,7 +484,7 @@ func _adaptive() -> void:
 	var last: float = steps[steps.size() - 1]
 	var achieved := g.clock / (float(r["real"]) / 1000.0)
 	TestUtil.check(last >= 2.5 and last <= 3.4, "x100, a step 24 ms: settles on a step of 2.5 to 3.4 s (2.94 derived) (got %.3f)" % last)
-	TestUtil.check(_ratio(steps.slice(steps.size() - 100)) <= 1.2, "x100: holds it (last 100 steps within a ratio %.3f of 1.2)" % _ratio(steps.slice(steps.size() - 100)))
+	TestUtil.check(_ratio(steps.slice(steps.size() - 100)) <= 1.2, "x100: holds it (last 100 steps: longest over shortest %.3f, at most 1.2)" % _ratio(steps.slice(steps.size() - 100)))
 	TestUtil.check(achieved >= 90.0, "x100: reaches x90 or more (got x%.1f)" % achieved)
 	# one slow iteration
 	var settled := Governor.new()
