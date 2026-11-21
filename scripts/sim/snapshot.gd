@@ -14,6 +14,6 @@ var payloads: Array = []  ## every PayloadInfo published since the snapshot the 
 var field_view: FieldViewInfo = null
 var thumbs: ThumbsInfo = null  ## the newest thumbnails' atlas (null before the first)
 var totals: Dictionary = {}  ## every running dish together, worked out where the snapshot is made (DishState.aggregate): {dishes, count, stats}
-var husk_view: Dictionary = {}  ## the main dish's live husks as last read: {row, version, transforms: PackedFloat32Array (SimCore.husk_view)}; empty before
+var husk_view: Dictionary = {}  ## the main dish's live husks as last read: {row, version, transforms: PackedFloat32Array (SimCore.run's husk_list)}; empty before
 var worlds: Dictionary = {}  ## row -> DishWorldCopy (only when it changed)
 var timing: Dictionary = {}  ## iteration_ms, steps, step_ms_ema, duty, sync_ms, publish_ms, lineage_ms

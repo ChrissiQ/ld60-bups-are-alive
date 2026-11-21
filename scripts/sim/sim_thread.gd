@@ -363,8 +363,8 @@ func _iterate(k: int) -> float:
 		samples.append([i + 1, t0 + (sampled[i] + 1) * d])
 	var item := _results(ran, d, t0, samples if ran > 0 else [], res, plan)
 	var busy := (Time.get_ticks_usec() - start) / 1000.0
-	# (sync_ms is the submit and wait, with the field's own submits of a step of many diffusion rounds, in which the card runs the steps, the answers and the pictures; answer_ms, readback_ms and
-	# publish_ms are the host's own time on each, before the list and after the sync)
+	# (sync_ms is the submit and wait in which the card runs the steps, the answers and the pictures, with the field's own submits when a
+	# step's diffusion rounds are split; answer_ms, readback_ms and publish_ms are the host's own time on each, before the list and after the sync)
 	_last_timing = {
 		"iteration_ms": busy, "steps": ran, "step_ms_ema": governor.step_ms_ema, "fixed_ms": governor.fixed_ms, "duty": governor.duty,
 		"sync_ms": float(res.get("gpu_usec", 0)) / 1000.0, "record_ms": float(res.get("record_usec", 0)) / 1000.0,

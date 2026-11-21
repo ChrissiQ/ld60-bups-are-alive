@@ -3,7 +3,7 @@ extends RefCounted
 ## How a dish is drawn: the bups (one multimesh whose buffer the main view's ViewRenderer writes from the picture the simulation publishes,
 ## never through `multimesh.buffer`, for the bups at or over their least footprint on screen; the smaller ones, a zoomed-out crowd, are the
 ## view's density picture, the colour of one covering bup a pixel, which `density_sprite` shows under the capsules), the husks (a multimesh of their own, under the bups, every live husk one instance, from the list the
-## simulation reads for the main view: SimCore.husk_view), the dish itself with the nutrient haze, the steering map, the sources and the
+## simulation reads for the main view: SimCore.run's husk_list), the dish itself with the nutrient haze, the steering map, the sources and the
 ## plankton (`draw`, for Dish._draw), and the rings, the placement preview and the flash above the bups (`draw_overlay`, for the dish's
 ## DishOverlay). Nothing here changes the simulation. It is a part of its Dish and holds the nodes it draws with.
 ##
