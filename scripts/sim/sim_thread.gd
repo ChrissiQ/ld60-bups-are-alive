@@ -2,8 +2,9 @@ class_name SimThread
 extends RefCounted
 ## The simulation's own thread: it makes the pooled world (SimCore, on a local RenderingDevice made on this
 ## thread, the only thread that ever touches it), keeps each dish's DishWorld (plankton, bloom, sources), drains the commands between
-## iterations, asks the Governor how many steps to run, runs them (record, submit, sync), copies what it needs out of the device and hands
-## it to the ResultWorker, publishes the main dish's pictures, and rests as the governor's duty says. It never touches the scene tree.
+## iterations, asks the Governor how many steps to run, runs them with the questions due and the main dish's pictures in the same list
+## (record, submit, sync, one read back), hands what it read to the ResultWorker, and rests as the governor's duty says. It never touches
+## the scene tree.
 ##
 ## Rows: the main thread names a dish by its client row (WorldClient hands them out); this thread maps each to the core's row, which the
 ## core picks itself, so a refused dish never puts the two out of step. Snapshots, PayloadInfo.row and ViewRequest.row are client rows.
@@ -11,12 +12,15 @@ extends RefCounted
 ## The loop:
 ##   drain commands (each handled at once: an edit lands at the sim clock when drained); the pipettes whose new dish's grid is ready; the
 ##     grid of the main view's dish's next pipette started ahead on the worker pool
-##   nothing owed (paused, or less than a step): if something changed, a pass of no steps (edits made, stats fresh, pictures, a
-##     snapshot); then sleep until the next command (or, when that pass left the husks unread, until they may be read again)
-##   else: k = the governor's steps within the pool's room and the history samples; the dishes' world events for the window; run;
-##     answer the questions asked; copy out DSTATE, STATS and the family events; publish (with the asked-after bups' places); push to the
-##     worker; rest. An iteration the memory budget refuses (nothing ran) puts the dishes' worlds back as they were before its events,
-##     and the next tries are fewer steps, then one step at most every REFUSED_RETRY_MSEC (`_plan_steps`)
+##   nothing owed (paused, or less than a step): if something changed, a pass of no steps (edits made, stats fresh, the questions due
+##     answered, pictures, a snapshot); then sleep until the next command (or, when that pass left the husks unread, until they may be
+##     read again)
+##   else: k = the governor's steps within the pool's room and the history samples; the dishes' world events for the window, the
+##     questions due and the view; run (the steps, then the answers and the pictures, with the asked-after bups' places, in one list,
+##     and DSTATE, STATS, the family events, the answers and the pictures read back with its one sync); push to the worker; rest. An
+##     iteration the memory budget refuses (no step ran: the questions are answered and the pictures published all the same) puts the
+##     dishes' worlds back as they were before its events, and the next tries are fewer steps, then one step at most every
+##     REFUSED_RETRY_MSEC (`_plan_steps`)
 ##
 ## Shared textures: the core makes them on this device; `texture_handles` gives their native handles (for the main device to import,
 ## after a sync, which every publish has done), and `texture_bound` is how the main side tells each texture it used, on which frame and
@@ -321,6 +325,8 @@ func _iterate(k: int) -> float:
 	for j in k:
 		times.append(t0 + (j + 1) * d)
 	plan.step_times = times
+	plan.questions = _due_questions()
+	plan.view = _view_request()
 	var bursts := {}
 	var before := {}  ## client row -> its world before the window (DishWorld.checkpoint)
 	for client: int in _rows:
@@ -355,8 +361,10 @@ func _iterate(k: int) -> float:
 	var samples: Array = []
 	for i in sampled.size():
 		samples.append([i + 1, t0 + (sampled[i] + 1) * d])
-	var item := _results(ran, d, t0, samples if ran > 0 else [])
+	var item := _results(ran, d, t0, samples if ran > 0 else [], res, plan)
 	var busy := (Time.get_ticks_usec() - start) / 1000.0
+	# (sync_ms is the one submit and wait, in which the card runs the steps, the answers and the pictures; answer_ms, readback_ms and
+	# publish_ms are the host's own time on each, before the list and after the sync)
 	_last_timing = {
 		"iteration_ms": busy, "steps": ran, "step_ms_ema": governor.step_ms_ema, "fixed_ms": governor.fixed_ms, "duty": governor.duty,
 		"sync_ms": float(res.get("gpu_usec", 0)) / 1000.0, "record_ms": float(res.get("record_usec", 0)) / 1000.0,
@@ -370,25 +378,31 @@ func _iterate(k: int) -> float:
 	return busy
 
 
-## A pass of no steps: the queued edits are made, the stats are current, the pictures go out, and a snapshot shows what the commands did.
+## A pass of no steps: the queued edits are made, the stats are current, the questions due are answered and the pictures go out, in one
+## list, and a snapshot shows what the commands did.
 func _quiet_pass() -> void:
-	_core.run(0, governor.delta())
-	var item := _results(0, governor.delta(), governor.clock, [])
+	var plan := IterationPlan.new()
+	plan.delta = governor.delta()
+	plan.questions = _due_questions()
+	plan.view = _view_request()
+	var res := _core.run(0, governor.delta(), plan)
+	var item := _results(0, governor.delta(), governor.clock, [], res, plan)
 	item["timing"] = _timing()
 	worker.push_iteration(item)
 	_changed = false
 
 
-## What the worker needs of the state now (bytes and plain values only: it never touches the device).
-func _results(steps: int, d: float, t0: float, samples: Array) -> Dictionary:
+## What the worker needs of the state now (bytes and plain values only: it never touches the device), from what the iteration's list
+## read back (`res`: SimCore.run's) and what `plan` asked of it: the answers (before the rows, which carry them: a pass answers what was
+## asked before it), the rows, the stats, the family events and the pictures.
+func _results(steps: int, d: float, t0: float, samples: Array, res: Dictionary, plan: IterationPlan) -> Dictionary:
 	var t_answer := Time.get_ticks_usec()
-	_answer()  # (before the rows, which carry the answers: a pass answers what was asked before it)
-	var answer_ms := (Time.get_ticks_usec() - t_answer) / 1000.0
+	_take_answers(plan.questions, res.get("answers", {}))
+	var answer_ms := (Time.get_ticks_usec() - t_answer + int(res.get("ask_usec", 0))) / 1000.0
 	var t_read := Time.get_ticks_usec()
 	var rows: Array = []
 	var births := 0
 	var deaths := 0
-	var top := 0
 	for client: int in _rows:
 		var cr: int = _rows[client]
 		var ds := _core.dstate_row(cr)
@@ -397,7 +411,6 @@ func _results(steps: int, d: float, t0: float, samples: Array) -> Dictionary:
 			_had_bups[client] = true
 		births += ds.decode_u32(GpuLayout.DS_BIRTHS * 4)
 		deaths += ds.decode_u32(GpuLayout.DS_DEATHS * 4)
-		top = maxi(top, cr + 1)
 		rows.append({
 			"row": client, "core_row": cr, "number": _numbers[client], "count": count,
 			"clouds": ds.decode_u32(GpuLayout.DS_CLOUD_SLOTS * 4), "husks": ds.decode_u32(GpuLayout.DS_HUSKS * 4),
@@ -405,18 +418,13 @@ func _results(steps: int, d: float, t0: float, samples: Array) -> Dictionary:
 			"fractions": (_answers.get(client, {}) as Dictionary).get("fractions", {}),
 			"answers": _answers_of(client),
 		})
-	var parts: Array = [["STATS", top * GpuLayout.STATS_DISH_WORDS * 4]]
 	if steps > 0:
 		_births_per_step = maxf(float(births) / steps, _births_per_step * 0.9)
-		var cap := _core.arena.event_cap
-		parts.append(["EVB", mini(births, cap) * GpuLayout.BIRTH_WORDS * 4])
-		parts.append(["EVD", mini(deaths, cap) * GpuLayout.DEATH_WORDS * 4])
-	var got := _read(parts)
-	var stats: PackedByteArray = got[0]
-	var eb: PackedByteArray = got[1] if steps > 0 else PackedByteArray()
-	var ed: PackedByteArray = got[2] if steps > 0 else PackedByteArray()
+	var stats: PackedByteArray = res.get("stats", PackedByteArray())
+	var eb: PackedByteArray = res.get("births", PackedByteArray()) if steps > 0 else PackedByteArray()
+	var ed: PackedByteArray = res.get("deaths", PackedByteArray()) if steps > 0 else PackedByteArray()
 	_last_events = [births if steps > 0 else 0, deaths if steps > 0 else 0]
-	var readback_ms := (Time.get_ticks_usec() - t_read) / 1000.0
+	var readback_ms := (Time.get_ticks_usec() - t_read + int(res.get("read_usec", 0))) / 1000.0
 	var worlds := {}
 	for client: int in _rows:
 		var w: DishWorld = _worlds[client]
@@ -427,18 +435,13 @@ func _results(steps: int, d: float, t0: float, samples: Array) -> Dictionary:
 	var refused := _refused
 	_refused = {}
 	var t_pub := Time.get_ticks_usec()
-	_publish(steps > 0)
+	_published(plan.view, res.get("published", {}), steps > 0)
 	return {
 		"steps": steps, "delta": d, "t0": t0, "sim_time": governor.clock, "achieved": _achieved(), "paused": governor.paused,
 		"births": eb, "deaths": ed, "rows": rows, "stats": stats, "samples": samples, "worlds": worlds, "refused": refused,
 		"payload": _payload, "field_view": _field_view, "thumbs": _thumbs, "husk_view": _husk_view, "readback_ms": readback_ms,
 		"publish_ms": (Time.get_ticks_usec() - t_pub) / 1000.0, "answer_ms": answer_ms, "game_began": _game_began,
 	}
-
-
-## The first `bytes` of each buffer in `parts` ([name, bytes]), in one right-sized read (SimCore.read_parts).
-func _read(parts: Array) -> Array:
-	return _core.read_parts(parts.map(func(p: Array) -> Array: return [p[0], 0, p[1]]))
 
 
 func _timing() -> Dictionary:
@@ -507,13 +510,12 @@ func _give_bound() -> void:
 		_core.texture_bound(b[0], b[1], b[2], b[3])
 
 
-## `later`: the husks may be read without waiting for them (an iteration of steps follows, and the card runs the read with it): the list
-## asked for in this publish is the snapshot's in the next one. A pass of no steps waits for them.
-func _publish(later: bool) -> void:
+## What the next list publishes: the main view's dish's pictures (null when no dish is in view). The textures the main side has told of
+## using are given to the core first, so it chooses from the newest.
+func _view_request() -> ViewRequest:
 	if _view == null or not _rows.has(_view.row):
-		_view_dirty = false
-		_husks_owed = false
-		return
+		return null
+	_give_bound()
 	var now := Time.get_ticks_msec()
 	var v := ViewRequest.new()
 	v.row = _rows[_view.row]
@@ -525,8 +527,18 @@ func _publish(later: bool) -> void:
 	v.want_field_view = _view.want_field_view and (now - _field_msec >= FIELD_VIEW_MSEC or _view_dirty)
 	v.want_thumbnails = _view.want_thumbnails and now - _thumbs_msec >= THUMBS_MSEC
 	v.track = PackedInt64Array((_questions.get(_view.row, {}) as Dictionary).get("tracked", []))
-	_give_bound()
-	var out := _core.publish(v)
+	return v
+
+
+## After the list: what it published of `v` (`out`: SimCore.run's "published") as the snapshot's pictures, and the husks' list. `later`: the
+## husks may be read without waiting for them (an iteration of steps follows, and the card runs the read with it): the list asked for in
+## this publish is the snapshot's in the next one. A pass of no steps waits for them.
+func _published(v: ViewRequest, out: Dictionary, later: bool) -> void:
+	if v == null or _view == null or not _rows.has(_view.row):
+		_view_dirty = false
+		_husks_owed = false
+		return
+	var now := Time.get_ticks_msec()
 	if not cpu_handover:
 		_take_handles()
 	var handed := _core.handed
@@ -612,11 +624,13 @@ func _take_handles() -> void:
 		_state.unlock()
 
 
-## The questions asked (WorldClient.ask), at most every ANSWER_MSEC a dish: the shares ("fractions": name -> [gene, threshold]), the
-## tracked bups' records ("tracked": ids, up to GpuLayout.TRACKED) with the steering at each one's place for its speed and sense range,
-## and the field at points ("probes": [x, y, speed, sense range] each, dish-local).
-func _answer() -> void:
+## The questions asked (WorldClient.ask) that are due, at most every ANSWER_MSEC a dish, for the next list (SimCore.answer's form, keyed
+## by client row): the shares ("fractions": name -> [gene, threshold]), the tracked bups' records ("tracked": ids, up to
+## GpuLayout.TRACKED) with the steering at each one's place for its speed and sense range, the field at points ("probes": [x, y, speed,
+## sense range] each, dish-local) and the nearest husks ("husks": [x, y, reach] each). A dish that asks nothing has no answers.
+func _due_questions() -> Array:
 	var now := Time.get_ticks_msec()
+	var out: Array = []
 	for client: int in _questions:
 		if not _rows.has(client) or now - int(_answered_msec.get(client, -1000000)) < ANSWER_MSEC:
 			continue
@@ -624,36 +638,25 @@ func _answer() -> void:
 		if q.is_empty():
 			_answers.erase(client)
 			continue
-		_answered_msec[client] = now
-		var cr: int = _rows[client]
-		var shares := {}
-		var fr: Dictionary = q.get("fractions", {})
-		for name: Variant in fr:
-			var f: Array = fr[name]
-			shares[name] = _core.fraction_with_gene_at_least(cr, String(f[0]), float(f[1]))
-		var tracked := _core.track(cr, PackedInt64Array(q.get("tracked", [])))
-		var points := PackedFloat32Array()
-		var ids: Array = tracked.keys()
-		for id: int in ids:
-			var r: PackedByteArray = tracked[id]
-			points.append_array(PackedFloat32Array([r.decode_float(GpuLayout.R_X * 4), r.decode_float(GpuLayout.R_Y * 4), r.decode_float(GpuLayout.R_SPEED * 4), _core.sense_range_of(r)]))
-		var asked := PackedFloat32Array()
+		var probes := PackedFloat32Array()
 		for p: Variant in q.get("probes", []):
-			asked.append_array(PackedFloat32Array(p))
-		points.append_array(asked.slice(0, (SimCore.PROBES_MOST - ids.size()) * 4))
-		var got := _core.probe(cr, points)
-		var steer := {}
-		var pf := GpuLayout.PROBE_FLOATS
-		for k in ids.size():
-			steer[ids[k]] = Vector3(got[k * pf], got[k * pf + 1], got[k * pf + 2])
+			probes.append_array(PackedFloat32Array(p))
 		var places := PackedFloat32Array()
 		for h: Variant in (q.get("husks", []) as Array).slice(0, GpuLayout.HUSK_QUERIES):
 			places.append_array(PackedFloat32Array(h))
-		var husks: Array = []
-		var found := _core.husk_near(cr, places)
-		for k in found.size():
-			husks.append({"at": Vector2(places[k * 3], places[k * 3 + 1]), "reach": places[k * 3 + 2], "found": found[k]})
-		_answers[client] = {"fractions": shares, "tracked": tracked, "steer": steer, "probes": got.slice(ids.size() * pf), "husks": husks}
+		out.append({"key": client, "row": _rows[client], "asked_msec": now, "fractions": q.get("fractions", {}),
+			"tracked": PackedInt64Array(q.get("tracked", [])), "probes": probes, "husks": places})
+	return out
+
+
+## The answers the list gave (`answers`: SimCore.run's, by client row) to the questions it was asked: a dish not answered (no set of the
+## question buffers was left for it) asks again in the next list.
+func _take_answers(questions: Array, answers: Dictionary) -> void:
+	for q: Dictionary in questions:
+		var client: int = q["key"]
+		if answers.has(client) and _rows.has(client):
+			_answers[client] = answers[client]
+			_answered_msec[client] = q["asked_msec"]
 
 
 ## What a snapshot answers for a dish (Snapshot.answers' row).

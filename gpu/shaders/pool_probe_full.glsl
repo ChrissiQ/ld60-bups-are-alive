@@ -37,6 +37,7 @@ const uint DS_START = 0u;
 const uint DS_STEP = 8u;
 const uint DS_WORDS = 32u;
 const uint NO_DISH = 4294967295u;
+const uint PROBES_MOST = 64u;
 const uint PROBE_FLOATS = 5u;
 const uint PUFF_ROW_BASE = 1065353216u;
 const int P_CELLS = 1;
@@ -190,8 +191,8 @@ float steering_chance_d(uint d, float speed, float sense_range, float c, float g
 	return 0.5 * erfc_fit(-z * 0.70710678);
 }
 
-void f(uint i) {
-	uint d = uint(pcs.pb);
+void f(uint k) {
+	uint d = uint(pcs.pb), i = uint(pcs.pd) * PROBES_MOST + k;
 	float x = SPQ[i * 4u], y = SPQ[i * 4u + 1u], speed = SPQ[i * 4u + 2u], sense_range = SPQ[i * 4u + 3u];
 	float c, gx, gy, pc, pgx, pgy, sg;
 	readf_d(d, x, y, c, gx, gy);

@@ -104,4 +104,4 @@ void f(uint k) {
 	PAYLOAD[k] = px;
 	IDTEX[k * 2u + IDT_LO] = lo; IDTEX[k * 2u + IDT_HI] = hi;
 }
-GRID_LOOP(f, ((DS(uint(pcs.pa), DS_COUNT) + PAYLOAD_TEX_WIDTH - 1u) / PAYLOAD_TEX_WIDTH) * PAYLOAD_TEX_WIDTH)
+GRID_LOOP(f, min(((DS(uint(pcs.pa), DS_COUNT) + PAYLOAD_TEX_WIDTH - 1u) / PAYLOAD_TEX_WIDTH) * PAYLOAD_TEX_WIDTH, uint(pcs.pb)))

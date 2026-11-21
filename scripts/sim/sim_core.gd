@@ -8,11 +8,12 @@ extends RefCounted
 ## The arena (SimArena) holds the buffers and grows them by 1.5 when an iteration's bound would pass 90% of one; a dish takes a row of
 ## the dish tables (DISHP, DSTATE), a segment of record slots (256-aligned, appended at the end and put in row order by the next step's
 ## compaction), a 256-aligned block of field cells and a run of cloud-list squares. An iteration (`run`) uploads the dishes' world events,
-## records its steps in one compute list in the order of `_record_step` (life's `pool_*` kernels in kernels_life.gd's
-## order), submits, syncs and reads back DSTATE and WORLD. The pipette is its own zero-step pass (`pipette`, a retarget); a dish leaves by
-## `remove_dish` (its blocks become padding at once, its clouds and husks empty slots) and comes back by `load_dish` from what `gather`
-## read; `resize` and `set_params` change a running dish. `publish` writes the main dish's pictures into the next free shared texture after
-## the sync. Reads of parts of the buffers go through a right-sized copy (`read_parts`).
+## records its steps in one compute list in the order of `_record_step` (life's `pool_*` kernels in kernels_life.gd's order) and after
+## them the stats, the answers to the dishes' questions (`answer`) and the main dish's pictures (`publish`: into the next free shared
+## texture), requests one read back of WORLD, DSTATE, STATS, the family events, the answers and the pictures' bytes (`_request`), then
+## submits and syncs once. The pipette is its own zero-step pass (`pipette`, a retarget); a dish leaves by `remove_dish` (its blocks become
+## padding at once, its clouds and husks empty slots) and comes back by `load_dish` from what `gather` read; `resize` and `set_params`
+## change a running dish. Reads of parts of the buffers go through a right-sized copy (`read_parts`, `_request`).
 ##
 ## The shared textures: each publish has a number (`publish_seq`, never reused) that every texture it wrote holds, and the
 ## main side tells each use of a texture with the number it held (`texture_bound`). A texture is written again only once the main side has
@@ -35,13 +36,15 @@ const EVENT_EXACT_MOST := 1 << 21  ## past this bound of an iteration's births t
 const MAX_STEPS := GpuLayout.MAX_STEPS_PER_BATCH
 const MASS_SUM_MARGIN := 1.0e-3  ## the share the measured mass sum is raised by: the sums are float, in a fixed order, with a relative error far under this
 const MASS_READ_ROWS := 16  ## the most running dishes whose mass sum is read from their own rows of STATS; with more, STATS is read up to the highest row
-const ID_RING := 4  ## with `cpu_handover`, the payloads whose bups' ids `ids_at` can still give
+const ID_RING := 8  ## with `cpu_handover`, the payloads whose bups' ids `ids_at` can still give: a payload's ids are asked for after it has waited to be shown (WorldClient.WAITING_MOST), been shown and picked in, the pick read back (a frame or frame_queue_size frames) and the question drained between two iterations, which at one publish a display frame is up to about 7 publishes after it
 const TEXTURES := 10  ## shared textures of each kind: a publish's texture is held for WorldClient.WAITING_MOST + 6 publishes at one publish a display frame (it waits to be shown, is shown, is superseded by the next, then frame_queue_size + 2 frames), so the rest is room for a late frame
 const HARD_BOUND_MOST := 1 << 18  ## the cloud (and husk) slots past which an iteration's room is estimated instead of bounded [placeholder: about 135 MB of cloud buffers at 516 B a slot]
 const OVERFLOW_DEVICE := 1  ## `overflow()` bits: a kernel found a buffer full (WORLD's flag)
 const OVERFLOW_BUDGET := 2  ## the room an iteration needed would pass the memory budget: it was refused, nothing ran
 const SCRATCH_KEEP := 1 << 23  ## bytes: a read up to this goes through the kept scratch buffer; a larger one (a dish's records) through one made for it and freed after it, so no buffer outside the memory budget stays
-const PROBES_MOST := 64  ## points a `probe` call answers
+const EVENT_READ_MARGIN := 1.25  ## the room over the most events a step of the last iterations had that an iteration reads back with its sync ...
+const EVENT_READ_SLACK := 1024  ## ... and the events more (a step that had more has the rest read after)
+const COUNT_READ_MARGIN := 1.25  ## the room over a dish's births a step of the last iteration that its expected count is given (`_expected_count`)
 
 var rd: RenderingDevice
 var limits: PoolLimits
@@ -72,6 +75,7 @@ var _entry_density := 0  ## the most entries a cloud slot in use had in the last
 var _entries_last := 0  ## the most list entries a step of the last iteration that made lists asked for
 var _deaths_per_step := 0.0  ## the most deaths a step of the last iterations had (all dishes), for the clouds' headroom
 var _births_per_step := 0.0
+var _last_steps := 0  ## the steps of the last iteration that stepped (a dish's DS_BIRTHS are that iteration's)
 var _textures := {}  ## kind -> Array of TEXTURES texture RIDs (publish)
 var _texture_seqs := {}  ## kind -> Array: the publish each texture holds (-1: never written)
 var _texture_used := {}  ## kind -> Array: the last frame the main side told it used each texture on since it was last written
@@ -88,7 +92,7 @@ var cpu_handover := false:  ## the main device cannot import this device's textu
 		if arena != null:
 			arena.cpu_handover = v  # (the memory budget counts the textures of the path in use)
 var handed := {}  ## with `cpu_handover`, the last publish's bytes: "payload" (the bups' used texels), "haze" and "steer" (RGBA8, a cell each), "thumbs" (the atlas's tile rows in use, with "thumb_rows" their number)
-var handed_usec := 0  ## what `_read_handed` has cost so far (microseconds), the reads made and the bytes they took
+var handed_usec := 0  ## what taking the handed-over bytes has cost so far (microseconds, `_publish_take`), the publishes that handed bytes over and the bytes
 var handed_calls := 0
 var handed_bytes := 0
 var _id_ring: Array = []  ## with `cpu_handover`, the ids of the last ID_RING payloads published, on this device only: {buffer: RID, seq: the publish (0: none), count: its texels}, the oldest overwritten first
@@ -703,59 +707,140 @@ func set_field(row: int, values: PackedFloat32Array) -> void:
 
 # ---- the iteration ------------------------------------------------------------------------------------------------------------------
 
-## `steps` steps of `delta` seconds of every running dish, in one submit: record, submit, sync, read back DSTATE and WORLD. `plan`
-## (IterationPlan) carries each dish's world events and the history samples. Returns {steps, overflow, record_usec, gpu_usec}; steps 0
-## when the room the iteration needs would pass the memory budget (OVERFLOW_BUDGET is set, `errors` says so, nothing ran). An overflow a
-## kernel finds (WORLD's flag) is not undone: the iteration cannot be done again from what the host holds (the records and fields change
-## in place on the device), so `overflow()` keeps it and the kernels keep every read and write inside the buffers.
+## `steps` steps of `delta` seconds of every running dish, and what is asked of the state after them, in one submit and one wait: the
+## steps are recorded, then the stats, the answers to `plan.questions` (`answer`'s) and the pictures of `plan.view` (`publish`'s), in one
+## compute list; one read back (`_request`) takes WORLD, DSTATE, STATS, the family events, the answers and what the pictures hand over;
+## submit; sync. `plan` (IterationPlan) carries each dish's world events, the history samples, the questions and the view. Returns {steps,
+## overflow, record_usec, gpu_usec, stats (STATS up to the highest running row), births and deaths (the steps' family events: EVB's and
+## EVD's bytes in use), answers (`answer`'s), published (`publish`'s), ask_usec (the host's time on the answers and the pictures before the
+## list and after the sync), read_usec (on the read back)}; steps 0 when the room the steps need would pass the memory budget
+## (OVERFLOW_BUDGET is set, `errors` says so, no step ran; the questions are answered and the pictures published all the same). With no
+## steps and no plan, the queued edits are made and the stats refreshed, and nothing else. An overflow a kernel finds (WORLD's flag) is not
+## undone: the iteration cannot be done again from what the host holds (the records and fields change in place on the device), so
+## `overflow()` keeps it and the kernels keep every read and write inside the buffers.
 func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 	_apply_edits()
-	if steps <= 0:
+	if steps <= 0 and plan == null:
 		if not _stats_fresh:
 			_refresh_stats()
 		return {"steps": 0, "overflow": _overflow}
-	steps = mini(steps, MAX_STEPS)
-	if not _stats_fresh:
-		_refresh_stats()  # (the births the iteration can have are bounded from the dishes' masses as they are now)
-	_set_step(delta)
-	_sync_tiles()
-	var events: Dictionary = plan.events if plan != null and plan.get("events") != null else {}
-	var history: PackedByteArray = plan.history_flags if plan != null and plan.get("history_flags") != null else PackedByteArray()
-	var ev := _world_events(steps, events)
-	if not _ensure_room(steps, ev):
-		return {"steps": 0, "overflow": _overflow}
-	_upload_events(ev)
+	steps = clampi(steps, 0, MAX_STEPS)
+	var history := PackedByteArray()
+	if steps > 0:
+		if not _stats_fresh:
+			_refresh_stats()  # (the births the iteration can have are bounded from the dishes' masses as they are now)
+		_set_step(delta)
+		_sync_tiles()
+		var events: Dictionary = plan.events if plan != null and plan.get("events") != null else {}
+		history = plan.history_flags if plan != null and plan.get("history_flags") != null else PackedByteArray()
+		var ev := _world_events(steps, events)
+		if _ensure_room(steps, ev):
+			_upload_events(ev)
+		else:
+			steps = 0
+	var t_ask := Time.get_ticks_usec()
+	var questions: Array = plan.questions if plan != null and plan.get("questions") is Array else []
+	var view: ViewRequest = plan.view if plan != null and plan.get("view") is ViewRequest else null
+	var staged := _answers_stage(questions)
+	var pub := _publish_stage(view, _expected_count(view.row, steps) if view != null and _dishes.has(view.row) else 0)
+	var ask_usec := Time.get_ticks_usec() - t_ask
+	var stats := steps > 0 or not _stats_fresh
 	var t0 := Time.get_ticks_usec()
-	var cl := rd.compute_list_begin()
-	_disp(cl, "pool_ev_begin", D_MAX / 64)
-	var samples := 0
-	for s in steps:
-		_record_step(cl, s)
-		if s < history.size() and history[s] != 0 and samples < GpuLayout.STATS_ITER_SAMPLES:
-			samples += 1
-			_record_stats(cl, samples, s)
-	_record_stats(cl, 0, steps - 1)
-	rd.compute_list_end()
+	if stats or not (staged["sets"] as Array).is_empty() or not pub.is_empty():
+		var cl := rd.compute_list_begin()
+		if steps > 0:
+			_disp(cl, "pool_ev_begin", D_MAX / 64)
+			var samples := 0
+			for s in steps:
+				_record_step(cl, s)
+				if s < history.size() and history[s] != 0 and samples < GpuLayout.STATS_ITER_SAMPLES:
+					samples += 1
+					_record_stats(cl, samples, s)
+		if stats:
+			_record_stats(cl, 0, maxi(steps - 1, 0))
+		_answers_record(cl, staged)
+		_publish_record(cl, pub)
+		rd.compute_list_end()
+	var parts: Array = [["WORLD", "WORLD", 0, int(arena.sizes["WORLD"])], ["DSTATE", "DSTATE", 0, int(arena.sizes["DSTATE"])],
+		["STATS", "STATS", 0, _top_row() * GpuLayout.STATS_DISH_WORDS * 4]]
+	if steps > 0:
+		parts.append(["EVB", "EVB", 0, _expected_events(_births_per_step, steps) * GpuLayout.BIRTH_WORDS * 4])
+		parts.append(["EVD", "EVD", 0, _expected_events(_deaths_per_step, steps) * GpuLayout.DEATH_WORDS * 4])
+	parts.append_array(_answers_parts(staged))
+	var direct: Array = []
+	_publish_parts(pub, parts, direct)
+	var reads := _request(parts, direct)
 	var t1 := Time.get_ticks_usec()
 	rd.submit()
 	rd.sync()
 	var t2 := Time.get_ticks_usec()
-	_read_back()
-	_event_rows.clear()
+	var got := _take(reads)
+	_apply_read_back(got["WORLD"], got["DSTATE"])
+	if stats:
+		_mark_stats_fresh(got["STATS"])
+	var out := {"steps": steps, "record_usec": t1 - t0, "gpu_usec": t2 - t1, "stats": got["STATS"], "births": PackedByteArray(), "deaths": PackedByteArray()}
 	var deaths := 0
 	var births := 0
+	if steps > 0:
+		_event_rows.clear()
+		for row: int in _dishes:
+			_event_rows[row] = true
+			deaths += _ds(row, GpuLayout.DS_DEATHS)
+			births += _ds(row, GpuLayout.DS_BIRTHS)
+		out["births"] = _events_read(got["EVB"], "EVB", mini(births, arena.event_cap) * GpuLayout.BIRTH_WORDS * 4)
+		out["deaths"] = _events_read(got["EVD"], "EVD", mini(deaths, arena.event_cap) * GpuLayout.DEATH_WORDS * 4)
+		_deaths_per_step = maxf(float(deaths) / steps, _deaths_per_step * 0.9)
+		_births_per_step = maxf(float(births) / steps, _births_per_step * 0.9)
+		_last_steps = steps
+	var read_usec := Time.get_ticks_usec() - t2
+	var t_took := Time.get_ticks_usec()
+	out["answers"] = _answers_take(staged, got)
+	out["published"] = _publish_take(pub, got)
+	out["ask_usec"] = ask_usec + Time.get_ticks_usec() - t_took
+	out["read_usec"] = read_usec
+	if steps > 0:
+		arena.maybe_shrink(_wd(GpuLayout.WD_SLOTS), _wd(GpuLayout.WD_CLOUD_SLOTS), _wd(GpuLayout.WD_HUSK_SLOTS), _entries_peak, maxi(births, deaths))
+		_entries_peak = 0
+		if arena.changed:
+			_after_growth()
+	out["overflow"] = _overflow
+	return out
+
+
+## The family events read back with an iteration (`head`: the first bytes of `buffer`, as many as were expected) made up to `bytes`, the
+## rest read now when the steps had more than expected.
+func _events_read(head: PackedByteArray, buffer: String, bytes: int) -> PackedByteArray:
+	if head.size() >= bytes:
+		return head.slice(0, bytes)
+	var out := head.duplicate()
+	out.append_array(read_parts([[buffer, head.size(), bytes - head.size()]])[0])
+	return out
+
+
+## The family events of one kind an iteration of `steps` steps is expected to have, read back with it (the most a step of the last
+## iterations had, `per_step`, with EVENT_READ_MARGIN of room and EVENT_READ_SLACK more), never past the ring.
+func _expected_events(per_step: float, steps: int) -> int:
+	return mini(arena.event_cap, ceili(EVENT_READ_MARGIN * per_step * steps) + EVENT_READ_SLACK)
+
+
+## How many bups dish `row` is expected to hold after `steps` more steps, before they run (the pictures' buffers are made for it, and on the
+## byte path that much of the payload is read back with the iteration): its count now, its births a step in the last iteration that
+## stepped with COUNT_READ_MARGIN of room, a sixteenth of its count and a row of texels, never past its cap. A dish that outgrows the
+## buffers is not drawn that time (`_publish_take`); one that outgrows the read has the rest read after.
+func _expected_count(row: int, steps: int) -> int:
+	var n := count(row)
+	if steps <= 0:
+		return n
+	var per_step := float(_ds(row, GpuLayout.DS_BIRTHS)) / maxi(_last_steps, 1)
+	return mini((_dishes[row] as CoreDish).cap, n + ceili(COUNT_READ_MARGIN * per_step * steps) + n / 16 + GpuLayout.PAYLOAD_TEX_WIDTH)
+
+
+## The highest running dish row + 1 (0 with none).
+func _top_row() -> int:
+	var top := 0
 	for row: int in _dishes:
-		_event_rows[row] = true
-		deaths += _ds(row, GpuLayout.DS_DEATHS)
-		births += _ds(row, GpuLayout.DS_BIRTHS)
-	_deaths_per_step = maxf(float(deaths) / steps, _deaths_per_step * 0.9)
-	_births_per_step = maxf(float(births) / steps, _births_per_step * 0.9)
-	_mark_stats_fresh()
-	arena.maybe_shrink(_wd(GpuLayout.WD_SLOTS), _wd(GpuLayout.WD_CLOUD_SLOTS), _wd(GpuLayout.WD_HUSK_SLOTS), _entries_peak, maxi(births, deaths))
-	_entries_peak = 0
-	if arena.changed:
-		_after_growth()
-	return {"steps": steps, "overflow": _overflow, "record_usec": t1 - t0, "gpu_usec": t2 - t1}
+		top = maxi(top, row + 1)
+	return top
 
 
 ## For timing (tools/gpu/gpu_lab.gd): `steps` steps as `run` records them, but each dispatch in a submit of its own, timed by the wall
@@ -984,17 +1069,16 @@ func _refresh_stats() -> void:
 	_mark_stats_fresh()
 
 
-## STATS sample 0 holds every running dish's state now: its mass sums are read, for `births_series`.
-func _mark_stats_fresh() -> void:
+## STATS sample 0 holds every running dish's state now: its mass sums are taken, for `births_series`, from `stats` (STATS up to the
+## highest running row, as an iteration reads it back), or read now when it is not given.
+func _mark_stats_fresh(stats := PackedByteArray()) -> void:
 	_stats_fresh = true
 	_mass_sum.clear()
 	if _dishes.is_empty():
 		return
-	var top := 0
-	for row: int in _dishes:
-		top = maxi(top, row + 1)
-	var bulk := PackedByteArray()
-	if _dishes.size() > MASS_READ_ROWS:
+	var top := _top_row()
+	var bulk := stats if stats.size() >= top * GpuLayout.STATS_DISH_WORDS * 4 else PackedByteArray()
+	if bulk.is_empty() and _dishes.size() > MASS_READ_ROWS:
 		bulk = rd.buffer_get_data(arena.buf("STATS"), 0, top * GpuLayout.STATS_DISH_WORDS * 4)
 	for row: int in _dishes:
 		var at := (row * GpuLayout.STATS_DISH_WORDS + GpuLayout.ST_MASS) * 4
@@ -1476,15 +1560,7 @@ func read_parts(parts: Array) -> Array:
 		for p: Array in parts:
 			out.append(PackedByteArray())
 		return out
-	var scratch := _scratch
-	if total > SCRATCH_KEEP:
-		scratch = rd.storage_buffer_create(total)
-	elif total > _scratch_bytes:
-		if _scratch.is_valid():
-			rd.free_rid(_scratch)
-		_scratch_bytes = clampi(int(_scratch_bytes * 1.5), total, SCRATCH_KEEP)
-		_scratch = rd.storage_buffer_create(_scratch_bytes)
-		scratch = _scratch
+	var scratch := _scratch_for(total)
 	var at := 0
 	for p: Array in parts:
 		if int(p[2]) > 0:
@@ -1497,6 +1573,75 @@ func read_parts(parts: Array) -> Array:
 	for p: Array in parts:
 		out.append(data.slice(at, at + int(p[2])))
 		at += int(p[2])
+	return out
+
+
+## A buffer of at least `total` bytes to gather reads in: the kept scratch (made larger when it must), or past SCRATCH_KEEP one made for
+## the read, which its reader frees.
+func _scratch_for(total: int) -> RID:
+	if total > SCRATCH_KEEP:
+		return rd.storage_buffer_create(total)
+	if total > _scratch_bytes:
+		if _scratch.is_valid():
+			rd.free_rid(_scratch)
+		_scratch_bytes = clampi(int(_scratch_bytes * 1.5), total, SCRATCH_KEEP)
+		_scratch = rd.storage_buffer_create(_scratch_bytes)
+	return _scratch
+
+
+## Reads the next submit's sync completes, without a wait of their own: `parts` ([key, buffer name, byte offset, bytes] each) are copied,
+## where the commands stand, into the scratch buffer, which one request reads back (as `read_parts` gathers them), so each part is its
+## buffer as the commands recorded before left it; `direct` parts (the same form) are each requested straight from their buffer, for a
+## part that is most of a buffer of its own. `_take` gives the bytes after the sync; nothing else may read through the scratch in between.
+func _request(parts: Array, direct: Array) -> Dictionary:
+	var reads := {"parts": parts, "direct": direct, "got": {}, "total": 0, "scratch": RID()}
+	var total := 0
+	for p: Array in parts:
+		total += int(p[3])
+	reads["total"] = total
+	if total > 0:
+		var scratch := _scratch_for(total)
+		var at := 0
+		for p: Array in parts:
+			if int(p[3]) > 0:
+				rd.buffer_copy(arena.buf(p[1]), scratch, int(p[2]), at, int(p[3]))
+			at += int(p[3])
+		reads["scratch"] = scratch
+		rd.buffer_get_data_async(scratch, _read_in.bind(reads, ""), 0, total)
+	for p: Array in direct:
+		if int(p[3]) > 0:
+			rd.buffer_get_data_async(arena.buf(p[1]), _read_in.bind(reads, String(p[0])), int(p[2]), int(p[3]))
+	return reads
+
+
+func _read_in(data: PackedByteArray, reads: Dictionary, key: String) -> void:
+	(reads["got"] as Dictionary)[key] = data
+
+
+## The bytes of `_request`'s parts once the sync that ran them is done: key -> bytes (empty for a part of none). A part whose request did
+## not complete with the sync (none is expected to) is read with a wait.
+func _take(reads: Dictionary) -> Dictionary:
+	var got: Dictionary = reads["got"]
+	var out := {}
+	var total: int = reads["total"]
+	var data := PackedByteArray()
+	if total > 0:
+		var scratch: RID = reads["scratch"]
+		data = got.get("", PackedByteArray())
+		if data.size() < total:
+			data = rd.buffer_get_data(scratch, 0, total)
+		if scratch != _scratch:
+			rd.free_rid(scratch)
+	var at := 0
+	for p: Array in reads["parts"]:
+		out[p[0]] = data.slice(at, at + int(p[3])) if int(p[3]) > 0 else PackedByteArray()
+		at += int(p[3])
+	for p: Array in reads["direct"]:
+		var bytes := int(p[3])
+		var d: PackedByteArray = got.get(String(p[0]), PackedByteArray())
+		if bytes > 0 and d.size() < bytes:
+			d = rd.buffer_get_data(arena.buf(p[1]), int(p[2]), bytes)
+		out[p[0]] = d if bytes > 0 else PackedByteArray()
 	return out
 
 
@@ -1527,58 +1672,232 @@ func canonical_dump(row: int) -> Dictionary:
 	}
 
 
-## The share of dish `row`'s bups whose `gene` (a name of GpuLayout.GENE_NAMES) is at least `threshold`
-## (the goal tracker's input; a blocking read). The kernel counts the records' float genes at or above the least float
-## that is not below `threshold`, which is the same as comparing each float gene with `threshold` itself.
+# ---- answers --------------------------------------------------------------------------------------------------------------------------
+
+## The questions dishes ask, answered in one list from the state as it is when the list runs (`run` records them after the steps of its
+## list): `questions` holds for each dish {key (the caller's name for it), row, fractions: {name: [gene (a name of GpuLayout.GENE_NAMES),
+## threshold]} (up to GpuLayout.FRACTIONS), tracked: ids (up to GpuLayout.TRACKED), probes: PackedFloat32Array (x, y, speed, sense range a
+## point, dish-local µm), husks: PackedFloat32Array (x, y, reach a place, dish-local µm, up to GpuLayout.HUSK_QUERIES), steer (default true:
+## the steering at each tracked bup found)}. Returns key -> {fractions: {name: share}, tracked: {id: record bytes (`track`'s)}, steer: {id:
+## Vector3 (the way up the gradient at the bup, x and y, and its chance of steering up it, for its own speed and sense range)}, probes:
+## PackedFloat32Array (`probe`'s, for the points asked), husks: Array of {at: Vector2, reach, found (`husk_near`'s)}}. A dish whose
+## questions need the device takes a set of the question buffers (GpuLayout.ANSWER_SETS, set 0 the publish's); one that finds none left
+## is not answered (its key is not in the result) and asks again. A blocking read.
+func answer(questions: Array) -> Dictionary:
+	var staged := _answers_stage(questions)
+	var got := {}
+	if not (staged["sets"] as Array).is_empty():
+		var cl := rd.compute_list_begin()
+		_answers_record(cl, staged)
+		rd.compute_list_end()
+		var reads := _request(_answers_parts(staged), [])
+		rd.submit()
+		rd.sync()
+		got = _take(reads)
+	return _answers_take(staged, got)
+
+
+## The share of dish `row`'s bups whose `gene` (a name of GpuLayout.GENE_NAMES) is at least `threshold` (`answer`'s; a blocking read).
+## The kernel counts the records' float genes at or above the least float that is not below `threshold`, which is the same as comparing
+## each float gene with `threshold` itself.
 func fraction_with_gene_at_least(row: int, gene: String, threshold: float) -> float:
-	var g := GpuLayout.GENE_NAMES.find(gene)
-	var n := count(row) if _dishes.has(row) else 0
-	if g < 0 or n == 0:
-		return 0.0
-	arena.put_small("FRQ", arena.zeros(16))
-	_run_list(func(cl: int) -> void: _disp(cl, "pool_fraction", _bup_groups(), float(GpuLayout.R_SPEED + g), float(row), _float_at_least(threshold)))
-	return float(rd.buffer_get_data(arena.buf("FRQ"), 0, 4).decode_u32(0)) / n
+	var a: Dictionary = answer([{"key": 0, "row": row, "fractions": {"share": [gene, threshold]}}]).get(0, {})
+	return float((a.get("fractions", {}) as Dictionary).get("share", 0.0))
 
 
-## The records of the tracked bups `ids` (up to GpuLayout.TRACKED) of dish `row`, searched only in its segment (a blocking read): id ->
-## its first GpuLayout.ANSWER_BYTES bytes (everything but the chemotaxis memory). An id not in the dish (dead, never there, or in another
-## dish) is left out.
+## The records of the tracked bups `ids` (up to GpuLayout.TRACKED) of dish `row`, searched only in its segment (`answer`'s; a blocking
+## read): id -> its first GpuLayout.ANSWER_BYTES bytes (everything but the chemotaxis memory). An id not in the dish (dead, never there, or
+## in another dish) is left out.
 func track(row: int, ids: PackedInt64Array) -> Dictionary:
-	var n := mini(ids.size(), GpuLayout.TRACKED)
-	if n == 0 or not _dishes.has(row) or count(row) == 0:
-		return {}
-	_put_track(ids)
-	_run_list(func(cl: int) -> void: _disp_track(cl, row))
-	return _took_track(ids)
+	var a: Dictionary = answer([{"key": 0, "row": row, "tracked": ids, "steer": false}]).get(0, {})
+	return a.get("tracked", {})
 
 
-## The tracked bups' question (TQ) and an answer of none for each (TR), before the list that runs `pool_track`.
-func _put_track(ids: PackedInt64Array) -> void:
+## The field and the steering at points of dish `row` (`pool_probe_full`, on the field and the cloud lists of the last step; `answer`'s, a
+## blocking read): `points` holds x, y, speed, sense range for each point (up to GpuLayout.PROBES_MOST; dish-local µm). Returns for each
+## point GpuLayout.PROBE_FLOATS floats: the unit direction up the gradient (x, y), the chance of steering up it for a bup of that speed and
+## sense range (0.5 where there is no gradient), the nutrient concentration there (the grid's and the clouds') and the gradient's size
+## (concentration per µm).
+func probe(row: int, points: PackedFloat32Array) -> PackedFloat32Array:
+	var a: Dictionary = answer([{"key": 0, "row": row, "probes": points}]).get(0, {})
+	return a.get("probes", PackedFloat32Array())
+
+
+## For each place of dish `row` (`places`: x, y, reach, up to GpuLayout.HUSK_QUERIES; dish-local µm), the nearest live husk within reach
+## as PackedFloat32Array([x, y, energy, age, pieces let go]), or an empty one for none (`answer`'s; a blocking read).
+func husk_near(row: int, places: PackedFloat32Array) -> Array:
+	var a: Dictionary = answer([{"key": 0, "row": row, "husks": places}]).get(0, {})
+	return (a.get("husks", []) as Array).map(func(h: Dictionary) -> PackedFloat32Array: return h["found"])
+
+
+## Before the list: each dish's questions as what its kernels need, the dishes that need the device in a set of their own (from 1; set 0 is
+## the publish's) with the set's buffers filled (FRQ counts from 0, the tracked ids in TQ and none in TR, the asked points in SPQ after
+## the tracked bups' places, the husk places in HNQ and none in HNR). {sets: [entry], plain: [entry]} (plain: answered without the
+## device); a dish past the last set is in neither.
+func _answers_stage(questions: Array) -> Dictionary:
+	var sets: Array = []
+	var plain: Array = []
+	for q: Dictionary in questions:
+		var row: int = q.get("row", -1)
+		var e := {"key": q.get("key", row), "row": row, "set": -1, "names": [], "genes": [], "thresholds": [], "ids": PackedInt64Array(),
+			"steer": bool(q.get("steer", true)), "tracked_points": 0, "asked": 0, "places": PackedFloat32Array(), "husks": 0}
+		var places := PackedFloat32Array(q.get("husks", PackedFloat32Array()))
+		e["husks"] = mini(places.size() / 3, GpuLayout.HUSK_QUERIES)
+		e["places"] = places.slice(0, e["husks"] * 3)
+		var fr: Dictionary = q.get("fractions", {})
+		for name: Variant in fr:
+			if (e["names"] as Array).size() >= GpuLayout.FRACTIONS:
+				break
+			var f: Array = fr[name]
+			e["names"].append(name)
+			e["genes"].append(GpuLayout.GENE_NAMES.find(String(f[0])))
+			e["thresholds"].append(float(f[1]))
+		if not _dishes.has(row):
+			plain.append(e)
+			continue
+		var ids := PackedInt64Array(q.get("tracked", PackedInt64Array()))
+		e["ids"] = ids.slice(0, GpuLayout.TRACKED)
+		e["tracked_points"] = (e["ids"] as PackedInt64Array).size() if e["steer"] else 0
+		var asked := PackedFloat32Array(q.get("probes", PackedFloat32Array()))
+		e["asked"] = mini(asked.size() / 4, GpuLayout.PROBES_MOST - int(e["tracked_points"]))
+		var device: bool = (e["genes"] as Array).any(func(g: int) -> bool: return g >= 0) or not (e["ids"] as PackedInt64Array).is_empty() or int(e["asked"]) > 0 or int(e["husks"]) > 0
+		if not device:
+			plain.append(e)
+			continue
+		if sets.size() + 1 >= GpuLayout.ANSWER_SETS:
+			continue  # (no set left: the dish is answered in a later list)
+		var s := sets.size() + 1
+		e["set"] = s
+		if not (e["ids"] as PackedInt64Array).is_empty():
+			_put_track(e["ids"], s)
+		if int(e["asked"]) > 0:
+			var pb := asked.slice(0, int(e["asked"]) * 4).to_byte_array()
+			rd.buffer_update(arena.buf("SPQ"), (s * GpuLayout.PROBES_MOST + int(e["tracked_points"])) * 16, pb.size(), pb)
+		if int(e["husks"]) > 0:
+			var hq := PackedFloat32Array()
+			var none := PackedInt32Array()
+			for k in int(e["husks"]):
+				hq.append_array(PackedFloat32Array([places[k * 3], places[k * 3 + 1], places[k * 3 + 2], 0.0]))
+				var a := PackedInt32Array()
+				a.resize(GpuLayout.HN_WORDS)
+				a[0] = -1
+				none.append_array(a)
+			var qb := hq.to_byte_array()
+			var nb := none.to_byte_array()
+			var at := s * GpuLayout.HUSK_QUERIES
+			rd.buffer_update(arena.buf("HNQ"), at * 16, qb.size(), qb)
+			rd.buffer_update(arena.buf("HNR"), at * GpuLayout.HN_WORDS * 4, nb.size(), nb)
+		sets.append(e)
+	if not sets.is_empty():
+		var zeros := arena.zeros(GpuLayout.ANSWER_SETS * GpuLayout.FRACTIONS * 4)
+		rd.buffer_update(arena.buf("FRQ"), 0, zeros.size(), zeros)
+	return {"sets": sets, "plain": plain}
+
+
+## The answers' kernels for the staged sets, into the open list `cl`. Each bounds its loop by what the device holds when it runs (the
+## dish's segment, the slots in use), so the counts the host knows before the steps size only the dispatch.
+func _answers_record(cl: int, staged: Dictionary) -> void:
+	for e: Dictionary in staged["sets"]:
+		var s: int = e["set"]
+		var row: int = e["row"]
+		var genes: Array = e["genes"]
+		for i in genes.size():
+			if int(genes[i]) >= 0:
+				_disp(cl, "pool_fraction", _bup_groups(), float(GpuLayout.R_SPEED + int(genes[i])), float(row), _float_at_least(float(e["thresholds"][i])), float(s * GpuLayout.FRACTIONS + i))
+		if not (e["ids"] as PackedInt64Array).is_empty():
+			_disp_track(cl, row, s)
+			if e["steer"]:
+				_disp(cl, "pool_track_points", 1, float(s))
+		var points: int = int(e["tracked_points"]) + int(e["asked"])
+		if points > 0:
+			_disp(cl, "pool_probe_full", 1, float(points), float(row), float(_consts["steering_window"]), float(s))
+		if int(e["husks"]) > 0:
+			var kg := _groups(maxi(_wd(GpuLayout.WD_HUSK_SLOTS), 64))
+			_disp(cl, "pool_husk_near", kg, float(row), float(e["husks"]), float(s))
+			_disp(cl, "pool_husk_near2", kg, float(row), float(e["husks"]), float(s))
+			_disp(cl, "pool_husk_near3", 1, float(row), float(e["husks"]), float(s))
+
+
+## The parts of the question buffers the staged sets' answers are in, for `_request`.
+func _answers_parts(staged: Dictionary) -> Array:
+	var top := 0
+	for e: Dictionary in staged["sets"]:
+		top = maxi(top, int(e["set"]) + 1)
+	if top == 0:
+		return []
+	return [["FRQ", "FRQ", 0, top * GpuLayout.FRACTIONS * 4], ["TR", "TR", 0, top * GpuLayout.TRACKED * GpuLayout.ANSWER_BYTES],
+		["SPR", "SPR", 0, top * GpuLayout.PROBES_MOST * GpuLayout.PROBE_FLOATS * 4], ["HNR", "HNR", 0, top * GpuLayout.HUSK_QUERIES * GpuLayout.HN_WORDS * 4]]
+
+
+## After the sync (and the read back of DSTATE, so a share is of the dish's bups then): each staged dish's answer, by its key.
+func _answers_take(staged: Dictionary, got: Dictionary) -> Dictionary:
+	var out := {}
+	for e: Dictionary in staged["plain"] + staged["sets"]:
+		var s: int = e["set"]
+		var n := count(e["row"]) if _dishes.has(e["row"]) else 0
+		var shares := {}
+		var names: Array = e["names"]
+		for i in names.size():
+			var share := 0.0
+			if s >= 0 and int(e["genes"][i]) >= 0 and n > 0:
+				share = float((got["FRQ"] as PackedByteArray).decode_u32((s * GpuLayout.FRACTIONS + i) * 4)) / n
+			shares[names[i]] = share
+		var ids: PackedInt64Array = e["ids"]
+		var tracked := {}
+		var steer := {}
+		var probes := PackedFloat32Array()
+		if s >= 0:
+			var tr_bytes := GpuLayout.TRACKED * GpuLayout.ANSWER_BYTES
+			tracked = _took_track(ids, (got["TR"] as PackedByteArray).slice(s * tr_bytes, (s + 1) * tr_bytes))
+			var pf := GpuLayout.PROBE_FLOATS
+			var spr := (got["SPR"] as PackedByteArray).slice(s * GpuLayout.PROBES_MOST * pf * 4, (s + 1) * GpuLayout.PROBES_MOST * pf * 4).to_float32_array()
+			if e["steer"]:
+				for t in ids.size():
+					if tracked.has(ids[t]):
+						steer[ids[t]] = Vector3(spr[t * pf], spr[t * pf + 1], spr[t * pf + 2])
+			var first: int = e["tracked_points"]
+			probes = spr.slice(first * pf, (first + int(e["asked"])) * pf)
+		var husks: Array = []
+		var places: PackedFloat32Array = e["places"]
+		for k in int(e["husks"]):
+			var found := PackedFloat32Array()
+			if s >= 0:
+				var a := ((s * GpuLayout.HUSK_QUERIES + k) * GpuLayout.HN_WORDS) * 4
+				var hn: PackedByteArray = got["HNR"]
+				if hn.decode_u32(a + 4) != 0:
+					found = hn.slice(a + 8, a + 28).to_float32_array()
+			husks.append({"at": Vector2(places[k * 3], places[k * 3 + 1]), "reach": places[k * 3 + 2], "found": found})
+		out[e["key"]] = {"fractions": shares, "tracked": tracked, "steer": steer, "probes": probes, "husks": husks}
+	return out
+
+
+## Set `which`'s tracked ids (TQ) and an answer of none for each (TR), before the list that runs `pool_track`.
+func _put_track(ids: PackedInt64Array, which: int) -> void:
 	var n := mini(ids.size(), GpuLayout.TRACKED)
-	var q := arena.zeros((1 + 2 * GpuLayout.TRACKED) * 4)
+	var q := arena.zeros(GpuLayout.TQ_WORDS * 4)
 	q.encode_u32(0, n)
 	for t in n:
 		q.encode_u32((1 + 2 * t) * 4, ids[t] & 0xFFFFFFFF)
 		q.encode_u32((2 + 2 * t) * 4, (ids[t] >> 32) & 0xFFFFFFFF)
-	rd.buffer_update(arena.buf("TQ"), 0, q.size(), q)
+	rd.buffer_update(arena.buf("TQ"), which * GpuLayout.TQ_WORDS * 4, q.size(), q)
 	var none := arena.zeros(GpuLayout.TRACKED * GpuLayout.ANSWER_BYTES)
 	for t in GpuLayout.TRACKED:
 		none.encode_u32(t * GpuLayout.ANSWER_BYTES + GpuLayout.R_ID_LO * 4, 0xFFFFFFFF)
 		none.encode_u32(t * GpuLayout.ANSWER_BYTES + GpuLayout.R_ID_HI * 4, 0xFFFFFFFF)
-	rd.buffer_update(arena.buf("TR"), 0, none.size(), none)
+	rd.buffer_update(arena.buf("TR"), which * none.size(), none.size(), none)
 
 
-func _disp_track(cl: int, row: int) -> void:
-	var m := count(row)
-	_disp(cl, "pool_track", _groups(m), float(_ds(row, GpuLayout.DS_START)), float(m))
+## `pool_track` of set `which` over dish `row`'s segment as the device has it when it runs (dispatched for the count the host knows: the
+## loop is bounded on the device).
+func _disp_track(cl: int, row: int, which: int) -> void:
+	_disp(cl, "pool_track", _groups(maxi(count(row), 64)), float(row), float(which))
 
 
-## The answers `pool_track` wrote, after the list's sync (TR is small: read straight back): id -> record bytes, the ids found only.
-func _took_track(ids: PackedInt64Array) -> Dictionary:
+## The answers `pool_track` wrote (`got`: the set's TR, read after the list's sync): id -> record bytes, the ids found only.
+func _took_track(ids: PackedInt64Array, got: PackedByteArray) -> Dictionary:
 	var out := {}
 	var n := mini(ids.size(), GpuLayout.TRACKED)
-	var got := rd.buffer_get_data(arena.buf("TR"), 0, n * GpuLayout.ANSWER_BYTES)
-	for t in n:
+	for t in mini(n, got.size() / GpuLayout.ANSWER_BYTES):
 		var answer := got.slice(t * GpuLayout.ANSWER_BYTES, (t + 1) * GpuLayout.ANSWER_BYTES)
 		if _answer_id(answer) == ids[t]:
 			out[ids[t]] = answer
@@ -1587,20 +1906,6 @@ func _took_track(ids: PackedInt64Array) -> Dictionary:
 
 static func _answer_id(answer: PackedByteArray) -> int:
 	return answer.decode_u32(GpuLayout.R_ID_LO * 4) | (answer.decode_u32(GpuLayout.R_ID_HI * 4) << 32)
-
-
-## The field and the steering at points of dish `row` (`pool_probe_full`, on the field and the cloud lists of the last step): `points` holds
-## x, y, speed, sense range for each point (up to PROBES_MOST; dish-local µm). Returns for each point GpuLayout.PROBE_FLOATS floats: the
-## unit direction up the gradient (x, y), the chance of steering up it for a bup of that speed and sense range (0.5 where there is no
-## gradient), the nutrient concentration there (the grid's and the clouds') and the gradient's size (concentration per µm).
-func probe(row: int, points: PackedFloat32Array) -> PackedFloat32Array:
-	var n := mini(points.size() / 4, PROBES_MOST)
-	if n == 0 or not _dishes.has(row):
-		return PackedFloat32Array()
-	var q := points.slice(0, n * 4).to_byte_array()
-	rd.buffer_update(arena.buf("SPQ"), 0, q.size(), q)
-	_run_list(func(cl: int) -> void: _disp(cl, "pool_probe_full", 1, float(n), float(row), float(_consts["steering_window"])))
-	return (read_parts([["SPR", 0, n * GpuLayout.PROBE_FLOATS * 4]])[0] as PackedByteArray).to_float32_array()
 
 
 ## Dish `row`'s live husks (alive, with a piece not yet let go: what the cull keeps) as 2D MultiMesh transforms, 8 floats each (a unit
@@ -1689,46 +1994,6 @@ func husk_view_drop() -> void:
 	_husk_read = {}
 
 
-## For each place of dish `row` (`places`: x, y, reach, up to GpuLayout.HUSK_QUERIES; dish-local µm), the nearest live husk within reach
-## as PackedFloat32Array([x, y, energy, age, pieces let go]), or an empty one for none.
-func husk_near(row: int, places: PackedFloat32Array) -> Array:
-	var n := mini(places.size() / 3, GpuLayout.HUSK_QUERIES)
-	var out: Array = []
-	if n == 0 or not _dishes.has(row) or _wd(GpuLayout.WD_HUSK_SLOTS) == 0:
-		for k in n:
-			out.append(PackedFloat32Array())
-		return out
-	var q := PackedFloat32Array()
-	var none := PackedInt32Array()
-	for k in n:
-		q.append_array(PackedFloat32Array([places[k * 3], places[k * 3 + 1], places[k * 3 + 2], 0.0]))
-		var answer := PackedInt32Array()
-		answer.resize(GpuLayout.HN_WORDS)
-		answer[0] = -1
-		none.append_array(answer)
-	var qb := q.to_byte_array()
-	var nb := none.to_byte_array()
-	rd.buffer_update(arena.buf("HNQ"), 0, qb.size(), qb)
-	rd.buffer_update(arena.buf("HNR"), 0, nb.size(), nb)
-	var kg := _groups(_wd(GpuLayout.WD_HUSK_SLOTS))
-	_run_list(func(cl: int) -> void:
-		_disp(cl, "pool_husk_near", kg, float(row), float(n))
-		_disp(cl, "pool_husk_near2", kg, float(row), float(n))
-		_disp(cl, "pool_husk_near3", 1, float(row), float(n)), false)
-	var got: PackedByteArray = read_parts([["HNR", 0, n * GpuLayout.HN_WORDS * 4]])[0]
-	for k in n:
-		var a := k * GpuLayout.HN_WORDS * 4
-		out.append(got.slice(a + 8, a + 28).to_float32_array() if got.decode_u32(a + 4) != 0 else PackedFloat32Array())
-	return out
-
-
-## A bup's sense range from its record's words (RecordCodec's): its sense gene times the root of its size (the
-## root of its mass) over the reference size.
-func sense_range_of(answer: PackedByteArray) -> float:
-	var mass := answer.decode_float(GpuLayout.R_MASS * 4)
-	return answer.decode_float(GpuLayout.R_SENSE * 4) * sqrt(sqrt(maxf(mass, 0.0)) / float(_consts["reference_size"]))
-
-
 ## The least float (32-bit) that is not below `x`.
 static func _float_at_least(x: float) -> float:
 	var b := PackedByteArray()
@@ -1802,28 +2067,47 @@ func _events_of(row: int) -> Array:
 
 # ---- publish ------------------------------------------------------------------------------------------------------------------------
 
-## The main dish's pictures into the next free shared texture of each kind, after the iteration's sync: its payload and
-## ids (bups after the last step), and when asked its field's haze and steering pictures and every dish's thumbnail. Only a free texture is
-## written (see the header); a kind with none is not published this time. Every texture written holds this publish's number, `publish_seq`
-## after the call. Returns kind -> the texture index written, and with a payload written and `view.track` ids asked, "tracked": those bups'
-## records as the payload has them (as `track` gives them, looked up in the same list).
+## The main dish's pictures into the next free shared texture of each kind: its payload and ids (its bups as they are), and when asked
+## its field's haze and steering pictures and every dish's thumbnail. Only a free texture is written (see the header); a kind with none is
+## not published this time. Every texture written holds this publish's number, `publish_seq` after the call. Returns kind -> the texture
+## index written, and with a payload written and `view.track` ids asked, "tracked": those bups' records as the payload has them (as `track`
+## gives them, looked up in the same list). A list of its own, one submit and one wait; `run` records the same after the steps of its list
+## (`_publish_stage`, `_publish_record`, `_publish_parts`, `_publish_take`).
 func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
-	var out := {}
+	var pub := _publish_stage(view, count(view.row) if view != null and _dishes.has(view.row) else 0)
+	if pub.is_empty():
+		return {}
+	var cl := rd.compute_list_begin()
+	_publish_record(cl, pub)
+	rd.compute_list_end()
+	var parts: Array = []
+	var direct: Array = []
+	_publish_parts(pub, parts, direct)
+	var reads := _request(parts, direct)
+	rd.submit()
+	rd.sync()
+	return _publish_take(pub, _take(reads))
+
+
+## Before the list: the pictures' buffers made for `expect` bups (the count the dish is expected to have when the kernels run: they write
+## no further than the buffers hold), the free textures chosen and the small buffers the kernels read filled. {} when nothing is
+## published (none of the dish, its buffers past the memory budget, no texture free).
+func _publish_stage(view: ViewRequest, expect: int) -> Dictionary:
 	if view == null or not _dishes.has(view.row):
-		return out
+		return {}
 	var row := view.row
 	var cd: CoreDish = _dishes[row]
-	var n := _ds(row, GpuLayout.DS_COUNT)
-	var rows := maxi(1, (n + GpuLayout.PAYLOAD_TEX_WIDTH - 1) / GpuLayout.PAYLOAD_TEX_WIDTH)
-	var texels := rows * GpuLayout.PAYLOAD_TEX_WIDTH
-	var drawn := arena.ensure_draw(texels, cd.grid.n * cd.grid.n, ((cd.cap + GpuLayout.PAYLOAD_TEX_WIDTH - 1) / GpuLayout.PAYLOAD_TEX_WIDTH) * GpuLayout.PAYLOAD_TEX_WIDTH, view.want_thumbnails)
+	var width := GpuLayout.PAYLOAD_TEX_WIDTH
+	var rows := maxi(1, (expect + width - 1) / width)
+	var texels := rows * width
+	var drawn := arena.ensure_draw(texels, cd.grid.n * cd.grid.n, ((cd.cap + width - 1) / width) * width, view.want_thumbnails)
 	_after_growth()
 	if not drawn:
-		var why := "SimCore: the pictures' buffers for %d bups and a field of %d cells would pass the memory budget of %d bytes: not published" % [n, cd.grid.n * cd.grid.n, limits.memory_budget_bytes]
+		var why := "SimCore: the pictures' buffers for %d bups and a field of %d cells would pass the memory budget of %d bytes: not published" % [expect, cd.grid.n * cd.grid.n, limits.memory_budget_bytes]
 		if draw_refusal == "":
 			errors.append(why)  # (once while it lasts: the thread reports it as the refused iteration, so the game shows the memory banner)
 		draw_refusal = why
-		return out
+		return {}
 	draw_refusal = ""
 	_free_retired()
 	var nn := cd.grid.n
@@ -1837,51 +2121,131 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 		sw = fw
 		tw = 0 if view.want_thumbnails else -1
 	else:
-		w = _free_texture("payload", Vector2i(GpuLayout.PAYLOAD_TEX_WIDTH, maxi(rows, arena.draw_rows())))  # (as tall as the buffers' room: made anew only when that grows)
+		w = _free_texture("payload", Vector2i(width, maxi(rows, arena.draw_rows())))  # (as tall as the buffers' room: made anew only when that grows)
 		fw = _free_texture("haze", Vector2i(nn, nn)) if view.want_field_view else -1
 		sw = _free_texture("steer", Vector2i(nn, nn)) if view.want_field_view else -1
 		tw = _free_texture("thumbs", Vector2i(GpuKernelsDraw.THUMB_ATLAS, GpuKernelsDraw.THUMB_ATLAS)) if view.want_thumbnails else -1
 	if w < 0 and fw < 0 and sw < 0 and tw < 0:
-		return out
+		return {}
 	if fw >= 0 or sw >= 0:
 		arena.put_small("VQ", PackedFloat32Array([view.steer.x, view.steer.y, view.steer_alpha, float(_consts["steering_window"])]).to_byte_array())
 		_free_sets_using(["VQ"])
-	var tracking := w >= 0 and not view.track.is_empty() and n > 0
+	var tracking := w >= 0 and not view.track.is_empty() and count(row) > 0
 	if tracking:
-		_put_track(view.track)
-	_run_list(func(cl: int) -> void:
-		if w >= 0:
-			_disp(cl, "pool_payload", _groups(texels), float(row))
-			if not cpu_handover:
-				_copy(cl, "pool_copy_payload", {"PAYTEX": _textures["payload"][w], "IDS": _textures["ids"][w]}, GpuLayout.PAYLOAD_TEX_WIDTH, texels)
-		if tracking:
-			_disp_track(cl, row)
-		if fw >= 0 or sw >= 0:
-			_disp(cl, "pool_view_faint_clear", _groups(nn * nn), float(row))
-			_disp(cl, "pool_view_faint", _groups(maxi(_wd(GpuLayout.WD_CLOUD_SLOTS), 64)), float(row))
-			_disp(cl, "pool_view", _groups(nn * nn), float(row))
-		if fw >= 0:
-			_disp(cl, "pool_haze", _groups(nn * nn), float(row), view.haze.x, view.haze.y, view.haze.z)
-			if not cpu_handover:
-				_copy_pix(cl, "HAZEPIX", _textures["haze"][fw], nn, nn * nn)
-		if sw >= 0:
-			_disp(cl, "pool_steer_map", _groups(nn * nn), float(row))
-			if not cpu_handover:
-				_copy_pix(cl, "STEERPIX", _textures["steer"][sw], nn, nn * nn)
-		if tw >= 0:
-			var tiles := D_MAX * GpuKernelsDraw.THUMB_TILE * GpuKernelsDraw.THUMB_TILE
-			_disp(cl, "pool_thumb_clear", _groups(tiles))
-			_disp(cl, "pool_thumb_splat", _bup_groups())
-			_disp(cl, "pool_thumb_resolve", _groups(tiles))
-			if not cpu_handover: _copy_pix(cl, "THUMBS", _textures["thumbs"][tw], GpuKernelsDraw.THUMB_ATLAS, GpuKernelsDraw.THUMB_ATLAS * GpuKernelsDraw.THUMB_ATLAS), false)
-	if cpu_handover:
-		_read_handed(n, nn, w >= 0, fw >= 0, sw >= 0, tw >= 0)
+		_put_track(view.track, 0)
+	var room := arena.draw_rows() * width
+	return {"view": view, "row": row, "texels": texels, "room": room, "expect": mini(expect, room), "nn": nn, "w": w, "fw": fw, "sw": sw,
+		"tw": tw, "tracking": tracking}
+
+
+## The pictures' kernels into the open list `cl` (nothing for a `pub` of {}). The payload and its copy run over the dish's bups as the
+## device has them then, within the buffers' room.
+func _publish_record(cl: int, pub: Dictionary) -> void:
+	if pub.is_empty():
+		return
+	var row: int = pub["row"]
+	var view: ViewRequest = pub["view"]
+	var nn: int = pub["nn"]
+	var room: int = pub["room"]
+	if pub["w"] >= 0:
+		_disp(cl, "pool_payload", _groups(pub["texels"]), float(row), float(room))
+		if not cpu_handover:
+			var w: int = pub["w"]
+			_copy(cl, "pool_copy_payload", {"PAYTEX": _textures["payload"][w], "IDS": _textures["ids"][w]}, GpuLayout.PAYLOAD_TEX_WIDTH, room, float(row))
+	if pub["tracking"]:
+		_disp_track(cl, row, 0)
+	if pub["fw"] >= 0 or pub["sw"] >= 0:
+		_disp(cl, "pool_view_faint_clear", _groups(nn * nn), float(row))
+		_disp(cl, "pool_view_faint", _groups(maxi(_wd(GpuLayout.WD_CLOUD_SLOTS), 64)), float(row))
+		_disp(cl, "pool_view", _groups(nn * nn), float(row))
+	if pub["fw"] >= 0:
+		_disp(cl, "pool_haze", _groups(nn * nn), float(row), view.haze.x, view.haze.y, view.haze.z)
+		if not cpu_handover:
+			_copy_pix(cl, "HAZEPIX", _textures["haze"][pub["fw"]], nn, nn * nn)
+	if pub["sw"] >= 0:
+		_disp(cl, "pool_steer_map", _groups(nn * nn), float(row))
+		if not cpu_handover:
+			_copy_pix(cl, "STEERPIX", _textures["steer"][pub["sw"]], nn, nn * nn)
+	if pub["tw"] >= 0:
+		var tiles := D_MAX * GpuKernelsDraw.THUMB_TILE * GpuKernelsDraw.THUMB_TILE
+		_disp(cl, "pool_thumb_clear", _groups(tiles))
+		_disp(cl, "pool_thumb_splat", _bup_groups())
+		_disp(cl, "pool_thumb_resolve", _groups(tiles))
+		if not cpu_handover:
+			_copy_pix(cl, "THUMBS", _textures["thumbs"][pub["tw"]], GpuKernelsDraw.THUMB_ATLAS, GpuKernelsDraw.THUMB_ATLAS * GpuKernelsDraw.THUMB_ATLAS)
+
+
+## What the pictures read back, added to `parts` and `direct` (`_request`'s): the tracked bups' records (set 0 of TR) and, with
+## `cpu_handover`, what is handed over, each straight from the buffer it was written in, only the part in use (the payload as far as the
+## dish is expected to reach, the atlas's tile rows of the dishes in the pool).
+func _publish_parts(pub: Dictionary, parts: Array, direct: Array) -> void:
+	if pub.is_empty():
+		return
+	if pub["tracking"]:
+		parts.append(["TR0", "TR", 0, mini((pub["view"] as ViewRequest).track.size(), GpuLayout.TRACKED) * GpuLayout.ANSWER_BYTES])
+	if not cpu_handover:
+		return
+	var nn: int = pub["nn"]
+	if pub["w"] >= 0:
+		direct.append(["payload", "PAYLOAD", 0, int(pub["expect"]) * GpuLayout.PAYLOAD_BYTES])
+	if pub["fw"] >= 0:
+		direct.append(["haze", "HAZEPIX", 0, nn * nn * 4])
+	if pub["sw"] >= 0:
+		direct.append(["steer", "STEERPIX", 0, nn * nn * 4])
+	if pub["tw"] >= 0:
+		direct.append(["thumbs", "THUMBS", 0, _thumb_rows() * GpuKernelsDraw.THUMB_TILE * GpuKernelsDraw.THUMB_ATLAS * 4])
+
+
+## The rows of the thumbnails' atlas that hold a running dish's tile.
+func _thumb_rows() -> int:
+	var most := 0
+	for row: int in _dishes:
+		most = maxi(most, row)
+	return most / (GpuKernelsDraw.THUMB_ATLAS / GpuKernelsDraw.THUMB_TILE) + 1
+
+
+## After the sync (and the read back of DSTATE): what `publish` returns, from what the list wrote and `got` (`_take`'s). With
+## `cpu_handover` the handed-over bytes go to `handed`: the payload's texels of the dish's bups now (read on, with a wait, past what was
+## expected), the pictures' pixels and the atlas's rows in use. A dish that outgrew the pictures' buffers in the steps is drawn only in
+## part, so its payload is not published this time (the next is made for its count).
+func _publish_take(pub: Dictionary, got: Dictionary) -> Dictionary:
+	var out := {}
+	if pub.is_empty():
+		return out
+	var started := Time.get_ticks_usec()
 	for t: RID in _temp_sets:
 		if rd.uniform_set_is_valid(t):
 			rd.free_rid(t)
 	_temp_sets.clear()
-	for pair in [["payload", w], ["haze", fw], ["steer", sw], ["thumbs", tw]]:
-		if pair[1] >= 0:
+	var view: ViewRequest = pub["view"]
+	var n := count(pub["row"])
+	var w: int = pub["w"] if n <= int(pub["room"]) else -1
+	if cpu_handover:
+		handed = {}
+		if w >= 0:
+			var payload: PackedByteArray = got.get("payload", PackedByteArray())
+			var bytes := n * GpuLayout.PAYLOAD_BYTES
+			if payload.size() >= bytes:
+				payload = payload.slice(0, bytes)
+			else:
+				payload.append_array(rd.buffer_get_data(arena.buf("PAYLOAD"), payload.size(), bytes - payload.size()))
+			handed["payload"] = payload
+		if pub["fw"] >= 0:
+			handed["haze"] = got.get("haze", PackedByteArray())
+		if pub["sw"] >= 0:
+			handed["steer"] = got.get("steer", PackedByteArray())
+		if pub["tw"] >= 0:
+			handed["thumbs"] = got.get("thumbs", PackedByteArray())
+			handed["thumb_rows"] = _thumb_rows()
+		var total := 0
+		for kind: String in ["payload", "haze", "steer", "thumbs"]:
+			total += (handed.get(kind, PackedByteArray()) as PackedByteArray).size()
+		if total > 0:
+			handed_usec += Time.get_ticks_usec() - started
+			handed_calls += 1
+			handed_bytes += total
+	for pair: Array in [["payload", w], ["haze", pub["fw"]], ["steer", pub["sw"]], ["thumbs", pub["tw"]]]:
+		if int(pair[1]) >= 0:
 			out[pair[0]] = pair[1]
 	if out.is_empty():
 		return out
@@ -1896,57 +2260,9 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 		_texture_used[kind][i] = -1
 		_superseded[kind][i] = -1
 		_next_texture[kind] = (i + 1) % TEXTURES
-	if tracking:
-		out["tracked"] = _took_track(view.track)
+	if pub["tracking"] and w >= 0:
+		out["tracked"] = _took_track(view.track, got.get("TR0", PackedByteArray()))
 	return out
-
-
-## With `cpu_handover`: reads what the publish wrote into `handed`, only the part in use (the payload's `n` texels, the atlas's tile rows
-## of the dishes in the pool), each straight from the buffer it was written in: a request for each (`buffer_get_data_async`, which gives
-## the bytes the buffer held at the request's place in the commands, and costs less than the same read waited for) and one wait for
-## them all. The bups' ids stay on this device (`_keep_ids`): the main side draws from the payload and asks for the id of a bup it picked
-## (`ids_at`).
-func _read_handed(n: int, nn: int, payload: bool, haze: bool, steer: bool, thumbs: bool) -> void:
-	handed = {}
-	var started := Time.get_ticks_usec()
-	var asked := {}  ## kind -> its buffer and bytes, until the bytes have come
-	var read := func(kind: String, buffer: String, bytes: int) -> void:
-		handed[kind] = PackedByteArray()
-		if bytes > 0:
-			asked[kind] = [buffer, bytes]
-			rd.buffer_get_data_async(arena.buf(buffer), _handed_in.bind(kind, asked), 0, bytes)
-	if payload:
-		read.call("payload", "PAYLOAD", n * GpuLayout.PAYLOAD_BYTES)
-	if haze:
-		read.call("haze", "HAZEPIX", nn * nn * 4)
-	if steer:
-		read.call("steer", "STEERPIX", nn * nn * 4)
-	if thumbs:
-		var across := GpuKernelsDraw.THUMB_ATLAS / GpuKernelsDraw.THUMB_TILE
-		var most := 0
-		for row: int in _dishes:
-			most = maxi(most, row)
-		var tile_rows := most / across + 1
-		handed["thumb_rows"] = tile_rows
-		read.call("thumbs", "THUMBS", tile_rows * GpuKernelsDraw.THUMB_TILE * GpuKernelsDraw.THUMB_ATLAS * 4)
-	if not asked.is_empty():
-		rd.submit()
-		rd.sync()
-	for kind: String in asked.keys():  # (none expected: the requests are answered by the wait)
-		handed[kind] = rd.buffer_get_data(arena.buf(asked[kind][0]), 0, asked[kind][1])
-	var total := 0
-	for kind: String in ["payload", "haze", "steer", "thumbs"]:
-		total += (handed.get(kind, PackedByteArray()) as PackedByteArray).size()
-	if total == 0:
-		return
-	handed_usec += Time.get_ticks_usec() - started
-	handed_calls += 1
-	handed_bytes += total
-
-
-func _handed_in(data: PackedByteArray, kind: String, asked: Dictionary) -> void:
-	handed[kind] = data
-	asked.erase(kind)
 
 
 ## With `cpu_handover`: the ids of the payload just published (number `publish_seq`) copied, on this device, into the ring's next slot.
@@ -2107,8 +2423,8 @@ func retired_textures() -> Dictionary:
 	return out
 
 
-## A copy kernel with image bindings: its storage buffers by name, its images from `images`.
-func _copy(cl: int, kname: String, images: Dictionary, width: int, texels: int) -> void:
+## A copy kernel with image bindings: its storage buffers by name, its images from `images`; `pc` its third push constant.
+func _copy(cl: int, kname: String, images: Dictionary, width: int, texels: int, pc := 0.0) -> void:
 	var k: Dictionary = _made[kname]
 	var uniforms: Array[RDUniform] = []
 	var names: Array = k["buffers"]
@@ -2128,7 +2444,7 @@ func _copy(cl: int, kname: String, images: Dictionary, width: int, texels: int) 
 	var set_rid := rd.uniform_set_create(uniforms, k["shader"], 0)
 	rd.compute_list_bind_compute_pipeline(cl, k["pipeline"])
 	rd.compute_list_bind_uniform_set(cl, set_rid, 0)
-	rd.compute_list_set_push_constant(cl, PackedFloat32Array([float(width), float(texels), 0.0, 0.0]).to_byte_array(), 16)
+	rd.compute_list_set_push_constant(cl, PackedFloat32Array([float(width), float(texels), pc, 0.0]).to_byte_array(), 16)
 	rd.compute_list_dispatch(cl, _groups(texels), 1, 1)
 	rd.compute_list_add_barrier(cl)
 	_temp_sets.append(set_rid)
@@ -2285,8 +2601,13 @@ func _run_list(rec: Callable, read_back := true) -> void:
 
 
 func _read_back() -> void:
-	_world = rd.buffer_get_data(arena.buf("WORLD"))
-	_dstate = rd.buffer_get_data(arena.buf("DSTATE"))
+	_apply_read_back(rd.buffer_get_data(arena.buf("WORLD")), rd.buffer_get_data(arena.buf("DSTATE")))
+
+
+## WORLD and DSTATE as read after a sync become the host's (`_world`, `_dstate`), with what the host takes from them.
+func _apply_read_back(world: PackedByteArray, dstate: PackedByteArray) -> void:
+	_world = world
+	_dstate = dstate
 	_overflow |= _wd(GpuLayout.WD_OVERFLOW)
 	var peak := _wd(GpuLayout.WD_ENTRIES_PEAK)
 	if peak > 0:  # (what the lists asked for: the kernel keeps the most since it was last set to 0, and the host takes it here)

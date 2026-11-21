@@ -2,8 +2,8 @@ class_name GpuKernelsCore
 extends RefCounted
 ## The pooled world's host operations as kernels (SimCore, scripts/sim/sim_core.gd; see gpu/kernels.gd for how a kernel is made): a
 ## dish's clouds and husks leaving with it, the field edits (a drop of nutrient, the eraser), the check that a step's next layout fits the
-## record slots, the goals' question, the ids of a run of records, the tracked bups' records, and the copies of the published pictures into
-## the shared textures.
+## record slots, the goals' question, the ids of a run of records, the tracked bups' records and their places as probe points, and the
+## copies of the published pictures into the shared textures.
 
 ## The clouds and husks of dish row `pcs.pa` leave the pool (its row is about to be another dish's): their slots become empty, and the
 ## next compaction or cull drops them.
@@ -70,11 +70,11 @@ void main() {
 """
 
 ## The goals' question for dish row `pcs.pb`: how many of its bups hold record word `pcs.pa` (a gene,
-## R_SPEED + g) at or above `pcs.pc` (the threshold as the host rounds it up to a float), counted into FRQ[0]. An integer count, so the
-## share the host works out from it does not depend on the order the threads run in.
+## R_SPEED + g) at or above `pcs.pc` (the threshold as the host rounds it up to a float), counted into FRQ[`pcs.pd`]. An integer count, so
+## the share the host works out from it does not depend on the order the threads run in.
 const K_FRACTION := """
 void f(uint i, uint d, uint l) {
-	if (d == uint(pcs.pb) && BUPS[i * RECORD_WORDS + uint(pcs.pa)] >= pcs.pc) atomicAdd(FRQ[0], 1u);
+	if (d == uint(pcs.pb) && BUPS[i * RECORD_WORDS + uint(pcs.pa)] >= pcs.pc) atomicAdd(FRQ[uint(pcs.pd)], 1u);
 }
 BUP_LOOP(f)
 """
@@ -91,34 +91,54 @@ void f(uint k) {
 GRID_LOOP(f, uint(pcs.pb))
 """
 
-## The tracked bups' records among `pcs.pb` records from slot `pcs.pa` on (one dish's segment, so only that dish's bups are found). TQ: how
-## many ids (up to TRACKED), then each id's low and high word. The bup with an id copies its first ANSWER_WORDS words into TR (ANSWER_WORDS
-## words an id, in TQ's order); the host fills TR's id words with 0xFFFFFFFF first, and they stay so where the id is not found.
+## The tracked bups' records of set `pcs.pb` among dish row `pcs.pa`'s bups (its segment as DSTATE has it when the kernel runs, so it may
+## follow the steps in their list, and only that dish's bups are found). The set's TQ words: how many ids (up to TRACKED), then each id's
+## low and high word. The bup with an id copies its first ANSWER_WORDS words into the set's TR (ANSWER_WORDS words an id, in TQ's order);
+## the host fills TR's id words with 0xFFFFFFFF first, and they stay so where the id is not found.
 const K_TRACK := """
 void f(uint k) {
-	uint n = min(TQ[0], TRACKED);
-	uint b = (uint(pcs.pa) + k) * RECORD_WORDS, lo = BUPS_U[b + R_ID_LO], hi = BUPS_U[b + R_ID_HI];
+	uint d = uint(pcs.pa), q = uint(pcs.pb) * TQ_WORDS, r = uint(pcs.pb) * TRACKED * ANSWER_WORDS;
+	uint n = min(TQ[q], TRACKED);
+	uint b = (DS(d, DS_START) + k) * RECORD_WORDS, lo = BUPS_U[b + R_ID_LO], hi = BUPS_U[b + R_ID_HI];
 	for (uint t = 0u; t < n; t++) {
-		if (TQ[1u + 2u * t] == lo && TQ[2u + 2u * t] == hi) {
-			for (uint w = 0u; w < ANSWER_WORDS; w++) TR[t * ANSWER_WORDS + w] = BUPS_U[b + w];
+		if (TQ[q + 1u + 2u * t] == lo && TQ[q + 2u + 2u * t] == hi) {
+			for (uint w = 0u; w < ANSWER_WORDS; w++) TR[r + t * ANSWER_WORDS + w] = BUPS_U[b + w];
 		}
 	}
 }
-GRID_LOOP(f, uint(pcs.pb))
+GRID_LOOP(f, DS(uint(pcs.pa), DS_COUNT))
 """
 
-## The published pictures into the shared textures (after the sync; the storage buffers are laid out as the textures): a thread a texel.
-## `pcs.pa` is the texture's width, `pcs.pb` the texels written.
+## After `pool_track` of set `pcs.pa`: each tracked bup as a point of the set's probes (SPQ, the first TRACKED points of the set: x, y,
+## speed, sense range), so `pool_probe_full` in the same list gives the steering at each. The sense range is the bup's sense gene times the
+## root of its size (the root of its mass) over the reference size, as the swim reads it. An id not found is a point at the dish's centre
+## whose answer the host does not read.
+const K_TRACK_POINTS := """
+void f(uint t) {
+	uint s = uint(pcs.pa), q = s * TQ_WORDS, r = (s * TRACKED + t) * ANSWER_WORDS, o = (s * PROBES_MOST + t) * 4u;
+	bool found = TR[r + R_ID_LO] == TQ[q + 1u + 2u * t] && TR[r + R_ID_HI] == TQ[q + 2u + 2u * t];
+	float mass = max(uintBitsToFloat(TR[r + R_MASS]), 0.0);
+	SPQ[o] = found ? uintBitsToFloat(TR[r + R_X]) : 0.0;
+	SPQ[o + 1u] = found ? uintBitsToFloat(TR[r + R_Y]) : 0.0;
+	SPQ[o + 2u] = found ? uintBitsToFloat(TR[r + R_SPEED]) : 0.0;
+	SPQ[o + 3u] = found ? uintBitsToFloat(TR[r + R_SENSE]) * sqrt(sqrt(mass) / P[P_REFERENCE_SIZE]) : 1.0;
+}
+GRID_LOOP(f, min(TQ[uint(pcs.pa) * TQ_WORDS], TRACKED))
+"""
+
+## The published pictures into the shared textures (the storage buffers are laid out as the textures): a thread a texel. `pcs.pa` is the
+## texture's width, `pcs.pb` the texels written; for the payload, at most those and `pcs.pc` the dish row whose payload it is: the rows
+## `pool_payload` wrote, from the count DSTATE has when the kernel runs (the payload may follow the steps in their list).
 const K_COPY_PAYLOAD := """
-layout(set = 0, binding = 2, rgba32ui) uniform restrict writeonly uimage2D PAYTEX;
-layout(set = 0, binding = 3, rg32ui) uniform restrict writeonly uimage2D IDS;
+layout(set = 0, binding = 3, rgba32ui) uniform restrict writeonly uimage2D PAYTEX;
+layout(set = 0, binding = 4, rg32ui) uniform restrict writeonly uimage2D IDS;
 void f(uint k) {
 	uint w = uint(pcs.pa);
 	ivec2 at = ivec2(int(k % w), int(k / w));
 	imageStore(PAYTEX, at, PAYLOAD[k]);
 	imageStore(IDS, at, uvec4(IDTEX[k * 2u + IDT_LO], IDTEX[k * 2u + IDT_HI], 0u, 0u));
 }
-GRID_LOOP(f, uint(pcs.pb))
+GRID_LOOP(f, min(((DS(uint(pcs.pc), DS_COUNT) + PAYLOAD_TEX_WIDTH - 1u) / PAYLOAD_TEX_WIDTH) * PAYLOAD_TEX_WIDTH, uint(pcs.pb)))
 """
 
 ## The payload alone, for the main device's copy of what the simulation handed over as bytes (ViewRenderer): the same, without the ids.
@@ -142,7 +162,7 @@ GRID_LOOP(f, uint(pcs.pb))
 
 ## The image bindings of the copy kernels (binding -> the name SimCore binds a texture by), past their storage buffers.
 const IMAGE_BINDINGS := {
-	"pool_copy_payload": {2: "PAYTEX", 3: "IDS"},
+	"pool_copy_payload": {3: "PAYTEX", 4: "IDS"},
 	"pool_copy_payload_only": {1: "PAYTEX"},
 	"pool_copy_rgba8": {1: "PIC"},
 }
@@ -157,8 +177,9 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "pool_erase_puffs", K_ERASE_PUFFS, ["WORLD", "PUFF", "EDA"], "", 64, t)
 	GpuKernels.add(out, "pool_fraction", K_FRACTION, ["WORLD", "BLKDISH", "DSTATE", "BUPS", "FRQ"], "", 64, {"FRQ": "uint"})
 	GpuKernels.add(out, "pool_ids", K_IDS, ["BUPS_U", "CHILD_U"])
-	GpuKernels.add(out, "pool_track", K_TRACK, ["BUPS_U", "TQ", "TR"], "", 64, {"TQ": "uint", "TR": "uint"})
+	GpuKernels.add(out, "pool_track", K_TRACK, ["DSTATE", "BUPS_U", "TQ", "TR"], "", 64, {"TQ": "uint", "TR": "uint"})
+	GpuKernels.add(out, "pool_track_points", K_TRACK_POINTS, ["P", "TQ", "TR", "SPQ"], "", 64, {"TQ": "uint", "TR": "uint", "SPQ": "float"})
 	GpuKernels.add(out, "pool_slot_check", K_SLOT_CHECK, ["WORLD", "DNEXT", "DSTATE"], dn, 64, GpuKernelsLife.POOL_TYPES)
-	GpuKernels.add(out, "pool_copy_payload", K_COPY_PAYLOAD, ["PAYLOAD", "IDTEX"], "", 64, GpuKernelsDraw.POOL_DRAW_TYPES)
+	GpuKernels.add(out, "pool_copy_payload", K_COPY_PAYLOAD, ["DSTATE", "PAYLOAD", "IDTEX"], "", 64, GpuKernelsDraw.POOL_DRAW_TYPES)
 	GpuKernels.add(out, "pool_copy_payload_only", K_COPY_PAYLOAD_ONLY, ["PAYLOAD"], "", 64, GpuKernelsDraw.POOL_DRAW_TYPES)
 	GpuKernels.add(out, "pool_copy_rgba8", K_COPY_RGBA8, ["PIX"], "", 64, t)

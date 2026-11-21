@@ -20,6 +20,7 @@ const uint DS_START = 0u;
 const uint DS_STEP = 8u;
 const uint DS_WORDS = 32u;
 const uint HN_WORDS = 8u;
+const uint HUSK_QUERIES = 4u;
 const uint NO_DISH = 4294967295u;
 const uint PUFF_ROW_BASE = 1065353216u;
 const int P_CELLS = 1;
@@ -56,12 +57,14 @@ float husk_share(int k) {
 	return k == HUSK_PIECES - 1 ? share + exp(-0.25 * float(HUSK_PIECES)) : share;
 }
 
+uint place_of(uint q) { return uint(pcs.pc) * HUSK_QUERIES + q; }
 bool husk_of(uint k, out uint o) {
 	o = k * 8u;
 	return HUSK[o + 6u] >= 0.5 && int(HUSK[o + 4u]) < HUSK_PIECES && floatBitsToUint(HUSK[o + 5u]) - PUFF_ROW_BASE == uint(pcs.pa);
 }
 bool within(uint o, uint q, out uint bits) {
-	float dx = HUSK[o] - HNQ[q * 4u], dy = HUSK[o + 1u] - HNQ[q * 4u + 1u], r = HNQ[q * 4u + 2u];
+	uint p = place_of(q);
+	float dx = HUSK[o] - HNQ[p * 4u], dy = HUSK[o + 1u] - HNQ[p * 4u + 1u], r = HNQ[p * 4u + 2u];
 	float d2 = dx * dx + dy * dy;
 	bits = floatBitsToUint(d2);
 	return d2 <= r * r;
@@ -70,6 +73,6 @@ bool within(uint o, uint q, out uint bits) {
 void f(uint k) {
 	uint o, bits;
 	if (!husk_of(k, o)) return;
-	for (uint q = 0u; q < uint(pcs.pb); q++) if (within(o, q, bits)) atomicMin(HNR[q * HN_WORDS], bits);
+	for (uint q = 0u; q < uint(pcs.pb); q++) if (within(o, q, bits)) atomicMin(HNR[place_of(q) * HN_WORDS], bits);
 }
 GRID_LOOP(f, WORLD[WD_HUSK_SLOTS])

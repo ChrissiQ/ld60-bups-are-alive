@@ -106,8 +106,13 @@ const CNT_DONORS := 15  ## the donors of the step (`conj_insert`)
 const PCNT_SLOTS := 0  ## cloud slots in use
 
 # ---- what a frame asks for and edits ----------------------------------------------------------------------------------------------------
-const FRACTIONS := 4
+const FRACTIONS := 4  ## the shares a dish's questions ask at most (FRQ: a counter each)
 const TRACKED := 8
+const TQ_WORDS := 1 + 2 * TRACKED  ## a set of tracked ids (TQ): how many, then each id's low and high word
+const PROBES_MOST := 64  ## the points a set of probes answers (SPQ: x, y, speed, sense range each; SPR: PROBE_FLOATS each)
+## The sets of questions one list answers: FRQ, TQ, TR, SPQ, SPR, HNQ and HNR hold this many, each set at its own place (the set's
+## index x what a set takes). An iteration answers a dish's questions in a set of their own and the publish's tracked bups in set 0.
+const ANSWER_SETS := 8
 const MAX_ERASE := 64  ## eraser discs in one frame (ERASE: x, y, radius, strength each)
 
 # ---- the stats samples (STATS; uint words, floats by their bits) ------------------------------------------------------------------------
@@ -152,7 +157,7 @@ const EV_DISH_BITS := 19
 const EV_DISH_MASK := 0x7FFFF
 
 const PROBE_FLOATS := 5  ## a point's answer (SPR, `pool_probe_full`): the way up the gradient (x, y, a unit vector), the chance of steering up it, the concentration, the gradient's size
-const HUSK_QUERIES := 4  ## the places one `husk_near` call asks about (HNQ: x, y, reach, a spare 0 each)
+const HUSK_QUERIES := 4  ## the places a set of husk questions asks about (HNQ: x, y, reach, a spare 0 each)
 const HN_WORDS := 8  ## a husk question's answer (HNR, uint words): the nearest's squared distance (float bits; 0xFFFFFFFF none), its slot + 1 (0 none), then its x, y, energy, age and pieces let go (float bits), a spare 0
 const PUFF_ROW_BASE := 0x3F800000  ## a cloud's word 5 (and its event's) is the float whose bits are this plus its dish's row: 1.0 and up, so "alive" stays `>= 0.5` and 0.0 is a free slot (no denormals, which a copy through a float register could flush)
 

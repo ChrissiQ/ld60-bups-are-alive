@@ -48,9 +48,11 @@ const POOL_DRAW_TYPES := {
 	"THUMBN": "uint", "THUMBMAX": "uint", "THUMBS": "uint",
 }
 
-## The main-view dish's records as picture words, one thread a texel of `pcs.pa`'s row, for the whole last row of the texture: a dead bup
-## (the marker R_PY = -2 that `life` leaves until `compact`) and the texels past the dish's bups are zero (length 0: nothing drawn). The
-## length is the body's true length, with no minimum and no trail; the angle is where it faces.
+## The main-view dish's records as picture words, one thread a texel of dish row `pcs.pa`'s bups, for the whole last row of the texture
+## and no further than the `pcs.pb` texels the buffers hold (the count is DSTATE's when the kernel runs, after the steps of its list,
+## which the host does not know when it sizes them): a dead bup (the marker R_PY = -2 that `life` leaves until `compact`) and the texels
+## past the dish's bups are zero (length 0: nothing drawn). The length is the body's true length, with no minimum and no trail; the angle
+## is where it faces.
 const K_POOL_PAYLOAD := COLOUR_FUNCS + """
 uint byte_of(float v) { return uint(clamp(v * 255.0 + 0.5, 0.0, 255.0)); }
 void f(uint k) {
@@ -71,7 +73,7 @@ void f(uint k) {
 	PAYLOAD[k] = px;
 	IDTEX[k * 2u + IDT_LO] = lo; IDTEX[k * 2u + IDT_HI] = hi;
 }
-GRID_LOOP(f, ((DS(uint(pcs.pa), DS_COUNT) + PAYLOAD_TEX_WIDTH - 1u) / PAYLOAD_TEX_WIDTH) * PAYLOAD_TEX_WIDTH)
+GRID_LOOP(f, min(((DS(uint(pcs.pa), DS_COUNT) + PAYLOAD_TEX_WIDTH - 1u) / PAYLOAD_TEX_WIDTH) * PAYLOAD_TEX_WIDTH, uint(pcs.pb)))
 """
 
 ## The field picture of dish row `pcs.pa`, the nutrient on the grid and the clouds' (summed by `pool_view_faint`: FAINTLO, FAINTHI), as

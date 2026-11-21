@@ -50,10 +50,10 @@ const BUFFERS := {
 	"EVR": ["fixed", GpuLayout.MAX_STEPS_PER_BATCH * 16, false, 0], "EVP": ["fixed", GpuLayout.EV_PUFFS_CAPACITY * GpuLayout.EV_PUFF_FLOATS * 4, false, 0],
 	"EVCC": ["fixed", GpuLayout.EV_CELLS_CAPACITY * 4, false, 0], "EVCA": ["fixed", GpuLayout.EV_CELLS_CAPACITY * 4, false, 0],
 	"TILES": ["fixed", D_MAX * TILES_MOST * 4, false, 0],
-	"EDC": ["fixed", 16, false, 0], "EDA": ["fixed", 16, false, 0], "FRQ": ["fixed", 16, false, 0],
-	"TQ": ["fixed", (1 + 2 * GpuLayout.TRACKED) * 4, false, 0], "TR": ["fixed", GpuLayout.TRACKED * GpuLayout.ANSWER_WORDS * 4, false, 0],
-	"SPQ": ["fixed", SimCore.PROBES_MOST * 16, false, 0], "SPR": ["fixed", SimCore.PROBES_MOST * GpuLayout.PROBE_FLOATS * 4, false, 0],
-	"HVC": ["fixed", 16, false, 0], "HNQ": ["fixed", GpuLayout.HUSK_QUERIES * 16, false, 0], "HNR": ["fixed", GpuLayout.HUSK_QUERIES * GpuLayout.HN_WORDS * 4, false, 0],
+	"EDC": ["fixed", 16, false, 0], "EDA": ["fixed", 16, false, 0], "FRQ": ["fixed", GpuLayout.ANSWER_SETS * GpuLayout.FRACTIONS * 4, false, 0],
+	"TQ": ["fixed", GpuLayout.ANSWER_SETS * GpuLayout.TQ_WORDS * 4, false, 0], "TR": ["fixed", GpuLayout.ANSWER_SETS * GpuLayout.TRACKED * GpuLayout.ANSWER_BYTES, false, 0],
+	"SPQ": ["fixed", GpuLayout.ANSWER_SETS * GpuLayout.PROBES_MOST * 16, false, 0], "SPR": ["fixed", GpuLayout.ANSWER_SETS * GpuLayout.PROBES_MOST * GpuLayout.PROBE_FLOATS * 4, false, 0],
+	"HVC": ["fixed", 16, false, 0], "HNQ": ["fixed", GpuLayout.ANSWER_SETS * GpuLayout.HUSK_QUERIES * 16, false, 0], "HNR": ["fixed", GpuLayout.ANSWER_SETS * GpuLayout.HUSK_QUERIES * GpuLayout.HN_WORDS * 4, false, 0],
 }
 
 ## The pictures' buffers, made when something is first published: name -> [class, bytes a unit] (classes "texel": the main dish's payload

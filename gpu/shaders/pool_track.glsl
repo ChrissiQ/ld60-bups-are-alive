@@ -3,9 +3,10 @@
 #version 450
 layout(local_size_x = 64) in;
 layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs;
-layout(set = 0, binding = 0, std430) buffer B_BUPS_U { uint BUPS_U[]; };
-layout(set = 0, binding = 1, std430) buffer B_TQ { uint TQ[]; };
-layout(set = 0, binding = 2, std430) buffer B_TR { uint TR[]; };
+layout(set = 0, binding = 0, std430) buffer B_DSTATE { uint DSTATE[]; };
+layout(set = 0, binding = 1, std430) buffer B_BUPS_U { uint BUPS_U[]; };
+layout(set = 0, binding = 2, std430) buffer B_TQ { uint TQ[]; };
+layout(set = 0, binding = 3, std430) buffer B_TR { uint TR[]; };
 const uint ANSWER_WORDS = 24u;
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
@@ -24,6 +25,7 @@ const int P_CELLS = 1;
 const uint RECORD_WORDS = 28u;
 const uint R_ID_HI = 21u;
 const uint R_ID_LO = 0u;
+const uint TQ_WORDS = 17u;
 const uint TRACKED = 8u;
 const uint WD_LEDGER = 10u;
 const uint WD_SLOTS = 0u;
@@ -50,12 +52,13 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 #define LEDGER(d, t, amount) { if (WORLD[WD_LEDGER] != 0u) { float rest_ = (amount); uint lo_ = (d) * DS_WORDS + DS_LEDGER + 2u * (t), hi_ = lo_ + 1u; while (rest_ > 0.0) { float part_ = min(rest_, 4000.0); rest_ -= part_; uint q_ = uint(part_ * 1048576.0 + 0.5); uint old_ = atomicAdd(DSTATE[lo_], q_); if (old_ + q_ < old_) atomicAdd(DSTATE[hi_], 1u); } } }
 
 void f(uint k) {
-	uint n = min(TQ[0], TRACKED);
-	uint b = (uint(pcs.pa) + k) * RECORD_WORDS, lo = BUPS_U[b + R_ID_LO], hi = BUPS_U[b + R_ID_HI];
+	uint d = uint(pcs.pa), q = uint(pcs.pb) * TQ_WORDS, r = uint(pcs.pb) * TRACKED * ANSWER_WORDS;
+	uint n = min(TQ[q], TRACKED);
+	uint b = (DS(d, DS_START) + k) * RECORD_WORDS, lo = BUPS_U[b + R_ID_LO], hi = BUPS_U[b + R_ID_HI];
 	for (uint t = 0u; t < n; t++) {
-		if (TQ[1u + 2u * t] == lo && TQ[2u + 2u * t] == hi) {
-			for (uint w = 0u; w < ANSWER_WORDS; w++) TR[t * ANSWER_WORDS + w] = BUPS_U[b + w];
+		if (TQ[q + 1u + 2u * t] == lo && TQ[q + 2u + 2u * t] == hi) {
+			for (uint w = 0u; w < ANSWER_WORDS; w++) TR[r + t * ANSWER_WORDS + w] = BUPS_U[b + w];
 		}
 	}
 }
-GRID_LOOP(f, uint(pcs.pb))
+GRID_LOOP(f, DS(uint(pcs.pa), DS_COUNT))

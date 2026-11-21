@@ -7,6 +7,7 @@ layout(set = 0, binding = 0, std430) buffer B_HUSK { float HUSK[]; };
 layout(set = 0, binding = 1, std430) buffer B_HNR { uint HNR[]; };
 const uint CNT_BUPS = 0u;
 const uint HN_WORDS = 8u;
+const uint HUSK_QUERIES = 4u;
 const int P_CELLS = 1;
 const uint RECORD_WORDS = 28u;
 
@@ -21,7 +22,7 @@ float gauss(inout uint s) { float a = u01(s); float b = u01(s); return sqrt(-2.0
 void main() {
 	if (gl_GlobalInvocationID.x != 0u) return;  // (one thread: a dispatch of 1 runs a whole group of 64)
 	for (uint q = 0u; q < uint(pcs.pb); q++) {
-		uint a = q * HN_WORDS, k = HNR[a + 1u];
+		uint a = (uint(pcs.pc) * HUSK_QUERIES + q) * HN_WORDS, k = HNR[a + 1u];
 		if (k == 0u) continue;
 		for (uint w = 0u; w < 5u; w++) HNR[a + 2u + w] = floatBitsToUint(HUSK[(k - 1u) * 8u + w]);
 	}

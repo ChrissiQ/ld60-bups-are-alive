@@ -150,16 +150,19 @@ void f(uint k) {
 GRID_LOOP(f, WORLD[WD_HUSK_SLOTS])
 """
 
-## `pool_husk_near`, `pool_husk_near2`, `pool_husk_near3`: for each of `pcs.pb` places (HNQ: x, y, reach), the nearest live husk within
-## reach (of those as near, the last in the pool's order), in three passes: the least squared distance, the highest slot
-## at it, then that husk's x, y, energy, age and pieces into its answer (HNR, HN_WORDS a place; the host sets each to none first).
+## `pool_husk_near`, `pool_husk_near2`, `pool_husk_near3`: for each of `pcs.pb` places of set `pcs.pc` (HNQ: x, y, reach; a set is
+## HUSK_QUERIES places), the nearest live husk of dish row `pcs.pa` within reach (of those as near, the last in the pool's order), in
+## three passes: the least squared distance, the highest slot at it, then that husk's x, y, energy, age and pieces into its answer (HNR,
+## HN_WORDS a place; the host sets each to none first).
 const NEAR_FUNCS := """
+uint place_of(uint q) { return uint(pcs.pc) * HUSK_QUERIES + q; }
 bool husk_of(uint k, out uint o) {
 	o = k * 8u;
 	return HUSK[o + 6u] >= 0.5 && int(HUSK[o + 4u]) < HUSK_PIECES && floatBitsToUint(HUSK[o + 5u]) - PUFF_ROW_BASE == uint(pcs.pa);
 }
 bool within(uint o, uint q, out uint bits) {
-	float dx = HUSK[o] - HNQ[q * 4u], dy = HUSK[o + 1u] - HNQ[q * 4u + 1u], r = HNQ[q * 4u + 2u];
+	uint p = place_of(q);
+	float dx = HUSK[o] - HNQ[p * 4u], dy = HUSK[o + 1u] - HNQ[p * 4u + 1u], r = HNQ[p * 4u + 2u];
 	float d2 = dx * dx + dy * dy;
 	bits = floatBitsToUint(d2);
 	return d2 <= r * r;
@@ -170,7 +173,7 @@ const K_NEAR := """
 void f(uint k) {
 	uint o, bits;
 	if (!husk_of(k, o)) return;
-	for (uint q = 0u; q < uint(pcs.pb); q++) if (within(o, q, bits)) atomicMin(HNR[q * HN_WORDS], bits);
+	for (uint q = 0u; q < uint(pcs.pb); q++) if (within(o, q, bits)) atomicMin(HNR[place_of(q) * HN_WORDS], bits);
 }
 GRID_LOOP(f, WORLD[WD_HUSK_SLOTS])
 """
@@ -179,7 +182,7 @@ const K_NEAR2 := """
 void f(uint k) {
 	uint o, bits;
 	if (!husk_of(k, o)) return;
-	for (uint q = 0u; q < uint(pcs.pb); q++) if (within(o, q, bits) && bits == HNR[q * HN_WORDS]) atomicMax(HNR[q * HN_WORDS + 1u], k + 1u);
+	for (uint q = 0u; q < uint(pcs.pb); q++) if (within(o, q, bits) && bits == HNR[place_of(q) * HN_WORDS]) atomicMax(HNR[place_of(q) * HN_WORDS + 1u], k + 1u);
 }
 GRID_LOOP(f, WORLD[WD_HUSK_SLOTS])
 """
@@ -188,7 +191,7 @@ const K_NEAR3 := """
 void main() {
 	if (gl_GlobalInvocationID.x != 0u) return;  // (one thread: a dispatch of 1 runs a whole group of 64)
 	for (uint q = 0u; q < uint(pcs.pb); q++) {
-		uint a = q * HN_WORDS, k = HNR[a + 1u];
+		uint a = (uint(pcs.pc) * HUSK_QUERIES + q) * HN_WORDS, k = HNR[a + 1u];
 		if (k == 0u) continue;
 		for (uint w = 0u; w < 5u; w++) HNR[a + 2u + w] = floatBitsToUint(HUSK[(k - 1u) * 8u + w]);
 	}

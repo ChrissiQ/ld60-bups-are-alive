@@ -566,13 +566,13 @@ float steering_chance_d(uint d, float speed, float sense_range, float c, float g
 }
 """
 
-## The full point answer of dish row `pcs.pb` for `pcs.pa` queries (SPQ: x, y, speed, sense range; SPR, PROBE_FLOATS a point: the unit
-## direction up the gradient, the chance of steering up it, the concentration, the gradient's size; `pcs.pc` the steering window):
-## The steering readout and the hover card's nutrient, from the grid snapshot and the clouds. No gradient
-## (1e-12 or less) gives (0, 0, 0.5).
+## The full point answer of dish row `pcs.pb` for the first `pcs.pa` points of set `pcs.pd` (SPQ: x, y, speed, sense range; SPR,
+## PROBE_FLOATS a point: the unit direction up the gradient, the chance of steering up it, the concentration, the gradient's size; a set
+## is PROBES_MOST points of each; `pcs.pc` the steering window): the steering readout and the hover card's nutrient, from the grid
+## snapshot and the clouds. No gradient (1e-12 or less) gives (0, 0, 0.5).
 const K_POOL_PROBE_FULL := """
-void f(uint i) {
-	uint d = uint(pcs.pb);
+void f(uint k) {
+	uint d = uint(pcs.pb), i = uint(pcs.pd) * PROBES_MOST + k;
 	float x = SPQ[i * 4u], y = SPQ[i * 4u + 1u], speed = SPQ[i * 4u + 2u], sense_range = SPQ[i * 4u + 3u];
 	float c, gx, gy, pc, pgx, pgy, sg;
 	readf_d(d, x, y, c, gx, gy);
