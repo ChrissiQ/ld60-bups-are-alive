@@ -13,6 +13,8 @@ extends SceneTree
 ## - the canonical dumps of the dish (records, field, clouds, husks, DSTATE, the last iteration's events, stats) after N + 1 steps differ
 ##   in 0 words [derived: the same step length, the same steps and the same world events, and a step's result does not depend on how
 ##   steps are grouped into iterations (the continuation property)].
+## - the client sends no display frame (WorldClient.display_ms 0, so the governor does not pace): the frames fed are shorter than a display
+##   frame of a 60 Hz screen, and pacing would count such a frame as none, so the run would wait for a step never owed.
 ## - the dish: 200 founders in a 1.5 mm dish, every flag on, a bloom of 2 a mm² a day and a source, seed 21 (the fine path: 1/120 s is under
 ##   FINE_STEP).
 
@@ -60,6 +62,7 @@ func _run(dt: float) -> Dictionary:
 	var backend := GpuSimBackend.new()
 	backend.start(PoolLimits.new())
 	var w := WorldClient.new(backend)
+	w.display_ms = 0.0
 	var row := w.add_dish(spec())
 	var out := {"ok": false}
 	if not await _until(w, func(s: Snapshot) -> bool: return s.dishes.has(row)):

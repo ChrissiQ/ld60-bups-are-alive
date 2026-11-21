@@ -25,7 +25,7 @@ signal refused(row: int, why: String)
 var backend: SimBackend
 var _used := {}  ## client row -> true
 var _last_seq := -1
-var _display_ms := 0.0
+var display_ms := 0.0  ## the display's frame (ms), from the screen's refresh rate, sent with every set_time for the governor's pacing (0: not known, no pacing)
 var _waiting: Array = []  ## publishes seen and not yet shown, oldest first (at most WAITING_MOST after a frame)
 var _shown: PayloadInfo = null
 var _known_publish := -1  ## the newest publish seen
@@ -46,7 +46,7 @@ static func shared() -> WorldClient:
 func _init(p_backend: SimBackend) -> void:
 	backend = p_backend
 	var hz := DisplayServer.screen_get_refresh_rate()
-	_display_ms = 1000.0 / hz if hz > 0.0 else 1000.0 / 60.0
+	display_ms = 1000.0 / hz if hz > 0.0 else 1000.0 / 60.0
 
 
 ## Adds a dish; its row now (-1 when every row is taken). The dish's founders, seed and world are in `spec` (`spec.world`: {sources:
@@ -115,7 +115,7 @@ func edit_world(row: int, e: WorldEdit) -> void:
 ## Once a frame: the speed, whether the game is paused, and the frame's real length (s). The simulation owes speed x the frame (capped)
 ## and steps by the speed's step length, never by the frame's; the frame's length also sets its duty.
 func set_time(speed: float, paused: bool, real_dt: float) -> void:
-	_send(SimCommand.KIND_SET_TIME, {"speed": speed, "paused": paused, "real_dt": real_dt, "display_ms": _display_ms})
+	_send(SimCommand.KIND_SET_TIME, {"speed": speed, "paused": paused, "real_dt": real_dt, "display_ms": display_ms})
 
 
 ## The dish in the main view (`row`), its camera and scale, and which pictures it wants.
