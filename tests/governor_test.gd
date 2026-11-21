@@ -38,7 +38,7 @@ extends SceneTree
 ##    20 + 2 x 50 = 120 ms (the probe's own bound; a steady iteration is 20 + 6 x 8 = 68 ms), and with +-3 ms noise on the run time the step estimate stays within 2 ms of 8
 ##    ms and k within 2 to 12 (a probe halves k). The cost of a step rising from 2 to 8 ms (the dish growing), the estimate follows to 8 ms within
 ##    1 ms by the end; a 100k dish with a 20 ms fixed cost and a 1.5 ms step settles at the slope 1.5 ms and k of 10 or more; a cost taken
-##    too high at k = 1 comes down (`_latched_high`).
+##    too high at k = 1 comes down, and noise does not hold k at 1 (`_latched_high`).
 ##  - history samples (interval 120 s): from 0 with 10 steps of 20 s, one sample after step index 5; from 100 s with 3 steps, after index 0;
 ##    at most 16 an iteration: from 0, steps of 20 s allow 101 steps (the 17th sample would fall after step index 101).
 
@@ -391,6 +391,14 @@ func _latched_high() -> void:
 	g.target = g.clock + 100.0 * g.delta()
 	TestUtil.check(absf(g.step_ms_ema - 22.0) <= 0.5 and absf(g.fixed_ms - 12.0) <= 1.0 and g.steps_by_cost() == 2,
 		"a cost taken too high at k = 1 comes down: slope %.2f ms (22), fixed %.2f ms (12), k %d (2)" % [g.step_ms_ema, g.fixed_ms, g.steps_by_cost()])
+	# a 2M-bup dish on Apple Silicon: 22 ms a step, 14 ms fixed, +-6 ms noise; k = floor(50 / 22) = 2. An iteration of one step (36 ms, under
+	# T_ITER) is no rise however low the fixed cost was learned, and at k = 1 the probe goes up, so noise does not hold k at 1 [measured, mean k
+	# over the last 300 of 8 seeds: 1.77; without either rule 1.00 to 1.15 (k held at 1); a pair's slope is off by up to 12 ms, so k is 1 for a
+	# share of the time]: the mean k is at least 1.5
+	var mac := func(_i: int) -> float: return 22.0
+	var rm := _simulate(600, 14.0, mac, 10.0, 6.0, 6)
+	var mean_k := _mean_tail(rm["ks"], 300)
+	TestUtil.check(mean_k >= 1.5, "a 22 ms step with a 14 ms fixed cost and +-6 ms noise does not hold k at 1 (mean k %.2f over the last 300)" % mean_k)
 
 
 func _mean_tail(values: Array, n: int) -> float:
