@@ -435,7 +435,7 @@ func _results(steps: int, d: float, t0: float, samples: Array, res: Dictionary, 
 	var refused := _refused
 	_refused = {}
 	var t_pub := Time.get_ticks_usec()
-	_published(plan.view, res.get("published", {}), steps > 0)
+	_published(plan.view, res.get("published", {}), res.get("husk_list"))
 	return {
 		"steps": steps, "delta": d, "t0": t0, "sim_time": governor.clock, "achieved": _achieved(), "paused": governor.paused,
 		"births": eb, "deaths": ed, "rows": rows, "stats": stats, "samples": samples, "worlds": worlds, "refused": refused,
@@ -526,14 +526,14 @@ func _view_request() -> ViewRequest:
 	v.steer_alpha = _view.steer_alpha
 	v.want_field_view = _view.want_field_view and (now - _field_msec >= FIELD_VIEW_MSEC or _view_dirty)
 	v.want_thumbnails = _view.want_thumbnails and now - _thumbs_msec >= THUMBS_MSEC
+	v.want_husks = _view.want_husks and (now - _husk_msec >= HUSK_VIEW_MSEC or _view_dirty)
 	v.track = PackedInt64Array((_questions.get(_view.row, {}) as Dictionary).get("tracked", []))
 	return v
 
 
-## After the list: what it published of `v` (`out`: SimCore.run's "published") as the snapshot's pictures, and the husks' list. `later`: the
-## husks may be read without waiting for them (an iteration of steps follows, and the card runs the read with it): the list asked for in
-## this publish is the snapshot's in the next one. A pass of no steps waits for them.
-func _published(v: ViewRequest, out: Dictionary, later: bool) -> void:
+## After the list: what it published of `v` (`out`: SimCore.run's "published") as the snapshot's pictures, and the husks' list the list
+## read when `v` asked for it (`husks`: SimCore.run's "husk_list"; null when not read or not complete).
+func _published(v: ViewRequest, out: Dictionary, husks: Variant) -> void:
 	if v == null or _view == null or not _rows.has(_view.row):
 		_view_dirty = false
 		_husks_owed = false
@@ -542,18 +542,11 @@ func _published(v: ViewRequest, out: Dictionary, later: bool) -> void:
 	if not cpu_handover:
 		_take_handles()
 	var handed := _core.handed
-	_husks_owed = _view.want_husks and not (now - _husk_msec >= HUSK_VIEW_MSEC or _view_dirty)
-	if not _view.want_husks:
-		_core.husk_view_drop()
-	else:
-		if later:
-			var arrived: Variant = _core.husk_view_take(v.row)
-			if arrived != null:
-				_husk_view = {"row": _view.row, "version": int(_husk_view.get("version", 0)) + 1, "transforms": arrived}
-		if not _husks_owed:
-			_husk_msec = now
-			if not (later and _core.husk_view_request(v.row)):
-				_husk_view = {"row": _view.row, "version": int(_husk_view.get("version", 0)) + 1, "transforms": _core.husk_view(v.row)}
+	_husks_owed = _view.want_husks and not v.want_husks
+	if v.want_husks:
+		_husk_msec = now
+		if husks != null:
+			_husk_view = {"row": _view.row, "version": int(_husk_view.get("version", 0)) + 1, "transforms": husks}
 	if out.has("payload"):
 		var p := PayloadInfo.new()
 		p.texture_index = out["payload"]
