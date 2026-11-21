@@ -1,0 +1,657 @@
+{
+ "environment": {
+  "machine": "Apple M1 Pro, Metal, Godot 4.7.2, display 120 Hz (a frame is at best 8.33 ms), game screen layout viewport 1280x720 in a 2560x1440 window",
+  "window": "12 s settle, then 30 s measured (x1: 60 s), 3 runs each, all through tools/run_windowed.sh",
+  "what_is_measured": "interface frame time = Main._process to Main._process; achieved speed = slowest dish's clock over wall time. Every dish is filled to its limit and nutrient/feed set to the setup maxima so populations hold. Speed x10,000, backend Auto (the measured build chose between its CPU and GPU simulations), unless the scenario says forced. Every dish has both husk kinds and starvation on (StartConditions.death_husks, plankton_husks and stationary_phase): the game's defaults. The dishes have no plankton bloom, so plankton husks make nothing here; a death by chance leaves a husk.",
+  "commit_base": "the measured build is the game before the pooled world: each dish had a simulation of its own, on the CPU or on the GPU, and at most 20 dishes ran at once",
+  "scenarios_explained": {
+   "F": "one 90 mm dish of 2,000,000 bups",
+   "G": "nearly empty dishes (by number of bups: 50, 200, 1000)",
+   "x1": "the game at x1: how often the picture changes, and how soon an edit shows"
+  },
+  "same_sitting_control": {
+   "what": "scenario F with husks and starvation off, measured in the same sitting as the runs here, against perf_pre_pool.json's F (x309, p95 64.66 ms)",
+   "runs": [
+    {
+     "achieved_speed": 309.2,
+     "frame_ms_p95": 64.708
+    },
+    {
+     "achieved_speed": 309.4,
+     "frame_ms_p95": 64.757
+    }
+   ]
+  }
+ },
+ "expected_before_running": {
+  "written_before_running": true,
+  "mechanism": "no plankton bloom, so plankton husks make nothing; deaths at the limit leave nothing; deaths by chance (Biology.DEATH_PER_SECOND, 1e-6 a second) leave a husk that lives about 31,000 s (12 pieces of HUSK_SECONDS / 4); fed at the setup maxima, few starve [derived]",
+  "F": "x300-310 (perf_pre_pool.json's x309 less at most a few percent for the husks' host work: about 26,000 husks at the end), frame p95 about 65 ms, on the GPU [derived]",
+  "G": "x10,000 and frames near 8.33 ms on both backends at every size, as without husks: at most a few hundred deaths in a run [derived]",
+  "x1": "a changed picture in every frame, edit to visible 1 frame, as without husks: about 7 deaths in a run at 100,000 bups [derived]"
+ },
+ "scenarios": {
+  "F": {
+   "label": "[measured]",
+   "dishes": 1,
+   "setup": {
+    "cells_across": [
+     100
+    ],
+    "cells_max": 100,
+    "cells_min": 100,
+    "dishes": 1,
+    "setup_ms": 6224
+   },
+   "runs": [
+    {
+     "frame_ms_mean": 64.29,
+     "frame_ms_p95": 65.34,
+     "frame_ms_max": 386.498,
+     "achieved_speed": 307,
+     "backends_after_settle": {
+      "gpu": 1
+     },
+     "population_start": 1999641,
+     "population_end": 1999419,
+     "husks_at_end": 30405
+    },
+    {
+     "frame_ms_mean": 64.35,
+     "frame_ms_p95": 65.416,
+     "frame_ms_max": 391.945,
+     "achieved_speed": 306,
+     "backends_after_settle": {
+      "gpu": 1
+     },
+     "population_start": 1999442,
+     "population_end": 1999306,
+     "husks_at_end": 31324
+    },
+    {
+     "frame_ms_mean": 64.31,
+     "frame_ms_p95": 65.228,
+     "frame_ms_max": 381.611,
+     "achieved_speed": 306,
+     "backends_after_settle": {
+      "gpu": 1
+     },
+     "population_start": 1999430,
+     "population_end": 1999383,
+     "husks_at_end": 29796
+    }
+   ],
+   "frame_ms_mean_of_runs": 64.32,
+   "frame_ms_p95_mean_of_runs": 65.33,
+   "frame_ms_max_of_runs": 391.945,
+   "achieved_speed_mean_of_runs": 306,
+   "achieved_speed_spread": 0.5,
+   "notes": "one 2M dish (90 mm), Auto: runs on the GPU, as without husks. The husks are made on the host from the GPU's death events; about 30,000 at the end of a run."
+  },
+  "G": {
+   "50": {
+    "cpu": {
+     "label": "[measured]",
+     "dishes": 1,
+     "setup": {
+      "cells_across": [
+       100
+      ],
+      "cells_max": 100,
+      "cells_min": 100,
+      "dishes": 1,
+      "setup_ms": 869
+     },
+     "runs": [
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.534,
+       "frame_ms_max": 10.276,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "cpu": 1
+       },
+       "population_start": 50,
+       "population_end": 50,
+       "husks_at_end": 7
+      },
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.522,
+       "frame_ms_max": 9.165,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "cpu": 1
+       },
+       "population_start": 50,
+       "population_end": 50,
+       "husks_at_end": 7
+      },
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.524,
+       "frame_ms_max": 9.116,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "cpu": 1
+       },
+       "population_start": 50,
+       "population_end": 50,
+       "husks_at_end": 0
+      }
+     ],
+     "frame_ms_mean_of_runs": 8.33,
+     "frame_ms_p95_mean_of_runs": 8.53,
+     "frame_ms_max_of_runs": 10.276,
+     "achieved_speed_mean_of_runs": 10000,
+     "achieved_speed_spread": 0.0,
+     "notes": ""
+    },
+    "gpu": {
+     "label": "[measured]",
+     "dishes": 1,
+     "setup": {
+      "cells_across": [
+       100
+      ],
+      "cells_max": 100,
+      "cells_min": 100,
+      "dishes": 1,
+      "setup_ms": 832
+     },
+     "runs": [
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.766,
+       "frame_ms_max": 12.22,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "gpu": 1
+       },
+       "population_start": 42,
+       "population_end": 42,
+       "husks_at_end": 2
+      },
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.74,
+       "frame_ms_max": 11.969,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "gpu": 1
+       },
+       "population_start": 45,
+       "population_end": 42,
+       "husks_at_end": 0
+      },
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.746,
+       "frame_ms_max": 9.922,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "gpu": 1
+       },
+       "population_start": 44,
+       "population_end": 43,
+       "husks_at_end": 1
+      }
+     ],
+     "frame_ms_mean_of_runs": 8.33,
+     "frame_ms_p95_mean_of_runs": 8.75,
+     "frame_ms_max_of_runs": 12.22,
+     "achieved_speed_mean_of_runs": 10000,
+     "achieved_speed_spread": 0.0,
+     "notes": ""
+    },
+    "best_of_the_two": {
+     "backend": "cpu",
+     "rule": "lowest mean frame time, then lowest p95 (perf_pre_pool.json's rule: a tie on the mean is decided by the p95)",
+     "cpu_frame_ms_mean": 8.33,
+     "gpu_frame_ms_mean": 8.33,
+     "cpu_p95": 8.53,
+     "gpu_p95": 8.75
+    }
+   },
+   "200": {
+    "cpu": {
+     "label": "[measured]",
+     "dishes": 1,
+     "setup": {
+      "cells_across": [
+       100
+      ],
+      "cells_max": 100,
+      "cells_min": 100,
+      "dishes": 1,
+      "setup_ms": 860
+     },
+     "runs": [
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.521,
+       "frame_ms_max": 9.184,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "cpu": 1
+       },
+       "population_start": 200,
+       "population_end": 200,
+       "husks_at_end": 11
+      },
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.523,
+       "frame_ms_max": 9.23,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "cpu": 1
+       },
+       "population_start": 200,
+       "population_end": 200,
+       "husks_at_end": 5
+      },
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.55,
+       "frame_ms_max": 10.645,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "cpu": 1
+       },
+       "population_start": 200,
+       "population_end": 200,
+       "husks_at_end": 7
+      }
+     ],
+     "frame_ms_mean_of_runs": 8.33,
+     "frame_ms_p95_mean_of_runs": 8.53,
+     "frame_ms_max_of_runs": 10.645,
+     "achieved_speed_mean_of_runs": 10000,
+     "achieved_speed_spread": 0.0,
+     "notes": ""
+    },
+    "gpu": {
+     "label": "[measured]",
+     "dishes": 1,
+     "setup": {
+      "cells_across": [
+       100
+      ],
+      "cells_max": 100,
+      "cells_min": 100,
+      "dishes": 1,
+      "setup_ms": 826
+     },
+     "runs": [
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.737,
+       "frame_ms_max": 10.968,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "gpu": 1
+       },
+       "population_start": 192,
+       "population_end": 193,
+       "husks_at_end": 10
+      },
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.725,
+       "frame_ms_max": 11.438,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "gpu": 1
+       },
+       "population_start": 188,
+       "population_end": 192,
+       "husks_at_end": 7
+      },
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 9.469,
+       "frame_ms_max": 12.452,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "gpu": 1
+       },
+       "population_start": 185,
+       "population_end": 183,
+       "husks_at_end": 5
+      }
+     ],
+     "frame_ms_mean_of_runs": 8.33,
+     "frame_ms_p95_mean_of_runs": 8.98,
+     "frame_ms_max_of_runs": 12.452,
+     "achieved_speed_mean_of_runs": 10000,
+     "achieved_speed_spread": 0.0,
+     "notes": ""
+    },
+    "best_of_the_two": {
+     "backend": "cpu",
+     "rule": "lowest mean frame time, then lowest p95 (perf_pre_pool.json's rule: a tie on the mean is decided by the p95)",
+     "cpu_frame_ms_mean": 8.33,
+     "gpu_frame_ms_mean": 8.33,
+     "cpu_p95": 8.53,
+     "gpu_p95": 8.98
+    }
+   },
+   "1000": {
+    "cpu": {
+     "label": "[measured]",
+     "dishes": 1,
+     "setup": {
+      "cells_across": [
+       100
+      ],
+      "cells_max": 100,
+      "cells_min": 100,
+      "dishes": 1,
+      "setup_ms": 844
+     },
+     "runs": [
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.487,
+       "frame_ms_max": 8.746,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "cpu": 1
+       },
+       "population_start": 1000,
+       "population_end": 1000,
+       "husks_at_end": 37
+      },
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.477,
+       "frame_ms_max": 9.028,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "cpu": 1
+       },
+       "population_start": 1000,
+       "population_end": 1000,
+       "husks_at_end": 39
+      },
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.501,
+       "frame_ms_max": 9.041,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "cpu": 1
+       },
+       "population_start": 1000,
+       "population_end": 1000,
+       "husks_at_end": 41
+      }
+     ],
+     "frame_ms_mean_of_runs": 8.33,
+     "frame_ms_p95_mean_of_runs": 8.49,
+     "frame_ms_max_of_runs": 9.041,
+     "achieved_speed_mean_of_runs": 10000,
+     "achieved_speed_spread": 0.0,
+     "notes": ""
+    },
+    "gpu": {
+     "label": "[measured]",
+     "dishes": 1,
+     "setup": {
+      "cells_across": [
+       100
+      ],
+      "cells_max": 100,
+      "cells_min": 100,
+      "dishes": 1,
+      "setup_ms": 856
+     },
+     "runs": [
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.733,
+       "frame_ms_max": 11.494,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "gpu": 1
+       },
+       "population_start": 984,
+       "population_end": 967,
+       "husks_at_end": 25
+      },
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.748,
+       "frame_ms_max": 11.496,
+       "achieved_speed": 9999,
+       "backends_after_settle": {
+        "gpu": 1
+       },
+       "population_start": 983,
+       "population_end": 990,
+       "husks_at_end": 34
+      },
+      {
+       "frame_ms_mean": 8.33,
+       "frame_ms_p95": 8.737,
+       "frame_ms_max": 12.93,
+       "achieved_speed": 10000,
+       "backends_after_settle": {
+        "gpu": 1
+       },
+       "population_start": 982,
+       "population_end": 977,
+       "husks_at_end": 34
+      }
+     ],
+     "frame_ms_mean_of_runs": 8.33,
+     "frame_ms_p95_mean_of_runs": 8.74,
+     "frame_ms_max_of_runs": 12.93,
+     "achieved_speed_mean_of_runs": 10000,
+     "achieved_speed_spread": 0.5,
+     "notes": ""
+    },
+    "best_of_the_two": {
+     "backend": "cpu",
+     "rule": "lowest mean frame time, then lowest p95 (perf_pre_pool.json's rule: a tie on the mean is decided by the p95)",
+     "cpu_frame_ms_mean": 8.33,
+     "gpu_frame_ms_mean": 8.33,
+     "cpu_p95": 8.49,
+     "gpu_p95": 8.74
+    }
+   }
+  },
+  "x1": {
+   "note": "Edit = a source placed with the pointer off the stage, camera zoom 3, paused; ms include the stage hash's readback (~10 ms), so they are an upper bound. A single added bup was sub-pixel and never changed the hash, so it is not reported.",
+   "by_bups": {
+    "1000": {
+     "label": "[measured]",
+     "backend": "cpu",
+     "runs": [
+      {
+       "frame_ms_mean": 8.88,
+       "frame_ms_p95": 9.688,
+       "frame_ms_max": 12.931,
+       "share_frames_picture_changed": 1.0,
+       "share_frames_clock_advanced": 1.0,
+       "edit_to_visible_frames": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ],
+       "edit_to_visible_ms": [
+        16.041,
+        14.778,
+        17.571,
+        17.607,
+        17.478,
+        17.663,
+        16.813,
+        12.5
+       ],
+       "backend_running": "cpu",
+       "husks_at_end": 0
+      },
+      {
+       "frame_ms_mean": 8.89,
+       "frame_ms_p95": 9.684,
+       "frame_ms_max": 12.866,
+       "share_frames_picture_changed": 1.0,
+       "share_frames_clock_advanced": 1.0,
+       "edit_to_visible_frames": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ],
+       "edit_to_visible_ms": [
+        12.536,
+        15.414,
+        16.756,
+        17.606,
+        16.965,
+        17.965,
+        17.626,
+        15.866
+       ],
+       "backend_running": "cpu",
+       "husks_at_end": 0
+      },
+      {
+       "frame_ms_mean": 8.91,
+       "frame_ms_p95": 9.692,
+       "frame_ms_max": 15.009,
+       "share_frames_picture_changed": 1.0,
+       "share_frames_clock_advanced": 1.0,
+       "edit_to_visible_frames": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ],
+       "edit_to_visible_ms": [
+        16.344,
+        13.146,
+        12.234,
+        17.681,
+        18.029,
+        17.691,
+        16.993,
+        17.249
+       ],
+       "backend_running": "cpu",
+       "husks_at_end": 0
+      }
+     ]
+    },
+    "100000": {
+     "label": "[measured]",
+     "backend": "gpu",
+     "runs": [
+      {
+       "frame_ms_mean": 11.04,
+       "frame_ms_p95": 11.874,
+       "frame_ms_max": 18.389,
+       "share_frames_picture_changed": 1.0,
+       "share_frames_clock_advanced": 1.0,
+       "edit_to_visible_frames": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ],
+       "edit_to_visible_ms": [
+        12.846,
+        16.3,
+        17.833,
+        19.303,
+        19.118,
+        20.49,
+        13.141,
+        17.262
+       ],
+       "backend_running": "gpu",
+       "husks_at_end": 0
+      },
+      {
+       "frame_ms_mean": 11.03,
+       "frame_ms_p95": 11.882,
+       "frame_ms_max": 22.942,
+       "share_frames_picture_changed": 1.0,
+       "share_frames_clock_advanced": 1.0,
+       "edit_to_visible_frames": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ],
+       "edit_to_visible_ms": [
+        19.891,
+        18.511,
+        11.996,
+        17.26,
+        17.256,
+        17.837,
+        16.878,
+        17.98
+       ],
+       "backend_running": "gpu",
+       "husks_at_end": 0
+      },
+      {
+       "frame_ms_mean": 11.07,
+       "frame_ms_p95": 11.905,
+       "frame_ms_max": 22.254,
+       "share_frames_picture_changed": 1.0,
+       "share_frames_clock_advanced": 1.0,
+       "edit_to_visible_frames": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ],
+       "edit_to_visible_ms": [
+        19.537,
+        18.898,
+        17.475,
+        18.09,
+        12.733,
+        16.081,
+        18.553,
+        13.963
+       ],
+       "backend_running": "gpu",
+       "husks_at_end": 0
+      }
+     ]
+    }
+   }
+  }
+ }
+}

@@ -1,21 +1,26 @@
 extends SceneTree
-## The performance gates, against the baseline `tools/gpu/baseline/perf_pre_pool.json` (figures measured before the pooled world; the file's
-## `environment` says on what).
+## The performance gates, against figures measured on the game before the pooled world: `tools/gpu/baseline/perf_pre_pool.json` (A, B, E
+## and the interface) and `tools/gpu/baseline/perf_pre_pool_husks.json` (F, G and x1, every dish with both husk kinds and starvation on);
+## each file's `environment` says on what.
 ##
 ## Scenario letters (the baseline's keys, the gates' names): A, one 90 mm dish of 1,000,000 bups on the game screen; B, that dish with 940,000
 ## bups and six more dishes of 12,000; C100 and C48, 20 dishes of 100 bups with grids of 100 x 100 and 48 x 48 cells; C (the gate), 100 dishes
-## of 100 bups; D, 100 dishes of 10,000 bups against one dish of 1,000,000; E, one 45 mm dish of 100,000 bups; F, one 90 mm dish of 2,000,000
+## of 100 bups; D, 100 dishes of 10,000 bups; E, one 45 mm dish of 100,000 bups; F, one 90 mm dish of 2,000,000
 ## bups; G, 50, 200 or 1,000 bups in one 45 mm dish; x1, the share of display frames in which a new picture is shown at playback speed x1.
-## A, B and the interface are measured by tests/sim/interface_gate.gd, the others here.
+## A, B and the interface are measured by tests/sim/interface_gate.gd, the others here. Gates C, D, F, G and x1 run their dishes with both
+## husk kinds and starvation on (HUSKS_ON: the game's defaults, StartConditions); gate E's speed and the 1M pipette here run them off.
+## `husks=0` runs C, D, F, G or x1 with them off (a diagnosis, not the gate).
 ##
 ## Expected values:
-## - Static part (runs headless): the baseline holds every key the gates read, so a missing key fails with its path [derived from the
-##   gates]: scenarios A, B, C100, C48, D, E, F each with frame_ms_p95_mean_of_runs and achieved_speed_mean_of_runs; G "50", "200",
-##   "1000" each with cpu and gpu (the figures of the two backends the baseline was measured with: the game's earlier CPU simulation
-##   and its earlier GPU one, both replaced by the pooled world) and best_of_the_two; x1 by_bups "1000" and "100000" with runs[].share_frames_picture_changed.
+## - Static part (runs headless): each baseline file holds every key the gates read, so a missing key fails with its path [derived from the
+##   gates]: perf_pre_pool.json, scenarios A, B, C100, C48, D, E each with frame_ms_p95_mean_of_runs (and A, B, E achieved_speed_mean_of_runs,
+##   E achieved_speed_spread); perf_pre_pool_husks.json, F with frame_ms_p95_mean_of_runs, achieved_speed_mean_of_runs and
+##   achieved_speed_spread, G "50", "200", "1000" each with cpu and gpu (the figures of the two backends the baselines were measured with:
+##   the game's earlier CPU simulation and its earlier GPU one, both replaced by the pooled world) and best_of_the_two, x1 by_bups "1000"
+##   and "100000" with runs.
 ## - The gate functions (`gate_*`), checked on synthetic numbers [derived from the gate text]:
 ##   E: p95 <= min(baseline E p95, 1.15 x display frame) and speed >= 9,500 (measured baseline: p95 10.18 ms, speed 9,994; display frame
-##   8.33 ms [measured] so the cap is 9.58 ms). F: p95 and speed no worse than the baseline's (p95 64.66 ms, speed 309 [measured]) and
+##   8.33 ms [measured] so the cap is 9.58 ms). F: p95 and speed no worse than the husks-on baseline's (p95 65.33 ms, speed 306 [measured]) and
 ##   per-step cost at 2M <= 0.85 x the baseline's. A and B: p95 <= the baseline's (A: 32.0 ms [measured]). G: frame mean <= the best of the
 ##   baseline's two backends' + 1 SD, and speed >= 10,000. x1: payload advances in >= 99% of display frames.
 ## - The speed column of gates E, F, G and x1 is measured windowed through the real sim thread (GpuSimBackend, WorldClient; no game
@@ -26,28 +31,31 @@ extends SceneTree
 ##   E: 100,000 bups, 45 mm, x10,000, 600 s: every sliding 60 s window (1 s apart) >= x9,500 and the whole run >= baseline E's mean
 ##     minus its spread, 9,994 - 8.3 = x9,985.7 [measured baseline]; expected to pass: a 100k step is about 0.9 ms of GPU plus about 0.5 ms
 ##     fixed [derived from the measured 18 ms 2M step and the per-step dispatches], so x10,000 (500 steps a second) keeps the device about 70% busy.
-##   F: 2,000,000 bups, 90 mm, x10,000, 60 s: >= baseline F's mean minus its spread, 309 - 0.5 = x308.5 [measured baseline]; expected
-##     about x800 (a step about 20 ms [measured] plus the iteration's readback and publish, one step an iteration) [derived].
+##   F: 2,000,000 bups, 90 mm, x10,000, 60 s: >= husks-on baseline F's mean minus its spread, 306 - 0.5 = x305.5 [measured baseline];
+##     measured x1,035 (a step of 16.7 ms, iterations of 3 steps and about 55 ms; about 96,000 live husks at the end) [measured].
 ##   G: 50, 200 and 1,000 bups (limit = count), 45 mm, x10,000, 30 s each: >= x9,990 (x10,000 less what one iteration's lag of at most
-##     T_ITER of steps leaves unmeasured over 30 s and frame capping) [derived]; the baseline's best is x10,000 at each size [measured baseline].
+##     T_ITER of steps leaves unmeasured over 30 s and frame capping) [derived]; the husks-on baseline's best is x10,000 at each size (the
+##     CPU backend's) [measured baseline]; measured x10,000, x10,000 and x9,997 [measured].
 ##   x1: 1,000 and 100,000 bups, 45 mm, x1, 60 s: the share of display frames in which a new payload is shown; >= 0.99 is the gate. The
 ##     sim steps Governor.STEPS_PER_SECOND (120) times a simulated second, so on a 120 Hz display every frame can have a new one [derived];
 ##     this script shows the payload WorldClient's playout gives each frame (one publish a frame in order, at most WAITING_MOST (2) waiting:
-##     publishes that land together are shown on the frames after), as the game does: 0.9997 at 1,000 and 0.9989 at 100,000 with one waiting [measured:
-##     a replay of 7,200 frames' arrivals recorded in a run of this script; showing the newest gave 0.978 and 0.867 on the same frames]. Edit to
+##     publishes that land together are shown on the frames after), as the game does: 1.000 at 1,000 and at 100,000, no frame without a new
+##     payload in 7,200 [measured; at 1,000, 348 frames brought no publish and 359 brought two, and the waiting publishes covered every
+##     one]. Edit to
 ##     visible (paused, a source placed, 8 times): frames until a snapshot shows it, <= 2 frames + one iteration [derived], the baseline's 1 frame
 ##     [measured baseline, a pixel hash].
 ##   The interface column (frame p95 and worst on the game screen) is measured by tests/sim/interface_gate.gd; the main frames printed here
 ##   are this script's (no game screen), for reference only.
-## - Gates C and D. Both ask x10,000 (20 s steps: min(20, speed/120)) and the speed reached is the figure; the
-##   step's cost is the sum of the window's iterations' busy time over their steps (each iteration once), and the reference world is measured
-##   first in the same process (the GPU is bimodal between processes), each world with 12 s of settling.
+## - Gates C and D. Both ask x10,000 (20 s steps: min(20, speed/120)) and the speed reached is the figure (12 s of settling, then 30 s); the
+##   step's cost printed beside it is the sum of the window's iterations' busy time over their steps (each iteration once).
 ##   C: 100 dishes of 100 bups at the limit, each the default dish (45 mm, a 100 x 100 grid, checked): the speed reached >= x5,000 (the
-##   bound: many dishes of the default size at half the top speed or better). Measured [two processes]: x5,577 and x5,558 (a step of 3.46 and 3.47 ms), so about 10% of room. The cost is the 100 grids' (1M cells),
+##   bound: many dishes of the default size at half the top speed or better). Measured: x6,050, and x6,097 with `husks=0` (a step of 3.22
+##   and 3.20 ms), so about 20% of room [measured, one process each]. The cost is the 100 grids' (1M cells),
 ##   not the 10,000 bups'. `dishes=` and `radius=` rerun it at other sizes as a diagnosis (300 um gives the smallest grid, 48 x 48).
-##   D: 100 dishes of 10,000 bups (45 mm, 100 cells across), against one 90 mm dish of 1,000,000: step <= 1.2 x. Expected about 1.0 x [derived: the
-##   same 1M bups, the same 100 x 100 grid per dish, 100 dishes' field 1M cells (a tenth of the bups' work); the reference's step is
-##   about 11.4 ms [derived: half of the 22.75 ms at 2M]].
+##   D: 100 dishes of 10,000 bups at the limit (45 mm, 100 cells across): the speed reached >= x900 (the bound). Measured: x1,162, and
+##   x1,165 with `husks=0` (a step of 16.8 and 16.7 ms: 20 s over the step is x1,190, the rest the iterations' fixed cost) [measured, one
+##   process each]. The step is above the sum of its parts (half of gate F's 16.7 ms 2M step for the 1M bups, plus gate C's 3.2 ms for
+##   the 100 grids: 11.6 ms [derived]): the 100 dishes' own passes, not derived here.
 ##   The 1,000-dish interface is tests/sim/interface_gate.gd (the game screen on the real pool: this script has none), whose bounds are the
 ##   static `gate_interface` here.
 ## - The pipette on a dish of 1,000,000 bups, through WorldClient as Dish.pipette sends it, the world running at x10,000 (the
@@ -68,6 +76,8 @@ extends SceneTree
 ##   not the gate).
 
 const BASELINE := "res://tools/gpu/baseline/perf_pre_pool.json"
+const BASELINE_HUSKS := "res://tools/gpu/baseline/perf_pre_pool_husks.json"  ## F, G and x1 measured with both husk kinds and starvation on
+const HUSKS_ON := (1 << GpuLayout.DPF_STATIONARY) | (1 << GpuLayout.DPF_DEATH_HUSKS) | (1 << GpuLayout.DPF_PLANKTON_HUSKS)  ## the DishSpec flags of gates C, D, F, G and x1 (the game's defaults: StartConditions)
 const DISPLAY_FRAME_MS := 8.333  ## ms [measured]: a frame of the 120 Hz display of the one machine the baseline was measured on (`environment.machine` in BASELINE)
 const E_SPEED_FLOOR := 9500.0
 const E_FRAME_SHARE := 1.15
@@ -101,9 +111,12 @@ const REQUIRED := [
 	["scenarios", "C100", "frame_ms_p95_mean_of_runs"], ["scenarios", "C48", "frame_ms_p95_mean_of_runs"],
 	["scenarios", "C100", "frame_ms_mean_of_runs"], ["scenarios", "C48", "frame_ms_mean_of_runs"], ["scenarios", "C48", "frame_ms_max_of_runs"],
 	["scenarios", "D", "frame_ms_p95_mean_of_runs"], ["scenarios", "E", "frame_ms_p95_mean_of_runs"],
-	["scenarios", "E", "achieved_speed_mean_of_runs"], ["scenarios", "F", "frame_ms_p95_mean_of_runs"],
-	["scenarios", "F", "achieved_speed_mean_of_runs"],
+	["scenarios", "E", "achieved_speed_mean_of_runs"], ["scenarios", "E", "achieved_speed_spread"],
+]
+const REQUIRED_HUSKS := [
+	["scenarios", "F", "frame_ms_p95_mean_of_runs"], ["scenarios", "F", "achieved_speed_mean_of_runs"], ["scenarios", "F", "achieved_speed_spread"],
 	["scenarios", "G", "50", "cpu", "frame_ms_mean_of_runs"], ["scenarios", "G", "50", "gpu", "frame_ms_mean_of_runs"],
+	["scenarios", "G", "50", "best_of_the_two", "backend"], ["scenarios", "G", "200", "best_of_the_two", "backend"], ["scenarios", "G", "1000", "best_of_the_two", "backend"],
 	["scenarios", "G", "50", "best_of_the_two", "cpu_frame_ms_mean"], ["scenarios", "G", "50", "best_of_the_two", "gpu_frame_ms_mean"],
 	["scenarios", "G", "200", "best_of_the_two", "cpu_frame_ms_mean"], ["scenarios", "G", "1000", "best_of_the_two", "gpu_frame_ms_mean"],
 	["scenarios", "x1", "by_bups", "1000", "runs"], ["scenarios", "x1", "by_bups", "100000", "runs"],
@@ -119,6 +132,9 @@ func _initialize() -> void:
 	var baseline := load_baseline()
 	for path: Array in REQUIRED:
 		TestUtil.show(lookup(baseline, path) != null, "baseline has %s" % "/".join(path))
+	var husks_baseline := load_baseline(BASELINE_HUSKS)
+	for path: Array in REQUIRED_HUSKS:
+		TestUtil.show(lookup(husks_baseline, path) != null, "husks-on baseline has %s" % "/".join(path))
 	_gate_checks()
 	if not SimHarness.device_available():
 		print("SKIP perf_gates_test: gates C, D, E, F, G, x1 measurements need a local GPU (not available headless)")
@@ -138,9 +154,9 @@ func _initialize() -> void:
 			"E":
 				await _gate_e_speed(baseline)
 			"F":
-				await _gate_f_speed(baseline)
+				await _gate_f_speed(husks_baseline)
 			"G":
-				await _gate_g_speed(baseline)
+				await _gate_g_speed(husks_baseline)
 			"x1":
 				await _gate_x1_speed()
 			"55":
@@ -150,8 +166,8 @@ func _initialize() -> void:
 	TestUtil.finish(self, "OK perf_gates_test (gates %s: the speed column, gates C and D and the 1M pipette; the 1,000-dish interface and gates A and B are tests/sim/interface_gate.gd)" % ", ".join(gates))
 
 
-static func load_baseline() -> Dictionary:
-	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(BASELINE))
+static func load_baseline(path := BASELINE) -> Dictionary:
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
 	return parsed if parsed is Dictionary else {}
 
 
@@ -206,9 +222,9 @@ func _gate_checks() -> void:
 	TestUtil.show(gate_e(cap, 9500.0, 10.18), "gate E passes at its limits")
 	TestUtil.show(not gate_e(cap + 0.01, 9994.0, 10.18), "gate E fails a p95 over the cap")
 	TestUtil.show(not gate_e(9.0, 9499.0, 10.18), "gate E fails a speed under x9,500")
-	TestUtil.show(gate_f(64.66, 309.0, 0.85, 64.66, 309.0, 1.0), "gate F passes at its limits")
-	TestUtil.show(not gate_f(64.66, 309.0, 0.86, 64.66, 309.0, 1.0), "gate F fails a step cost over 0.85")
-	TestUtil.show(not gate_f(64.7, 400.0, 0.5, 64.66, 309.0, 1.0), "gate F fails a p95 regression")
+	TestUtil.show(gate_f(65.33, 306.0, 0.85, 65.33, 306.0, 1.0), "gate F passes at its limits")
+	TestUtil.show(not gate_f(65.33, 306.0, 0.86, 65.33, 306.0, 1.0), "gate F fails a step cost over 0.85")
+	TestUtil.show(not gate_f(65.34, 400.0, 0.5, 65.33, 306.0, 1.0), "gate F fails a p95 regression")
 	TestUtil.show(gate_ab(32.0, 32.0) and not gate_ab(32.1, 32.0), "gates A and B: p95 against the baseline")
 	TestUtil.show(gate_g(8.4, 10000.0, 8.33, 8.33, 0.1) and not gate_g(8.6, 10000.0, 8.33, 8.33, 0.1), "gate G: the best of the two plus 1 SD")
 	TestUtil.show(not gate_g(8.3, 9999.0, 8.33, 8.33, 0.1), "gate G fails a speed under x10,000")
@@ -299,10 +315,11 @@ static func gate_speed_kept(speed: float, baseline_mean: float, baseline_spread:
 
 
 ## The dish: `n` bups at once (its limit), the founder's genes, reserves from none to full, masses 1 to 2 birth masses, inside 95% of
-## the rim; nutrient and feed at the setup maxima; 100 cells across.
-static func filled_spec(n: int, radius: float, number := 1, seed_value := 3) -> DishSpec:
+## the rim; nutrient and feed at the setup maxima; 100 cells across; `flags` the DishSpec's (HUSKS_ON for gates C, D, F, G and x1).
+static func filled_spec(n: int, radius: float, number := 1, seed_value := 3, flags := 0) -> DishSpec:
 	var spec := DishSpec.new()
 	spec.number = number
+	spec.flags = flags
 	spec.radius = radius
 	spec.resolution = StartConditions.MIN_NUTRIENT_RESOLUTION
 	spec.limit = maxi(n, 10)
@@ -311,6 +328,12 @@ static func filled_spec(n: int, radius: float, number := 1, seed_value := 3) -> 
 	spec.feed_density = StartConditions.MAX_FEED_DENSITY
 	spec.founders = filled_records(n, radius, number, seed_value)
 	return spec
+
+
+## The flags of gates C, D, F, G and x1: HUSKS_ON, or none with `husks=0` (a diagnosis: the same gate with both husk kinds and starvation off,
+## not the gate).
+static func gate_flags() -> int:
+	return 0 if OS.get_cmdline_user_args().has("husks=0") else HUSKS_ON
 
 
 static func filled_records(n: int, radius: float, number: int, seed_value: int) -> PackedByteArray:
@@ -453,6 +476,11 @@ func _measure(label: String, one_or_many: Variant, speed: float, seconds: float,
 	out["step_ms"] = step_ms
 	out["long_iterations"] = long_iterations
 	out["timing"] = w.latest().timing
+	var husks := 0
+	for state: DishState in w.latest().dishes.values():
+		husks += state.husk_count
+	out["husks"] = husks
+	out["flags"] = spec.flags
 	out["step_cost_ms"] = busy_ms / busy_steps if busy_steps > 0 else INF
 	out["status"] = backend.status()
 	if edits > 0:
@@ -580,10 +608,11 @@ func _print_run(m: Dictionary) -> void:
 	if m.has("note"):
 		print("GATE_RUN %s: %s" % [m["label"], m["note"]])
 	print("GATE_RUN %s: timing %s" % [m["label"], m.get("timing", {})])
-	print("GATE_RUN %s: setup %.1f s; %s; last iteration: %s steps, %.2f ms busy, step ema %.3f ms, duty %.2f, publish %.2f ms, readback %.2f ms, lineage %.2f ms; dropped %.0f s in all; overflow %s; status %s" % [
+	print("GATE_RUN %s: setup %.1f s; %s; last iteration: %s steps, %.2f ms busy, step ema %.3f ms, duty %.2f, publish %.2f ms, readback %.2f ms, lineage %.2f ms; dropped %.0f s in all; overflow %s; live husks at the end %d (%s); status %s" % [
 		m["label"], float(m.get("setup_s", 0.0)), frame_figures(m.get("frames", [])), t.get("steps"), float(t.get("iteration_ms", 0.0)),
 		float(t.get("step_ms_ema", 0.0)), float(t.get("duty", 0.0)), float(t.get("publish_ms", 0.0)), float(t.get("readback_ms", 0.0)),
-		float(t.get("lineage_ms", 0.0)), float(t.get("dropped_s", 0.0)), m.get("overflow"), m.get("status")])
+		float(t.get("lineage_ms", 0.0)), float(t.get("dropped_s", 0.0)), m.get("overflow"), int(m.get("husks", 0)),
+		"husks and starvation on" if int(m.get("flags", 0)) == HUSKS_ON else "husks and starvation off", m.get("status")])
 
 
 func _gate_e_speed(baseline: Dictionary) -> void:
@@ -603,7 +632,7 @@ func _gate_e_speed(baseline: Dictionary) -> void:
 
 
 func _gate_f_speed(baseline: Dictionary) -> void:
-	var m := await _measure("F", filled_spec(2000000, DISH_90MM), 10000.0, F_SECONDS)
+	var m := await _measure("F", filled_spec(2000000, DISH_90MM, 1, 3, gate_flags()), 10000.0, F_SECONDS)
 	_print_run(m)
 	var speed := run_speed(m.get("samples", []))
 	var mean := float(lookup(baseline, ["scenarios", "F", "achieved_speed_mean_of_runs"]))
@@ -615,7 +644,7 @@ func _gate_f_speed(baseline: Dictionary) -> void:
 
 func _gate_g_speed(baseline: Dictionary) -> void:
 	for n in [50, 200, 1000]:
-		var m := await _measure("G%d" % n, filled_spec(n, DISH_45MM), 10000.0, G_SECONDS)
+		var m := await _measure("G%d" % n, filled_spec(n, DISH_45MM, 1, 3, gate_flags()), 10000.0, G_SECONDS)
 		_print_run(m)
 		var speed := run_speed(m.get("samples", []))
 		var best: Dictionary = lookup(baseline, ["scenarios", "G", str(n), "best_of_the_two"])
@@ -640,7 +669,7 @@ func _gate_c_speed() -> void:
 	TestUtil.show(radius != C_RADIUS or across == C_ACROSS, "gate C: the default dish has a %d x %d grid" % [C_ACROSS, C_ACROSS])
 	var specs: Array = []
 	for i in dishes:
-		specs.append(filled_spec(C_BUPS, radius, i + 1, 3 + i))
+		specs.append(filled_spec(C_BUPS, radius, i + 1, 3 + i, gate_flags()))
 	var m := await _measure("C %dx%d" % [dishes, C_BUPS], specs, 10000.0, secs)
 	_print_run(m)
 	var speed := run_speed(m.get("samples", []))
@@ -657,7 +686,7 @@ func _gate_d_step() -> void:
 			secs = float(a.substr(8))
 	var specs: Array = []
 	for i in D_DISHES:
-		specs.append(filled_spec(D_BUPS, DISH_45MM, i + 1, 3 + i))
+		specs.append(filled_spec(D_BUPS, DISH_45MM, i + 1, 3 + i, gate_flags()))
 	var m := await _measure("D %dx%d" % [D_DISHES, D_BUPS], specs, 10000.0, secs)
 	_print_run(m)
 	var speed := run_speed(m.get("samples", []))
@@ -672,7 +701,7 @@ func _gate_x1_speed() -> void:
 		if a.begins_with("bups="):
 			sizes = [int(a.substr(5))]
 	for n: int in sizes:
-		var m := await _measure("x1/%d" % n, filled_spec(n, DISH_45MM), 1.0, X1_SECONDS, X1_EDITS)
+		var m := await _measure("x1/%d" % n, filled_spec(n, DISH_45MM, 1, 3, gate_flags()), 1.0, X1_SECONDS, X1_EDITS)
 		_print_run(m)
 		var frames: Array = m.get("frames", [])
 		var share := float(m.get("payload_frames", 0)) / maxf(frames.size(), 1)
