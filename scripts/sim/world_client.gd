@@ -134,7 +134,8 @@ func set_view(row: int, view: ViewRequest) -> void:
 
 
 ## The questions about dish `row`, kept until asked again and answered every tenth of a second or so: {"fractions": {name: [gene,
-## threshold]}} (the share of bups whose gene is at least the threshold, in the dish's DishState.fractions under the same name), "tracked":
+## threshold]}} (up to GpuLayout.FRACTIONS: the share of bups whose gene is at least the threshold, in the dish's DishState.fractions under
+## the same name), "tracked":
 ## ids (up to GpuLayout.TRACKED: their records and the steering at each, in the snapshot's answers), "probes": [x, y, speed, sense range]
 ## points (dish-local: the way up the gradient there, the chance of steering up it, the concentration, the gradient's size), "husks":
 ## [x, y, reach] places (dish-local, up to GpuLayout.HUSK_QUERIES: the nearest live husk within reach of each).

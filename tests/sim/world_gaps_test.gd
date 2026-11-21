@@ -376,7 +376,8 @@ func _through_thread() -> void:
 
 
 ## The husks' list at x10,000: a 45 mm dish of 2,000 founders and 200,000 husks run 3 s with the husks not wanted, then 3 s wanted; the
-## publish's time (timing.publish_ms: the pictures, and the husks' read at most every 100 ms) and the achieved speed of each [measured].
+## publish's time (timing.publish_ms: the host's time on the pictures, and the husks' read at most every 100 ms) and the achieved speed of
+## each [measured].
 func _husks_at_speed() -> void:
 	var thread := _start(null)
 	var spec := _spec(1, 45000.0, 1 << GpuLayout.DPF_PLANKTON_HUSKS)
