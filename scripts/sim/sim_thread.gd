@@ -295,7 +295,7 @@ func _room_steps(most: int) -> int:
 func _fits(k: int) -> bool:
 	var slots := 0
 	var bound := 0
-	var delta := _core.step_length()
+	var delta := maxf(_core.step_length(), governor.delta())  # (the step the next iteration takes, which the core has not been told yet when it grows)
 	for client: int in _rows:
 		var cr: int = _rows[client]
 		var series := SimCore.births_series(_core.count(cr), _core.mass_of(cr), _core.cap_of(cr), k, delta)
@@ -374,7 +374,7 @@ func _iterate(k: int) -> float:
 	# (sync_ms is the submit and wait in which the card runs the steps, the answers and the pictures, with the field's own submits when a
 	# step's diffusion rounds are split; answer_ms, readback_ms and publish_ms are the host's own time on each, before the list and after the sync)
 	_last_timing = {
-		"iteration_ms": busy, "steps": ran, "step_ms_ema": governor.step_ms_ema, "fixed_ms": governor.fixed_ms, "duty": governor.duty,
+		"iteration_ms": busy, "steps": ran, "step_ms_ema": governor.step_ms_ema, "stretch": governor.stretch, "step_cost_ms": governor.step_cost_ms, "fixed_ms": governor.fixed_ms, "duty": governor.duty,
 		"sync_ms": float(res.get("gpu_usec", 0)) / 1000.0, "record_ms": float(res.get("record_usec", 0)) / 1000.0,
 		"publish_ms": item["publish_ms"], "readback_ms": item["readback_ms"], "answer_ms": item["answer_ms"],
 		"rest_ms": governor.rest_ms(busy), "run_ms": run_ms,

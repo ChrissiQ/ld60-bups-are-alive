@@ -1,12 +1,12 @@
 extends SceneTree
-## The step length follows the speed, never the frame. The same dish is run
+## With no display frame known the step length does not depend on the frames' length. The same dish is run
 ## twice through the real sim thread (GpuSimBackend, WorldClient) at x1, once fed by frames of 1/120 s and once by frames of 1/240 s,
 ## for the same simulated time, and the two end states are compared word for word.
 ## Windowed, through the lock. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/refresh_rate_test.gd
 ##
 ## Expected values:
-## - both runs take steps of 1/120 s (x1: Governor.step_length(1) [derived]) and run exactly N = 240 steps from (N + 0.5) steps'
+## - both runs take steps of 1/120 s (x1 with no display known: Governor.shortest_step(1) [derived]; the dish is small, a step costs far less than 1/120 s, so the governor keeps up and the step stays the shortest) and run exactly N = 240 steps from (N + 0.5) steps'
 ##   time (N frames of 1/120 s and half a frame, or 2N + 1 frames of 1/240 s), then one more step alone (a frame of 1/120 s, or of 1/240 s
 ##   on the half step left), so the last iteration is a single step in both [derived from the Governor's owed time]; no time is dropped
 ##   (each frame waits until the sim has caught up, so what is owed never passes the cap).
@@ -69,7 +69,7 @@ func _run(dt: float) -> Dictionary:
 		out["note"] = "the dish never appeared (status %s)" % [backend.status()]
 		backend.shutdown()
 		return out
-	var step := Governor.step_length(1.0)
+	var step := Governor.shortest_step(1.0)
 	var frames: Array = []
 	if is_equal_approx(dt, step):
 		for f in N:

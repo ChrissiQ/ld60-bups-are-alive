@@ -93,6 +93,8 @@ static func backend(dish: Dish) -> Dictionary:
 			"duty": timing.get("duty", 0.0),
 			"T_ITER_ms": Governor.T_ITER_MS,
 			"step_ms_ema": timing.get("step_ms_ema", 0.0),
+			"stretch": timing.get("stretch", 1.0),
+			"step_cost_ms": timing.get("step_cost_ms", 0.0),
 			"iteration_ms": timing.get("iteration_ms", 0.0),
 			"rest_ms": timing.get("rest_ms", 0.0),
 			"sync_ms": timing.get("sync_ms", 0.0),

@@ -45,7 +45,7 @@ func _run() -> void:
 	_check_exact("T x10,000", 0)
 	var first_slow := times.size()
 	await g.run_for(dish, 3600.0, 1000.0)
-	_check_within("S x1,000", first_slow, 1000.0 / Governor.STEPS_PER_SECOND)
+	_check_within("S x1,000", first_slow, g.step_bound(1000.0))
 	await _extinct()
 	TestUtil.finish(self, "OK parity_history_test")
 

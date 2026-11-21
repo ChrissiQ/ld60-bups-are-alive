@@ -4,7 +4,20 @@ extends RefCounted
 ## the frames the interface has drawn, how many steps the next iteration takes, and how long the thread rests after one so the interface
 ## keeps its frame rate. Pure arithmetic: the caller gives every time (no clock is read here), so a test drives it with a fake one.
 ##
-## - Step length: `step_length(speed) = min(MAX_STEP, speed / STEPS_PER_SECOND)`, from the speed alone, never from the frame.
+## - Step length: the shortest step that reaches the asked speed, never shorter than one display frame of simulated time and at most
+##   MAX_STEP: `clamp(speed / R, speed x frame, MAX_STEP)`, where R is the steps a second the machine sustains and `frame` the display's
+##   frame (1 / FALLBACK_STEPS_PER_SECOND while it is not known). Kept as `stretch` = step / (speed x frame), at least 1, a property of the
+##   machine alone: 1 while it keeps up with frame-length steps, so then a step is speed x frame (speed / 120 at 120 Hz).
+##   R = 1000 x duty x k / (fixed_ms + k x cost) with cost = `step_cost_ms`, k = floor(T_ITER_MS / cost): what an iteration of the usual k
+##   costs (its fixed cost included) with the duty's rest. `step_cost_ms` is its own slow mean of what each iteration's steps cost (the
+##   iteration's time less the fixed cost, over its steps; a sample is held within STEP_COST_RANGE of the mean, so one slow iteration moves
+##   it by a few percent), apart from the cost the iteration bounds learn (`step_ms_ema`, which takes a rise at once to shorten the next
+##   iteration). The step is sized to HEADROOM of R (the answers and pictures the iteration's time leaves out come on top). The step length is
+##   fixed within an iteration and changes only between them, after WARMUP_ITERATIONS: when the stretch R asks for is more than
+##   STRETCH_RAISE_BAND above the current one or STRETCH_LOWER_BAND below it, it moves STRETCH_WEIGHT of the way (in logarithm; to MAX_STEP at most), then the next change waits SETTLE_ITERATIONS. A
+##   change restarts the pair the cost of a step is learned from and makes the next iteration a probe, because the cost of a step can grow
+##   with its length (a small dish in water needs more diffusion rounds for a longer step) and the new length is judged by what it costs.
+##   The stretch does not grow while the step is already MAX_STEP.
 ## - Owed time: each frame adds `speed x min(paced real_dt, MAX_FRAME_SECONDS)` (nothing while paused); what is owed is kept to at most
 ##   OWED_ITERATIONS iterations' worth, so a slow machine drops time (the achieved speed shows it) instead of piling it up.
 ## - Pacing: once the display's frame is known (`frame`), a frame counts as a whole number of display frames: its length plus what earlier
@@ -26,7 +39,7 @@ extends RefCounted
 ##   between pairs (a dish filling) is taken at once: an iteration longer than T_ITER_MS whose steps cost more than GROWTH_TOLERANCE x the cost
 ##   known (over the fixed cost) sets it to what they cost, so the next one is shorter without waiting for a pair; that iteration restarts the pair and the fixed cost stays as it was (a pair across a rise
 ##   would read the rise as fixed cost).
-## - Catch-up in single frames' worth: below MAX_STEP a display frame owes `frame_steps()` steps (1 at 120 Hz) and every iteration publishes
+## - Catch-up in single frames' worth: below MAX_STEP a display frame owes `frame_steps()` steps (1 while the stretch is 1) and every iteration publishes
 ##   one picture the display shows for a frame. After a late iteration k > 1 frames' worth are owed; run as one merged iteration they give
 ##   pictures at as many of their steps as display frames the last iteration took (SimThread._pictures_for), but all at once, after the
 ##   whole iteration. When the sim keeps up (a frame's steps cost, on the slow mean, within a display frame, resting included; one late
@@ -38,7 +51,15 @@ extends RefCounted
 ##   raises it by DUTY_UP; after an iteration that kept the thread busy `busy` ms it rests `busy x (1 / duty - 1)` ms.
 
 const MAX_STEP := Dish.MAX_STEP  ## s: the longest world step
-const STEPS_PER_SECOND := 120.0  ## steps per simulated second at x1 (a step of 1/120 s)
+const FALLBACK_STEPS_PER_SECOND := 120.0  ## display frames a second assumed while the display's frame is not known
+const HEADROOM := 0.9  ## of the steps a second the machine sustains: what the step length is sized to
+const STRETCH_RAISE_BAND := 0.03  ## how far (relative) the stretch wanted may be above the current one before the step lengthens (a short step is the costlier mistake: the speed is missed)
+const STRETCH_LOWER_BAND := 0.1  ## how far (relative) it may be below the current one before the step shortens (a longer step than needed only costs latency)
+const STRETCH_WEIGHT := 0.5  ## of the way (in logarithm) a change of the step length goes to the stretch wanted
+const STEP_COST_WEIGHT := 0.15  ## the newest iteration's weight in `step_cost_ms`
+const STEP_COST_RANGE := 1.5  ## how many times the mean (and its inverse) a sample of `step_cost_ms` is held within
+const WARMUP_ITERATIONS := 24  ## iterations whose cost is learned before the step length may change (the first cost is a placeholder)
+const SETTLE_ITERATIONS := 8  ## iterations after a change of the step length before the next
 const MAX_FRAME_SECONDS := 0.1  ## the longest frame the sim catches up on (Main.MAX_FRAME_SECONDS)
 const T_ITER_MS := 50.0  ## [placeholder] the longest an iteration's steps should take (the fixed cost of an iteration is not counted)
 const MAX_STEPS := GpuLayout.MAX_STEPS_PER_BATCH
@@ -74,18 +95,69 @@ var step_ms_mean := T_ITER_MS  ## ms: the cost of a step on a slow mean (MEAN_WE
 var duty := 1.0
 var dropped := 0.0  ## s of owed time dropped by the cap, in all
 var display_ms := 0.0  ## the display's frame (ms), as `frame` was last told; 0: not known (no pacing)
+var stretch := 1.0  ## the step length over the shortest (speed x frame): at least 1
+var step_cost_ms := 0.0  ## ms: the slow mean of what a step costs apart from the iteration's fixed cost (0: no iteration yet)
+var _learned := 0  ## iterations learned from
+var _hold := 0  ## iterations before the step length may change again
 var _slow := 0
 var _pace_carry := 0.0  ## s: the real time the paced frames have left over (within half a display frame)
 
 
-## The world step's length at `p_speed` (s).
-static func step_length(p_speed: float) -> float:
-	return minf(MAX_STEP, maxf(p_speed, 0.0) / STEPS_PER_SECOND)
+## The shortest world step at `p_speed` (s) on a display whose frame is `p_display_ms` (0: not known): a display frame of simulated time, at most MAX_STEP.
+static func shortest_step(p_speed: float, p_display_ms := 0.0) -> float:
+	var frame_s := p_display_ms / 1000.0 if p_display_ms > 0.0 else 1.0 / FALLBACK_STEPS_PER_SECOND
+	return minf(MAX_STEP, maxf(p_speed, 0.0) * frame_s)
 
 
-## The step length now.
+## The step length now (see the header).
 func delta() -> float:
-	return step_length(speed)
+	if speed <= 0.0:
+		return 0.0
+	return minf(MAX_STEP, speed * _frame_s() * stretch)
+
+
+## The display's frame (s) the step length is built on: the real one, or the fallback's.
+func _frame_s() -> float:
+	return display_ms / 1000.0 if display_ms > 0.0 else 1.0 / FALLBACK_STEPS_PER_SECOND
+
+
+## The steps a second the machine sustains at the cost known: an iteration of the usual k, its rest included.
+func sustained_rate() -> float:
+	var k := float(clampi(int(floor(T_ITER_MS / maxf(step_cost_ms, 1e-3))), 1, MAX_STEPS))
+	return 1000.0 * maxf(duty, DUTY_MIN) * k / maxf(fixed_ms + k * step_cost_ms, 1e-3)
+
+
+## The stretch the machine's rate asks for: the step that reaches the speed at HEADROOM of that rate, over the shortest.
+func wanted_stretch() -> float:
+	return maxf(1.0, 1.0 / (HEADROOM * sustained_rate() * _frame_s()))
+
+
+## After an iteration of `k` steps that took `run_ms`: the step length moves toward what the machine sustains, gradually (see the header).
+func _adapt(k: int, run_ms: float) -> void:
+	var sample := maxf(run_ms - fixed_ms, 0.0) / float(k)
+	if step_cost_ms <= 0.0:
+		step_cost_ms = sample
+	else:
+		step_cost_ms += STEP_COST_WEIGHT * (clampf(sample, step_cost_ms / STEP_COST_RANGE, step_cost_ms * STEP_COST_RANGE) - step_cost_ms)
+	_learned += 1
+	if _hold > 0:
+		_hold -= 1
+		return
+	if _learned < WARMUP_ITERATIONS:
+		return
+	var off := log(wanted_stretch() / stretch)
+	if off > 0.0:
+		if off <= log(1.0 + STRETCH_RAISE_BAND) or delta() >= MAX_STEP:
+			return
+		var most := maxf(stretch, MAX_STEP / (speed * _frame_s()))  # (to MAX_STEP and no further)
+		stretch = minf(exp(log(stretch) + STRETCH_WEIGHT * off), most)
+	else:
+		if off >= -log(1.0 + STRETCH_LOWER_BAND):
+			return
+		stretch = maxf(1.0, exp(log(stretch) + STRETCH_WEIGHT * off))
+	_hold = SETTLE_ITERATIONS
+	_ref_k = 0
+	_since_pair = PROBE_EVERY
 
 
 ## A frame of `real_dt` seconds at `p_speed` (paused: no time owed). The time owed is then capped (see the header).
@@ -160,12 +232,12 @@ func steps(room: int = MAX_STEPS, samples: int = MAX_STEPS) -> int:
 	return maxi(1, mini(mini(k, steps_by_time()), mini(room, samples)))
 
 
-## The steps a display frame owes while steps are shorter than MAX_STEP (STEPS_PER_SECOND x the frame, at least 1); 0 when that does not hold
-## or the display's frame is not known.
+## The steps a display frame owes at the step length now while steps are shorter than MAX_STEP (the frame's simulated time over the step, at least 1);
+## 0 when that does not hold or the display's frame is not known.
 func frame_steps() -> int:
 	if display_ms <= 0.0 or delta() >= MAX_STEP or delta() <= 0.0:
 		return 0
-	return maxi(1, roundi(STEPS_PER_SECOND * display_ms / 1000.0))
+	return maxi(1, roundi(speed * display_ms / 1000.0 / delta()))
 
 
 ## Whether `n` steps, on the slow mean of what the iterations measured and with the duty's rest, cost within KEEP_UP_SHARE of a display frame.
@@ -186,6 +258,7 @@ func advanced(k: int, step_delta: float, busy_ms: float) -> void:
 	_learn(k, busy_ms)
 	if probed:
 		_since_pair = 0  # (the iteration that was due to probe was the probe, whether or not it gave a slope: the next runs the usual k)
+	_adapt(k, busy_ms)
 
 
 ## One iteration of `k` steps took `run_ms`: the slope against the iteration before at another k, or the time per step while none is known.

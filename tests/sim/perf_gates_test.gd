@@ -37,7 +37,7 @@ extends SceneTree
 ##     T_ITER of steps leaves unmeasured over 30 s and frame capping) [derived]; the husks-on baseline's best is x10,000 at each size (the
 ##     CPU backend's) [measured baseline]; measured x10,000, x10,000 and x9,997 [measured].
 ##   x1: 1,000 and 100,000 bups, 45 mm, x1, 60 s: the share of display frames in which a new payload is shown; >= 0.99 is the gate. The
-##     sim steps Governor.STEPS_PER_SECOND (120) times a simulated second, so on a 120 Hz display every frame can have a new one [derived];
+##     sim steps a display frame of simulated time while it keeps up with such steps (Governor.shortest_step), so every frame can have a new one [derived];
 ##     this script shows the payload WorldClient's playout gives each frame (oldest first, at most one a frame: publishes that land
 ##     together are shown on the frames after; tests/playout_test.gd checks the rule), as the game does: 1.000 at 1,000 and at 100,000, no frame without a new
 ##     payload in 7,200 [measured; at 1,000, 348 frames brought no publish and 359 brought two, and the waiting publishes covered every
@@ -640,10 +640,10 @@ func _gate_x1_speed() -> void:
 		var share := float(m.get("payload_frames", 0)) / maxf(frames.size(), 1)
 		var edit_frames: Array = m.get("edit_frames", [])
 		var hz := DisplayServer.screen_get_refresh_rate()
-		print("GATE x1/%d [measured]: a new payload in %.3f of %d display frames (display %.0f Hz; derived most %.2f); edit to visible (frames) %s" % [n, share, frames.size(), hz, minf(1.0, Governor.STEPS_PER_SECOND / maxf(hz, 1.0)), edit_frames])
+		print("GATE x1/%d [measured]: a new payload in %.3f of %d display frames (display %.0f Hz; derived most %.2f); edit to visible (frames) %s" % [n, share, frames.size(), hz, 1.0, edit_frames])
 		_print_misses(m)
 		TestUtil.show(m["ok"], "gate x1 (%d bups): the run was clean" % n)
-		TestUtil.show(gate_x1(share), "gate x1 (%d bups): a new payload in >= 99%% of display frames (at most STEPS_PER_SECOND / display Hz)" % n)
+		TestUtil.show(gate_x1(share), "gate x1 (%d bups): a new payload in >= 99%% of display frames (at most every frame)" % n)
 		TestUtil.show(not edit_frames.is_empty() and edit_frames.max() <= 3, "gate x1 (%d bups): edit to visible <= 2 frames + one iteration (%s)" % [n, edit_frames])
 
 

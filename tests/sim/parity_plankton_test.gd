@@ -90,9 +90,10 @@ func _bloom(d: Dish) -> void:
 		for p: Plankton in d.plankton:
 			born[p.born_at] = true
 	await g.settle()
+	var step := g.step_bound(600.0)
 	var times: Array = born.keys()
 	times.sort()
 	var worst := 0.0
 	for k in times.size():
 		worst = maxf(worst, absf(float(times[k]) - float(times[0]) - k * interval))
-	TestUtil.show(times.size() >= 12 and worst <= 600.0 / Governor.STEPS_PER_SECOND, "A a bloom of 1 a mm² a day: %d arrivals, each within %.2f s of the first plus k x %.2f s (a step is %.1f s)" % [times.size(), worst, interval, 600.0 / Governor.STEPS_PER_SECOND])
+	TestUtil.show(times.size() >= 12 and worst <= step, "A a bloom of 1 a mm² a day: %d arrivals, each within %.2f s of the first plus k x %.2f s (a step is %.1f s)" % [times.size(), worst, interval, step])

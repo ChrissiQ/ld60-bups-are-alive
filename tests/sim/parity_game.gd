@@ -90,6 +90,14 @@ func run_for(d: Dish, seconds: float, speed: float) -> void:
 	await settle()
 
 
+## The longest world step (s) the governor may take at `speed` now: the shortest one on this display times the stretch the last iteration
+## ran with (1 while the machine keeps up with steps of a display frame of simulated time).
+func step_bound(speed: float) -> float:
+	var snap := world.latest()
+	var stretch := float(snap.timing.get("stretch", 1.0)) if snap != null else 1.0
+	return minf(Governor.MAX_STEP, Governor.shortest_step(speed, world.display_ms) * maxf(stretch, 1.0))
+
+
 ## Frames (paused unless `speed` > 0 and `paused` false) until `done` returns true; false when `most` frames pass first.
 func wait_until(done: Callable, most := WAIT_FRAMES, speed := 1.0, paused := true) -> bool:
 	for i in most:
