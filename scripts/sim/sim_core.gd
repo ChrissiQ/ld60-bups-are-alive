@@ -712,8 +712,8 @@ func set_field(row: int, values: PackedFloat32Array) -> void:
 ## compute list; one read back (`_request`) takes WORLD, DSTATE, STATS, the family events, the answers and what the pictures hand over;
 ## submit; sync. `plan` (IterationPlan) carries each dish's world events, the history samples, the questions and the view. Returns {steps,
 ## overflow, record_usec, gpu_usec, stats (STATS up to the highest running row), births and deaths (the steps' family events: EVB's and
-## EVD's bytes in use), answers (`answer`'s), published (`publish`'s), ask_usec (the host's time on the answers and the pictures before the
-## list and after the sync), read_usec (on the read back)}; steps 0 when the room the steps need would pass the memory budget
+## EVD's bytes in use), answers (`answer`'s), published (`publish`'s), answer_usec and publish_usec (the host's time on the answers and on
+## the pictures, before the list and after the sync), read_usec (on the read back)}; steps 0 when the room the steps need would pass the memory budget
 ## (OVERFLOW_BUDGET is set, `errors` says so, no step ran; the questions are answered and the pictures published all the same). With no
 ## steps and no plan, the queued edits are made and the stats refreshed, and nothing else. An overflow a kernel finds (WORLD's flag) is not
 ## undone: the iteration cannot be done again from what the host holds (the records and fields change in place on the device), so
@@ -742,8 +742,10 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 	var questions: Array = plan.questions if plan != null and plan.get("questions") is Array else []
 	var view: ViewRequest = plan.view if plan != null and plan.get("view") is ViewRequest else null
 	var staged := _answers_stage(questions)
+	var t_pub := Time.get_ticks_usec()
 	var pub := _publish_stage(view, _expected_count(view.row, steps) if view != null and _dishes.has(view.row) else 0)
-	var ask_usec := Time.get_ticks_usec() - t_ask
+	var answer_usec := t_pub - t_ask
+	var publish_usec := Time.get_ticks_usec() - t_pub
 	var stats := steps > 0 or not _stats_fresh
 	var t0 := Time.get_ticks_usec()
 	if stats or not (staged["sets"] as Array).is_empty() or not pub.is_empty():
@@ -795,8 +797,10 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 	var read_usec := Time.get_ticks_usec() - t2
 	var t_took := Time.get_ticks_usec()
 	out["answers"] = _answers_take(staged, got)
+	var t_pub_took := Time.get_ticks_usec()
 	out["published"] = _publish_take(pub, got)
-	out["ask_usec"] = ask_usec + Time.get_ticks_usec() - t_took
+	out["answer_usec"] = answer_usec + t_pub_took - t_took
+	out["publish_usec"] = publish_usec + Time.get_ticks_usec() - t_pub_took
 	out["read_usec"] = read_usec
 	if steps > 0:
 		arena.maybe_shrink(_wd(GpuLayout.WD_SLOTS), _wd(GpuLayout.WD_CLOUD_SLOTS), _wd(GpuLayout.WD_HUSK_SLOTS), _entries_peak, maxi(births, deaths))

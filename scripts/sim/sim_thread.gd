@@ -398,7 +398,7 @@ func _quiet_pass() -> void:
 func _results(steps: int, d: float, t0: float, samples: Array, res: Dictionary, plan: IterationPlan) -> Dictionary:
 	var t_answer := Time.get_ticks_usec()
 	_take_answers(plan.questions, res.get("answers", {}))
-	var answer_ms := (Time.get_ticks_usec() - t_answer + int(res.get("ask_usec", 0))) / 1000.0
+	var answer_ms := (Time.get_ticks_usec() - t_answer + int(res.get("answer_usec", 0))) / 1000.0
 	var t_read := Time.get_ticks_usec()
 	var rows: Array = []
 	var births := 0
@@ -440,7 +440,7 @@ func _results(steps: int, d: float, t0: float, samples: Array, res: Dictionary, 
 		"steps": steps, "delta": d, "t0": t0, "sim_time": governor.clock, "achieved": _achieved(), "paused": governor.paused,
 		"births": eb, "deaths": ed, "rows": rows, "stats": stats, "samples": samples, "worlds": worlds, "refused": refused,
 		"payload": _payload, "field_view": _field_view, "thumbs": _thumbs, "husk_view": _husk_view, "readback_ms": readback_ms,
-		"publish_ms": (Time.get_ticks_usec() - t_pub) / 1000.0, "answer_ms": answer_ms, "game_began": _game_began,
+		"publish_ms": (Time.get_ticks_usec() - t_pub + int(res.get("publish_usec", 0))) / 1000.0, "answer_ms": answer_ms, "game_began": _game_began,
 	}
 
 
