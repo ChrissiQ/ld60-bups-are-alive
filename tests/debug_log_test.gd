@@ -48,6 +48,7 @@ func _initialize() -> void:
 		TestUtil.check(be["governor"]["T_ITER_ms"] == Governor.T_ITER_MS and be["pool"] is Dictionary and be["pool_in_use"] is Dictionary and be["pool_overflow"] is float and be["payload_behind_sim_s"] is float,"...T_ITER is the governor's, and the pool, what of it is in use, its overflow bits and the payload's age are there (the canned world serves none)")
 		TestUtil.check(be.has("time_process") and (be["time_process"] is float or be["time_process"] is int), "backend has the process time")
 		TestUtil.check(be.has("draw_slots") and be["draw_slots"] is Dictionary and be["draw_slots"].has("drawn") and be["draw_slots"].has("capacity") and be["draw_slots"].has("live"), "...draw_slots has drawn, capacity and live")
+		TestUtil.check(be.get("pictures_last_second") is Dictionary and (be["pictures_last_second"] as Dictionary).has("shown"), "...pictures_last_second says how often the picture changed")
 		TestUtil.check(be.has("pick_latency_frames") and be["pick_latency_frames"] is Dictionary and be["pick_latency_frames"].has("last") and be["pick_latency_frames"].has("max") and be["pick_latency_frames"].has("last_ms"), "...pick_latency_frames has last, max and last_ms")
 		TestUtil.check(data["dish"].has("births_refused") and data["dish"]["births_refused"] is float,"the dish has its births refused at the pool's edge")
 		TestUtil.check(data["dish"].has("layers_hidden") and data["dish"]["layers_hidden"] is Array, "layers_hidden is an Array")

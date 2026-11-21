@@ -18,6 +18,7 @@ extends RefCounted
 ## as fast as it filled, and when iterations are longer than a frame (above x1) it does not fill.
 
 const WAITING_MOST := 2  ## publishes seen and not yet shown that the playout keeps (SimCore.TEXTURES holds their textures)
+const PICTURE_WINDOW_MSEC := 1000  ## how far back `picture_rate` counts
 
 signal snapshot_changed(snap: Snapshot)
 signal refused(row: int, why: String)
@@ -28,6 +29,8 @@ var _last_seq := -1
 var display_ms := 0.0  ## the display's frame (ms), from the screen's refresh rate, sent with every set_time for the governor's pacing (0: not known, no pacing)
 var _waiting: Array = []  ## publishes seen and not yet shown, oldest first (at most WAITING_MOST after a frame)
 var _shown: PayloadInfo = null
+var _new_pictures: Array = []  ## [msec, poll] of each frame that showed the main view a new publish, the last PICTURE_WINDOW_MSEC
+var _arrivals: Array = []  ## msec of each publish that arrived, the last PICTURE_WINDOW_MSEC
 var _known_publish := -1  ## the newest publish seen
 var _refusals_taken := {}  ## row -> the snapshot that first carried the last refusal of it that was taken (timing["refused_seq"])
 var _polls := 0  ## frames polled so far (the question latency counts in these)
@@ -220,9 +223,14 @@ func poll() -> void:
 				arrived.append(p)
 				_known_publish = p.seq
 	var step := playout(_waiting, arrived)
+	var now := Time.get_ticks_msec()
+	for _p: PayloadInfo in arrived:
+		_arrivals.append(now)
 	if step[0] != null:
 		_shown = step[0]
+		_new_pictures.append([now, _polls])
 	_waiting = step[1]
+	_forget_pictures(now)
 	if snap == null or snap.seq <= 0 or snap.seq == _last_seq:
 		return
 	_last_seq = snap.seq
@@ -239,6 +247,26 @@ func poll() -> void:
 		_used.erase(row)
 		refused.emit(row, String(gone[row]))
 	snapshot_changed.emit(snap)
+
+
+## How often the main view's picture changed in the last PICTURE_WINDOW_MSEC: {shown (new pictures shown), published (publishes that
+## arrived; more than shown when some were skipped), longest_hold_frames (the most frames one picture stayed up, the one up now
+## included)}.
+func picture_rate() -> Dictionary:
+	_forget_pictures(Time.get_ticks_msec())
+	var longest := 0
+	for i in range(1, _new_pictures.size()):
+		longest = maxi(longest, int(_new_pictures[i][1]) - int(_new_pictures[i - 1][1]))
+	if not _new_pictures.is_empty():
+		longest = maxi(longest, _polls - int(_new_pictures[-1][1]))
+	return {"shown": _new_pictures.size(), "published": _arrivals.size(), "longest_hold_frames": longest}
+
+
+func _forget_pictures(now: int) -> void:
+	while not _new_pictures.is_empty() and now - int(_new_pictures[0][0]) > PICTURE_WINDOW_MSEC:
+		_new_pictures.pop_front()
+	while not _arrivals.is_empty() and now - int(_arrivals[0]) > PICTURE_WINDOW_MSEC:
+		_arrivals.pop_front()
 
 
 ## Times the answers of `snap` (a snapshot taken after a question was sent: its seq is past the one current then) against the questions waiting.

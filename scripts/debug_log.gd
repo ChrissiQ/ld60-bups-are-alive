@@ -119,6 +119,7 @@ static func backend(dish: Dish) -> Dictionary:
 		"pool_overflow": timing.get("overflow", 0),
 		"payload_behind_sim_s": snap.sim_time - shown.sim_time if shown != null else -1.0,
 		"pick_latency_frames": world.pick_latency() if world != null else {"last": 0, "max": 0, "last_ms": 0.0},
+		"pictures_last_second": world.picture_rate() if world != null else {},
 		"time_process": Performance.get_monitor(Performance.TIME_PROCESS),
 		"draw_slots": _draw_slots(dish),
 	}
