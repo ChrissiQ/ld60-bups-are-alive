@@ -154,17 +154,7 @@ var want_thumbnails := false  ## the screen shows every dish's small picture (th
 var _layers_hidden := {}  ## Layer -> true for each one hidden
 
 ## Presentation state set by the screen that shows this dish (nothing here affects the sim).
-var pick_mode := PickMode.ALL:  ## the select tool ignores whatever this leaves out
-	set(value):
-		pick_mode = value
-		if not looks_at_bups():
-			selected.bup = -1
-		if not looks_at_sources():
-			selected.source = null
-		if not looks_at_plankton():
-			selected.plankton = null
-		if not looks_at_husks():
-			selected.husk = NO_HUSK
+var pick_mode := PickMode.ALL  ## the select tool ignores whatever this leaves out; what is selected stays selected when it changes
 var _hover_pos := Vector2.ZERO  ## where the pointer was when `hovered` was picked
 var _hover_slack := 0.0  ## and the slack it was picked with
 var _hover_waiting := false  ## the picture has not yet answered whether a bup is at `_hover_pos`: `hovered` is empty until it does

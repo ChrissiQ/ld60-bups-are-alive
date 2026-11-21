@@ -410,14 +410,13 @@ func _open_watched(watched_in: Dish, id: int) -> void:
 	set_main_dish(watched_in)  # (the bup may be in another dish: the view goes there)
 	if not dish.has_record(id):
 		return
-	tool_options.show_all()  # (a mode that skips bups would let go of it again)
 	dish.selected.bup = id
 	stage_input.stop_following()
 
 
-## The select tool now looks at something else: a selection of a kind it no longer looks at is let go.
+## The select tool now looks at something else: what it can pick changes, what is selected (and followed) does not.
 func _on_pick_mode_selected(mode: Dish.PickMode) -> void:
-	dish.pick_mode = mode  # (which also lets go of a selection the mode doesn't look at)
+	dish.pick_mode = mode
 
 
 func _on_tool_selected(new_tool: Toolbar.Tool) -> void:

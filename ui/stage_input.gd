@@ -122,8 +122,8 @@ func stop_following() -> void:
 	following_id = -1
 
 
-## Follow: the camera keeps the selected bup in the middle of the view until the player stops it,
-## pans, selects something else, or the bup dies.
+## Follow: the camera keeps the selected bup in the middle of the view until the player stops it, pans, selects something else or
+## lets go of the selection (Escape, a click on nothing), changes dish, or the bup dies. Changing the select tool's mode keeps it.
 func toggle_follow() -> void:
 	following_id = -1 if following_id >= 0 else dish.selected.bup
 	follow_selected()

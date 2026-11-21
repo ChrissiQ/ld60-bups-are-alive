@@ -332,8 +332,10 @@ func _initialize() -> void:
 	TestUtil.check(not m.inspector.note_divisions(bup, {"divisions": 6}), "...and the flash ends")
 	TestUtil.check(not m.inspector.note_divisions(bup + 1, {"divisions": 9}), "another bup shown does not flash")
 	TestUtil.check(m.inspector.info_panel.visible and m.inspector.name_row.visible and m.inspector.name_row.name_label.text.contains("bup #") and m.inspector.info_text.get_parsed_text().contains("divisions"), "info panel shows the selected bup, named with its number ('%s')" % m.inspector.name_row.name_label.text)
+	m.stage_input.toggle_follow()
 	_click(m, centre + Vector2(-250, -250))
-	TestUtil.check(m.dish.selected.bup == -1, "clicking empty space deselects")
+	await process_frame
+	TestUtil.check(m.dish.selected.bup == -1 and m.stage_input.following_id == -1, "clicking empty space deselects and ends the follow")
 	m.dish.selected.bup = bup
 	cam_before = m.camera.position
 	_drag(m, centre, Vector2(30, 0), MOUSE_BUTTON_MIDDLE)
@@ -599,12 +601,14 @@ func _initialize() -> void:
 	picks[2].button_pressed = true
 	await _select_at(m, mode_spot)
 	TestUtil.check(m.dish.selected.bup == mode_bup and m.dish.selected.source == null, "a click in Bups mode picks the bup")
+	m.inspector.follow_button.pressed.emit()
 	picks[3].button_pressed = true
-	TestUtil.check(m.dish.selected.bup == -1, "changing to a mode that doesn't look at bups lets go of the selected bup")
+	await process_frame
+	TestUtil.check(m.dish.selected.bup == mode_bup and m.stage_input.following_id == mode_bup, "changing to a mode that doesn't look at bups keeps the selected bup and the follow")
 	await _select_at(m, mode_spot)
-	TestUtil.check(m.dish.selected.source != null and m.dish.selected.bup == -1, "a click in Nutrient sources mode picks the source")
+	TestUtil.check(m.dish.selected.source != null and m.dish.selected.bup == -1 and m.stage_input.following_id == -1, "a click in Nutrient sources mode picks the source, which ends the follow")
 	picks[1].button_pressed = true
-	TestUtil.check(m.dish.selected.source == null, "...and changing to Background lets go of it")
+	TestUtil.check(m.dish.selected.source != null, "...and changing to Background keeps it")
 	picks[0].button_pressed = true
 	await _clear_sources(m)
 	await process_frame
@@ -632,7 +636,7 @@ func _initialize() -> void:
 	await _select_at(m, float_spot)
 	TestUtil.check(m.dish.selected.plankton == floater and m.dish.selected.bup == -1 and m.dish.selected.source == null, "a click in Plankton mode picks it")
 	picks[Dish.PickMode.BUPS].button_pressed = true
-	TestUtil.check(m.dish.selected.plankton == null, "changing to a mode that doesn't look at plankton lets go of it")
+	TestUtil.check(m.dish.selected.plankton == floater, "changing to a mode that doesn't look at plankton keeps it")
 	picks[Dish.PickMode.PLANKTON].button_pressed = true
 	await _select_at(m, float_spot)
 	m.toolbar.select_tool(Toolbar.Tool.PAN)
