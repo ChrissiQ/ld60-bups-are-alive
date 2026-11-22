@@ -578,8 +578,10 @@ func _published(v: ViewRequest, out: Dictionary, husks: Variant, t0: float, d: f
 		q.generation = generation
 		if cpu_handover:
 			q.bytes = shot["bytes"]
+			q.prev_bytes = shot["prev"]
 		q.seq = shot["seq"]
 		q.places = _places(shot.get("tracked", {}))
+		q.places_before = _places_before(shot.get("tracked", {}))
 		payloads.append(q)
 		_payload = q
 	if out.has("payload"):
@@ -591,8 +593,10 @@ func _published(v: ViewRequest, out: Dictionary, husks: Variant, t0: float, d: f
 		p.generation = generation
 		if cpu_handover:
 			p.bytes = handed["payload"]
+			p.prev_bytes = handed["prev"]
 		p.seq = _core.publish_seq
 		p.places = _places(out.get("tracked", {}))
+		p.places_before = _places_before(out.get("tracked", {}))
 		_payload = p
 		payloads.append(p)
 	if out.has("haze") or out.has("steer"):
@@ -628,12 +632,23 @@ func _published(v: ViewRequest, out: Dictionary, husks: Variant, t0: float, d: f
 
 ## Where the bups the main view's dish asks after (its selected and hovered: WorldClient.ask's "tracked") are in the payload just published
 ## (`found`: SimCore.publish's "tracked", looked up in the publish's own list): id -> Vector3(x, y, drawn length in µm), dish-local. The
-## camera's follow and the rings take a bup's place from the payload they draw, so neither lags the picture.
+## camera's follow and the rings take a bup's place from the payload they draw (between pictures, part of the way from its place before:
+## `_places_before`), so neither lags the drawing.
 func _places(found: Dictionary) -> Dictionary:
 	var out := {}
 	for id: int in found:
 		var r: PackedByteArray = found[id]
 		out[id] = Vector3(r.decode_float(GpuLayout.R_X * 4), r.decode_float(GpuLayout.R_Y * 4), r.decode_float(GpuLayout.R_MASS * 4) * _mass_um)
+	return out
+
+
+## Where the same bups were in the picture before (`found`'s answers carry it in R_PX and R_PY: `pool_track_picture`): id -> Vector2,
+## dish-local; a bup in no picture before has its place in this one.
+func _places_before(found: Dictionary) -> Dictionary:
+	var out := {}
+	for id: int in found:
+		var r: PackedByteArray = found[id]
+		out[id] = Vector2(r.decode_float(GpuLayout.R_PX * 4), r.decode_float(GpuLayout.R_PY * 4))
 	return out
 
 

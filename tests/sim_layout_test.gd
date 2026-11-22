@@ -95,7 +95,9 @@ func _dstate() -> void:
 
 
 func _payload() -> void:
-	TestUtil.check(L.PL_WORDS == 4 and L.PAYLOAD_BYTES == 16 and L.IDT_WORDS == 2 and L.IDT_BYTES == 8, "the payload is 16 bytes a bup, the id texture 8")
+	TestUtil.check(L.PL_WORDS == 4 and L.PAYLOAD_BYTES == 16 and L.IDT_WORDS == 2 and L.IDT_BYTES == 8, "the payload is 16 bytes a bup, its ids buffer 8")
+	TestUtil.check(L.IDS_WORDS == 4 and L.IDS_BYTES == 16 and L.IDS_PREV_X == 2 and L.IDS_PREV_Y == 3, "the ids texture is the id then the place before, 16 bytes a bup")
+	TestUtil.check(L.PV_WORDS == 2 and L.PV_BYTES == 8 and L.LP_WORDS == 4 and L.LP_BYTES == 16 and L.LP_ID_LO == 0 and L.LP_ID_HI == 1 and L.LP_X == 2 and L.LP_Y == 3 and L.LP_ROW == 0 and L.LP_COUNT == 1, "the places before and the last picture's words")
 	TestUtil.check(L.PL_X == 0 and L.PL_Y == 1 and L.PL_SHAPE == 2 and L.PL_COLOR == 3 and L.IDT_LO == 0 and L.IDT_HI == 1, "payload words in order")
 	TestUtil.check(L.PL_RED_SHIFT == 24 and L.PL_GREEN_SHIFT == 16 and L.PL_BLUE_SHIFT == 8, "the colour's three bytes sit above the spare low byte")
 	TestUtil.check(L.PAYLOAD_TEX_WIDTH == 2048, "payload textures are 2048 wide")

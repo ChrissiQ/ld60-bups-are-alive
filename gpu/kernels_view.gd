@@ -1,12 +1,14 @@
 class_name GpuKernelsView
 extends RefCounted
 ## The main device's kernels of the pooled world's picture: they read the payload the simulation publishes into a
-## shared texture (one texel a bup of the main-view dish, GpuLayout.PL_*; its ids in a second texture, GpuLayout.IDT_*) and write the
-## bups' MultiMesh (ViewRenderer, scripts/sim/view_renderer.gd), and answer the pointer's questions. They never run on the simulation's
-## device. The textures are imported in a format other than the one the simulation made them in (RGBA32UI as RGBA32I, RG32UI as RG32I:
-## see ViewRenderer), so the kernels read them as signed images and take the bits back as unsigned.
+## shared texture (one texel a bup of the main-view dish, GpuLayout.PL_*; its ids and its place in the picture before in a second texture,
+## GpuLayout.IDT_* and IDS_PREV_*) and write the bups' MultiMesh (ViewRenderer, scripts/sim/view_renderer.gd), and answer the pointer's
+## questions. Every one of them takes a bup where it is drawn this frame: between its place before and its place in the picture, the
+## share VW_T of the way (`place_at`), so the drawing, the picks and the places looked up agree. They never run on the simulation's
+## device. The textures are imported in a format other than the one the simulation made them in (RGBA32UI as RGBA32I, both: see
+## ViewRenderer), so the kernels read them as signed images and take the bits back as unsigned.
 ##
-## view_build, every frame the camera or the payload changed, a stream compaction in the dish's own order over G groups of 256 (each
+## view_build, every frame the camera, the payload or the share of the way between pictures changed, a stream compaction in the dish's own order over G groups of 256 (each
 ## group a run of texels, as the grid scan of gpu/kernels.gd cuts them; few dispatches, each texel read twice, nothing per texel written
 ## but the instances):
 ## - view_count: each group counts the bups of its run whose quad reaches into the camera's rectangle (VCOUNT, a word a group);
@@ -39,7 +41,8 @@ const FINDS := 2  ## the bups whose place is looked up a frame (the selected and
 const VW_DENSITY := VW_FIND + 2 * FINDS  ## 0: the capsules for every bup; 1: the bups under their least footprint are splatted (below), not drawn
 const VW_DEN_W := VW_DENSITY + 1  ## the density picture's size in pixels (the camera's rectangle over the pixel)
 const VW_DEN_H := VW_DENSITY + 2
-const VW_WORDS := VW_DEN_H + 1
+const VW_T := VW_DEN_H + 1  ## the share of the way from each bup's place before to its place in the picture it is drawn at this frame (float, 0 to 1)
+const VW_WORDS := VW_T + 1
 
 ## VOUT: the build's answers, read back by the host a frame or two later.
 const VO_VISIBLE := 0  ## the visible bups (instances written)
@@ -48,7 +51,7 @@ const VO_INDEX := 2  ## the picked texel (all ones: none)
 const VO_NEAREST := 3  ## the nearest bup's d² (float bits; all ones: no bups)
 const VO_NEAR := 4  ## the bups within VW_NEAR of the pick's point
 const VO_FOUND := 5  ## FINDS texels of the bups looked up (all ones: not in the payload)
-const VO_PICKED := VO_FOUND + FINDS  ## the picked bup: id low, id high, x, y, length (µm)
+const VO_PICKED := VO_FOUND + FINDS  ## the picked bup: id low, id high, x, y (where it is drawn), length (µm)
 const VO_PLACE_WORDS := 5
 const VO_PLACES := VO_PICKED + VO_PLACE_WORDS  ## each found bup: id low, id high, x, y, length
 const VO_LARGE := VO_PLACES + FINDS * VO_PLACE_WORDS  ## density mode: the bups that are not under their least footprint (the capsule path draws them; none: it need not run)
@@ -76,11 +79,11 @@ const DENSITY_KERNELS := ["density_clear", "density_splat", "density_resolve"]
 
 ## The image bindings of each kernel (binding -> the texture ViewRenderer binds there: "payload" or "ids"), past its storage buffers.
 const IMAGE_BINDINGS := {
-	"view_count": {3: "payload"},
-	"view_scatter": {4: "payload"},
+	"view_count": {3: "payload", 4: "ids"},
+	"view_scatter": {4: "payload", 5: "ids"},
 	"view_pick": {4: "payload", 5: "ids"},
 	"view_answer": {2: "payload", 3: "ids"},
-	"density_splat": {4: "payload"},
+	"density_splat": {4: "payload", 5: "ids"},
 	"density_resolve": {2: "density"},
 }
 
@@ -88,11 +91,20 @@ const PAYLOAD_IMAGE := "uniform restrict readonly iimage2D PAYTEX;\n"
 const IDS_IMAGE := "uniform restrict readonly iimage2D IDTEX;\n"
 const DENSITY_IMAGE := "uniform restrict writeonly image2D DENTEX;\n"
 
-## A texel's place in the textures, its words, and the parameters as floats.
+## A texel's place in the textures, its words, the parameters as floats, and where texel k's bup (its payload words `px`) is drawn: at
+## VW_T 1 its place in the picture exactly, else that share of the way from its place before.
 const VIEW_FUNCS := """
 ivec2 texel_at(uint k) { return ivec2(int(k % PAYLOAD_TEX_WIDTH), int(k / PAYLOAD_TEX_WIDTH)); }
 uvec4 payload_at(uint k) { return uvec4(imageLoad(PAYTEX, texel_at(k))); }
 float vpf(uint w) { return uintBitsToFloat(VP[w]); }
+vec2 place_at(uint k, uvec4 px) {
+	vec2 here = vec2(uintBitsToFloat(px[PL_X]), uintBitsToFloat(px[PL_Y]));
+	float t = vpf(VW_T);
+	if (t >= 1.0) return here;
+	uvec4 q = uvec4(imageLoad(IDTEX, texel_at(k)));
+	vec2 was = vec2(uintBitsToFloat(q[IDS_PREV_X]), uintBitsToFloat(q[IDS_PREV_Y]));
+	return was * (1.0 - t) + here * t;
+}
 """
 
 ## Whether texel k's bup reaches into the camera's rectangle: half the reach of its quad from its middle along either axis is half its drawn
@@ -107,7 +119,8 @@ uint visible_at(uint k) {
 	float pixel = vpf(VW_PIXEL);
 	if (VP[VW_DENSITY] != 0u && small_at(shape.x, pixel)) return 0u;
 	float half_reach = 0.5 * max(max(shape.x, P[P_MIN_LENGTH_PX] * pixel), max(P[P_WIDTH], P[P_MIN_WIDTH_PX] * pixel)) + pixel;
-	float x = uintBitsToFloat(px[PL_X]), y = uintBitsToFloat(px[PL_Y]);
+	vec2 at = place_at(k, px);
+	float x = at.x, y = at.y;
 	return (x + half_reach >= vpf(VW_X0) && x - half_reach <= vpf(VW_X1) && y + half_reach >= vpf(VW_Y0) && y - half_reach <= vpf(VW_Y1)) ? 1u : 0u;
 }
 uvec2 run_of(uint g, uint groups) {
@@ -144,8 +157,9 @@ void put(uint k, uint j) {
 	float ux = cos(shape.y), uy = sin(shape.y);
 	float ql = len + 2.0 * margin, qw = width + 2.0 * margin;
 	uint c = px[PL_COLOR];
-	INST[j * 4u] = vec4(ux * ql, -uy * qw, 0.0, uintBitsToFloat(px[PL_X]));
-	INST[j * 4u + 1u] = vec4(uy * ql, ux * qw, 0.0, uintBitsToFloat(px[PL_Y]));
+	vec2 at = place_at(k, px);
+	INST[j * 4u] = vec4(ux * ql, -uy * qw, 0.0, at.x);
+	INST[j * 4u + 1u] = vec4(uy * ql, ux * qw, 0.0, at.y);
 	INST[j * 4u + 2u] = vec4(vec3(float((c >> PL_RED_SHIFT) & 255u), float((c >> PL_GREEN_SHIFT) & 255u), float((c >> PL_BLUE_SHIFT) & 255u)) / 255.0, 1.0);
 	INST[j * 4u + 3u] = vec4(len, width, margin, 0.0);
 }
@@ -197,7 +211,8 @@ void f(uint k) {
 		if (VP[VW_PICK] != 0u) {
 			float pixel = vpf(VW_PIXEL);
 			float reach = 0.5 * max(shape.x, P[P_MIN_LENGTH_PX] * pixel) + vpf(VW_SLACK);
-			float dx = uintBitsToFloat(px[PL_X]) - vpf(VW_PICK_X), dy = uintBitsToFloat(px[PL_Y]) - vpf(VW_PICK_Y);
+			vec2 at = place_at(k, px);
+			float dx = at.x - vpf(VW_PICK_X), dy = at.y - vpf(VW_PICK_Y);
 			float d2 = dx * dx + dy * dy;
 			if (d2 <= reach * reach) { bits = floatBitsToUint(d2); atomicMin(VOUT[VO_D2], bits); }
 			atomicMin(VOUT[VO_NEAREST], floatBitsToUint(d2));
@@ -229,7 +244,8 @@ void place(uint k, uint at) {
 	if (k == 0xFFFFFFFFu) return;
 	uvec4 px = payload_at(k);
 	uvec2 id = uvec2(imageLoad(IDTEX, texel_at(k)).xy);
-	VOUT[at] = id.x; VOUT[at + 1u] = id.y; VOUT[at + 2u] = px[PL_X]; VOUT[at + 3u] = px[PL_Y];
+	vec2 drawn = place_at(k, px);
+	VOUT[at] = id.x; VOUT[at + 1u] = id.y; VOUT[at + 2u] = floatBitsToUint(drawn.x); VOUT[at + 3u] = floatBitsToUint(drawn.y);
 	VOUT[at + 4u] = floatBitsToUint(unpackHalf2x16(px[PL_SHAPE]).x);
 }
 void main() {
@@ -287,7 +303,7 @@ void f(uint k) {
 		atomicAdd(VOUT[VO_LARGE], 1u);
 		return;
 	}
-	vec2 u = (vec2(uintBitsToFloat(px[PL_X]), uintBitsToFloat(px[PL_Y])) - vec2(vpf(VW_X0), vpf(VW_Y0))) / pixel;
+	vec2 u = (place_at(k, px) - vec2(vpf(VW_X0), vpf(VW_Y0))) / pixel;
 	float length_px = P[P_MIN_LENGTH_PX];
 	float width_px = max(P[P_WIDTH] / pixel, P[P_MIN_WIDTH_PX]);
 	float area = max(length_px - width_px, 0.0) * width_px + PI_QUARTER * width_px * width_px;
@@ -341,7 +357,7 @@ static func _images(kernel_name: String) -> String:
 			"payload":
 				text += "layout(set = 0, binding = %d, rgba32i) %s" % [b, PAYLOAD_IMAGE]
 			"ids":
-				text += "layout(set = 0, binding = %d, rg32i) %s" % [b, IDS_IMAGE]
+				text += "layout(set = 0, binding = %d, rgba32i) %s" % [b, IDS_IMAGE]
 			"density":
 				text += "layout(set = 0, binding = %d, rgba8) %s" % [b, DENSITY_IMAGE]
 	return text

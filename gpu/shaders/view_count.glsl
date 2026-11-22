@@ -7,6 +7,8 @@ layout(set = 0, binding = 0, std430) buffer B_P { float P[]; };
 layout(set = 0, binding = 1, std430) buffer B_VP { uint VP[]; };
 layout(set = 0, binding = 2, std430) buffer B_VCOUNT { uint VCOUNT[]; };
 const uint CNT_BUPS = 0u;
+const uint IDS_PREV_X = 2u;
+const uint IDS_PREV_Y = 3u;
 const uint PAYLOAD_TEX_WIDTH = 2048u;
 const uint PL_SHAPE = 2u;
 const uint PL_X = 0u;
@@ -52,16 +54,26 @@ const uint VW_PICK_Y = 10u;
 const uint VW_PIXEL = 5u;
 const uint VW_SLACK = 11u;
 const uint VW_SLOTS = 6u;
-const uint VW_WORDS = 21u;
+const uint VW_T = 21u;
+const uint VW_WORDS = 22u;
 const uint VW_X0 = 1u;
 const uint VW_X1 = 3u;
 const uint VW_Y0 = 2u;
 const uint VW_Y1 = 4u;
 layout(set = 0, binding = 3, rgba32i) uniform restrict readonly iimage2D PAYTEX;
+layout(set = 0, binding = 4, rgba32i) uniform restrict readonly iimage2D IDTEX;
 
 ivec2 texel_at(uint k) { return ivec2(int(k % PAYLOAD_TEX_WIDTH), int(k / PAYLOAD_TEX_WIDTH)); }
 uvec4 payload_at(uint k) { return uvec4(imageLoad(PAYTEX, texel_at(k))); }
 float vpf(uint w) { return uintBitsToFloat(VP[w]); }
+vec2 place_at(uint k, uvec4 px) {
+	vec2 here = vec2(uintBitsToFloat(px[PL_X]), uintBitsToFloat(px[PL_Y]));
+	float t = vpf(VW_T);
+	if (t >= 1.0) return here;
+	uvec4 q = uvec4(imageLoad(IDTEX, texel_at(k)));
+	vec2 was = vec2(uintBitsToFloat(q[IDS_PREV_X]), uintBitsToFloat(q[IDS_PREV_Y]));
+	return was * (1.0 - t) + here * t;
+}
 
 bool small_at(float length, float pixel) { return length < P[P_MIN_LENGTH_PX] * pixel; }
 uint visible_at(uint k) {
@@ -71,7 +83,8 @@ uint visible_at(uint k) {
 	float pixel = vpf(VW_PIXEL);
 	if (VP[VW_DENSITY] != 0u && small_at(shape.x, pixel)) return 0u;
 	float half_reach = 0.5 * max(max(shape.x, P[P_MIN_LENGTH_PX] * pixel), max(P[P_WIDTH], P[P_MIN_WIDTH_PX] * pixel)) + pixel;
-	float x = uintBitsToFloat(px[PL_X]), y = uintBitsToFloat(px[PL_Y]);
+	vec2 at = place_at(k, px);
+	float x = at.x, y = at.y;
 	return (x + half_reach >= vpf(VW_X0) && x - half_reach <= vpf(VW_X1) && y + half_reach >= vpf(VW_Y0) && y - half_reach <= vpf(VW_Y1)) ? 1u : 0u;
 }
 uvec2 run_of(uint g, uint groups) {

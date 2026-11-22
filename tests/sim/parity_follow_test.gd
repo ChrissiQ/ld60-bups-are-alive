@@ -1,15 +1,16 @@
 extends SceneTree
 ## The windowed part of the info panel's follow (it keeps the selected bup in the middle of the stage), on the real pool at x10,000:
-## the game screen itself (Main, free mode, on SimService's world), a bup selected and followed, and each frame the bup's place in the
-## picture drawn that frame (the payload the dish's view drew, read back from its shared texture) against the stage's middle, in screen
-## pixels. Windowed only. On macOS:
+## the game screen itself (Main, free mode, on SimService's world), a bup selected and followed, and each frame where the bup is drawn
+## that frame (between its place before and its place in the payload the dish's view drew, both read back from what the view holds, at
+## the frame's share of the way) against the stage's middle, in screen pixels. Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/parity_follow_test.gd
 ##
 ## Expected values [derived unless marked]:
 ## F  The bound: over 100 frames at x10,000, zoomed in to 2 px a µm, the followed bup is drawn within 2 px of the stage's middle
-##    in every frame. StageInput.follow_selected puts the camera on Dish.bup_world_pos, which is the bup's place in the payload the frame
-##    draws (PayloadInfo.places: the sim thread looks up the bups the dish asks after as it publishes, and Main gives the view the frame's
-##    payload before it moves the camera), so the two differ by float rounding only: well under 0.01 px [derived]. A frame drawn from a
+##    in every frame. StageInput.follow_selected puts the camera on Dish.bup_world_pos, which is where the frame draws the bup
+##    (PayloadInfo.places and places_before at DishDrawing.share: the sim thread looks up the bups the dish asks after as it publishes, and
+##    Main gives the view the frame's payload before it moves the camera), so the two differ by float rounding only: well under 0.01 px
+##    [derived]. A frame drawn from a
 ##    payload published before the dish asked after the bup has no place for it; the 60 frames before the window leave none of those.
 
 var g: ParityGame
@@ -55,8 +56,11 @@ func _run() -> void:
 		await process_frame
 	var errors: Array = []
 	var missing := 0
+	var between := 0
 	for f in 100:
 		await process_frame
+		var t := dish.drawing.share()
+		between += 1 if t > 0.0 and t < 1.0 else 0
 		var at: Variant = _drawn_at(dish, id)
 		if at == null:
 			missing += 1
@@ -67,23 +71,27 @@ func _run() -> void:
 		errors.append(((dish.global_position + (at as Vector2)) - centre).length() * zoom)
 	errors.sort()
 	var worst: float = errors[-1] if not errors.is_empty() else INF
-	print("     x10,000 (achieved x%.0f): following %d, the drawn bup off the stage's middle by median %.1f px, p95 %.1f px, worst %.1f px; %d frames it was not in the picture" % [g.world.latest().achieved_speed, id, errors[errors.size() / 2] if not errors.is_empty() else -1.0, errors[int(errors.size() * 0.95)] if not errors.is_empty() else -1.0, worst, missing])
+	print("     x10,000 (achieved x%.0f): following %d, the drawn bup off the stage's middle by median %.1f px, p95 %.1f px, worst %.1f px; %d frames it was not in the picture; %d frames drawn between pictures" % [g.world.latest().achieved_speed, id, errors[errors.size() / 2] if not errors.is_empty() else -1.0, errors[int(errors.size() * 0.95)] if not errors.is_empty() else -1.0, worst, missing, between])
 	TestUtil.show(g.world.latest().achieved_speed >= 5000.0, "the game runs at x10,000 (achieved x%.0f)" % g.world.latest().achieved_speed)
 	TestUtil.show(id >= 0 and main.stage_input.following_id == id and errors.size() >= 95 and worst <= 2.0, "F the followed bup stays within 2 px of the stage's middle over 100 frames at x10,000 (worst %.1f px)" % worst)
 	TestUtil.finish(self, "OK parity_follow_test")
 
 
-## Where bup `id` is in the payload the dish's view drew this frame (dish-local), read from the shared textures; null when it is not there.
+## Where bup `id` is drawn this frame (dish-local): the share of the way the frame draws at (DishDrawing.share) from its place before to its
+## place in the payload the dish's view drew, both read from what the view holds (the shared textures, or the bytes handed over); null when
+## it is not there.
 func _drawn_at(dish: Dish, id: int) -> Variant:
 	var view := dish.drawing.view
 	if view == null:
 		return null
+	var t := dish.drawing.share()
 	var p := view.payload()
 	if p != null and not p.bytes.is_empty():  # (handed over as bytes, with no ids: the place the payload gives the bup, if a texel of what was handed holds it)
 		var at: Variant = p.places.get(id)
 		for k in p.count:
 			if at != null and p.bytes.decode_float(k * GpuLayout.PAYLOAD_BYTES) == at.x and p.bytes.decode_float(k * GpuLayout.PAYLOAD_BYTES + 4) == at.y:
-				return Vector2(at.x, at.y)
+				var was := Vector2(p.prev_bytes.decode_float(k * GpuLayout.PV_BYTES), p.prev_bytes.decode_float(k * GpuLayout.PV_BYTES + 4))
+				return _between(was, Vector2(at.x, at.y), t)
 		return null
 	var imports: Dictionary = view._imports
 	if p == null or p.texture_index < 0 or not imports.has("payload") or not imports.has("ids"):
@@ -97,7 +105,14 @@ func _drawn_at(dish: Dish, id: int) -> Variant:
 		got[1] = rd.texture_get_data(idt, 0))
 	var lo := id & 0xFFFFFFFF
 	var hi := (id >> 32) & 0xFFFFFFFF
-	for k in mini(p.count, (got[1] as PackedByteArray).size() / GpuLayout.IDT_BYTES):
-		if got[1].decode_u32(k * GpuLayout.IDT_BYTES) == lo and got[1].decode_u32(k * GpuLayout.IDT_BYTES + 4) == hi:
-			return Vector2(got[0].decode_float(k * GpuLayout.PAYLOAD_BYTES), got[0].decode_float(k * GpuLayout.PAYLOAD_BYTES + 4))
+	for k in mini(p.count, (got[1] as PackedByteArray).size() / GpuLayout.IDS_BYTES):
+		var o := k * GpuLayout.IDS_BYTES
+		if got[1].decode_u32(o + GpuLayout.IDT_LO * 4) == lo and got[1].decode_u32(o + GpuLayout.IDT_HI * 4) == hi:
+			var was := Vector2(got[1].decode_float(o + GpuLayout.IDS_PREV_X * 4), got[1].decode_float(o + GpuLayout.IDS_PREV_Y * 4))
+			return _between(was, Vector2(got[0].decode_float(k * GpuLayout.PAYLOAD_BYTES), got[0].decode_float(k * GpuLayout.PAYLOAD_BYTES + 4)), t)
 	return null
+
+
+## `t` of the way from `was` to `here`, as the view's kernels draw it (GpuKernelsView.place_at).
+static func _between(was: Vector2, here: Vector2, t: float) -> Vector2:
+	return here if t >= 1.0 else was * (1.0 - t) + here * t

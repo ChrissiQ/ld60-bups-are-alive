@@ -103,11 +103,17 @@ void f(uint k) {
 	for (uint t = 0u; t < n; t++) {
 		if (TQ[q + 1u + 2u * t] == lo && TQ[q + 2u + 2u * t] == hi) {
 			for (uint w = 0u; w < ANSWER_WORDS; w++) TR[r + t * ANSWER_WORDS + w] = BUPS_U[b + w];
+			BEFORE
 		}
 	}
 }
 GRID_LOOP(f, DS(uint(pcs.pa), DS_COUNT))
 """
+
+## `pool_track` for a bup picture just made (`pool_payload` of slot `pcs.pc`, `pcs.pd` texels a slot, in the same list): an answer's R_PX
+## and R_PY are where the bup was in the picture before, as the picture's PREVXY has it, so the main side can draw its rings and follow it
+## where it draws the bup.
+const TRACK_BEFORE := "if (k < uint(pcs.pd)) { uint v = (uint(pcs.pc) * uint(pcs.pd) + k) * PV_WORDS; TR[r + t * ANSWER_WORDS + R_PX] = PREVXY[v]; TR[r + t * ANSWER_WORDS + R_PY] = PREVXY[v + 1u]; }"
 
 ## After `pool_track` of set `pcs.pa`: each tracked bup as a point of the set's probes (SPQ, the first TRACKED points of the set: x, y,
 ## speed, sense range), so `pool_probe_full` in the same list gives the steering at each. The sense range is the bup's sense gene times the
@@ -128,25 +134,31 @@ GRID_LOOP(f, min(TQ[uint(pcs.pa) * TQ_WORDS], TRACKED))
 
 ## The published pictures into the shared textures (the storage buffers are laid out as the textures): a thread a texel. `pcs.pa` is the
 ## texture's width, `pcs.pb` the texels written; for the payload, at most those and `pcs.pc` the dish row whose payload it is: the rows
-## `pool_payload` wrote, from the count DSTATE has when the kernel runs (the payload may follow the steps in their list).
+## `pool_payload` wrote, from the count DSTATE has when the kernel runs (the payload may follow the steps in their list). The ids texture
+## takes each bup's id and its place in the picture before (GpuLayout.IDS_*).
 const K_COPY_PAYLOAD := """
-layout(set = 0, binding = 3, rgba32ui) uniform restrict writeonly uimage2D PAYTEX;
-layout(set = 0, binding = 4, rg32ui) uniform restrict writeonly uimage2D IDS;
+layout(set = 0, binding = 4, rgba32ui) uniform restrict writeonly uimage2D PAYTEX;
+layout(set = 0, binding = 5, rgba32ui) uniform restrict writeonly uimage2D IDS;
 void f(uint k) {
 	uint w = uint(pcs.pa);
 	ivec2 at = ivec2(int(k % w), int(k / w));
 	imageStore(PAYTEX, at, PAYLOAD[k]);
-	imageStore(IDS, at, uvec4(IDTEX[k * 2u + IDT_LO], IDTEX[k * 2u + IDT_HI], 0u, 0u));
+	imageStore(IDS, at, uvec4(IDTEX[k * IDT_WORDS + IDT_LO], IDTEX[k * IDT_WORDS + IDT_HI], PREVXY[k * PV_WORDS], PREVXY[k * PV_WORDS + 1u]));
 }
 GRID_LOOP(f, min(((DS(uint(pcs.pc), DS_COUNT) + PAYLOAD_TEX_WIDTH - 1u) / PAYLOAD_TEX_WIDTH) * PAYLOAD_TEX_WIDTH, uint(pcs.pb)))
 """
 
-## The payload alone, for the main device's copy of what the simulation handed over as bytes (ViewRenderer): the same, without the ids.
-const K_COPY_PAYLOAD_ONLY := """
-layout(set = 0, binding = 1, rgba32ui) uniform restrict writeonly uimage2D PAYTEX;
+## The payload and the places before, for the main device's copy of what the simulation handed over as bytes (ViewRenderer): the same,
+## with no ids (the ids texture's id words are 0). `pcs.pc` 0: no places before were handed over, and each bup's is its place in the payload.
+const K_COPY_HANDED := """
+layout(set = 0, binding = 2, rgba32ui) uniform restrict writeonly uimage2D PAYTEX;
+layout(set = 0, binding = 3, rgba32ui) uniform restrict writeonly uimage2D IDS;
 void f(uint k) {
 	uint w = uint(pcs.pa);
-	imageStore(PAYTEX, ivec2(int(k % w), int(k / w)), PAYLOAD[k]);
+	ivec2 at = ivec2(int(k % w), int(k / w));
+	imageStore(PAYTEX, at, PAYLOAD[k]);
+	uvec2 was = pcs.pc > 0.5 ? uvec2(PREVXY[k * PV_WORDS], PREVXY[k * PV_WORDS + 1u]) : uvec2(PAYLOAD[k][PL_X], PAYLOAD[k][PL_Y]);
+	imageStore(IDS, at, uvec4(0u, 0u, was));
 }
 GRID_LOOP(f, uint(pcs.pb))
 """
@@ -162,8 +174,8 @@ GRID_LOOP(f, uint(pcs.pb))
 
 ## The image bindings of the copy kernels (binding -> the name SimCore binds a texture by), past their storage buffers.
 const IMAGE_BINDINGS := {
-	"pool_copy_payload": {3: "PAYTEX", 4: "IDS"},
-	"pool_copy_payload_only": {1: "PAYTEX"},
+	"pool_copy_payload": {4: "PAYTEX", 5: "IDS"},
+	"pool_copy_handed": {2: "PAYTEX", 3: "IDS"},
 	"pool_copy_rgba8": {1: "PIC"},
 }
 
@@ -177,9 +189,11 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "pool_erase_puffs", K_ERASE_PUFFS, ["WORLD", "PUFF", "EDA"], "", 64, t)
 	GpuKernels.add(out, "pool_fraction", K_FRACTION, ["WORLD", "BLKDISH", "DSTATE", "BUPS", "FRQ"], "", 64, {"FRQ": "uint"})
 	GpuKernels.add(out, "pool_ids", K_IDS, ["BUPS_U", "CHILD_U"])
-	GpuKernels.add(out, "pool_track", K_TRACK, ["DSTATE", "BUPS_U", "TQ", "TR"], "", 64, {"TQ": "uint", "TR": "uint"})
+	GpuKernels.add(out, "pool_track", K_TRACK.replace("\n\t\t\tBEFORE", ""), ["DSTATE", "BUPS_U", "TQ", "TR"], "", 64, {"TQ": "uint", "TR": "uint"})
+	GpuKernels.add(out, "pool_track_picture", K_TRACK.replace("BEFORE", TRACK_BEFORE), ["DSTATE", "BUPS_U", "TQ", "TR", "PREVXY"], "", 64,
+		{"TQ": "uint", "TR": "uint", "PREVXY": "uint"})
 	GpuKernels.add(out, "pool_track_points", K_TRACK_POINTS, ["P", "TQ", "TR", "SPQ"], "", 64, {"TQ": "uint", "TR": "uint", "SPQ": "float"})
 	GpuKernels.add(out, "pool_slot_check", K_SLOT_CHECK, ["WORLD", "DNEXT", "DSTATE"], dn, 64, GpuKernelsLife.POOL_TYPES)
-	GpuKernels.add(out, "pool_copy_payload", K_COPY_PAYLOAD, ["DSTATE", "PAYLOAD", "IDTEX"], "", 64, GpuKernelsDraw.POOL_DRAW_TYPES)
-	GpuKernels.add(out, "pool_copy_payload_only", K_COPY_PAYLOAD_ONLY, ["PAYLOAD"], "", 64, GpuKernelsDraw.POOL_DRAW_TYPES)
+	GpuKernels.add(out, "pool_copy_payload", K_COPY_PAYLOAD, ["DSTATE", "PAYLOAD", "IDTEX", "PREVXY"], "", 64, GpuKernelsDraw.POOL_DRAW_TYPES)
+	GpuKernels.add(out, "pool_copy_handed", K_COPY_HANDED, ["PAYLOAD", "PREVXY"], "", 64, GpuKernelsDraw.POOL_DRAW_TYPES)
 	GpuKernels.add(out, "pool_copy_rgba8", K_COPY_RGBA8, ["PIX"], "", 64, t)

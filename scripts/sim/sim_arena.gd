@@ -57,9 +57,11 @@ const BUFFERS := {
 }
 
 ## The pictures' buffers, made when something is first published: name -> [class, bytes a unit] (classes "slot texel": the main dish's
-## payload texels, `picture_slots()` times over; "view": the pool's cells; "pixel": the main dish's cells; "fixed").
+## payload texels, `picture_slots()` times over; "texel": those texels and one unit more, once; "view": the pool's cells; "pixel": the
+## main dish's cells; "fixed").
 const DRAW_BUFFERS := {
 	"PAYLOAD": ["slot texel", GpuLayout.PAYLOAD_BYTES], "IDTEX": ["slot texel", GpuLayout.IDT_BYTES], "PICN": ["fixed", GpuLayout.PICTURES_MOST * 4],
+	"PREVXY": ["slot texel", GpuLayout.PV_BYTES], "LASTPIC": ["texel", GpuLayout.LP_BYTES],
 	"VIEW": ["view", 4], "HAZEPIX": ["pixel", 4],
 	"STEERPIX": ["pixel", 4], "FAINTLO": ["pixel", 4], "FAINTHI": ["pixel", 4], "VQ": ["fixed", 16],
 	"THUMBN": ["fixed", D_MAX * GpuKernelsDraw.THUMB_TILE * GpuKernelsDraw.THUMB_TILE * 4], "THUMBMAX": ["fixed", D_MAX * 4],
@@ -72,18 +74,17 @@ const DRAW_BUFFERS := {
 ## Shared textures: `SimCore.ring_of(kind)` of each kind on the simulation's device (the main device imports them without a copy), one of
 ## each haze, steer and thumbnail picture the main device draws, and the main device's per-texel buffer of the view kernels.
 const TEXTURES_SHARED := [
-	["texel", (GpuLayout.PAYLOAD_BYTES + GpuLayout.IDT_BYTES) * SimCore.PAYLOAD_TEXTURES],  # payload and ids
+	["texel", (GpuLayout.PAYLOAD_BYTES + GpuLayout.IDS_BYTES) * SimCore.PAYLOAD_TEXTURES],  # payload, and ids with the places before
 	["texel", 4],  # ViewRenderer's VPD
 	["pixel", 2 * 4 * (SimCore.TEXTURES + 1)],  # haze and steer
 	["thumbs", GpuKernelsDraw.THUMB_ATLAS * GpuKernelsDraw.THUMB_ATLAS * 4 * (SimCore.TEXTURES + 1)],  # thumbnails
 ]
-## Handed over as bytes (besides the extra slots of PAYLOAD and IDTEX, `picture_slots`): the simulation's copies of the last payloads' ids
-## (SimCore.ID_RING of them), and on the main device the payload
-## texture and the ids' texture (which the view kernels bind and never read) with the buffer that fills the payload's, the view kernels'
-## buffer and the pictures it draws.
+## Handed over as bytes (besides the extra slots of PAYLOAD, IDTEX and PREVXY, `picture_slots`): the simulation's copies of the last
+## payloads' ids (SimCore.ID_RING of them), and on the main device the payload texture and the ids' texture (which holds the places before
+## and no ids) with the buffers that fill them, the view kernels' buffer and the pictures it draws.
 const TEXTURES_HANDED := [
 	["texel", GpuLayout.IDT_BYTES * SimCore.ID_RING],  # the ids kept
-	["texel", 2 * GpuLayout.PAYLOAD_BYTES + GpuLayout.IDT_BYTES],  # textures and the staging buffer
+	["texel", 2 * GpuLayout.PAYLOAD_BYTES + GpuLayout.IDS_BYTES + GpuLayout.PV_BYTES],  # textures and the staging buffers
 	["texel", 4],  # ViewRenderer's VPD
 	["pixel", 2 * 4],  # haze and steer, drawn
 	["thumbs", GpuKernelsDraw.THUMB_ATLAS * GpuKernelsDraw.THUMB_ATLAS * 4],  # thumbnails, drawn
@@ -166,6 +167,7 @@ func _bytes_of(nm: String) -> int:
 		"husk": return husk_cap * unit
 		"event": return event_cap * unit
 		"slot texel": return _texels * unit * picture_slots()
+		"texel": return (_texels + 1) * unit
 		"view": return cell_cap * unit
 		"pixel": return _pixels * unit
 	return unit
@@ -383,7 +385,7 @@ func draw_rows() -> int:
 	return _texels / GpuLayout.PAYLOAD_TEX_WIDTH
 
 
-## The pictures PAYLOAD and IDTEX hold, a slot each: on the byte path every bup picture of an iteration is read back after its one sync,
+## The pictures PAYLOAD, IDTEX and PREVXY hold, a slot each: on the byte path every bup picture of an iteration is read back after its one sync,
 ## so each needs its own (GpuLayout.PICTURES_MOST); a shared texture is written in the list right after its picture, so one slot serves.
 func picture_slots() -> int:
 	return GpuLayout.PICTURES_MOST if cpu_handover else 1
@@ -398,6 +400,7 @@ func draw_bytes(texels: int, pixels: int, cells: int, with_thumbs := false) -> i
 		var unit: int = e[1]
 		match e[0]:
 			"slot texel": total += texels * unit * picture_slots()
+			"texel": total += (texels + 1) * unit
 			"view": total += cells * unit
 			"pixel": total += pixels * unit
 			_: total += unit

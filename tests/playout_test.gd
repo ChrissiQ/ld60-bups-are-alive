@@ -20,6 +20,14 @@ extends SceneTree
 ## - Dish switch (poll on FakeSimBackend): three publishes of dish 0 arrive together (the first shown, two waiting); after set_view to dish
 ##   1 the next frame shows nothing new (the waiting are dropped); a snapshot then carrying a late publish of dish 0 and one of dish 1
 ##   shows dish 1's, and the next frames nothing new.
+## - The share between pictures (`expected_up`, `shown_share`): a picture's expected frames up are the frames until the playout shows the
+##   next (the pace's owed reaching one: ceil((1 - owed) / rate)) or, with none waiting, until the next arrival is due (the gap less the
+##   frames since the last). Where arrivals are regular that is exact once the gap is learnt: in the last 10 repeats every picture of
+##   bursts of 6 every 8 frames and of one every 4 frames stays up the frames expected (within 0.05: the smoothed gap is then within 0.001
+##   of the true one), so the share runs 0, 1/n, ... (n - 1)/n and
+##   the next picture starts at 0 where the last would have reached 1. Through `poll` on FakeSimBackend with one publish every 4 frames,
+##   the shares of the last 4 frames are 0, 0.25, 0.5, 0.75 once the gap has settled (it reaches 4 within 0.01 after 20 arrivals, as it
+##   moves a quarter of the way a gap); paused (set_time), the share is 1.
 
 
 func _initialize() -> void:
@@ -27,6 +35,7 @@ func _initialize() -> void:
 	_bursts()
 	_at_once()
 	_dish_switch()
+	_share()
 	TestUtil.finish(self, "PLAYOUT TEST OK")
 
 
@@ -89,6 +98,33 @@ func _dish_switch() -> void:
 	TestUtil.check(w.shown_payload().seq == 5, "and nothing else follows (shown %d)" % w.shown_payload().seq)
 
 
+func _share() -> void:
+	var eight := _played_out([6, 0, 0, 0, 0, 0, 0, 0], 30, 10)
+	TestUtil.check(eight["tail_shown"] == 60 and eight["tail_off"] == 0, "bursts of 6 every 8 frames, the last 10: each of the 60 pictures up the frames expected (%d off)" % eight["tail_off"])
+	var four := _played_out([1, 0, 0, 0], 40, 10)
+	TestUtil.check(four["tail_shown"] == 10 and four["tail_off"] == 0, "one every 4 frames, the last 10: each picture up the frames expected (%d off)" % four["tail_off"])
+	var fake := FakeSimBackend.new()
+	var w := WorldClient.new(fake)
+	w.set_view(0, ViewRequest.new())
+	var shares: Array = []
+	for f in 160:
+		if f % 4 == 0:
+			var snap := Snapshot.new()
+			snap.seq = f / 4 + 1
+			snap.payloads.append(_publish(f / 4 + 1, 0))
+			fake.serve(snap)
+		w.poll()
+		shares.append(w.shown_share())
+	var last: Array = shares.slice(shares.size() - 4)
+	var want := [0.0, 0.25, 0.5, 0.75]
+	var near := true
+	for i in 4:
+		near = near and absf(float(last[i]) - want[i]) < 0.01
+	TestUtil.check(near, "one publish every 4 frames through poll: the last frames' shares are 0, 0.25, 0.5, 0.75 (got %s)" % [last])
+	w.set_time(1.0, true, 1.0 / 60.0)
+	TestUtil.check(w.shown_share() == 1.0, "paused: the share is 1 (got %f)" % w.shown_share())
+
+
 static func _publish(seq: int, row := -1) -> PayloadInfo:
 	var p := PayloadInfo.new()
 	p.seq = seq
@@ -99,7 +135,8 @@ static func _publish(seq: int, row := -1) -> PayloadInfo:
 ## `pattern` (publishes arriving each frame) repeated `times`, with the gap smoothed as `WorldClient.poll` does: {newest: frames whose
 ## newest publish changed, changes: frames whose shown publish changed, shown: publishes shown, skipped: publishes never shown, back:
 ## frames that showed an older publish, most_waiting: the most left waiting, tail_changes and tail_hold: in the last `tail` repeats, the
-## frames whose picture changed and the most frames one picture stayed up}.
+## frames whose picture changed and the most frames one picture stayed up, tail_shown and tail_off: the pictures that came up then and
+## those whose predecessor stayed up other than the frames `WorldClient.expected_up` gave it, by 0.05 frames or more}.
 static func _played_out(pattern: Array, times: int, tail := 0) -> Dictionary:
 	var seq := 0
 	var waiting: Array = []
@@ -108,7 +145,8 @@ static func _played_out(pattern: Array, times: int, tail := 0) -> Dictionary:
 	var last_arrival := -1
 	var shown := -1
 	var shown_at := 0
-	var out := {"newest": 0, "changes": 0, "shown": 0, "skipped": 0, "back": 0, "most_waiting": 0, "tail_changes": 0, "tail_hold": 0}
+	var out := {"newest": 0, "changes": 0, "shown": 0, "skipped": 0, "back": 0, "most_waiting": 0, "tail_changes": 0, "tail_hold": 0, "tail_shown": 0, "tail_off": 0}
+	var expected := 0.0
 	var frame := 0
 	var tail_from := (times - tail) * pattern.size()
 	for t in times:
@@ -136,7 +174,10 @@ static func _played_out(pattern: Array, times: int, tail := 0) -> Dictionary:
 					if tail > 0 and frame >= tail_from:
 						out["tail_changes"] += 1
 						out["tail_hold"] = maxi(out["tail_hold"], frame - shown_at)
+						out["tail_shown"] += 1
+						out["tail_off"] += 0 if absf(float(frame - shown_at) - expected) < 0.05 else 1  # (the smoothed gap nears the true one a quarter of the way an arrival)
 					shown_at = frame
+					expected = WorldClient.expected_up(waiting, pace, gap, frame - last_arrival)
 				shown = s
 			frame += 1
 	out["skipped"] = seq - out["shown"] - waiting.size()

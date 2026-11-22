@@ -18,6 +18,11 @@ extends RefCounted
 ## frame (an iteration ended just after the last poll) the second is shown on the next, and a frame that then brings none still gets a new
 ## picture. At most WAITING_MOST are kept waiting; the oldest of more are skipped. Publishes of a dish that is no longer the main view's
 ## (`set_view`) are dropped, waiting or arriving.
+##
+## Between pictures the view draws each bup part of the way from its place in the picture before to its place in the one shown
+## (`shown_share`): the frames since the shown picture came up over the frames it is expected to stay up (`expected_up`: until the playout
+## shows the next waiting one, or with none waiting until the next arrival is due), so the bups move on every frame, about a picture behind
+## the newest. Paused, the share is 1: the picture shown, still.
 
 const WAITING_MOST := GpuLayout.PICTURES_MOST + 2  ## publishes seen and not yet shown that the playout keeps: an iteration's burst and two more (SimCore.PAYLOAD_TEXTURES holds their textures)
 const GAP_MOST := 30.0  ## frames: the most one gap between arrivals counts for in `gap` (a pause publishes nothing for a while)
@@ -44,6 +49,9 @@ var _refusals_taken := {}  ## row -> the snapshot that first carried the last re
 var _polls := 0  ## frames polled so far (the question latency counts in these)
 var _asked := {}  ## row -> {bup id: [poll, snapshot seq, msec] of its first question not yet answered}
 var _pick_latency := {"last": 0, "max": 0, "last_ms": 0.0}  ## frames and ms from a bup's first question to its first answer
+var _shown_frames := 0  ## frames since the shown publish came up
+var _shown_for := 1.0  ## frames it is expected to stay up (`expected_up`)
+var _paused := false  ## as the last `set_time` said
 
 
 ## The game's world: the SimService autoload's (null where it is not there). Reached through the tree, not the autoload's name, so the
@@ -126,6 +134,7 @@ func edit_world(row: int, e: WorldEdit) -> void:
 ## Once a frame: the speed, whether the game is paused, and the frame's real length (s). The simulation owes speed x the frame (capped)
 ## and steps by the speed's step length, never by the frame's; the frame's length also sets its duty.
 func set_time(speed: float, paused: bool, real_dt: float) -> void:
+	_paused = paused
 	_send(SimCommand.KIND_SET_TIME, {"speed": speed, "paused": paused, "real_dt": real_dt, "display_ms": display_ms})
 
 
@@ -210,6 +219,24 @@ func shown_payload() -> PayloadInfo:
 	return _shown
 
 
+## How far the view draws the bups this frame from their places in the picture before (0) to their places in the one shown (1): see the
+## header. 1 while paused or before the first publish.
+func shown_share() -> float:
+	if _paused or _shown == null:
+		return 1.0
+	return clampf(float(_shown_frames) / _shown_for, 0.0, 1.0)
+
+
+## The frames a publish just shown is expected to stay up: with publishes `waiting` after it, until the playout's pace (`pace`, as
+## `playout` returns it) shows the next; with none, until the next arrival is due (`gap` frames after the last, which came
+## `since_arrival` frames ago). At least one.
+static func expected_up(waiting: Array, pace: Array, gap: float, since_arrival: int) -> float:
+	if not waiting.is_empty():
+		var rate: float = pace[1]
+		return maxf(ceilf((1.0 - 1e-6 - float(pace[0])) / maxf(rate, 1e-6)), 1.0)
+	return maxf(gap - float(since_arrival), 1.0)
+
+
 ## One frame of the playout: `waiting` (publishes seen and not shown, oldest first) with the publishes that `arrived` this frame, the
 ## pace from the last frame (`pace`: [pictures owed, pictures a frame]) and `gap` (frames between arrivals). Returns [the publish to show
 ## now (null: keep the one shown), what waits after, the pace after]. A frame with arrivals shows the oldest at once and sets the rate
@@ -267,6 +294,10 @@ func poll() -> void:
 	if step[0] != null:
 		_shown = step[0]
 		_new_pictures.append([now, _polls, (step[0] as PayloadInfo).sim_time])
+		_shown_frames = 0
+		_shown_for = expected_up(step[1], _pace, _gap, _polls - _last_arrival)
+	else:
+		_shown_frames += 1
 	_waiting = step[1]
 	_forget_pictures(now)
 	if snap == null or snap.seq <= 0 or snap.seq == _last_seq:

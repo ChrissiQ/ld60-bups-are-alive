@@ -10,6 +10,8 @@ layout(set = 0, binding = 3, std430) buffer B_BUPS_U { uint BUPS_U[]; };
 layout(set = 0, binding = 4, std430) buffer B_PAYLOAD { uvec4 PAYLOAD[]; };
 layout(set = 0, binding = 5, std430) buffer B_IDTEX { uint IDTEX[]; };
 layout(set = 0, binding = 6, std430) buffer B_PICN { uint PICN[]; };
+layout(set = 0, binding = 7, std430) buffer B_PREVXY { uint PREVXY[]; };
+layout(set = 0, binding = 8, std430) buffer B_LASTPIC { uint LASTPIC[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -24,6 +26,14 @@ const uint DS_STEP = 8u;
 const uint DS_WORDS = 32u;
 const uint IDT_HI = 1u;
 const uint IDT_LO = 0u;
+const uint IDT_WORDS = 2u;
+const uint LP_COUNT = 1u;
+const uint LP_ID_HI = 1u;
+const uint LP_ID_LO = 0u;
+const uint LP_ROW = 0u;
+const uint LP_WORDS = 4u;
+const uint LP_X = 2u;
+const uint LP_Y = 3u;
 const uint NO_DISH = 4294967295u;
 const uint PAYLOAD_TEX_WIDTH = 2048u;
 const uint PL_BLUE_SHIFT = 8u;
@@ -33,6 +43,7 @@ const uint PL_RED_SHIFT = 24u;
 const uint PL_SHAPE = 2u;
 const uint PL_X = 0u;
 const uint PL_Y = 1u;
+const uint PV_WORDS = 2u;
 const int P_CELLS = 1;
 const int P_MASS_UM = 14;
 const uint RECORD_WORDS = 28u;
@@ -86,12 +97,26 @@ vec3 from_hsv(float h, float s, float v) {
 	return vec3(v, p, q);
 }
 
+bool id_before(uint hi_a, uint lo_a, uint hi_b, uint lo_b) { return hi_a < hi_b || (hi_a == hi_b && lo_a < lo_b); }
+vec2 place_before(uint d, uint lo, uint hi, vec2 here) {
+	if (LASTPIC[LP_ROW] != d + 1u) return here;
+	uint a = 0u, n = LASTPIC[LP_COUNT], b = n;
+	while (a < b) {
+		uint m = (a + b) >> 1u, o = (m + 1u) * LP_WORDS;
+		if (id_before(LASTPIC[o + LP_ID_HI], LASTPIC[o + LP_ID_LO], hi, lo)) a = m + 1u; else b = m;
+	}
+	uint o = (a + 1u) * LP_WORDS;
+	if (a < n && LASTPIC[o + LP_ID_LO] == lo && LASTPIC[o + LP_ID_HI] == hi) return vec2(uintBitsToFloat(LASTPIC[o + LP_X]), uintBitsToFloat(LASTPIC[o + LP_Y]));
+	return here;
+}
+
 uint byte_of(float v) { return uint(clamp(v * 255.0 + 0.5, 0.0, 255.0)); }
 void f(uint k) {
 	uint d = uint(pcs.pa), o = uint(pcs.pc) * uint(pcs.pb) + k;
 	if (k == 0u) PICN[uint(pcs.pd)] = DS(d, DS_COUNT);
 	uvec4 px = uvec4(0u);
 	uint lo = 0u, hi = 0u;
+	vec2 was = vec2(0.0);
 	if (k < DS(d, DS_COUNT)) {
 		uint b = (DS(d, DS_START) + k) * RECORD_WORDS;
 		if (BUPS[b + R_PY] != -2.0) {
@@ -101,9 +126,11 @@ void f(uint k) {
 			vec3 col = from_hsv(BUPS[b + R_HUE], BUPS[b + R_SAT], BUPS[b + R_VAL]);
 			px[PL_COLOR] = (byte_of(col.r) << PL_RED_SHIFT) | (byte_of(col.g) << PL_GREEN_SHIFT) | (byte_of(col.b) << PL_BLUE_SHIFT);
 			lo = BUPS_U[b + R_ID_LO]; hi = BUPS_U[b + R_ID_HI];
+			was = place_before(d, lo, hi, vec2(BUPS[b + R_X], BUPS[b + R_Y]));
 		}
 	}
 	PAYLOAD[o] = px;
-	IDTEX[o * 2u + IDT_LO] = lo; IDTEX[o * 2u + IDT_HI] = hi;
+	IDTEX[o * IDT_WORDS + IDT_LO] = lo; IDTEX[o * IDT_WORDS + IDT_HI] = hi;
+	PREVXY[o * PV_WORDS] = floatBitsToUint(was.x); PREVXY[o * PV_WORDS + 1u] = floatBitsToUint(was.y);
 }
 GRID_LOOP(f, min(((DS(uint(pcs.pa), DS_COUNT) + PAYLOAD_TEX_WIDTH - 1u) / PAYLOAD_TEX_WIDTH) * PAYLOAD_TEX_WIDTH, uint(pcs.pb)))

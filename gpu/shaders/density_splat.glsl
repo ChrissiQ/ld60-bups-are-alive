@@ -19,6 +19,8 @@ const uint DS_SEED = 7u;
 const uint DS_START = 0u;
 const uint DS_STEP = 8u;
 const uint DS_WORDS = 32u;
+const uint IDS_PREV_X = 2u;
+const uint IDS_PREV_Y = 3u;
 const uint NO_DISH = 4294967295u;
 const uint PAYLOAD_TEX_WIDTH = 2048u;
 const uint PL_BLUE_SHIFT = 8u;
@@ -84,16 +86,26 @@ const uint VW_PICK_Y = 10u;
 const uint VW_PIXEL = 5u;
 const uint VW_SLACK = 11u;
 const uint VW_SLOTS = 6u;
-const uint VW_WORDS = 21u;
+const uint VW_T = 21u;
+const uint VW_WORDS = 22u;
 const uint VW_X0 = 1u;
 const uint VW_X1 = 3u;
 const uint VW_Y0 = 2u;
 const uint VW_Y1 = 4u;
 layout(set = 0, binding = 4, rgba32i) uniform restrict readonly iimage2D PAYTEX;
+layout(set = 0, binding = 5, rgba32i) uniform restrict readonly iimage2D IDTEX;
 
 ivec2 texel_at(uint k) { return ivec2(int(k % PAYLOAD_TEX_WIDTH), int(k / PAYLOAD_TEX_WIDTH)); }
 uvec4 payload_at(uint k) { return uvec4(imageLoad(PAYTEX, texel_at(k))); }
 float vpf(uint w) { return uintBitsToFloat(VP[w]); }
+vec2 place_at(uint k, uvec4 px) {
+	vec2 here = vec2(uintBitsToFloat(px[PL_X]), uintBitsToFloat(px[PL_Y]));
+	float t = vpf(VW_T);
+	if (t >= 1.0) return here;
+	uvec4 q = uvec4(imageLoad(IDTEX, texel_at(k)));
+	vec2 was = vec2(uintBitsToFloat(q[IDS_PREV_X]), uintBitsToFloat(q[IDS_PREV_Y]));
+	return was * (1.0 - t) + here * t;
+}
 bool small_at(float length, float pixel) { return length < P[P_MIN_LENGTH_PX] * pixel; }
 
 const float PI_QUARTER = 0.7853982;
@@ -131,7 +143,7 @@ void f(uint k) {
 		atomicAdd(VOUT[VO_LARGE], 1u);
 		return;
 	}
-	vec2 u = (vec2(uintBitsToFloat(px[PL_X]), uintBitsToFloat(px[PL_Y])) - vec2(vpf(VW_X0), vpf(VW_Y0))) / pixel;
+	vec2 u = (place_at(k, px) - vec2(vpf(VW_X0), vpf(VW_Y0))) / pixel;
 	float length_px = P[P_MIN_LENGTH_PX];
 	float width_px = max(P[P_WIDTH] / pixel, P[P_MIN_WIDTH_PX]);
 	float area = max(length_px - width_px, 0.0) * width_px + PI_QUARTER * width_px * width_px;

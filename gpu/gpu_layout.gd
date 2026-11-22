@@ -31,7 +31,7 @@ const R_VAL := 18
 const R_MUTATIONS := 19  ## a whole number as a float
 const R_DIVISIONS := 20  ## a whole number as a float
 const R_ID_HI := 21  ## the id's high 32 bits (uint bits)
-const R_PX := 22  ## where it was in the last picture (>= 1e30: none; a newborn 3e38)
+const R_PX := 22  ## where it was in the last picture (>= 1e30: none; a newborn 3e38); in a picture's tracked answers (`pool_track_picture`), its place in the picture before
 const R_PY := 23  ## (a bup that died of starvation or chance has -2 here from `life` until `copy`, for `death_clouds` and `events`)
 const R_FAST := 24  ## the fine step's chemotaxis memory (a step as short as `fine_step` follows each run and tumble): the signal read lately (below 0: none read yet)
 const R_SLOW := 25  ## ... and over a longer memory
@@ -250,7 +250,9 @@ const WD_ENTRY_DENSITY := 15  ## the most entries a cloud slot in use averaged a
 const WD_ENTRIES_FULL := 16  ## the entries every cloud would have if every square were listed: summed by the count, taken (and zeroed) by `pool_bin_room`, which records it as the lists' ask
 const WD_FALLBACKS := 17  ## the bups that, after the swim, were in a square not listed, so that their demand and apply took their clouds from the cloud slots (a count since the world was made, wrapping)
 
-## The payload textures (a bup's picture, written sim-side after `finalize`): PAYLOAD (RGBA32UI, PAYLOAD_TEX_WIDTH wide) and the ids (RG32UI).
+## The payload textures (a bup's picture, written sim-side after `finalize`): PAYLOAD (RGBA32UI, PAYLOAD_TEX_WIDTH wide) and the ids
+## texture (RGBA32UI: the id, IDT_LO and IDT_HI, and where the bup was in the dish's picture before, IDS_PREV_X and IDS_PREV_Y). The
+## simulation's buffers hold the ids (IDTEX, IDT_WORDS a texel) and the places before (PREVXY, PV_WORDS a texel) apart.
 const PL_WORDS := 4
 const PL_X := 0  ## float bits
 const PL_Y := 1
@@ -264,6 +266,23 @@ const IDT_WORDS := 2  ## the id texture: the id's low and high words
 const IDT_LO := 0
 const IDT_HI := 1
 const IDT_BYTES := IDT_WORDS * 4
+const IDS_WORDS := 4  ## the ids texture's words a texel: IDT_LO, IDT_HI, then the place before
+const IDS_PREV_X := 2  ## float bits
+const IDS_PREV_Y := 3
+const IDS_BYTES := IDS_WORDS * 4
+const PV_WORDS := 2  ## PREVXY: where the bup was in the picture before, x and y (float bits; its place in this picture when it was in none)
+const PV_BYTES := PV_WORDS * 4
+## LASTPIC: the last bup picture made, kept for the next to find each bup's place before in. Its first LP_WORDS are a header (LP_ROW:
+## the dish row + 1, 0 for none; LP_COUNT: the texels kept), then LP_WORDS a texel in the picture's order (which is the ids' rising order):
+## the id's low and high word, x and y.
+const LP_WORDS := 4
+const LP_ROW := 0
+const LP_COUNT := 1
+const LP_ID_LO := 0
+const LP_ID_HI := 1
+const LP_X := 2
+const LP_Y := 3
+const LP_BYTES := LP_WORDS * 4
 const PAYLOAD_TEX_WIDTH := 2048  ## a texture's width: a dish's n bups take ceil(n / 2048) rows
 
 ## STATS per dish: D_MAX rows of one sample for the state at the end plus STATS_ITER_SAMPLES for the iteration's steps (sample words: ST_*).

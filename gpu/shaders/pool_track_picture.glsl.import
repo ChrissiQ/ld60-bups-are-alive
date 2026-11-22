@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://coaqjuy5x1kva"
+path="res://.godot/imported/pool_track_picture.glsl-54176b35934db12316a5ccb9889e269a.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_track_picture.glsl"
+dest_files=["res://.godot/imported/pool_track_picture.glsl-54176b35934db12316a5ccb9889e269a.res"]
+
+[params]
+
