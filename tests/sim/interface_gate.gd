@@ -30,7 +30,7 @@ extends SceneTree
 ## - The dishes are the game's defaults (StartConditions.new(): water, both husk kinds and starvation on) at 300 um, with 100 bups at their
 ##   limit and nutrient and feed at the setup maxima. A frame is the main thread's part, but the simulation's work shares the card: in
 ##   water such a dish runs 129 diffusion rounds a 20 s step, and the 999 dishes' step is about 140 ms of GPU work, mostly those rounds,
-##   which SimCore splits into submits of at most FIELD_SUBMIT_MS so the frames get the card between them. Measured: p95 8.73 and 8.75 ms,
+##   which SimCore splits into submits of at most SUBMIT_MS so the frames get the card between them. Measured: p95 8.73 and 8.75 ms,
 ##   mean 8.33, worst 11.4-12.2, speed reached x108-109 [measured, two processes]; with a step's rounds in one submit the p95 is 12.6-12.8
 ##   ms [measured]. Expected to pass both bounds. The speed reached is printed, not gated.
 ##

@@ -372,10 +372,10 @@ func _iterate(k: int) -> float:
 	var item := _results(ran, d, t0, samples if ran > 0 else [], res, plan)
 	var busy := (Time.get_ticks_usec() - start) / 1000.0
 	# (sync_ms is the submit and wait in which the card runs the steps, the answers and the pictures, with the field's own submits when a
-	# step's diffusion rounds are split; answer_ms, readback_ms and publish_ms are the host's own time on each, before the list and after the sync)
+	# step's diffusion rounds are split, and submit_ms_most the longest of those submits and waits; answer_ms, readback_ms and publish_ms are the host's own time on each, before the list and after the sync)
 	_last_timing = {
 		"iteration_ms": busy, "steps": ran, "step_ms_ema": governor.step_ms_ema, "stretch": governor.stretch, "step_cost_ms": governor.step_cost_ms, "fixed_ms": governor.fixed_ms, "duty": governor.duty,
-		"sync_ms": float(res.get("gpu_usec", 0)) / 1000.0, "record_ms": float(res.get("record_usec", 0)) / 1000.0,
+		"sync_ms": float(res.get("gpu_usec", 0)) / 1000.0, "submit_ms_most": float(res.get("submit_usec_most", 0)) / 1000.0, "record_ms": float(res.get("record_usec", 0)) / 1000.0,
 		"publish_ms": item["publish_ms"], "readback_ms": item["readback_ms"], "answer_ms": item["answer_ms"],
 		"rest_ms": governor.rest_ms(busy), "run_ms": run_ms,
 		"births": _last_events[0], "deaths": _last_events[1],
