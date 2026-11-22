@@ -40,6 +40,17 @@ extends SceneTree
 ##    Vector3 each and GpuLayout.PROBE_FLOATS (5) floats for the probe; set_params' feed reaches the core's spec; a pipette of a 700 µm disc replies with moved
 ##    > 0 and new_row 2 while the iterations run on (the new dish's grid is made on the worker pool), and dish 2 is in a later snapshot
 ##    with that count; resizing the second dish to 400 µm replies with removed > 0 and the core's spec says 400.
+## G  a dish that leaves gives its memory back at once, and the warning follows what the dishes need: two dishes of 20,000 bups (limit
+##    60,000) run 3 steps, then the pool is grown by hand to 400,000 slots and 200,000 clouds with the budget set to the bytes held over 0.97.
+##    The pool holds 0.97 of the budget (the held share would warn) but the dishes need a small part of it [derived: their slots after a
+##    step, at most 2 x 20,000 x 2, over FILL, are under a third of 400,000, and the floors of the other classes are the starting sizes]:
+##    the need's share is under 0.5 and the warning is "". Freezing one dish and a pass of no steps then makes the pool hold under 0.4 of
+##    the bytes it held [derived: the clouds, entries and husks go to 1.5 x the need, over a tenth of what they were, and the slots to
+##    the world's count (the frozen dish's blocks are padding until a step) over FILL], never fewer slots than the world's count; the
+##    other dish's dump is unchanged by it; one step later the slots hold less than they did, and the dish's dump equals that of a control
+##    core that held the dish alone and never shrank. Through SimThread, paused: with the budget at the need of both dishes over 0.95 the
+##    snapshot warns "near"; after the freeze the snapshot's need share is under 0.9, its warning "" within 3 s and the bytes the pool holds
+##    have fallen.
 
 var _store_ok := ClassDB.class_exists("LineageStore")
 
@@ -55,6 +66,8 @@ func _init() -> void:
 	_refused()
 	_refused_through_thread()
 	_memory_fraction()
+	_give_back()
+	_give_back_through_thread()
 	_pipette_room()
 	_through_thread()
 	TestUtil.finish(self, "OK core_calls_test")
@@ -328,16 +341,17 @@ func _refused() -> void:
 		core.release()
 
 
-## The share of the budget held reaches the warning: a budget set to the bytes held over 0.95 gives near, over 0.5 gives none, and one
-## at the bytes held gives 1 (the next growth is then over the budget).
+## The share of the budget the dish needs reaches the warning: a budget set to the need over 0.95 gives near, over 0.5 gives none; a budget
+## at the bytes held gives a held share of 1 (the next growth is then over the budget).
 func _memory_fraction() -> void:
 	var core := SimCore.new(PoolLimits.new())
 	core.add_dish(_spec_small())
 	var held := core.arena.bytes_now()
-	core.limits.memory_budget_bytes = int(held / 0.95)
-	TestUtil.show(PoolLimits.warning_state({"memory_fraction": core.arena.memory_fraction()}) == PoolLimits.WARN_NEAR, "M a budget just above the bytes held (%.3f of it) warns" % core.arena.memory_fraction())
-	core.limits.memory_budget_bytes = held * 2
-	TestUtil.show(PoolLimits.warning_state({"memory_fraction": core.arena.memory_fraction()}) == "", "M half the budget held gives no warning")
+	var need := core.need_bytes()
+	core.limits.memory_budget_bytes = int(need / 0.95)
+	TestUtil.show(PoolLimits.warning_state({"memory_need_fraction": float(need) / core.limits.memory_budget_bytes}) == PoolLimits.WARN_NEAR, "M a budget just above what the dish needs (%.3f of it) warns" % (float(need) / core.limits.memory_budget_bytes))
+	core.limits.memory_budget_bytes = need * 2
+	TestUtil.show(PoolLimits.warning_state({"memory_need_fraction": float(need) / core.limits.memory_budget_bytes}) == "", "M twice what it needs gives no warning")
 	core.limits.memory_budget_bytes = held
 	TestUtil.show(is_equal_approx(core.arena.memory_fraction(), 1.0) and core.arena.next_growth_bytes() > 0 and not core.arena.fits(core.arena.slot_cap * 2, 0, 0, 0, 0), "M at the whole budget the fraction is 1 and the next growth (%d bytes) does not fit" % core.arena.next_growth_bytes())
 	core.release()
@@ -381,6 +395,101 @@ func _pipette_room() -> void:
 	TestUtil.show(line == "" and warmed.errors.is_empty(), "P a core warmed up for the pipette runs 40 steps as one that was not%s" % (": " + line if line != "" else ""))
 	plain.release()
 	warmed.release()
+
+
+## G (see the header).
+func _give_back() -> void:
+	var core := SimCore.new(PoolLimits.new())
+	var control := SimCore.new(PoolLimits.new())
+	var specs: Array[DishSpec] = []
+	for k in 2:
+		var s := Scenario.small(20000, 3000.0).seed(81 + k)
+		s.limit = 60000
+		specs.append(_spec(k + 1, s))
+	var a := core.add_dish(specs[0])
+	var b := core.add_dish(specs[1])
+	var c := control.add_dish(specs[0])
+	for i in 3:
+		core.run(1, 20.0)
+		control.run(1, 20.0)
+	core.arena.ensure_slots(400000)
+	core.arena.ensure_clouds(200000)
+	core._after_growth()
+	core.limits.memory_budget_bytes = int(core.arena.bytes_now() / 0.97)
+	core.run(1, 20.0)
+	control.run(1, 20.0)
+	var held := core.arena.bytes_now()
+	var share := float(core.need_bytes()) / core.limits.memory_budget_bytes
+	TestUtil.show(core.arena.memory_fraction() > 0.9 and share < 0.5 and PoolLimits.warning_state({"memory_need_fraction": share}) == "",
+		"G the pool holds %.2f of the budget and the dishes need %.2f of it: no warning" % [core.arena.memory_fraction(), share])
+	core.freeze(b)
+	var after_freeze := float(core.need_bytes()) / core.limits.memory_budget_bytes
+	TestUtil.show(after_freeze < share, "G the need falls once a dish leaves (%.3f to %.3f)" % [share, after_freeze])
+	var dump := CanonicalDump.coerce(core.canonical_dump(a))
+	var slots_before := core.arena.slot_cap
+	core.run(0, 20.0, IterationPlan.new())
+	var world_slots := core.world_word(GpuLayout.WD_SLOTS)
+	TestUtil.show(core.arena.bytes_now() < 0.4 * held and core.arena.slot_cap < slots_before and core.arena.slot_cap >= world_slots,
+		"G a pass of no steps gives back at once: the pool holds %d of %d bytes, %d slots of %d (the world counts %d)" % [core.arena.bytes_now(), held, core.arena.slot_cap, slots_before, world_slots])
+	TestUtil.show(SimHarness.diff(dump, CanonicalDump.coerce(core.canonical_dump(a))) == "", "G the dish that stayed is unchanged by the pass")
+	var slots_paused := core.arena.slot_cap
+	core.run(1, 20.0)
+	TestUtil.show(core.arena.slot_cap <= slots_paused and not core._leave_owed, "G after a step nothing more is owed (%d slots, %d before the step)" % [core.arena.slot_cap, slots_paused])
+	control.run(1, 20.0)
+	for i in 3:
+		core.run(1, 20.0)
+		control.run(1, 20.0)
+	var line := _diff(core, a, control, c)
+	TestUtil.show(line == "", "G the dish that stayed runs as it does in a pool that never shrank%s" % (": " + line if line != "" else ""))
+	core.release()
+	control.release()
+
+
+## G through SimThread, paused.
+func _give_back_through_thread() -> void:
+	var thread := SimThread.new(PoolLimits.new(), null)
+	thread.start()
+	var until := Time.get_ticks_msec() + 20000
+	while not thread.status()["ready"] and Time.get_ticks_msec() < until:
+		OS.delay_msec(10)
+	thread.submit(SimCommand.new(SimCommand.KIND_SET_TIME, {"speed": 1.0, "paused": true, "real_dt": 1.0 / 60.0}))
+	for k in 2:
+		var s := Scenario.small(20000, 3000.0).seed(91 + k)
+		s.limit = 60000
+		thread.submit(SimCommand.new(SimCommand.KIND_ADD_DISH, {"row": k, "spec": _spec(k + 1, s)}))
+	_timing_until(thread, func(t: Dictionary) -> bool: return int(t.get("iterations", 0)) >= 0 and t.has("pool") and int(t["pool_in_use"]["slots"]) >= 40000)
+	OS.delay_msec(500)  # (the dishes' first pictures are made, so the need counts them)
+	var squeeze := SimReply.new()
+	thread.submit(SimCommand.new(SimThread.KIND_INSPECT, {"call": func(core: SimCore, _rows: Dictionary) -> Array:
+		core.arena.ensure_slots(400000)
+		core.arena.ensure_clouds(200000)
+		core._after_growth()
+		core._need_bytes = -1
+		core.limits.memory_budget_bytes = int(core.need_bytes() / 0.95)
+		return [core.arena.bytes_now(), core.limits.memory_budget_bytes]}, squeeze))
+	_wait(squeeze)
+	var figures: Array = squeeze.value()
+	var near := _timing_until(thread, func(t: Dictionary) -> bool: return PoolLimits.warning_state(t) == PoolLimits.WARN_NEAR)
+	TestUtil.show(not near.is_empty(), "G through SimThread, two dishes need 0.95 of the budget: the snapshot warns near")
+	var freeze := SimReply.new()
+	thread.submit(SimCommand.new(SimCommand.KIND_FREEZE, {"row": 1}, freeze))
+	_wait(freeze)
+	var cleared := _timing_until(thread, func(t: Dictionary) -> bool: return PoolLimits.warning_state(t) == "" and float(t["memory_need_fraction"]) < 0.9)
+	TestUtil.show(not cleared.is_empty(), "G paused, the warning is gone within 3 s of the freeze (need share %.2f)" % float(cleared.get("memory_need_fraction", -1.0)))
+	var fell := _timing_until(thread, func(t: Dictionary) -> bool: return int(t["pool"]["bytes"]) < 0.6 * int(figures[0]))
+	TestUtil.show(not fell.is_empty(), "G paused, the pool's bytes fall from %d (now %d)" % [int(figures[0]), int(thread.worker.latest().timing["pool"]["bytes"])])
+	thread.stop()
+
+
+## The newest snapshot's timing once `test` holds of it (within 3 s), else an empty dictionary.
+func _timing_until(thread: SimThread, test: Callable) -> Dictionary:
+	var until := Time.get_ticks_msec() + 3000
+	while Time.get_ticks_msec() < until:
+		var snap: Snapshot = thread.worker.latest()
+		if snap != null and not snap.timing.is_empty() and bool(test.call(snap.timing)):
+			return snap.timing
+		OS.delay_msec(20)
+	return {}
 
 
 func _spec_small() -> DishSpec:

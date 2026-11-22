@@ -11,7 +11,6 @@ var bins := 65536  ## cloud-list squares
 const WARN_FRACTION := 0.90  ## the share of the memory budget at which the game warns that graphics memory is nearly full
 const BUDGET_SHARE := 0.4  ## of the memory the buffers may share with the system (the whole of it when the graphics memory is the system's): the host side's copies of a dish's grid and the rest of the process add up to a quarter on top, which keeps the process near half of the memory
 const BUDGET_FLOOR := 1024 * 1024 * 1024  ## the least: the pool has to hold a few big dishes
-const BUDGET_CAP := 8 * 1024 * 1024 * 1024  ## the most: more than any dish or crowd the interface allows needs
 const CARD_SHARE := 0.75  ## of what the system lets the process use on a card with memory of its own (the card's budget, else its dedicated memory), the share the buffers may take: the rest holds the interface's drawing, the engine's own textures and what other programs use; the same share of what is still free bounds a growth
 const DISCRETE_BUDGET := 2 * 1024 * 1024 * 1024  ## the budget for a card with memory of its own whose size could not be read (the native query is not there or the driver did not answer): a 4 GB card has to hold the interface's drawing besides
 const GROW_SHARE := 0.5  ## of the system memory free now (a card with a live budget uses CARD_SHARE of its own free memory instead), what the pool may take on top of what it holds
@@ -63,19 +62,19 @@ func start_watch() -> void:
 ## The budget for a machine. Graphics memory that is the system's: BUDGET_SHARE of the physical memory. Otherwise (a card with memory of its
 ## own, or an adapter not known to be integrated): CARD_SHARE of what the system lets the process use of the card (`card_budget`; else
 ## `card_dedicated`), DISCRETE_BUDGET when the card's size is not known, and never more than BUDGET_SHARE of the physical memory when that is
-## known (the host side's copies of the buffers live there). Held between BUDGET_FLOOR and BUDGET_CAP; nothing usable reported: the floor.
+## known (the host side's copies of the buffers live there). Never under BUDGET_FLOOR; nothing usable reported: the floor.
 static func budget_for(m: MachineMemory) -> int:
 	if m.shared == 1:
 		if m.physical <= 0:
 			return BUDGET_FLOOR
-		return clampi(int(BUDGET_SHARE * m.physical), BUDGET_FLOOR, BUDGET_CAP)
+		return maxi(int(BUDGET_SHARE * m.physical), BUDGET_FLOOR)
 	var card := m.card_budget if m.card_budget > 0 else m.card_dedicated
 	var budget := CARD_SHARE * card if card > 0 else float(DISCRETE_BUDGET)
 	if m.physical > 0:
 		budget = minf(budget, BUDGET_SHARE * m.physical)
 	elif card <= 0:
 		return BUDGET_FLOOR
-	return clampi(int(budget), BUDGET_FLOOR, BUDGET_CAP)
+	return maxi(int(budget), BUDGET_FLOOR)
 
 
 ## Whether low-memory mode is on for a machine: it is not classed enough.
@@ -115,10 +114,11 @@ static func classify(m: MachineMemory) -> String:
 
 
 ## The memory warning a timing dictionary (a snapshot's) calls for: WARN_STALLED while an iteration is refused for want of room (the
-## simulation waits), WARN_NEAR while the buffers hold WARN_FRACTION of the budget or more, else "".
+## simulation waits), WARN_NEAR while what the running dishes need (what they use and the room their next growth asks for, `SimArena.need_bytes`,
+## not what the pool holds, which falls back only as the pool shrinks) is WARN_FRACTION of the budget or more, else "".
 static func warning_state(timing: Dictionary) -> String:
 	if String(timing.get("refused_iteration", "")) != "":
 		return WARN_STALLED
-	if float(timing.get("memory_fraction", 0.0)) >= WARN_FRACTION:
+	if float(timing.get("memory_need_fraction", 0.0)) >= WARN_FRACTION:
 		return WARN_NEAR
 	return ""

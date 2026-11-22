@@ -77,6 +77,8 @@ var _entry_density := 0  ## the most entries a cloud slot in use had in the last
 var _entries_last := 0  ## the most list entries a step of the last iteration that made lists asked for
 var _deaths_per_step := 0.0  ## the most deaths a step of the last iterations had (all dishes), for the clouds' headroom
 var _births_per_step := 0.0
+var _need_bytes := -1  ## the bytes the running dishes need (`need_bytes`), -1 when a dish came or went since it was worked out
+var _leave_owed := false  ## a dish left and the arena has not yet given back what it held (`_give_back`)
 var _last_steps := 0  ## the steps of the last iteration that stepped (a dish's DS_BIRTHS are that iteration's)
 var _textures := {}  ## kind -> Array of `ring_of(kind)` texture RIDs (publish)
 var _texture_seqs := {}  ## kind -> Array: the publish each texture holds (-1: never written)
@@ -284,6 +286,7 @@ func load_dish(blob: DishBlob, at_row := -1) -> int:
 	_append_slots("PUFF", GpuLayout.WD_CLOUD_SLOTS, blob.clouds, row)
 	_append_slots("HUSK", GpuLayout.WD_HUSK_SLOTS, blob.husks, row)
 	_stats_fresh = false
+	_need_bytes = -1
 	return row
 
 
@@ -324,6 +327,8 @@ func remove_dish(row: int) -> PackedInt64Array:
 	_set_wd(GpuLayout.WD_CELLS, arena.cell_top)
 	_set_wd(GpuLayout.WD_BINS, arena.bin_top)
 	_stats_fresh = false
+	_need_bytes = -1
+	_leave_owed = true
 	return ids
 
 
@@ -831,6 +836,8 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 	out["answer_usec"] = answer_usec + t_pub_took - t_took
 	out["publish_usec"] = publish_usec + Time.get_ticks_usec() - t_pub_took
 	out["read_usec"] = read_usec
+	if _leave_owed:
+		_give_back(steps > 0)
 	if steps > 0:
 		arena.maybe_shrink(_wd(GpuLayout.WD_SLOTS), _wd(GpuLayout.WD_CLOUD_SLOTS), _wd(GpuLayout.WD_HUSK_SLOTS), _entries_peak, maxi(births, deaths))
 		_entries_peak = 0
@@ -1279,15 +1286,30 @@ func mass_of(row: int) -> float:
 	return float(_mass_sum[row]) if _stats_fresh and _mass_sum.has(row) else -1.0
 
 
-## Grows what an iteration of `steps` steps could pass: the record slots to the bound of every dish's segment after `steps` steps
-## (`births_series`: a bup divides at most once a step and only with mass to divide, and never past its dish's cap); the event ring to the bound of
-## its births; the clouds and husks, while that bound is small (under EVENT_EXACT_MOST, and the slots under HARD_BOUND_MOST), to a hard bound:
-## each step's deaths are at most its bups (the same bound), each death and plankton husk makes at most a cloud or a husk, and each husk lets
-## go at most min(12, steps x (delta / a quarter of its life + 1)) pieces; past it, to an estimate of what the steps until the next
-## compaction append (a kernel that finds a buffer full raises the overflow flag and keeps inside it). The ring, when it is sized from
-## what the last iterations had, still grows only to the bound. False, with OVERFLOW_BUDGET set and the reason in `errors`, when the room
-## would pass the memory budget.
-func _ensure_room(steps: int, ev: Dictionary) -> bool:
+## The bytes the buffers and the pictures' textures would take at what the running dishes need: what they use and the room their next
+## growth asks for (`room_needed` over the last iteration's steps), whatever the pool holds now. Worked out again when a dish came or went.
+func need_bytes() -> int:
+	if _need_bytes < 0:
+		_need_bytes = arena.need_bytes(room_needed(maxi(_last_steps, 1), 0, true))
+	return _need_bytes
+
+
+## Gives back what a dish that left held, without the wait of the ordinary shrink (`SimArena.give_back`), after the iteration or pass that
+## read its state back. The slots of the dish stay in the world's count until a step closes the gap, so a pass of no steps gives back
+## the rest and the order stands until a step has run.
+func _give_back(stepped: bool) -> void:
+	var blocked := arena.give_back(room_needed(maxi(_last_steps, 1), 0, true), {"slots": _wd(GpuLayout.WD_SLOTS), "clouds": _wd(GpuLayout.WD_CLOUD_SLOTS), "husks": _wd(GpuLayout.WD_HUSK_SLOTS)})
+	_leave_owed = blocked and not stepped
+	if arena.changed:
+		_after_growth()
+
+
+## What the running dishes need of each class for an iteration of `steps` steps with `world_clouds` clouds brought by the world's events
+## (`_ensure_room` grows to it): "slots" (their segments after the steps), "most" (the slots they can never pass), "events" (the ring, with
+## "events_most" its growth bound and "events_asked" what a refusal names), "clouds", "husks", "entry_clouds" (the cloud slots the
+## lists are sized for) and "entries_density". `stale_mass` takes a dish's mass from the last sample even when an edit or a dish leaving has
+## made the sample not current (an estimate of the need, not the room an iteration is given).
+func room_needed(steps: int, world_clouds: int, stale_mass: bool) -> Dictionary:
 	var need := 0
 	var most := 0
 	var bound := 0
@@ -1297,23 +1319,14 @@ func _ensure_room(steps: int, ev: Dictionary) -> bool:
 		var cd: CoreDish = _dishes[row]
 		var n := _ds(row, GpuLayout.DS_COUNT)
 		counted += n
-		var series := births_series(n, mass_of(row), cd.cap, steps, delta)
+		var mass := float(_mass_sum[row]) if stale_mass and _mass_sum.has(row) else mass_of(row)
+		var series := births_series(n, mass, cd.cap, steps, delta)
 		need += _align(series[steps])
 		most += _align(maxi(cd.cap, n))
 		for j in steps:
 			bound += series[j]
-	var refused: Array[String] = []
-	if not arena.ensure_slots(maxi(need, _wd(GpuLayout.WD_SLOTS)), maxi(most, _wd(GpuLayout.WD_SLOTS))):
-		refused.append("record slots %d" % maxi(need, _wd(GpuLayout.WD_SLOTS)))
 	var exact := bound < EVENT_EXACT_MOST
 	var events := bound if exact else mini(bound, maxi(EVENT_EXACT_MOST, int(4.0 * maxf(_births_per_step, _deaths_per_step) * steps)))
-	var grown := arena.ensure_events(maxi(events, EVENT_FLOOR), maxi(bound, EVENT_FLOOR))
-	if grown < 0:
-		refused.append("events %d" % events)
-	elif grown > 0:
-		_p[GpuLayout.p_slot("event_capacity")] = arena.event_cap
-		_upload_p()
-	var world_clouds: int = (ev["puffs"] as PackedFloat32Array).size() / GpuLayout.EV_PUFF_FLOATS
 	var husks_most := _wd(GpuLayout.WD_HUSK_SLOTS) + bound + world_clouds
 	var pieces_a_step := mini(GpuKernelsHusks.HUSK_PIECES, int(maxf(_delta, 0.0) / (Biology.HUSK_SECONDS / 4.0)) + 1)
 	var clouds_most := _wd(GpuLayout.WD_CLOUD_SLOTS) + bound + world_clouds + husks_most * mini(GpuKernelsHusks.HUSK_PIECES, steps * pieces_a_step)
@@ -1324,16 +1337,43 @@ func _ensure_room(steps: int, ev: Dictionary) -> bool:
 		var window := mini(steps, CLOUD_COMPACT_EVERY) + 1
 		clouds = _wd(GpuLayout.WD_CLOUD_SLOTS) + int(per_step * window) + world_clouds + _wd(GpuLayout.WD_HUSK_SLOTS) * window
 		husks = _wd(GpuLayout.WD_HUSK_SLOTS) + int(per_step * (mini(steps, HUSK_CULL_EVERY) + 1)) + world_clouds
-	if not arena.ensure_clouds(clouds):
-		refused.append("cloud slots %d" % clouds)
-	if not arena.ensure_husks(husks):
-		refused.append("husk slots %d" % husks)
+	var entry_clouds := 0
+	if _entry_density > 0:
+		entry_clouds = mini(clouds, _wd(GpuLayout.WD_CLOUD_SLOTS) + int(maxf(_deaths_per_step * 2.0, float(counted) / 50.0) * (mini(steps, CLOUD_COMPACT_EVERY) + 1)) + world_clouds + _wd(GpuLayout.WD_HUSK_SLOTS) * (mini(steps, CLOUD_COMPACT_EVERY) + 1))
+	return {"slots": need, "most": most, "events": maxi(events, EVENT_FLOOR), "events_most": maxi(bound, EVENT_FLOOR), "events_asked": events,
+		"clouds": clouds, "husks": husks, "entry_clouds": entry_clouds, "entries_density": ceili(_entry_density * ENTRY_MARGIN)}
+
+
+## Grows what an iteration of `steps` steps could pass: the record slots to the bound of every dish's segment after `steps` steps
+## (`births_series`: a bup divides at most once a step and only with mass to divide, and never past its dish's cap); the event ring to the bound of
+## its births; the clouds and husks, while that bound is small (under EVENT_EXACT_MOST, and the slots under HARD_BOUND_MOST), to a hard bound:
+## each step's deaths are at most its bups (the same bound), each death and plankton husk makes at most a cloud or a husk, and each husk lets
+## go at most min(12, steps x (delta / a quarter of its life + 1)) pieces; past it, to an estimate of what the steps until the next
+## compaction append (a kernel that finds a buffer full raises the overflow flag and keeps inside it). The ring, when it is sized from
+## what the last iterations had, still grows only to the bound. False, with OVERFLOW_BUDGET set and the reason in `errors`, when the room
+## would pass the memory budget.
+func _ensure_room(steps: int, ev: Dictionary) -> bool:
+	var world_clouds: int = (ev["puffs"] as PackedFloat32Array).size() / GpuLayout.EV_PUFF_FLOATS
+	var room := room_needed(steps, world_clouds, false)
+	_need_bytes = arena.need_bytes(room)
+	var refused: Array[String] = []
+	if not arena.ensure_slots(maxi(room["slots"], _wd(GpuLayout.WD_SLOTS)), maxi(room["most"], _wd(GpuLayout.WD_SLOTS))):
+		refused.append("record slots %d" % maxi(room["slots"], _wd(GpuLayout.WD_SLOTS)))
+	var grown := arena.ensure_events(room["events"], room["events_most"])
+	if grown < 0:
+		refused.append("events %d" % room["events_asked"])
+	elif grown > 0:
+		_p[GpuLayout.p_slot("event_capacity")] = arena.event_cap
+		_upload_p()
+	if not arena.ensure_clouds(room["clouds"]):
+		refused.append("cloud slots %d" % room["clouds"])
+	if not arena.ensure_husks(room["husks"]):
+		refused.append("husk slots %d" % room["husks"])
 	# The cloud lists' entries: the density the bin scan measured (entries a cloud slot in use) with ENTRY_MARGIN room, over the slots the
 	# iteration is expected to use (the estimate, not the hard bound, which can be many times the clouds there are). When the budget has
 	# no room for them the lists keep what they have: the kernel cuts what does not fit and raises the overflow flag.
 	if _entry_density > 0:
-		var estimate := _wd(GpuLayout.WD_CLOUD_SLOTS) + int(maxf(_deaths_per_step * 2.0, float(counted) / 50.0) * (mini(steps, CLOUD_COMPACT_EVERY) + 1)) + world_clouds + _wd(GpuLayout.WD_HUSK_SLOTS) * (mini(steps, CLOUD_COMPACT_EVERY) + 1)
-		arena.ensure_entries(SimArena.entries_for(mini(mini(clouds, estimate), arena.cloud_cap), ceili(_entry_density * ENTRY_MARGIN)))
+		arena.ensure_entries(SimArena.entries_for(mini(room["entry_clouds"], arena.cloud_cap), ceili(_entry_density * ENTRY_MARGIN)))
 	_after_growth()
 	if refused.is_empty():
 		return true
