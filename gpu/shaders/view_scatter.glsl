@@ -8,6 +8,8 @@ layout(set = 0, binding = 1, std430) buffer B_VP { uint VP[]; };
 layout(set = 0, binding = 2, std430) buffer B_VOFFS { uint VOFFS[]; };
 layout(set = 0, binding = 3, std430) buffer B_INST { vec4 INST[]; };
 const uint CNT_BUPS = 0u;
+const uint IDS_PREV_X = 2u;
+const uint IDS_PREV_Y = 3u;
 const uint PAYLOAD_TEX_WIDTH = 2048u;
 const uint PL_BLUE_SHIFT = 8u;
 const uint PL_COLOR = 3u;
@@ -57,16 +59,26 @@ const uint VW_PICK_Y = 10u;
 const uint VW_PIXEL = 5u;
 const uint VW_SLACK = 11u;
 const uint VW_SLOTS = 6u;
-const uint VW_WORDS = 21u;
+const uint VW_T = 21u;
+const uint VW_WORDS = 22u;
 const uint VW_X0 = 1u;
 const uint VW_X1 = 3u;
 const uint VW_Y0 = 2u;
 const uint VW_Y1 = 4u;
 layout(set = 0, binding = 4, rgba32i) uniform restrict readonly iimage2D PAYTEX;
+layout(set = 0, binding = 5, rgba32i) uniform restrict readonly iimage2D IDTEX;
 
 ivec2 texel_at(uint k) { return ivec2(int(k % PAYLOAD_TEX_WIDTH), int(k / PAYLOAD_TEX_WIDTH)); }
 uvec4 payload_at(uint k) { return uvec4(imageLoad(PAYTEX, texel_at(k))); }
 float vpf(uint w) { return uintBitsToFloat(VP[w]); }
+vec2 place_at(uint k, uvec4 px) {
+	vec2 here = vec2(uintBitsToFloat(px[PL_X]), uintBitsToFloat(px[PL_Y]));
+	float t = vpf(VW_T);
+	if (t >= 1.0) return here;
+	uvec4 q = uvec4(imageLoad(IDTEX, texel_at(k)));
+	vec2 was = vec2(uintBitsToFloat(q[IDS_PREV_X]), uintBitsToFloat(q[IDS_PREV_Y]));
+	return was * (1.0 - t) + here * t;
+}
 
 bool small_at(float length, float pixel) { return length < P[P_MIN_LENGTH_PX] * pixel; }
 uint visible_at(uint k) {
@@ -76,7 +88,8 @@ uint visible_at(uint k) {
 	float pixel = vpf(VW_PIXEL);
 	if (VP[VW_DENSITY] != 0u && small_at(shape.x, pixel)) return 0u;
 	float half_reach = 0.5 * max(max(shape.x, P[P_MIN_LENGTH_PX] * pixel), max(P[P_WIDTH], P[P_MIN_WIDTH_PX] * pixel)) + pixel;
-	float x = uintBitsToFloat(px[PL_X]), y = uintBitsToFloat(px[PL_Y]);
+	vec2 at = place_at(k, px);
+	float x = at.x, y = at.y;
 	return (x + half_reach >= vpf(VW_X0) && x - half_reach <= vpf(VW_X1) && y + half_reach >= vpf(VW_Y0) && y - half_reach <= vpf(VW_Y1)) ? 1u : 0u;
 }
 uvec2 run_of(uint g, uint groups) {
@@ -96,8 +109,9 @@ void put(uint k, uint j) {
 	float ux = cos(shape.y), uy = sin(shape.y);
 	float ql = len + 2.0 * margin, qw = width + 2.0 * margin;
 	uint c = px[PL_COLOR];
-	INST[j * 4u] = vec4(ux * ql, -uy * qw, 0.0, uintBitsToFloat(px[PL_X]));
-	INST[j * 4u + 1u] = vec4(uy * ql, ux * qw, 0.0, uintBitsToFloat(px[PL_Y]));
+	vec2 at = place_at(k, px);
+	INST[j * 4u] = vec4(ux * ql, -uy * qw, 0.0, at.x);
+	INST[j * 4u + 1u] = vec4(uy * ql, ux * qw, 0.0, at.y);
 	INST[j * 4u + 2u] = vec4(vec3(float((c >> PL_RED_SHIFT) & 255u), float((c >> PL_GREEN_SHIFT) & 255u), float((c >> PL_BLUE_SHIFT) & 255u)) / 255.0, 1.0);
 	INST[j * 4u + 3u] = vec4(len, width, margin, 0.0);
 }

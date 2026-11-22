@@ -11,7 +11,8 @@ extends RefCounted
 ## haze and the steering map are wanted, the selected bup's speed and sense range for the map, whether its husks are), offers the view each
 ## publish the world's playout shows (WorldClient.shown_payload) and the newest haze and steering map, with the shared textures' handles,
 ## and tells the world every texture the view used this frame and the publish it held (WorldClient.texture_bound), so the simulation never
-## writes over one still in use. The rings follow the bups' places in the picture.
+## writes over one still in use. Between pictures every bup is drawn part of the way from its place in the picture before to its place in
+## the one shown (`share`: WorldClient.shown_share), and the rings, the camera's follow and the picks take it where it is drawn.
 
 const AGAR := Color(0.03, 0.06, 0.04)  ## the dish's dark agar
 const RIM := Color(0.45, 0.8, 0.6, 0.6)  ## its green-tinted glass rim
@@ -28,6 +29,7 @@ var bups_mesh: MultiMeshInstance2D = null  ## the bups at or over their least fo
 var density_sprite: Sprite2D = null  ## the bups under it, as the view's density picture (one texel a screen pixel), under the capsules
 var husks_mesh: MultiMeshInstance2D = null  ## every live husk, as one instance each
 var overlay: Node2D = null  ## the selection and hover rings, drawn above the bups
+var share_override := -1.0  ## checks only: at 0 to 1, the share of the way between pictures every frame draws at (`share`), in place of the playout's
 var _no_view := false  ## a view was tried and cannot draw here (no main device, or its kernels did not build)
 var _view_sent: Array = []  ## what the world was last told of the view
 var _id_asked := {true: [], false: []}  ## hover -> the questions to the simulation for a picked bup's id that are out, oldest first: {reply, answer} each
@@ -253,6 +255,7 @@ static func _with_handles(p: PayloadInfo, handles: Dictionary) -> PayloadInfo:
 	out.generation = p.generation
 	out.seq = p.seq
 	out.places = p.places
+	out.places_before = p.places_before
 	out.handles = PackedInt64Array(pay["handles"])
 	out.id_handles = PackedInt64Array(ids["handles"])
 	out.size = Vector2i(int(pay["width"]), int(pay["height"]))
@@ -307,7 +310,7 @@ func draw_bups_view() -> void:
 		density_sprite.visible = false
 		return
 	var camera := dish.get_global_transform_with_canvas().affine_inverse() * dish.get_viewport_rect()
-	view.draw_frame(camera, dish.pixel(), multimesh.get_rid())
+	view.draw_frame(camera, dish.pixel(), multimesh.get_rid(), share())
 	var picture := view.density_texture() if view.density_ready() else null
 	density_sprite.visible = picture != null
 	if picture != null:
@@ -375,12 +378,30 @@ func ring_of(id: int) -> Variant:
 	return view_ring(id) if view != null and id >= 0 else null
 
 
+## How far this frame draws the bups from their places in the picture before (0) to their places in the payload the view holds (1): the
+## world's playout share while the view holds the publish the playout shows, else 1 (`share_override` in its place when set).
+func share() -> float:
+	if share_override >= 0.0:
+		return share_override
+	var w := dish.world
+	if view == null or w == null:
+		return 1.0
+	var shown := w.shown_payload()
+	return w.shown_share() if shown != null and shown.seq == view.payload().seq else 1.0
+
+
 ## Where a bup is drawn round (its place and half its drawn length) on the view's picture: from the payload the view draws, which carries
-## the places of the bups the dish asks after (PayloadInfo.places); else from the last place the view looked up, or, until that comes, from
-## the pick that found it (so the hover ring shows as soon as the pick is answered); null when the view does not know it.
+## the places of the bups the dish asks after and where they were in the picture before (PayloadInfo.places, places_before: the place
+## drawn is `share` of the way between, as the view's kernels draw it); else from the last place the view looked up, or, until that comes,
+## from the pick that found it (so the hover ring shows as soon as the pick is answered); null when the view does not know it.
 func view_ring(id: int) -> Variant:
 	var p := view.payload()
 	var at: Variant = p.places.get(id) if p != null else null
+	if at != null and p.places_before.has(id):
+		var t := share()
+		if t < 1.0:
+			var was: Vector2 = p.places_before[id]
+			at = Vector3(was.x * (1.0 - t) + at.x * t, was.y * (1.0 - t) + at.y * t, at.z)
 	if at == null:
 		at = view.place_of(id)
 	if at == null:

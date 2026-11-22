@@ -9,7 +9,8 @@ extends SceneTree
 ## 6 pictures with a founder tracked: 5 come within the steps, after steps 2, 4, 6, 8 and 10 [derived: (j + 1) x 12 / 6], each with its
 ## own publish number, ascending, below the last publish's. World B runs to each of those steps (and to 12) and publishes there. For each
 ## picture: its count is B's count then, its payload's texels (bytes handed over, or the shared texture's first count texels) and its ids
-## (`ids_at`, or the id texture) are B's word for word, and its tracked founder's record is B's (found at least in the first). After the
+## (`ids_at`, or the id words of the id texture) are B's word for word, and its tracked founder's record is B's but for where it was in
+## the picture before (found at least in the first): the pictures before differ between A and B. After the
 ## 12 steps A's dish is word for word (canonical dump) that of a third world C, made alike, whose iteration of 12 steps asks one picture.
 
 const FOUNDERS := 2000
@@ -82,8 +83,8 @@ func _check(handed: bool) -> void:
 		var theirs := _texels(b.core, handed, {"payload": got.get("payload", -1), "bytes": b.core.handed.get("payload", PackedByteArray()), "seq": b.core.publish_seq}, n)
 		TestUtil.check(not mine[0].is_empty() and mine[0] == theirs[0], "%s, step %d: the payload's %d texels are the dish's then" % [path, done, n])
 		TestUtil.check(not mine[1].is_empty() and mine[1] == theirs[1], "%s, step %d: its ids are the dish's then" % [path, done])
-		var tracked: Dictionary = p.get("tracked", {})
-		var want: Dictionary = got.get("tracked", {})
+		var tracked: Dictionary = _without_before(p.get("tracked", {}))
+		var want: Dictionary = _without_before(got.get("tracked", {}))
 		TestUtil.check(tracked == want and (done > 2 or tracked.has(track)), "%s, step %d: its tracked founder's record is the dish's then (found: %s)" % [path, done, tracked.has(track)])
 	var c := _world(handed)
 	_run(c, STEPS, _view(track), 1)
@@ -93,6 +94,18 @@ func _check(handed: bool) -> void:
 			if a.dump(0)[key] != c.dump(0)[key]:
 				print("differs: %s" % key)
 	TestUtil.check(same, "%s: after the %d steps the dish is the one an iteration publishing only its last picture leaves" % [path, STEPS])
+
+
+## Tracked answers (id -> record bytes) with R_PX and R_PY zeroed: a picture's answers carry the bup's place in the picture before
+## (`pool_track_picture`), which the two worlds do not share.
+static func _without_before(tracked: Dictionary) -> Dictionary:
+	var out := {}
+	for id: int in tracked:
+		var r: PackedByteArray = (tracked[id] as PackedByteArray).duplicate()
+		r.encode_u32(GpuLayout.R_PX * 4, 0)
+		r.encode_u32(GpuLayout.R_PY * 4, 0)
+		out[id] = r
+	return out
 
 
 ## [payload bytes, id bytes] of the first `n` texels of picture `p` (its "payload" texture index, or its handed "bytes" and its "seq" for
@@ -108,4 +121,9 @@ static func _texels(core: SimCore, handed: bool, p: Dictionary, n: int) -> Array
 		return [PackedByteArray(), PackedByteArray()]
 	var pay := core.rd.texture_get_data(core.textures("payload")[i], 0)
 	var ids := core.rd.texture_get_data(core.textures("ids")[i], 0)
-	return [pay.slice(0, n * GpuLayout.PAYLOAD_BYTES), ids.slice(0, n * GpuLayout.IDT_BYTES)]
+	var just_ids := PackedByteArray()  # (the ids texture's id words: its places before depend on the picture before, which the runs do not share)
+	just_ids.resize(n * GpuLayout.IDT_BYTES)
+	for k in mini(n, ids.size() / GpuLayout.IDS_BYTES):
+		just_ids.encode_u32(k * GpuLayout.IDT_BYTES, ids.decode_u32(k * GpuLayout.IDS_BYTES + GpuLayout.IDT_LO * 4))
+		just_ids.encode_u32(k * GpuLayout.IDT_BYTES + 4, ids.decode_u32(k * GpuLayout.IDS_BYTES + GpuLayout.IDT_HI * 4))
+	return [pay.slice(0, n * GpuLayout.PAYLOAD_BYTES), just_ids]

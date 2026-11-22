@@ -1,0 +1,83 @@
+class_name TimingOverlay
+extends MarginContainer
+## F3 on the game screen shows how smoothly the dish in view is drawn, smoothed over the last WINDOW_MSEC and rewritten REFRESH_MSEC
+## apart (see DebugHotkey, which owns the key). Its figures come from where the F12 log gets them:
+## `WorldClient.picture_rate()` (pictures, holds, simulated time between them), the engine's frame rate, and the screen's playback
+## speed and the speed reached. Nothing here takes the mouse.
+
+const WINDOW_MSEC := 1000  ## how far back the late frames are counted (as far as `WorldClient.PICTURE_WINDOW_MSEC`)
+const REFRESH_MSEC := 250  ## how often the text is rewritten
+const LATE_FRAMES := 1.5  ## a frame is late when it took longer than this many display frames (the refresh rate's frame, `WorldClient.display_ms`): the next refresh was missed
+
+## The rows, top to bottom: the label's key and the key of the value's text in [debug] of strings.cfg.
+const ROWS := ["pictures", "per_picture", "hold", "frames", "late", "asked", "reached"]
+
+@onready var _rows: GridContainer = $Panel/Rows
+
+var _values := {}  ## row name -> its value's Label
+var _frames: Array = []  ## [msec, length in msec] of each frame in the last WINDOW_MSEC
+var _last_frame := 0  ## Time.get_ticks_msec() at the previous frame (0: none yet)
+var _next_refresh := 0
+
+
+func _ready() -> void:
+	for row: String in ROWS:
+		var caption := Label.new()
+		caption.theme_type_variation = &"ReadoutLabel"
+		caption.text = Strings.t("debug.overlay_%s" % row)
+		_rows.add_child(caption)
+		var value := Label.new()
+		value.theme_type_variation = &"StatValue"
+		value.size_flags_horizontal = Control.SIZE_SHRINK_END
+		value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		_rows.add_child(value)
+		_values[row] = value
+
+
+func _process(_delta: float) -> void:
+	if not visible:
+		_last_frame = 0
+		return
+	var now := Time.get_ticks_msec()
+	if _last_frame > 0:
+		_frames.append([now, now - _last_frame])
+	_last_frame = now
+	while not _frames.is_empty() and now - int(_frames[0][0]) > WINDOW_MSEC:
+		_frames.pop_front()
+	if now >= _next_refresh:
+		_next_refresh = now + REFRESH_MSEC
+		refresh()
+
+
+## Rewrites the figures from what is known now. `screen` is the game screen (its `sim_speed` and `achieved_speed`).
+func refresh() -> void:
+	var world := WorldClient.shared()
+	var pictures: Dictionary = world.picture_rate() if world != null else {}
+	var screen := get_tree().current_scene
+	var asked: float = screen.get("sim_speed") if screen != null and screen.get("sim_speed") != null else 0.0
+	var reached: float = screen.get("achieved_speed") if screen != null and screen.get("achieved_speed") != null else 0.0
+	var seconds_per_picture := float(pictures.get("sim_s_per_picture", 0.0))
+	_write("pictures", Strings.t("debug.overlay_pictures_value", ["%.1f" % (float(pictures.get("shown", 0)) * 1000.0 / WorldClient.PICTURE_WINDOW_MSEC)]))
+	# (A duration between two pictures, often well under a second at low speed, so it is in seconds, not SimClock.format's minutes.)
+	_write("per_picture", Strings.t("debug.overlay_per_picture_value", ["%.3f" % seconds_per_picture if seconds_per_picture < 10.0 else "%.1f" % seconds_per_picture]))
+	_write("hold", Strings.t("debug.overlay_hold_value", [int(pictures.get("longest_hold_frames", 0))]))
+	_write("frames", Strings.t("debug.overlay_frames_value", ["%.0f" % Engine.get_frames_per_second()]))
+	_write("late", Strings.t("debug.overlay_late_value", [int(round(late_share(world.display_ms if world != null else 0.0) * 100.0))]))
+	_write("asked", Strings.t("debug.overlay_speed_value", [int(asked)]))
+	_write("reached", Strings.t("debug.overlay_speed_value", [int(reached)]))
+
+
+## The share (0 to 1) of the frames in the window that took longer than LATE_FRAMES display frames (`display_ms`; 0: not known, 60 Hz).
+func late_share(display_ms: float) -> float:
+	if _frames.is_empty():
+		return 0.0
+	var limit := LATE_FRAMES * (display_ms if display_ms > 0.0 else 1000.0 / 60.0)
+	var late := 0
+	for frame: Array in _frames:
+		if int(frame[1]) > limit:
+			late += 1
+	return float(late) / _frames.size()
+
+
+func _write(row: String, text: String) -> void:
+	(_values[row] as Label).text = text

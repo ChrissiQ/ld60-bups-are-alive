@@ -15,7 +15,7 @@ extends RefCounted
 ## Imported textures (`SimCore.ring_of(kind)` of each kind, written by SimCore.publish after its sync):
 ## - The simulation hands over, for each kind, its textures' native handles (`driver_handles`, called on its own thread), their size and
 ##   a generation that changes whenever it made them afresh; `offer` says which of them it published last.
-## - Each is imported in a different, view-compatible format (payload RGBA32UI as RGBA32I, ids RG32UI as RG32I, the RGBA8 pictures as
+## - Each is imported in a different, view-compatible format (payload and ids RGBA32UI as RGBA32I, the RGBA8 pictures as
 ##   sRGB): on Metal `texture_create_from_extension` wraps a native texture of the same format without retaining it, and freeing the
 ##   wrapper would free the simulation's texture twice (a crash at exit); a different format makes the driver build a view with its own
 ##   count, which is safe to free.
@@ -31,18 +31,22 @@ extends RefCounted
 ##
 ## The CPU handover (`hand_over_picture`, `set_payload` with bytes): the simulation shares no textures, so there is nothing to reuse and
 ## nothing to tell it (`take_bound` stays empty). A picture's bytes go straight into its owned texture (`texture_update`; the atlas is
-## as tall as its rows of tiles in use). The payload's bytes (the texels in use only) go into one storage buffer and the
-## simulation's own copy kernel (`pool_copy_payload_only`) lays them into a storage texture of this device (made again, larger, when the
-## bups outgrow them), which the view kernels read through a view in the signed format as they read an import. A texture update has to
-## be whole, so the buffer takes the part in use and the kernel does the rest. The ids are not handed over: an answer's id is `UNRESOLVED` and
-## the caller asks the simulation for it (`WorldClient.ids_at`). Each handover is made on the render thread before the
-## frame's compute lists.
+## as tall as its rows of tiles in use). The payload's bytes and the places before (the texels in use only) go into two storage buffers
+## and the simulation's own copy kernel (`pool_copy_handed`) lays them into the payload's and the ids' storage textures of this device (made
+## again, larger, when the bups outgrow them), which the view kernels read through a view in the signed format as they read an import. A
+## texture update has to be whole, so the buffers take the part in use and the kernel does the rest. The ids are not handed over (the ids
+## texture holds the places before alone): an answer's id is `UNRESOLVED` and the caller asks the simulation for it
+## (`WorldClient.ids_at`). Each handover is made on the render thread before the frame's compute lists.
+##
+## Between pictures: `draw_frame` is given the share of the way from the picture before to the one shown (WorldClient.shown_share), and
+## every bup is drawn, picked and looked up that share of the way from its place before (the ids texture's) to its place in the payload
+## (GpuKernelsView.place_at), so a crowd moves on every frame and not only when a picture comes.
 
 const KINDS := ["payload", "ids", "haze", "steer", "thumbs"]
 const PICTURE_KINDS := ["haze", "steer", "thumbs"]  ## RGBA8 pictures the canvas draws
 const IMPORT_FORMATS := {
 	"payload": RenderingDevice.DATA_FORMAT_R32G32B32A32_SINT,
-	"ids": RenderingDevice.DATA_FORMAT_R32G32_SINT,
+	"ids": RenderingDevice.DATA_FORMAT_R32G32B32A32_SINT,
 	"haze": RenderingDevice.DATA_FORMAT_R8G8B8A8_SRGB,
 	"steer": RenderingDevice.DATA_FORMAT_R8G8B8A8_SRGB,
 	"thumbs": RenderingDevice.DATA_FORMAT_R8G8B8A8_SRGB,
@@ -103,9 +107,9 @@ var _epoch := 0  ## counts `let_go`s: an answer to a build from before the last 
 static var force_cpu_handover := false  ## checks and tools: take the CPU handover whatever the driver (also `--cpu-handover` as a user argument of the run)
 static var _vulkan := -1  ## 1 when the main device is Vulkan (read once)
 var _handed := false  ## the payload came as bytes with no ids: the bups looked up by id are not looked up here, and a picked bup's id is for the caller to ask for (`answer`'s "index" and "pub")
-var _ho := {}  ## the CPU handover's payload texture and the ids' beside it (which no byte is ever written into): {rows, bases, views, stages (the buffer the payload's bytes go into), set}
+var _ho := {}  ## the CPU handover's payload texture and the ids' beside it (which holds the places before and no ids): {rows, bases, views, stages (the buffers the payload's bytes and the places before go into), set}
 var _ho_generation := 0
-var _copy_made := {}  ## the copy kernel (staging buffers into the payload's textures), made with the first payload handed over
+var _copy_made := {}  ## the copy kernel (staging buffers into the payload's and the ids' textures), made with the first payload handed over
 static var _copy_defs := {}
 static var _defs := {}  ## KERNELS' definitions (GpuKernels.all's), taken by the first view made
 static var _den_defs := {}  ## GpuKernelsView.DENSITY_KERNELS' definitions, taken by the first view that switches density mode on
@@ -147,7 +151,7 @@ static func _take_defs() -> void:
 		_defs[kname] = all[kname]
 	for kname: String in GpuKernelsView.DENSITY_KERNELS:
 		_den_defs[kname] = all[kname]
-	_copy_defs["pool_copy_payload_only"] = all["pool_copy_payload_only"]
+	_copy_defs["pool_copy_handed"] = all["pool_copy_handed"]
 
 
 func set_density(on: bool) -> void:
@@ -341,18 +345,19 @@ static func thumbnail_region(row: int) -> Rect2:
 ## into `camera` (dish-local µm) at `pixel_um` µm to a pixel, in the dish's order, each at least the least footprint. Its visible instances
 ## are the visible bups, from the count the last build for this view read back (half again, to a power of two), or the payload's every bup
 ## until the count for a new view is back, so no visible bup is ever left out. Rebuilt when the camera, the scale or the payload changed,
-## or a question is asked.
-func draw_frame(camera: Rect2, pixel_um: float, multimesh: RID) -> void:
+## or the share of the way between pictures changed, or a question is asked. `share`: how far each bup is drawn from its place in the picture
+## before (0) to its place in the payload (1).
+func draw_frame(camera: Rect2, pixel_um: float, multimesh: RID, share := 1.0) -> void:
 	if not can_draw() or not _imports.has("payload") or not multimesh.is_valid():
 		return
 	var capacity := RenderingServer.multimesh_get_instance_count(multimesh)
 	var target := RenderingServer.multimesh_get_buffer_rd_rid(multimesh)
-	draw_into(camera, pixel_um, target, capacity, multimesh)
+	draw_into(camera, pixel_um, target, capacity, multimesh, share)
 
 
 ## `draw_frame` into `target`, a storage buffer of `capacity` instances on this renderer's device (the MultiMesh's, or a tool's: then
 ## `multimesh` is RID() and nothing is told the visible count).
-func draw_into(camera: Rect2, pixel_um: float, target: RID, capacity: int, multimesh := RID()) -> void:
+func draw_into(camera: Rect2, pixel_um: float, target: RID, capacity: int, multimesh := RID(), share := 1.0) -> void:
 	if capacity <= 0 or not target.is_valid() or not _imports.has("payload") or not _shown.has("payload"):
 		return  # (no payload yet, or none since `let_go`: a question asked waits for one)
 	var count := mini(_payload.count, _imports["payload"]["size"].x * _imports["payload"]["size"].y)
@@ -365,7 +370,8 @@ func draw_into(camera: Rect2, pixel_um: float, target: RID, capacity: int, multi
 	if not _visible.is_empty() and _visible["key"] == view_key and count - int(_visible["bups"]) <= int(_visible["count"]) / 2:
 		slots = mini(count, maxi(MIN_SLOTS, nearest_po2(int(_visible["count"]) + int(_visible["count"]) / 2)))
 	slots = mini(maxi(slots, mini(MIN_SLOTS, capacity)), capacity)
-	var build := [view_key, _payload.seq, _shown["payload"], slots, target]
+	share = clampf(share, 0.0, 1.0)
+	var build := [view_key, _payload.seq, _shown["payload"], slots, target, share]
 	# (density mode: the capsule kernels need not run while the last build of this view found no bup to draw as a capsule)
 	var skip: bool = dens and not _skipped_last and not _large.is_empty() and _large["key"] == view_key and int(_large["count"]) == 0
 	var rebuild: bool = build != _last_build
@@ -381,7 +387,7 @@ func draw_into(camera: Rect2, pixel_um: float, target: RID, capacity: int, multi
 	var pick: Variant = _pick_request
 	_pick_request = null
 	_follow_asked = false
-	_put_vp(count, camera, pixel_um, slots, capacity, pick, mode, den_size)
+	_put_vp(count, camera, pixel_um, slots, capacity, pick, mode, den_size, share)
 	_on_device(_build.bind(count, target, _shown["payload"], pick, view_key, rebuild, den_size, skip))
 
 
@@ -391,8 +397,9 @@ func forget_build() -> void:
 
 
 ## Asks which bup is at `local` (dish-local µm): the pick's rule (within half its drawn length at `pixel_um` plus `slack`, the
-## nearest), on the payload, and how many bups lie within `near` of it and how far the nearest is. The answer comes back a frame or two
-## later (`answer`); `hover` keeps the hover's answer apart from a click's. Returns the question's number.
+## nearest), each bup where the next build draws it (between pictures, that share of the way from its place before), and how many bups
+## lie within `near` of it and how far the nearest is. The answer comes back a frame or two later (`answer`); `hover` keeps the hover's
+## answer apart from a click's. Returns the question's number.
 func pick(local: Vector2, slack: float, pixel_um: float, hover := false, near := 0.0) -> int:
 	_pick_seq += 1
 	_pick_request = {"local": local, "slack": slack, "pixel_um": pixel_um, "near": near, "hover": hover, "seq": _pick_seq, "asked": Engine.get_frames_drawn()}
@@ -422,7 +429,7 @@ func follow(ids: Array) -> void:
 		_follow_asked = true
 
 
-## Where a followed bup was in the last payload drawn: Vector3(x, y, its length in µm), or null when it is not in it.
+## Where a followed bup was drawn by the last build that looked it up: Vector3(x, y, its length in µm), or null when it is not in the payload.
 func place_of(id: int) -> Variant:
 	return _places.get(id, null)
 
@@ -504,9 +511,10 @@ func _hand_picture(kind: String, bytes: PackedByteArray, size: Vector2i) -> void
 		rd.texture_update(made, 0, bytes)
 
 
-## The payload's and ids' bytes into the textures the view kernels read: the bytes go into two storage buffers (only the texels in use),
-## and the simulation's own copy kernel lays them into storage textures of the main device's own, which the kernels read through a view
-## in the signed format (as the imports are). Made again, larger, when the bups outgrow them.
+## The payload's bytes and the places before into the textures the view kernels read: the bytes go into two storage buffers (only the
+## texels in use), and the simulation's own copy kernel lays them into storage textures of the main device's own (the payload's, and the
+## ids' with no ids), which the kernels read through a view in the signed format (as the imports are). Made again, larger, when the bups
+## outgrow them.
 func _hand_payload(info: PayloadInfo) -> void:
 	var w := GpuLayout.PAYLOAD_TEX_WIDTH
 	var texels := info.bytes.size() / GpuLayout.PAYLOAD_BYTES
@@ -524,11 +532,14 @@ func _hand_payload(info: PayloadInfo) -> void:
 			return
 	if texels > 0:
 		rd.buffer_update(_ho["stages"][0], 0, info.bytes.size(), info.bytes)
-		var k: Dictionary = _copy_made["pool_copy_payload_only"]
+		var before := info.prev_bytes.size() == texels * GpuLayout.PV_BYTES  # (none handed: each bup is drawn at its place in the payload)
+		if before:
+			rd.buffer_update(_ho["stages"][1], 0, info.prev_bytes.size(), info.prev_bytes)
+		var k: Dictionary = _copy_made["pool_copy_handed"]
 		var cl := rd.compute_list_begin()
 		rd.compute_list_bind_compute_pipeline(cl, k["pipeline"])
 		rd.compute_list_bind_uniform_set(cl, _ho["set"], 0)
-		rd.compute_list_set_push_constant(cl, PackedFloat32Array([float(w), float(texels), 0.0, 0.0]).to_byte_array(), 16)
+		rd.compute_list_set_push_constant(cl, PackedFloat32Array([float(w), float(texels), 1.0 if before else 0.0, 0.0]).to_byte_array(), 16)
 		rd.compute_list_dispatch(cl, clampi(ceili(texels / 64.0), 1, 16384), 1, 1)
 		rd.compute_list_add_barrier(cl)
 		rd.compute_list_end()
@@ -543,7 +554,7 @@ func _make_handover(rows: int) -> void:
 	var bases: Array[RID] = []
 	var views: Array[RID] = []
 	for kind: String in ["payload", "ids"]:
-		var unsigned := RenderingDevice.DATA_FORMAT_R32G32B32A32_UINT if kind == "payload" else RenderingDevice.DATA_FORMAT_R32G32_UINT
+		var unsigned := RenderingDevice.DATA_FORMAT_R32G32B32A32_UINT
 		var format := RDTextureFormat.new()
 		format.format = unsigned
 		format.width = w
@@ -563,19 +574,21 @@ func _make_handover(rows: int) -> void:
 			return
 		bases.append(base)
 		views.append(shared)
-	var stages: Array[RID] = [rd.storage_buffer_create(rows * w * GpuLayout.PAYLOAD_BYTES)]
-	var k: Dictionary = _copy_made["pool_copy_payload_only"]
+	var stages: Array[RID] = [rd.storage_buffer_create(rows * w * GpuLayout.PAYLOAD_BYTES), rd.storage_buffer_create(rows * w * GpuLayout.PV_BYTES)]
+	var k: Dictionary = _copy_made["pool_copy_handed"]
 	var uniforms: Array[RDUniform] = []
-	var stage := RDUniform.new()
-	stage.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
-	stage.binding = 0
-	stage.add_id(stages[0])
-	uniforms.append(stage)
-	var image := RDUniform.new()  # (the copy kernel writes the unsigned texture itself)
-	image.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
-	image.binding = 1
-	image.add_id(bases[0])
-	uniforms.append(image)
+	for b in 2:
+		var stage := RDUniform.new()
+		stage.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
+		stage.binding = b
+		stage.add_id(stages[b])
+		uniforms.append(stage)
+	for b in 2:
+		var image := RDUniform.new()  # (the copy kernel writes the unsigned textures themselves)
+		image.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
+		image.binding = 2 + b
+		image.add_id(bases[b])
+		uniforms.append(image)
 	_ho = {"rows": rows, "bases": bases, "views": views, "stages": stages, "set": rd.uniform_set_create(uniforms, k["shader"], 0)}
 	_ho_generation += 1
 	var ring := SimCore.ring_of("payload")
@@ -678,7 +691,7 @@ func _ensure_texels(texels: int) -> void:
 	_texels = texels
 
 
-func _put_vp(count: int, camera: Rect2, pixel_um: float, slots: int, capacity: int, pick: Variant, mode := 0, den_size := Vector2i.ZERO) -> void:
+func _put_vp(count: int, camera: Rect2, pixel_um: float, slots: int, capacity: int, pick: Variant, mode := 0, den_size := Vector2i.ZERO, share := 1.0) -> void:
 	var put_u := func(w: int, v: int) -> void: _vp.encode_u32(w * 4, v)
 	var put_f := func(w: int, v: float) -> void: _vp.encode_float(w * 4, v)
 	put_u.call(GpuKernelsView.VW_COUNT, count)
@@ -698,6 +711,7 @@ func _put_vp(count: int, camera: Rect2, pixel_um: float, slots: int, capacity: i
 	put_u.call(GpuKernelsView.VW_DENSITY, mode)
 	put_u.call(GpuKernelsView.VW_DEN_W, den_size.x)
 	put_u.call(GpuKernelsView.VW_DEN_H, den_size.y)
+	put_f.call(GpuKernelsView.VW_T, share)
 	put_u.call(GpuKernelsView.VW_FINDS, 0 if _follow.is_empty() or _handed else 1)
 	for s in GpuKernelsView.FINDS:
 		var id: int = _follow[s] if s < _follow.size() and _follow[s] >= 0 else -1

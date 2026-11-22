@@ -3,7 +3,7 @@ extends RefCounted
 ## Every key the game answers to, and the player's changes to them (kept in user://keys.cfg). Code asks for an action by its
 ## id (`KeyBindings.key("pause")`, `KeyBindings.matches("pause", event)`); nothing else spells out a letter. Each action has
 ## one rebindable key; a few fixed extras (the keypad's + and -, Shift for +) ride along with the zoom keys in the toolbar.
-## The names shown to the player are in text/strings.cfg, [keys]. Escape, F1, F11 (full screen; Ctrl+Cmd+F on a Mac) and F12 are not rebindable.
+## The names shown to the player are in text/strings.cfg, [keys]. Escape, F1, F3 (the timing overlay), F11 (full screen; Ctrl+Cmd+F on a Mac) and F12 are not rebindable.
 
 const PATH := "user://keys.cfg"
 ## id -> default key, in the order the controls list shows them.
@@ -20,7 +20,7 @@ const DEFAULTS := {
 	"dish_prev": KEY_PAGEUP, "dish_next": KEY_PAGEDOWN,
 }
 ## Keys that mean something fixed, which no action may take.
-const RESERVED := [KEY_ESCAPE, KEY_F1, KEY_F11, KEY_F12, KEY_ENTER, KEY_KP_ENTER, KEY_DELETE, KEY_BACKSPACE]
+const RESERVED := [KEY_ESCAPE, KEY_F1, KEY_F3, KEY_F11, KEY_F12, KEY_ENTER, KEY_KP_ENTER, KEY_DELETE, KEY_BACKSPACE]
 
 static var path := PATH  ## where the changes are kept (tests point it at a scratch file)
 static var _custom := {}  ## id -> key, only for the actions the player changed

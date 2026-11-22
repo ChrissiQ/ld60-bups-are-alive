@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://dcv1uh8krdobw"
+path="res://.godot/imported/pool_copy_handed.glsl-5e3c55466484901cad01ac37903aa03e.res"
+
+[deps]
+
+source_file="res://gpu/shaders/pool_copy_handed.glsl"
+dest_files=["res://.godot/imported/pool_copy_handed.glsl-5e3c55466484901cad01ac37903aa03e.res"]
+
+[params]
+

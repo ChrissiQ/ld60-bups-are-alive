@@ -42,6 +42,7 @@ const LONGEST_CLOCK_HOURS := 999999  ## the top bar keeps room for the clock up 
 @onready var menu_button: Button = %MenuButton
 @onready var side: ScrollContainer = %Side  ## the side column: the goal, what is picked or the dish, the watch list (it scrolls when the window is too short for all of it)
 @onready var stage: Control = %Stage  ## the free middle of the screen, between the rail, the side column, the top bar and the bottom bar: the dish is framed in it
+@onready var timing_overlay: TimingOverlay = %TimingOverlay  ## the debug overlay of the picture rate (F3, `DebugHotkey`): in the stage's bottom left corner, off at start
 @onready var toolbar: Toolbar = %Toolbar
 @onready var tool_options: ToolOptions = %ToolOptions
 @onready var feed_row: SettingRow = %FeedRow

@@ -6,6 +6,8 @@ layout(push_constant) uniform PC { float pa; float pb; float pc; float pd; } pcs
 layout(set = 0, binding = 0, std430) buffer B_VP { uint VP[]; };
 layout(set = 0, binding = 1, std430) buffer B_VOUT { uint VOUT[]; };
 const uint CNT_BUPS = 0u;
+const uint IDS_PREV_X = 2u;
+const uint IDS_PREV_Y = 3u;
 const uint PAYLOAD_TEX_WIDTH = 2048u;
 const uint PL_SHAPE = 2u;
 const uint PL_X = 0u;
@@ -48,23 +50,33 @@ const uint VW_PICK_Y = 10u;
 const uint VW_PIXEL = 5u;
 const uint VW_SLACK = 11u;
 const uint VW_SLOTS = 6u;
-const uint VW_WORDS = 21u;
+const uint VW_T = 21u;
+const uint VW_WORDS = 22u;
 const uint VW_X0 = 1u;
 const uint VW_X1 = 3u;
 const uint VW_Y0 = 2u;
 const uint VW_Y1 = 4u;
 layout(set = 0, binding = 2, rgba32i) uniform restrict readonly iimage2D PAYTEX;
-layout(set = 0, binding = 3, rg32i) uniform restrict readonly iimage2D IDTEX;
+layout(set = 0, binding = 3, rgba32i) uniform restrict readonly iimage2D IDTEX;
 
 ivec2 texel_at(uint k) { return ivec2(int(k % PAYLOAD_TEX_WIDTH), int(k / PAYLOAD_TEX_WIDTH)); }
 uvec4 payload_at(uint k) { return uvec4(imageLoad(PAYTEX, texel_at(k))); }
 float vpf(uint w) { return uintBitsToFloat(VP[w]); }
+vec2 place_at(uint k, uvec4 px) {
+	vec2 here = vec2(uintBitsToFloat(px[PL_X]), uintBitsToFloat(px[PL_Y]));
+	float t = vpf(VW_T);
+	if (t >= 1.0) return here;
+	uvec4 q = uvec4(imageLoad(IDTEX, texel_at(k)));
+	vec2 was = vec2(uintBitsToFloat(q[IDS_PREV_X]), uintBitsToFloat(q[IDS_PREV_Y]));
+	return was * (1.0 - t) + here * t;
+}
 
 void place(uint k, uint at) {
 	if (k == 0xFFFFFFFFu) return;
 	uvec4 px = payload_at(k);
 	uvec2 id = uvec2(imageLoad(IDTEX, texel_at(k)).xy);
-	VOUT[at] = id.x; VOUT[at + 1u] = id.y; VOUT[at + 2u] = px[PL_X]; VOUT[at + 3u] = px[PL_Y];
+	vec2 drawn = place_at(k, px);
+	VOUT[at] = id.x; VOUT[at + 1u] = id.y; VOUT[at + 2u] = floatBitsToUint(drawn.x); VOUT[at + 3u] = floatBitsToUint(drawn.y);
 	VOUT[at + 4u] = floatBitsToUint(unpackHalf2x16(px[PL_SHAPE]).x);
 }
 void main() {

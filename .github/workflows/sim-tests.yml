@@ -8,7 +8,8 @@
 #     dish's donors to grow in number, which is not derived for any device);
 #   invariants, stats: exact counts, and sums within the tolerances the tests state;
 #   faint_view: the nutrient picture against the sum the test works out from the dish's own clouds;
-#   picture_steps: the pictures made within an iteration's steps against runs stopped at those steps, word for word.
+#   picture_steps: the pictures made within an iteration's steps against runs stopped at those steps, word for word;
+#   places_before: each bup's place in the picture before against the ids and places of the pictures made, bit for bit.
 # Not run here: goldens_test (its recorded values are one machine's), the timing gates, the tests
 # of the game's screens, and list_agreement_test (it grows a 90 mm dish to about 200,000 bups first,
 # too long for a software GPU).
@@ -71,7 +72,7 @@ jobs:
       - name: Run the tests
         run: |
           failed=""
-          for t in isolation permutation field_padding continuation conjugation_isolation medium_isolation near_lists invariants stats faint_view picture_steps; do
+          for t in isolation permutation field_padding continuation conjugation_isolation medium_isolation near_lists invariants stats faint_view picture_steps places_before; do
             log="$RUNNER_TEMP/${t}_test.log"
             echo "::group::${t}_test"
             timeout -k 30 "$TEST_TIMEOUT" xvfb-run -a -s "-screen 0 1280x720x24" \

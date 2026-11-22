@@ -82,6 +82,35 @@ func _initialize() -> void:
 	TestUtil.check(m.tutorial.active, "the tour is up")
 	m.tutorial._input(TestUtil.key_event(KEY_F12))
 	TestUtil.check(m.tutorial.active, "the tour does not take F12 as a key of its own")
+	# F3 shows and hides the timing overlay (also through the tour), its rows fill with numbers, and it ignores the mouse.
+	var overlay: TimingOverlay = m.timing_overlay
+	TestUtil.check(not overlay.visible and KeyBindings.set_key("pause", KEY_F3) == "!", "the overlay is off at start and F3 is not a key to rebind")
+	m.tutorial._input(TestUtil.key_event(KEY_F3))
+	TestUtil.check(m.tutorial.active, "the tour does not take F3 as a key of its own")
+	hotkey._input(TestUtil.key_event(KEY_F3))
+	await process_frame
+	TestUtil.check(overlay.visible, "F3 shows the overlay")
+	for i in 3:
+		await process_frame
+	overlay.refresh()
+	for row: String in TimingOverlay.ROWS:
+		var shown: String = overlay._values[row].text
+		TestUtil.check(shown.length() > 0 and shown.find("%") < 0 or row == "late", "the overlay's %s row has a figure (%s)" % [row, shown])
+		TestUtil.check(shown.strip_edges() != "" and (shown[0].is_valid_int() or shown[0] == "x"), "...which starts with a number (%s)" % shown)
+	TestUtil.check(overlay.late_share(16.7) >= 0.0 and overlay.late_share(16.7) <= 1.0, "the late share is a share")
+	overlay._frames = [[0, 10], [0, 40], [0, 20], [0, 25]]
+	TestUtil.check(is_equal_approx(overlay.late_share(16.0), 0.5), "a frame is late past 1.5 display frames (two of four are)")
+	var all_ignore := true
+	var pending: Array = [overlay]
+	while not pending.is_empty():
+		var node: Node = pending.pop_back()
+		pending.append_array(node.get_children())
+		if node is Control and (node as Control).mouse_filter != Control.MOUSE_FILTER_IGNORE:
+			all_ignore = false
+	TestUtil.check(all_ignore, "nothing in the overlay takes the mouse")
+	hotkey._input(TestUtil.key_event(KEY_F3))
+	await process_frame
+	TestUtil.check(not overlay.visible, "F3 hides it again")
 	hotkey._input(TestUtil.key_event(KEY_F12))
 	TestUtil.check(not hotkey.notice.visible, "nothing is said before the log is written")
 	for i in hotkey.FREEZE_FRAMES + 3:
