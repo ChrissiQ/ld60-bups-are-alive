@@ -8,6 +8,11 @@ extends RefCounted
 ## uniform sets again. The field cells and squares are handed out in blocks from first-fit free lists.
 
 const GROW := 1.5
+## The most one buffer may take: the least any backend promises. Direct3D 12 documents 2048 MB as the largest resource (the C term of its
+## resource-size limit: min(max(128, a quarter of the video memory), 2048) MB); Vulkan's `maxStorageBufferRange` is often 4 GiB - 1 and
+## 1 GiB on older cards, and the size of a RenderingDevice buffer is a 32-bit integer; Metal's `maxBufferLength` is read from the device
+## (at least 256 MB). A growth that would make a class's buffer bigger is refused like one that passes the memory budget (`fits`).
+const BUFFER_MOST := 2 * 1024 * 1024 * 1024
 const FILL := 0.9  ## a class grows when what is asked passes this share of it
 const SHRINK_BELOW := 0.25
 const SHRINK_EVERY_MSEC := 60000
@@ -513,12 +518,14 @@ static func _trim(free: Array, top: int) -> int:
 
 
 ## Whether the pool with these capacities (slots, clouds, husks, events and entries: the most of these and the pool's current ones; cells and bins: more than
-## the pool's current ones) stays within the memory budget.
+## the pool's current ones) stays within the memory budget and no single buffer passes `BUFFER_MOST`.
 func fits(slots: int, cells: int, bins: int, clouds: int, husks: int, events := 0, entries := 0) -> bool:
 	if limits.watch != null:
 		limits.watch.before_growth(Time.get_ticks_msec(), bytes_now())  # (the free memory is read again before room is made, at most once a second)
 	var cloud_room := maxi(clouds, cloud_cap)
-	return estimate_bytes(maxi(slots, slot_cap), cell_cap + cells, bin_cap + bins, cloud_room, maxi(husks, husk_cap), maxi(events, event_cap), maxi(entries, maxi(entry_cap, GpuKernelsClouds.ENTRIES_PER_SLOT * cloud_room))) <= limits.memory_budget_bytes
+	var want := [maxi(slots, slot_cap), cell_cap + cells, bin_cap + bins, cloud_room, maxi(husks, husk_cap), maxi(events, event_cap), maxi(entries, maxi(entry_cap, GpuKernelsClouds.ENTRIES_PER_SLOT * cloud_room))]
+	return largest_buffer_bytes(want[0], want[1], want[2], want[3], want[4], want[5], want[6]) <= BUFFER_MOST \
+			and estimate_bytes(want[0], want[1], want[2], want[3], want[4], want[5], want[6]) <= limits.memory_budget_bytes
 
 
 ## The bytes the buffers and the pictures' textures take at these capacities.
@@ -529,21 +536,34 @@ func estimate_bytes(slots: int, cells: int, bins: int, clouds: int, husks: int, 
 		entries = maxi(entry_cap, GpuKernelsClouds.ENTRIES_PER_SLOT * clouds)
 	var total := 0
 	for nm: String in BUFFERS:
-		var e: Array = BUFFERS[nm]
-		var unit: int = e[1]
-		match e[0]:
-			"slot": total += slots * unit
-			"block": total += (slots / GpuLayout.BLK_SLOTS + 1) * unit
-			"bucket": total += GpuKernelsLife.conj_buckets(slots) * unit
-			"bucketbits": total += (GpuKernelsLife.conj_buckets(slots) / 32 + 1) * unit
-			"cell": total += cells * unit
-			"bin": total += bins * unit
-			"cloud": total += clouds * unit
-			"husk": total += husks * unit
-			"entry": total += entries * unit
-			"event": total += events * unit
-			_: total += sizes.get(nm, unit)
+		total += _buffer_bytes(nm, slots, cells, bins, clouds, husks, events, entries)
 	return total + draw_bytes_now()
+
+
+## The bytes of buffer `nm` at these capacities.
+func _buffer_bytes(nm: String, slots: int, cells: int, bins: int, clouds: int, husks: int, events: int, entries: int) -> int:
+	var e: Array = BUFFERS[nm]
+	var unit: int = e[1]
+	match e[0]:
+		"slot": return slots * unit
+		"block": return (slots / GpuLayout.BLK_SLOTS + 1) * unit
+		"bucket": return GpuKernelsLife.conj_buckets(slots) * unit
+		"bucketbits": return (GpuKernelsLife.conj_buckets(slots) / 32 + 1) * unit
+		"cell": return cells * unit
+		"bin": return bins * unit
+		"cloud": return clouds * unit
+		"husk": return husks * unit
+		"entry": return entries * unit
+		"event": return events * unit
+	return sizes.get(nm, unit)
+
+
+## The bytes of the biggest single buffer at these capacities (`estimate_bytes`' arguments): what `BUFFER_MOST` bounds.
+func largest_buffer_bytes(slots: int, cells: int, bins: int, clouds: int, husks: int, events: int, entries: int) -> int:
+	var most := 0
+	for nm: String in BUFFERS:
+		most = maxi(most, _buffer_bytes(nm, slots, cells, bins, clouds, husks, events, entries))
+	return most
 
 
 ## The bytes the buffers and the pictures' textures take now.
@@ -557,6 +577,59 @@ func bytes_now() -> int:
 ## The share of the memory budget the buffers hold now.
 func memory_fraction() -> float:
 	return float(bytes_now()) / maxf(float(limits.memory_budget_bytes), 1.0)
+
+
+## The capacities the running dishes' need (`SimCore.room_needed`) asks for, the way the `ensure_*` calls would make them: by class,
+## room over FILL of what is asked, never under the limits' starting sizes; the entries follow the clouds and the ring's is what is asked.
+func caps_for(room: Dictionary) -> Dictionary:
+	var clouds := maxi(ceili(int(room["clouds"]) / FILL), limits.cloud_slots)
+	var entries := 0
+	if int(room["entries_density"]) > 0:
+		entries = ceili(entries_for(mini(int(room["entry_clouds"]), clouds), int(room["entries_density"])) / FILL)
+	return {"slot": _align(maxi(ceili(int(room["slots"]) / FILL), limits.world_slots)), "cloud": clouds, "husk": maxi(ceili(int(room["husks"]) / FILL), limits.husk_slots),
+		"entry": maxi(entries, GpuKernelsClouds.ENTRIES_PER_SLOT * clouds), "event": int(room["events"])}
+
+
+## The bytes the buffers and the pictures' textures would take at the capacities the running dishes need (`caps_for`): what is in use and
+## the room its next growth asks for, whatever the classes hold now. The share of the budget this is, is what the memory warning measures.
+func need_bytes(room: Dictionary) -> int:
+	var caps := caps_for(room)
+	return estimate_bytes(caps["slot"], cell_cap, bin_cap, caps["cloud"], caps["husk"], caps["event"], caps["entry"])
+
+
+## Gives back at once what a dish that left held: each class that holds more than GROW times the room the running dishes need
+## (`room`: `SimCore.room_needed`) is made smaller to that, never under what is in use (`used`: slots, clouds, husks, as the world counts
+## them; the slots of a dish that left count until a step closes the gap, so `blocked` is true while they are above the room the dishes
+## need) and never under the limits' sizes. The wait of `maybe_shrink` is skipped: it is there for numbers that swing, and these have not.
+## Returns true when the slots held up the rest (the caller tries again after the next step).
+func give_back(room: Dictionary, used: Dictionary) -> bool:
+	var caps := caps_for(room)
+	var floor_slots := _align(int(used["slots"]))
+	var slots := maxi(_align(ceili(int(caps["slot"]) * GROW)), _align(ceili(floor_slots / FILL)))
+	var remake: Array = []
+	if slots < slot_cap:
+		slot_cap = slots
+		remake.append_array(["slot", "block", "bucket", "bucketbits"])
+	var clouds := maxi(int(caps["cloud"] * GROW), ceili(int(used["clouds"]) / FILL))
+	if clouds < cloud_cap:
+		cloud_cap = clouds
+		remake.append("cloud")
+	var husks := maxi(int(caps["husk"] * GROW), ceili(int(used["husks"]) / FILL))
+	if husks < husk_cap:
+		husk_cap = husks
+		remake.append("husk")
+	var entries := maxi(int(caps["entry"] * GROW), GpuKernelsClouds.ENTRIES_PER_SLOT * cloud_cap)
+	if entries < entry_cap:
+		entry_cap = entries
+		remake.append("entry")
+	if int(caps["event"] * GROW) < event_cap:
+		_event_shrink_to = maxi(int(caps["event"] * GROW), SimCore.EVENT_FLOOR)
+	if not remake.is_empty():
+		_remake(remake)
+	for cls: String in ["slot", "cloud", "husk", "entry", "event"]:
+		asked[cls] = 0
+		_low_since.erase(cls)
+	return floor_slots > int(caps["slot"] * FILL)
 
 
 ## The bytes the record slots' next growth would add (by GROW, as `ensure_slots` grows them first).

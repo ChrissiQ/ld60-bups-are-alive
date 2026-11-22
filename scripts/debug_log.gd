@@ -111,6 +111,7 @@ static func backend(dish: Dish) -> Dictionary:
 		},
 		"memory": {
 			"fraction": timing.get("memory_fraction", 0.0),
+			"need_fraction": timing.get("memory_need_fraction", 0.0),
 			"next_growth_bytes": timing.get("next_growth_bytes", 0),
 			"warn_fraction": PoolLimits.WARN_FRACTION,
 			"warning": PoolLimits.warning_state(timing),

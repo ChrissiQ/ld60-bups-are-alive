@@ -57,11 +57,12 @@ func _initialize() -> void:
 		TestUtil.check(data["screen"]["tutorial_step"] == 0, "it says the tour is up, and where")
 	# The memory warning: the fraction and the state are in the log, and the screen's banner says it while it holds.
 	TestUtil.check(data["backend"]["memory"]["warning"] == "" and data["backend"]["memory"]["warn_fraction"] == PoolLimits.WARN_FRACTION, "the log has the memory share and no warning below the threshold")
-	canned.memory_fraction = PoolLimits.WARN_FRACTION + 0.02
+	canned.memory_fraction = 0.99  # (what the pool holds does not warn; what the dishes need does)
+	canned.need_fraction = PoolLimits.WARN_FRACTION + 0.02
 	for i in 4:
 		await process_frame
 	var warned: Dictionary = JSON.parse_string(DebugLog.report(dish, m, m.debug_state()))["backend"]["memory"]
-	TestUtil.check(warned["warning"] == PoolLimits.WARN_NEAR and absf(float(warned["fraction"]) - 0.92) < 0.001 and int(warned["next_growth_bytes"]) == 123, "at the threshold the log says near, with the fraction and the next growth")
+	TestUtil.check(warned["warning"] == PoolLimits.WARN_NEAR and absf(float(warned["need_fraction"]) - 0.92) < 0.001 and absf(float(warned["fraction"]) - 0.99) < 0.001 and int(warned["next_growth_bytes"]) == 123, "at the need's threshold the log says near, with the need, the held share and the next growth")
 	TestUtil.check(m.banner.text == Strings.t("banner.memory_near"), "...and the banner says graphics memory is nearly full")
 	canned.refusing_iteration = "no room"
 	for i in 4:
@@ -69,8 +70,8 @@ func _initialize() -> void:
 	var stalled: Dictionary = JSON.parse_string(DebugLog.report(dish, m, m.debug_state()))["backend"]["memory"]
 	TestUtil.check(stalled["warning"] == PoolLimits.WARN_STALLED and m.banner.text == Strings.t("banner.memory_stalled") and Strings.t("banner.memory_stalled") != Strings.t("banner.memory_budget"), "refused iterations: the log says stalled and the banner has its own words, not the action's")
 	canned.refusing_iteration = ""
-	canned.memory_fraction = PoolLimits.WARN_FRACTION - 0.01
-	TestUtil.check(PoolLimits.warning_state({"memory_fraction": PoolLimits.WARN_FRACTION}) == PoolLimits.WARN_NEAR and PoolLimits.warning_state({"memory_fraction": PoolLimits.WARN_FRACTION - 0.001}) == "", "the threshold is at 0.90 exactly")
+	canned.need_fraction = PoolLimits.WARN_FRACTION - 0.01  # (the pool still holds 0.99: no warning)
+	TestUtil.check(PoolLimits.warning_state({"memory_need_fraction": PoolLimits.WARN_FRACTION}) == PoolLimits.WARN_NEAR and PoolLimits.warning_state({"memory_need_fraction": PoolLimits.WARN_FRACTION - 0.001}) == "", "the threshold is at 0.90 exactly")
 	m.call("_show_banner", "", 0.0)
 	for i in 4:
 		await process_frame

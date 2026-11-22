@@ -2,12 +2,12 @@ extends SceneTree
 ## Run: godot --headless --path . -s tests/pool_limits_test.gd
 ## The pool's memory budget worked out from what a machine reports (MachineMemory, PoolLimits.budget_for, working_budget_for, MemoryWatch),
 ## headless, with made-up machines. Expected values
-## [derived from BUDGET_SHARE 0.4, BUDGET_FLOOR 1 GiB, BUDGET_CAP 8 GiB, DISCRETE_BUDGET 2 GiB, GROW_SHARE 0.5, SHORT_FREE_SHARE 0.1]:
+## [derived from BUDGET_SHARE 0.4, BUDGET_FLOOR 1 GiB, DISCRETE_BUDGET 2 GiB, GROW_SHARE 0.5, SHORT_FREE_SHARE 0.1]:
 ##  - what a machine has free is `free` on Windows and macOS (never the engine's `available`: Windows' commit limit, macOS's free swap
 ##    added), `MemAvailable` on Linux when it is read, else `free`; a figure the engine gives as -1 is unknown;
-##  - 16 GiB shared: 0.4 x 16 = 6.4 GiB; 8 GiB shared: 3.2 GiB; 64 GiB shared: the 8 GiB cap; 2 GiB: the 1 GiB floor;
+##  - 16 GiB shared: 0.4 x 16 = 6.4 GiB; 8 GiB shared: 3.2 GiB; 64 GiB shared: 25.6 GiB (no upper cap); 2 GiB: the 1 GiB floor;
 ##  - memory of its own (discrete) or an adapter not known: CARD_SHARE 0.75 of what the card reports, its OS budget when given, else its
-##    dedicated memory (8 GiB card, no budget: 6 GiB; 8 GiB card, the OS gives 7: 5.25 GiB; 24 GiB card: the 8 GiB cap), and never over
+##    dedicated memory (8 GiB card, no budget: 6 GiB; 8 GiB card, the OS gives 7: 5.25 GiB; 16.08 GiB card on 32 GiB: 12.06 GiB; 24 GiB card, the OS gives 22, on 32 GiB: 0.4 x 32 = 12.8 GiB), and never over
 ##    0.4 of the physical memory (8 GiB card on 8 GiB: 3.2 GiB); a card whose size is not read: the 2 GiB default;
 ##  - on a card with a live budget and usage (usage counts what the pool holds), the working budget is held + 0.75 x (budget - usage):
 ##    7 budget, 2 used, 1 held: 1 + 3.75 = 4.75; the system's free memory is then not used;
@@ -16,6 +16,8 @@ extends SceneTree
 ##    free not reported: the ceiling; short when free is under a tenth of physical;
 ##  - the watch lowers the working budget at once and raises it only when the figure has come back by a tenth of the ceiling or reaches the ceiling;
 ##    it reads on its timer (5 s) and before a growth (at most once a second), and never per call;
+##  - a single buffer never passes `SimArena.BUFFER_MOST` (2 GiB): record slots are 112 bytes, so 19,000,000 slots (2.13 GB) fit and 20,000,000 (2.24 GB) do not;
+##    list entries are 32 bytes, so 60,000,000 fit (1.92 GB) and 70,000,000 do not (2.24 GB); each with a budget far above the total, so only the buffer's size refuses.
 ##  - `PoolLimits.new()` keeps the 6 GiB the tests set their own budgets from; the warning is at WARN_FRACTION of whatever budget is set.
 const GIB := 1024 * 1024 * 1024
 const MAC := "macOS"
@@ -36,10 +38,12 @@ func _init() -> void:
 	_working()
 	_watch()
 	_classes()
+	_buffer_most()
 	TestUtil.check(PoolLimits.new().memory_budget_bytes == 6 * GIB, "the tests' default budget is unchanged")
 	var started := PoolLimits.from_settings()
-	TestUtil.check(started.memory_budget_bytes >= PoolLimits.BUDGET_FLOOR and started.memory_budget_bytes <= PoolLimits.BUDGET_CAP, "from_settings gives a budget between the floor and the cap")
-	TestUtil.check(PoolLimits.warning_state({"memory_fraction": 0.9}) == PoolLimits.WARN_NEAR and PoolLimits.warning_state({"memory_fraction": 0.89}) == "", "the warning stays at 0.9")
+	TestUtil.check(started.memory_budget_bytes >= PoolLimits.BUDGET_FLOOR, "from_settings gives a budget of at least the floor")
+	TestUtil.check(PoolLimits.warning_state({"memory_need_fraction": 0.9}) == PoolLimits.WARN_NEAR and PoolLimits.warning_state({"memory_need_fraction": 0.89}) == "", "the warning stays at 0.9 of the budget, of what the dishes need")
+	TestUtil.check(PoolLimits.warning_state({"memory_fraction": 0.99, "memory_need_fraction": 0.3}) == "", "a pool that holds 0.99 of the budget but is needed at 0.3 gives no warning")
 	TestUtil.finish(self, "OK pool_limits_test")
 
 
@@ -73,7 +77,7 @@ func _budgets() -> void:
 	TestUtil.check(_near(PoolLimits.budget_for(_machine_of(16 * GIB, 10 * GIB, -1, MAC, INTEGRATED)), 6.4 * GIB), "16 GiB shared: 6.4 GiB")
 	TestUtil.check(_near(PoolLimits.budget_for(_machine_of(16 * GIB, 1 * GIB, -1, MAC, INTEGRATED)), 6.4 * GIB), "the budget is the ceiling whatever is free now: the working budget follows what is free")
 	TestUtil.check(_near(PoolLimits.budget_for(_machine_of(8 * GIB, 5 * GIB, -1, WIN, INTEGRATED)), 3.2 * GIB), "8 GiB shared: 3.2 GiB")
-	TestUtil.check(PoolLimits.budget_for(_machine_of(64 * GIB, 50 * GIB, -1, WIN, INTEGRATED)) == 8 * GIB, "64 GiB shared: the cap")
+	TestUtil.check(_near(PoolLimits.budget_for(_machine_of(64 * GIB, 50 * GIB, -1, WIN, INTEGRATED)), 25.6 * GIB), "64 GiB shared: 0.4 x 64, no cap")
 	TestUtil.check(PoolLimits.budget_for(_machine_of(32 * GIB, 20 * GIB, -1, WIN, DISCRETE)) == 2 * GIB, "a discrete card of unknown size, 32 GiB of system memory: 2 GiB")
 	TestUtil.check(PoolLimits.budget_for(_machine_of(32 * GIB, 20 * GIB, -1, LIN, OTHER)) == 2 * GIB, "an adapter not known: 2 GiB")
 	TestUtil.check(_near(PoolLimits.budget_for(_machine_of(4 * GIB, 2 * GIB, -1, WIN, DISCRETE)), 1.6 * GIB), "a discrete card of unknown size, 4 GiB of system memory: 0.4 x 4")
@@ -88,7 +92,8 @@ func _cards() -> void:
 	TestUtil.check(m.card_dedicated == 8 * GIB and m.card_budget == 7 * GIB and m.card_usage == 2 * GIB and m.card_api == "dxgi", "the card's figures are kept")
 	TestUtil.check(_near(PoolLimits.budget_for(m), 5.25 * GIB), "8 GiB card, the system gives 7: 0.75 x 7")
 	TestUtil.check(_near(PoolLimits.budget_for(win.call(_card(8 * GIB))), 6.0 * GIB), "8 GiB card, no system budget: 0.75 x 8")
-	TestUtil.check(PoolLimits.budget_for(win.call(_card(24 * GIB, 22 * GIB))) == 8 * GIB, "24 GiB card: the cap")
+	TestUtil.check(_near(PoolLimits.budget_for(win.call(_card(24 * GIB, 22 * GIB))), 12.8 * GIB), "24 GiB card on 32 GiB: 0.4 x 32, under 0.75 x 22")
+	TestUtil.check(_near(PoolLimits.budget_for(win.call(_card(16 * GIB, int(16.08 * GIB)))), 0.75 * int(16.08 * GIB)), "16.08 GiB card budget on 32 GiB: 0.75 x 16.08, about 12 GiB, not 8")
 	TestUtil.check(_near(PoolLimits.budget_for(win.call(_card(8 * GIB), 8 * GIB)), 3.2 * GIB), "8 GiB card on 8 GiB of system memory: 0.4 x 8")
 	TestUtil.check(PoolLimits.budget_for(win.call(_card(1 * GIB))) == GIB, "a 1 GiB card: the floor")
 	TestUtil.check(PoolLimits.budget_for(win.call({"known": false})) == 2 * GIB, "a card of unknown size: 2 GiB")
@@ -193,6 +198,25 @@ func _classes() -> void:
 	TestUtil.check(PoolLimits.classify(_machine_of(2 * GIB, 1 * GIB, -1, WIN, INTEGRATED)) == B, "2 GiB: below the minimum")
 	TestUtil.check(PoolLimits.classify(_machine_of(16 * GIB, GIB / 2, -1, MAC, INTEGRATED)) == B, "16 GiB with 0.5 GiB free: below the minimum")
 	TestUtil.check(PoolLimits.classify(_machine_of(3 * GIB, 2 * GIB, -1, LIN, INTEGRATED)) == L, "3 GiB with 2 free: low, not below")
+
+
+func _buffer_most() -> void:
+	var limits := PoolLimits.new()
+	limits.memory_budget_bytes = 256 * GIB
+	var arena := SimArena.new(null, limits)
+	arena.slot_cap = 4096
+	arena.cell_cap = 65536
+	arena.bin_cap = 65536
+	arena.cloud_cap = 1024
+	arena.husk_cap = 1024
+	arena.entry_cap = 12288
+	arena.event_cap = 1024
+	TestUtil.check(arena.fits(19000000, 0, 0, 0, 0), "19,000,000 slots (112 bytes each, 2.13 GB) fit")
+	TestUtil.check(not arena.fits(20000000, 0, 0, 0, 0), "20,000,000 slots (2.24 GB in one buffer) do not")
+	TestUtil.check(arena.fits(0, 0, 0, 0, 0, 0, 60000000), "60,000,000 entries (32 bytes each, 1.92 GB) fit")
+	TestUtil.check(not arena.fits(0, 0, 0, 0, 0, 0, 70000000), "70,000,000 entries (2.24 GB in one buffer) do not")
+	TestUtil.check(not arena.ensure_slots(20000000) and arena.slot_cap == 4096, "a growth of the record slots past it is refused and nothing changes")
+	TestUtil.check(not arena.ensure_entries(70000000) and arena.entry_cap == 12288, "a growth of the entries past it is refused and nothing changes")
 
 
 func _near(a: int, b: float) -> bool:
