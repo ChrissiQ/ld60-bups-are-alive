@@ -20,10 +20,9 @@ extends SceneTree
 ##    whose drawn time moved over 3 times the median speed (simulated s a real s, over the real time the playout's clock moved by that
 ##    frame, `Playout.last_dt`, which the frame's start does not mark). Stalls are at most 3% of the frames (a stall comes when two
 ##    arrivals are further apart than the lead covers, about 2.5 times the usual time; at 2M on Apple Silicon, Metal, 0 to 5 of 240 frames
-##    [measured], against 36 to 53 with a playout that showed each picture until the next arrived), no jump comes and the clock is never
+##    [measured]), no jump comes and the clock is never
 ##    brought up to the lead (`Playout.snaps`). The pictures passed without being shown are printed: where pictures come faster than the
-##    frames (on a 60 Hz display at 2M on a fast card) a frame's clock passes more than one, and the drawing still follows the clock. The lag (WorldClient.lag, in ms and pictures, averaged over the frames) is printed. (A build whose playout
-##    has no clock counts the stalls by the share alone.)
+##    frames (on a 60 Hz display at 2M on a fast card) a frame's clock passes more than one, and the drawing still follows the clock. The lag (WorldClient.lag, in ms and pictures, averaged over the frames) is printed.
 ## S  The share of bups whose place before (the ids texture's, or the bytes handed over) differs from their place: on the shared path,
 ##    over the bups that are in both of two pictures shown one after the other (matched by id), within 0.02 of the share whose place
 ##    changed from the first picture to the second; on the byte handover (no ids on this side) it is printed. Either is above 0.5 (most
