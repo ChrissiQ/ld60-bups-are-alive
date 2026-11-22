@@ -65,7 +65,6 @@ var save_path := SaveGame.PATH  ## where the game is saved and loaded from (a te
 var started_as: StartConditions = null
 var tracker := GoalTracker.new()
 var dishes: Array[Dish] = []  ## every dish that runs; `dish` is the one in the main view and the only one shown (the others are parked, Dish.park: see the strip). Every dish sits at the screen's origin, so what is drawn is in the main dish's own coordinates
-var _view_before_extinct: Dish = null  ## the dish that was in the main view when the first dish in `_extinct_queue` was brought into view: the view goes back to it afterwards
 var _extinct_queue: Array[Dish] = []  ## dishes that have died out and are not yet deleted (the first is the one the screen has said so about)
 var _dish_numbers := {}  ## Dish -> the number it is shown by, 1 to MAX_DISHES (`_take_label`); its ids and the family tree use its world number, Dish.number
 var _next_dish_number := 1  ## the world number (Dish.number) the next dish takes: never reused in a game, so no two bups ever share an id (a pipette's new dish takes the one the simulation gives it, and this moves past it)
@@ -775,7 +774,8 @@ func _finish_pipette() -> void:
 		if source.is_watched(id):
 			source.unwatch_bup(id)
 			receiver.watch_bup(id)
-	set_main_dish(receiver)  # (the view follows the bups to their new dish)
+	if dish == source:  # (the view follows the bups to their new dish, unless the player chose another dish while the answer was awaited)
+		set_main_dish(receiver)
 	toolbar.select_tool(Toolbar.Tool.SELECT)  # (the pipette is done: the next click inspects)
 	_ask_about_old_dish(source, int(got["moved"]), receiver)  # (play, which the pipette's timer was holding, goes on once that is answered)
 
@@ -1093,7 +1093,11 @@ func _step_dish(by: int) -> void:
 		set_main_dish(dishes[posmod(dishes.find(dish) + by, dishes.size())])
 
 
-## Brings another dish into the main view: the panels and the graph follow it, and the camera goes back to where (and how close) it last looked at that dish, or frames the dish if it has not looked yet; what was open on the old dish (a selection, a lineage) is closed.
+## Brings another dish into the main view. The rule for who calls it: the player's own choice (a tab, a key, an entry of the watch list, a pipette
+## answered while they are still on the dish it was made in) moves the view; the game moves it by itself only so that something is on screen
+## when the dish in view goes (`_remove_dish`: frozen, trashed or died out, and an unfrozen dish taking the place of the last one that died
+## out). It never moves the view off a dish the player chose, and no answer from the simulation does when it arrives later.
+## The panels and the graph follow it, and the camera goes back to where (and how close) it last looked at that dish, or frames the dish if it has not looked yet; what was open on the old dish (a selection, a lineage) is closed.
 func set_main_dish(d: Dish) -> void:
 	if d == dish or not dishes.has(d):
 		return
@@ -1187,8 +1191,8 @@ func _on_goal_completed(goal: Goal) -> void:
 	save_game(false)
 
 
-## A dish has no bups left. The game pauses on that dish and says so; resuming goes on without it (the dish before it, or the next when it was the first, comes
-## into view and the extinct one is deleted). When it was the last dish the game is over: only starting again or quitting to the menu go on.
+## A dish has no bups left. The game pauses and says which dish; resuming goes on without it (the extinct one is deleted, and the view goes to the dish before it,
+## or the next when it was the first, only if it was the one in view). When it was the last dish the game is over: only starting again or quitting to the menu go on.
 func _on_dish_extinct(d: Dish) -> void:
 	if holds.has(&"end") or not dishes.has(d) or _extinct_queue.has(d):
 		return
@@ -1199,10 +1203,6 @@ func _on_dish_extinct(d: Dish) -> void:
 
 func _announce_extinct() -> void:
 	var d := _extinct_queue[0]
-	if d != dish:
-		if _view_before_extinct == null:
-			_view_before_extinct = dish
-		set_main_dish(d)
 	toolbar.set_paused(true)
 	if dishes.size() == 1 and not freezer_shelf.entries.is_empty():
 		_left_empty = d
@@ -1210,7 +1210,6 @@ func _announce_extinct() -> void:
 		return
 	if dishes.size() == 1:
 		_extinct_queue.clear()
-		_view_before_extinct = null
 		holds.hold(&"end")
 		pause_ring.visible = false  # (the game is over, not paused: the dialog says what happened)
 		end_dialog.dialog_text = Strings.t("hud.end_text") + "\n" + Strings.t("hud.end_survived", [SimClock.format(dish.time - game_began)])
@@ -1219,20 +1218,15 @@ func _announce_extinct() -> void:
 	_show_banner(Strings.t("hud.banner_dish_extinct", [_dish_numbers[d]]), 1e9)
 
 
-## Play was resumed after a dish went extinct: it is deleted as though it had never been, and the view goes to its neighbour.
+## Play was resumed after a dish went extinct: it is deleted as though it had never been (`_remove_dish`: the view goes to its neighbour if it was in view).
 func _retire_extinct() -> void:
 	if _extinct_queue.is_empty() or holds.has(&"end"):
 		return
 	if dishes.size() < 2:  # (the last running dish died out while others are frozen: it stays, empty, until one is unfrozen)
 		_extinct_queue.clear()
-		_view_before_extinct = null
 		_show_banner("", 0.0)
 		return
 	var d: Dish = _extinct_queue.pop_front()
-	if d == dish and _view_before_extinct != null and dishes.has(_view_before_extinct) and _view_before_extinct != d and not _extinct_queue.has(_view_before_extinct):
-		set_main_dish(_view_before_extinct)  # (back to what was being looked at: the dish before this one only if this was the one being looked at)
-	if _extinct_queue.is_empty():
-		_view_before_extinct = null
 	_remove_dish(d)
 	_show_banner("", 0.0)
 	if not _extinct_queue.is_empty():
