@@ -134,16 +134,17 @@ GRID_LOOP(f, min(TQ[uint(pcs.pa) * TQ_WORDS], TRACKED))
 
 ## The published pictures into the shared textures (the storage buffers are laid out as the textures): a thread a texel. `pcs.pa` is the
 ## texture's width, `pcs.pb` the texels written; for the payload, at most those and `pcs.pc` the dish row whose payload it is: the rows
-## `pool_payload` wrote, from the count DSTATE has when the kernel runs (the payload may follow the steps in their list). The ids texture
-## takes each bup's id and its place in the picture before (GpuLayout.IDS_*).
+## `pool_payload` wrote, from the count DSTATE has when the kernel runs (the payload may follow the steps in their list), from slot `pcs.pd`
+## (`pcs.pb` texels a slot). The ids texture takes each bup's id and its place in the picture before (GpuLayout.IDS_*).
 const K_COPY_PAYLOAD := """
 layout(set = 0, binding = 4, rgba32ui) uniform restrict writeonly uimage2D PAYTEX;
 layout(set = 0, binding = 5, rgba32ui) uniform restrict writeonly uimage2D IDS;
 void f(uint k) {
 	uint w = uint(pcs.pa);
 	ivec2 at = ivec2(int(k % w), int(k / w));
-	imageStore(PAYTEX, at, PAYLOAD[k]);
-	imageStore(IDS, at, uvec4(IDTEX[k * IDT_WORDS + IDT_LO], IDTEX[k * IDT_WORDS + IDT_HI], PREVXY[k * PV_WORDS], PREVXY[k * PV_WORDS + 1u]));
+	uint o = uint(pcs.pd) * uint(pcs.pb) + k;
+	imageStore(PAYTEX, at, PAYLOAD[o]);
+	imageStore(IDS, at, uvec4(IDTEX[o * IDT_WORDS + IDT_LO], IDTEX[o * IDT_WORDS + IDT_HI], PREVXY[o * PV_WORDS], PREVXY[o * PV_WORDS + 1u]));
 }
 GRID_LOOP(f, min(((DS(uint(pcs.pc), DS_COUNT) + PAYLOAD_TEX_WIDTH - 1u) / PAYLOAD_TEX_WIDTH) * PAYLOAD_TEX_WIDTH, uint(pcs.pb)))
 """

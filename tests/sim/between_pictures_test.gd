@@ -6,6 +6,8 @@ extends SceneTree
 ## payload's texels in order. Windowed only, on either path. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/between_pictures_test.gd
 ##   (and with `-- --cpu-handover` after the script: the byte handover)
+## The hold is no set_time once the run has gone on RUN_FRAMES frames; a publish that still comes during the checks (a command the dish
+## sends may start a pass) changes the picture under them, so the run and the checks are made again, up to ATTEMPTS times.
 ##
 ## Expected values [derived from GpuKernelsView.place_at: a bup is drawn at was (1 - t) + here t, here exactly at t = 1]:
 ## M  The picture held has bups that moved from their places before (at x300 a picture follows the one before by seconds of simulated
@@ -24,6 +26,7 @@ const ZOOM := 1.0
 const SPEED := 300.0
 const RUN_FRAMES := 180
 const TOLERANCE := 1e-3  ## µm
+const ATTEMPTS := 3
 const REACH := 4.0  ## µm: more than a pick's reach with no slack, half a bup's drawn length (a bup is under 8 µm long; the least footprint at 1 px a µm is 2 µm)
 
 
@@ -101,6 +104,70 @@ func _pick(d: Dish, local: Vector2) -> Dictionary:
 	return {}
 
 
+## The checks M, D, R and P on the picture the view holds: [passed, text] each.
+func _measure(d: Dish, v: ViewRenderer, chosen: int) -> Array:
+	var out: Array = []
+	var held := _held(v)
+	var n: int = (held["here"] as PackedVector2Array).size()
+	var moved := 0
+	var still := 0
+	for k in n:
+		var gone: float = (held["here"][k] as Vector2).distance_to(held["was"][k])
+		moved += 1 if gone > 1.0 else 0
+		still += 1 if gone == 0.0 else 0
+	out.append(_result(n > 0 and moved * 2 >= n, "M %d of %d bups moved more than 1 µm from their places before (%d did not move: newborns)" % [moved, n, still]))
+	var worst := {}
+	var at_half := PackedVector2Array()
+	for t: float in [0.0, 0.5, 1.0]:
+		var inst: PackedVector2Array = await _draw_at(d, t)
+		worst[t] = _worst(held, inst, t)
+		if t == 0.5:
+			at_half = inst
+	var visible := int(v._visible.get("count", -1))
+	out.append(_result(visible == n and worst[0.0] <= TOLERANCE and worst[0.5] <= TOLERANCE and worst[1.0] <= TOLERANCE, "D %d of %d bups drawn; worst off where they should be at shares 0, 0.5, 1: %.6f, %.6f, %.6f µm (want under %.4f)" % [visible, n, worst[0.0], worst[0.5], worst[1.0], TOLERANCE]))
+	d.drawing.share_override = 0.5
+	await _pump(d, 4)
+	var ring: Variant = d.drawing.view_ring(chosen)
+	var follow: Vector2 = d.bup_world_pos(chosen) - d.global_position
+	var k_chosen := -1
+	var p := v.payload()
+	if (held["ids"] as PackedInt64Array).is_empty():
+		var here: Variant = p.places.get(chosen)
+		for k in n:
+			if here != null and held["here"][k] == Vector2(here.x, here.y):
+				k_chosen = k
+	else:
+		k_chosen = (held["ids"] as PackedInt64Array).find(chosen)
+	var ring_off: float = INF if ring == null or k_chosen < 0 else Vector2(ring.x, ring.y).distance_to(at_half[k_chosen])
+	var follow_off: float = INF if k_chosen < 0 else follow.distance_to(at_half[k_chosen])
+	out.append(_result(ring_off <= TOLERANCE and follow_off <= TOLERANCE, "R the selected bup %d (texel %d): its ring %.6f µm and its follow place %.6f µm from where it is drawn" % [chosen, k_chosen, ring_off, follow_off]))
+	var best := -1
+	var best_gone := 0.0
+	for k in n:
+		var half: Vector2 = at_half[k]
+		var clear := true
+		for j in n:
+			if j != k and half.distance_to(at_half[j]) <= 2.0 * REACH:
+				clear = false
+				break
+		var gone: float = (held["here"][k] as Vector2).distance_to(half)
+		if clear and gone > REACH and gone > best_gone:
+			best = k
+			best_gone = gone
+	if best < 0:
+		out.append(_result(false, "P a bup whose halfway point is clear of the others and of its own place"))
+	else:
+		var a := await _pick(d, at_half[best])
+		var miss := await _pick(d, held["here"][best])
+		var id_ok: bool = (held["ids"] as PackedInt64Array).is_empty() or (not a.is_empty() and int(a["id"]) == held["ids"][best])
+		out.append(_result(not a.is_empty() and int(a["index"]) == best and id_ok and not miss.is_empty() and int(miss["index"]) != best, "P a pick at texel %d's halfway point (%.1f µm from its place) finds it (index %s), one at its place does not (index %s)" % [best, best_gone, a.get("index", "none"), miss.get("index", "none")]))
+	return out
+
+
+static func _result(ok: bool, text: String) -> Array:
+	return [ok, text]
+
+
 func _run() -> void:
 	if not SimHarness.begin(self, "between_pictures_test", "drawing between pictures"):
 		return
@@ -139,68 +206,23 @@ func _run() -> void:
 		ids = d.bup_ids()
 	var chosen: int = ids[ids.size() / 2] if not ids.is_empty() else -1
 	d.selected.bup = chosen
-	await _pump(d, RUN_FRAMES, true)
-	var quiet := 0  # (no more set_time: once the owed steps are run and the waiting pictures shown, the view holds the run's last picture)
-	var seen := -1
-	while quiet < 30 and Time.get_ticks_msec() - t0 < 30000:
-		await process_frame
-		quiet = quiet + 1 if v.payload().seq == seen else 0
-		seen = v.payload().seq
-	var held := _held(v)
-	var n: int = (held["here"] as PackedVector2Array).size()
-	var moved := 0
-	var still := 0
-	for k in n:
-		var gone: float = (held["here"][k] as Vector2).distance_to(held["was"][k])
-		moved += 1 if gone > 1.0 else 0
-		still += 1 if gone == 0.0 else 0
-	TestUtil.show(n > 0 and moved * 2 >= n, "M %d of %d bups moved more than 1 µm from their places before (%d did not move: newborns)" % [moved, n, still])
-	var worst := {}
-	var at_half := PackedVector2Array()
-	for t: float in [0.0, 0.5, 1.0]:
-		var inst: PackedVector2Array = await _draw_at(d, t)
-		worst[t] = _worst(held, inst, t)
-		if t == 0.5:
-			at_half = inst
-	var visible := int(v._visible.get("count", -1))
-	TestUtil.show(visible == n and worst[0.0] <= TOLERANCE and worst[0.5] <= TOLERANCE and worst[1.0] <= TOLERANCE, "D %d of %d bups drawn; worst off where they should be at shares 0, 0.5, 1: %.6f, %.6f, %.6f µm (want under %.4f)" % [visible, n, worst[0.0], worst[0.5], worst[1.0], TOLERANCE])
-	d.drawing.share_override = 0.5
-	await _pump(d, 4)
-	var ring: Variant = d.drawing.view_ring(chosen)
-	var follow: Vector2 = d.bup_world_pos(chosen) - d.global_position
-	var k_chosen := -1
-	var p := v.payload()
-	if (held["ids"] as PackedInt64Array).is_empty():
-		var here: Variant = p.places.get(chosen)
-		for k in n:
-			if here != null and held["here"][k] == Vector2(here.x, here.y):
-				k_chosen = k
-	else:
-		k_chosen = (held["ids"] as PackedInt64Array).find(chosen)
-	var ring_off: float = INF if ring == null or k_chosen < 0 else Vector2(ring.x, ring.y).distance_to(at_half[k_chosen])
-	var follow_off: float = INF if k_chosen < 0 else follow.distance_to(at_half[k_chosen])
-	TestUtil.show(ring_off <= TOLERANCE and follow_off <= TOLERANCE, "R the selected bup %d (texel %d): its ring %.6f µm and its follow place %.6f µm from where it is drawn" % [chosen, k_chosen, ring_off, follow_off])
-	var best := -1
-	var best_gone := 0.0
-	for k in n:
-		var half: Vector2 = at_half[k]
-		var clear := true
-		for j in n:
-			if j != k and half.distance_to(at_half[j]) <= 2.0 * REACH:
-				clear = false
-				break
-		var gone: float = (held["here"][k] as Vector2).distance_to(half)
-		if clear and gone > REACH and gone > best_gone:
-			best = k
-			best_gone = gone
-	if best < 0:
-		TestUtil.show(false, "P a bup whose halfway point is clear of the others and of its own place")
-	else:
-		var a := await _pick(d, at_half[best])
-		var miss := await _pick(d, held["here"][best])
-		var id_ok: bool = (held["ids"] as PackedInt64Array).is_empty() or (not a.is_empty() and int(a["id"]) == held["ids"][best])
-		TestUtil.show(not a.is_empty() and int(a["index"]) == best and id_ok and not miss.is_empty() and int(miss["index"]) != best, "P a pick at texel %d's halfway point (%.1f µm from its place) finds it (index %s), one at its place does not (index %s)" % [best, best_gone, a.get("index", "none"), miss.get("index", "none")])
-	TestUtil.show(v.payload().seq == seen, "the view held the one picture throughout (publish %d, %d at the end)" % [seen, v.payload().seq])
+	var out: Array = []
+	for attempt in ATTEMPTS:  # (a publish that comes after the hold began, from a command the dish sends, starts the attempt again)
+		await _pump(d, RUN_FRAMES, true)
+		var quiet := 0  # (no more set_time: once the owed steps are run and the waiting pictures shown, the view holds the run's last picture)
+		var seen := -1
+		while quiet < 30 and Time.get_ticks_msec() - t0 < 60000:
+			await process_frame
+			quiet = quiet + 1 if v.payload().seq == seen else 0
+			seen = v.payload().seq
+		out = await _measure(d, v, chosen)
+		d.drawing.share_override = -1.0
+		if v.payload().seq == seen:
+			break
+		print("     the held picture changed during attempt %d (publish %d, then %d): again" % [attempt + 1, seen, v.payload().seq])
+		out = [[false, "the view held one picture through an attempt"]]
+	for r: Array in out:
+		TestUtil.show(r[0], r[1])
 	d.queue_free()
 	camera.queue_free()
 	await process_frame

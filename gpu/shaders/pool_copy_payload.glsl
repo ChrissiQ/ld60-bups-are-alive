@@ -56,7 +56,8 @@ layout(set = 0, binding = 5, rgba32ui) uniform restrict writeonly uimage2D IDS;
 void f(uint k) {
 	uint w = uint(pcs.pa);
 	ivec2 at = ivec2(int(k % w), int(k / w));
-	imageStore(PAYTEX, at, PAYLOAD[k]);
-	imageStore(IDS, at, uvec4(IDTEX[k * IDT_WORDS + IDT_LO], IDTEX[k * IDT_WORDS + IDT_HI], PREVXY[k * PV_WORDS], PREVXY[k * PV_WORDS + 1u]));
+	uint o = uint(pcs.pd) * uint(pcs.pb) + k;
+	imageStore(PAYTEX, at, PAYLOAD[o]);
+	imageStore(IDS, at, uvec4(IDTEX[o * IDT_WORDS + IDT_LO], IDTEX[o * IDT_WORDS + IDT_HI], PREVXY[o * PV_WORDS], PREVXY[o * PV_WORDS + 1u]));
 }
 GRID_LOOP(f, min(((DS(uint(pcs.pc), DS_COUNT) + PAYLOAD_TEX_WIDTH - 1u) / PAYLOAD_TEX_WIDTH) * PAYLOAD_TEX_WIDTH, uint(pcs.pb)))

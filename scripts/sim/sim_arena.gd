@@ -57,11 +57,10 @@ const BUFFERS := {
 }
 
 ## The pictures' buffers, made when something is first published: name -> [class, bytes a unit] (classes "slot texel": the main dish's
-## payload texels, `picture_slots()` times over; "texel": those texels and one unit more, once; "view": the pool's cells; "pixel": the
-## main dish's cells; "fixed").
+## payload texels, `picture_slots()` times over; "view": the pool's cells; "pixel": the main dish's cells; "fixed").
 const DRAW_BUFFERS := {
 	"PAYLOAD": ["slot texel", GpuLayout.PAYLOAD_BYTES], "IDTEX": ["slot texel", GpuLayout.IDT_BYTES], "PICN": ["fixed", GpuLayout.PICTURES_MOST * 4],
-	"PREVXY": ["slot texel", GpuLayout.PV_BYTES], "LASTPIC": ["texel", GpuLayout.LP_BYTES],
+	"PREVXY": ["slot texel", GpuLayout.PV_BYTES], "SLOTHEAD": ["fixed", (GpuLayout.PICTURES_MOST + 1) * GpuLayout.SH_WORDS * 4],
 	"VIEW": ["view", 4], "HAZEPIX": ["pixel", 4],
 	"STEERPIX": ["pixel", 4], "FAINTLO": ["pixel", 4], "FAINTHI": ["pixel", 4], "VQ": ["fixed", 16],
 	"THUMBN": ["fixed", D_MAX * GpuKernelsDraw.THUMB_TILE * GpuKernelsDraw.THUMB_TILE * 4], "THUMBMAX": ["fixed", D_MAX * 4],
@@ -167,7 +166,6 @@ func _bytes_of(nm: String) -> int:
 		"husk": return husk_cap * unit
 		"event": return event_cap * unit
 		"slot texel": return _texels * unit * picture_slots()
-		"texel": return (_texels + 1) * unit
 		"view": return cell_cap * unit
 		"pixel": return _pixels * unit
 	return unit
@@ -385,10 +383,12 @@ func draw_rows() -> int:
 	return _texels / GpuLayout.PAYLOAD_TEX_WIDTH
 
 
-## The pictures PAYLOAD, IDTEX and PREVXY hold, a slot each: on the byte path every bup picture of an iteration is read back after its one sync,
-## so each needs its own (GpuLayout.PICTURES_MOST); a shared texture is written in the list right after its picture, so one slot serves.
+## The pictures PAYLOAD, IDTEX and PREVXY hold, a slot each, and the slot of the picture before them, which the next picture finds its bups'
+## places before in (SimCore._picture_slots): on the byte path every bup picture of an iteration is read back after its one sync, so each
+## needs its own (GpuLayout.PICTURES_MOST) besides that one; a shared texture is written in the list right after its picture, so one slot
+## serves besides it.
 func picture_slots() -> int:
-	return GpuLayout.PICTURES_MOST if cpu_handover else 1
+	return GpuLayout.PICTURES_MOST + 1 if cpu_handover else 2
 
 
 ## The bytes the pictures take for a payload of `texels`, a field of `pixels` cells and a pool of `cells` field cells: their buffers and
@@ -400,7 +400,6 @@ func draw_bytes(texels: int, pixels: int, cells: int, with_thumbs := false) -> i
 		var unit: int = e[1]
 		match e[0]:
 			"slot texel": total += texels * unit * picture_slots()
-			"texel": total += (texels + 1) * unit
 			"view": total += cells * unit
 			"pixel": total += pixels * unit
 			_: total += unit

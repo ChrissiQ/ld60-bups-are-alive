@@ -45,53 +45,63 @@ const THUMB_TILE := 64  ## a dish's thumbnail tile: THUMB_TILE x THUMB_TILE texe
 const THUMB_ATLAS := 2048  ## the atlas's width and height in texels: THUMB_ATLAS / THUMB_TILE tiles a row, so D_MAX tiles fill it
 const POOL_DRAW_TYPES := {
 	"PAYLOAD": "uvec4", "IDTEX": "uint", "VIEW": "float", "VQ": "float", "HAZEPIX": "uint", "STEERPIX": "uint", "FAINTLO": "uint", "FAINTHI": "uint",
-	"THUMBN": "uint", "THUMBMAX": "uint", "THUMBS": "uint", "PICN": "uint", "PREVXY": "uint", "LASTPIC": "uint",
+	"THUMBN": "uint", "THUMBMAX": "uint", "THUMBS": "uint", "PICN": "uint", "PREVXY": "uint", "SLOTHEAD": "uint",
 }
 
 ## The main-view dish's records as picture words, one thread a texel of dish row `pcs.pa`'s bups, for the whole last row of the texture
 ## and no further than the `pcs.pb` texels the buffers hold (the count is DSTATE's when the kernel runs, after the steps of its list,
 ## which the host does not know when it sizes them): a dead bup (the marker R_PY = -2 that `life` leaves until `compact`) and the texels
-## past the dish's bups are zero (length 0: nothing drawn). The length is the body's true length, with no minimum and no trail; the angle
-## is where it faces. The picture goes into slot `pcs.pc` of PAYLOAD, IDTEX and PREVXY (`pcs.pb` texels a slot: an iteration's pictures
-## each have their own on the byte path, SimArena.picture_slots), and the count it was made from into PICN[`pcs.pd`] (the host zeroes it
-## first, so a dish with no bups reads 0). PREVXY is where each bup was in the picture made before (LASTPIC, when it was of the same dish
-## row), found by its id: a dish's bups lie in the rising order of their ids (compaction keeps the survivors' order and puts the newborns,
-## whose ids are past every older one, after them; a pipette's moved bups keep their order), so a binary search over the picture before
-## finds a bup that was in it. A bup that was not (a newborn, a bup moved in, the first picture of a dish) has its place in this picture there, and so
-## would one out of that order, which is then drawn without moving from where it was.
+## past the dish's bups are zero (length 0: nothing drawn), but for a dead bup's id, which keeps the ids in their order. The length is the
+## body's true length, with no minimum and no trail; the angle is where it faces. The picture goes into slot `pcs.pc` of PAYLOAD, IDTEX
+## and PREVXY (`pcs.pb` texels a slot), what it holds into the slot's SLOTHEAD row, and the count it was made from into PICN[`pcs.pd` % 8]
+## (the host zeroes it first, so a dish with no bups reads 0). `pcs.pd` / 8 is the slot the picture before it was made in
+## (SimCore._picture_slots). PREVXY is where each bup was in that picture (when it was of the same dish row), found by its id: a dish's
+## bups lie in the rising order of their ids (compaction keeps the survivors' order and puts the newborns, whose ids are past every older
+## one, after them; a pipette's moved bups keep their order), so a search over the picture before finds a bup that was in it. The bups of
+## that picture that are still here come first, in its order, so one at texel k was at texel k or past it: the search starts there and
+## gallops (1, 2, 4... texels on) to a texel at or past its id, then halves the last stretch. A bup that was not in the picture before (a
+## newborn, a bup moved in, the first picture of a dish) has its place in this picture there, and so would one out of that order, which is
+## then drawn without moving from where it was.
 const PAYLOAD_FUNCS := """
 bool id_before(uint hi_a, uint lo_a, uint hi_b, uint lo_b) { return hi_a < hi_b || (hi_a == hi_b && lo_a < lo_b); }
-vec2 place_before(uint d, uint lo, uint hi, vec2 here) {
-	if (LASTPIC[LP_ROW] != d + 1u) return here;
-	uint a = 0u, n = LASTPIC[LP_COUNT], b = n;
+uint BEFORE;  // the first texel of the slot the picture before was made in
+bool was_before(uint m, uint lo, uint hi) { uint o = (BEFORE + m) * IDT_WORDS; return id_before(IDTEX[o + IDT_HI], IDTEX[o + IDT_LO], hi, lo); }
+vec2 place_before(uint d, uint k, uint lo, uint hi, vec2 here, uint slot) {
+	if (SLOTHEAD[slot * SH_WORDS + SH_ROW] != d + 1u) return here;
+	uint n = SLOTHEAD[slot * SH_WORDS + SH_COUNT], a = min(k, n), c = a, s = 1u;
+	while (c < n && was_before(c, lo, hi)) { a = c + 1u; c = min(c + s, n); s <<= 1u; }
+	uint b = min(c + 1u, n);
 	while (a < b) {
-		uint m = (a + b) >> 1u, o = (m + 1u) * LP_WORDS;
-		if (id_before(LASTPIC[o + LP_ID_HI], LASTPIC[o + LP_ID_LO], hi, lo)) a = m + 1u; else b = m;
+		uint m = (a + b) >> 1u;
+		if (was_before(m, lo, hi)) a = m + 1u; else b = m;
 	}
-	uint o = (a + 1u) * LP_WORDS;
-	if (a < n && LASTPIC[o + LP_ID_LO] == lo && LASTPIC[o + LP_ID_HI] == hi) return vec2(uintBitsToFloat(LASTPIC[o + LP_X]), uintBitsToFloat(LASTPIC[o + LP_Y]));
-	return here;
+	if (a >= n) return here;
+	uint o = (BEFORE + a) * IDT_WORDS;
+	if (IDTEX[o + IDT_LO] != lo || IDTEX[o + IDT_HI] != hi) return here;
+	uvec4 px = PAYLOAD[BEFORE + a];
+	return vec2(uintBitsToFloat(px[PL_X]), uintBitsToFloat(px[PL_Y]));
 }
 """
 
 const K_POOL_PAYLOAD := COLOUR_FUNCS + PAYLOAD_FUNCS + """
 uint byte_of(float v) { return uint(clamp(v * 255.0 + 0.5, 0.0, 255.0)); }
 void f(uint k) {
-	uint d = uint(pcs.pa), o = uint(pcs.pc) * uint(pcs.pb) + k;
-	if (k == 0u) PICN[uint(pcs.pd)] = DS(d, DS_COUNT);
+	uint d = uint(pcs.pa), room = uint(pcs.pb), slot = uint(pcs.pc), before = uint(pcs.pd) / 8u, o = slot * room + k;
+	BEFORE = before * room;
+	if (k == 0u) { PICN[uint(pcs.pd) % 8u] = DS(d, DS_COUNT); SLOTHEAD[slot * SH_WORDS + SH_ROW] = d + 1u; SLOTHEAD[slot * SH_WORDS + SH_COUNT] = min(DS(d, DS_COUNT), room); }
 	uvec4 px = uvec4(0u);
 	uint lo = 0u, hi = 0u;
 	vec2 was = vec2(0.0);
 	if (k < DS(d, DS_COUNT)) {
 		uint b = (DS(d, DS_START) + k) * RECORD_WORDS;
+		lo = BUPS_U[b + R_ID_LO]; hi = BUPS_U[b + R_ID_HI];
 		if (BUPS[b + R_PY] != -2.0) {
 			px[PL_X] = floatBitsToUint(BUPS[b + R_X]);
 			px[PL_Y] = floatBitsToUint(BUPS[b + R_Y]);
 			px[PL_SHAPE] = packHalf2x16(vec2(BUPS[b + R_MASS] * P[P_MASS_UM], atan(BUPS[b + R_DY], BUPS[b + R_DX])));
 			vec3 col = from_hsv(BUPS[b + R_HUE], BUPS[b + R_SAT], BUPS[b + R_VAL]);
 			px[PL_COLOR] = (byte_of(col.r) << PL_RED_SHIFT) | (byte_of(col.g) << PL_GREEN_SHIFT) | (byte_of(col.b) << PL_BLUE_SHIFT);
-			lo = BUPS_U[b + R_ID_LO]; hi = BUPS_U[b + R_ID_HI];
-			was = place_before(d, lo, hi, vec2(BUPS[b + R_X], BUPS[b + R_Y]));
+			was = place_before(d, k, lo, hi, vec2(BUPS[b + R_X], BUPS[b + R_Y]), before);
 		}
 	}
 	PAYLOAD[o] = px;
@@ -99,20 +109,6 @@ void f(uint k) {
 	PREVXY[o * PV_WORDS] = floatBitsToUint(was.x); PREVXY[o * PV_WORDS + 1u] = floatBitsToUint(was.y);
 }
 GRID_LOOP(f, min(((DS(uint(pcs.pa), DS_COUNT) + PAYLOAD_TEX_WIDTH - 1u) / PAYLOAD_TEX_WIDTH) * PAYLOAD_TEX_WIDTH, uint(pcs.pb)))
-"""
-
-## After `pool_payload` of dish row `pcs.pa` (and before the next picture): the picture's bups, as far as the `pcs.pb` texels it holds, into
-## LASTPIC for the next picture to find them in: each one's id and place (every bup's, a dead one's too, so the ids stay in their order).
-const K_POOL_PAYLOAD_KEEP := """
-void f(uint k) {
-	uint d = uint(pcs.pa), n = min(DS(d, DS_COUNT), uint(pcs.pb));
-	if (k == 0u) { LASTPIC[LP_ROW] = d + 1u; LASTPIC[LP_COUNT] = n; }
-	if (k >= n) return;
-	uint b = (DS(d, DS_START) + k) * RECORD_WORDS, o = (k + 1u) * LP_WORDS;
-	LASTPIC[o + LP_ID_LO] = BUPS_U[b + R_ID_LO]; LASTPIC[o + LP_ID_HI] = BUPS_U[b + R_ID_HI];
-	LASTPIC[o + LP_X] = BUPS_U[b + R_X]; LASTPIC[o + LP_Y] = BUPS_U[b + R_Y];
-}
-GRID_LOOP(f, max(min(DS(uint(pcs.pa), DS_COUNT), uint(pcs.pb)), 1u))
 """
 
 ## The field picture of dish row `pcs.pa`, the nutrient on the grid and the clouds' (summed by `pool_view_faint`: FAINTLO, FAINTHI), as
@@ -238,8 +234,7 @@ static func _register_pool(out: Dictionary) -> void:
 	var tile := "const uint THUMB_TILE = %du;\nconst uint THUMB_ATLAS = %du;\n" % [THUMB_TILE, THUMB_ATLAS]
 	var view_buffers := ["DISHP", "OWNER", "INSIDE", "VIEW"]
 	assert(GpuLayout.D_MAX == (THUMB_ATLAS / THUMB_TILE) * (THUMB_ATLAS / THUMB_TILE), "the atlas holds one tile a dish row")
-	GpuKernels.add(out, "pool_payload", K_POOL_PAYLOAD, ["P", "DSTATE", "BUPS", "BUPS_U", "PAYLOAD", "IDTEX", "PICN", "PREVXY", "LASTPIC"], "", 64, POOL_DRAW_TYPES)
-	GpuKernels.add(out, "pool_payload_keep", K_POOL_PAYLOAD_KEEP, ["DSTATE", "BUPS_U", "LASTPIC"], "", 64, POOL_DRAW_TYPES)
+	GpuKernels.add(out, "pool_payload", K_POOL_PAYLOAD, ["P", "DSTATE", "BUPS", "BUPS_U", "PAYLOAD", "IDTEX", "PICN", "PREVXY", "SLOTHEAD"], "", 64, POOL_DRAW_TYPES)
 	var faint := "const float FAINT_UNIT = %.1f;\n" % FAINT_UNIT + GpuKernels.FIXED_FUNCS
 	GpuKernels.add(out, "pool_view_faint_clear", K_POOL_VIEW_FAINT_CLEAR, ["DISHP", "FAINTLO", "FAINTHI"], "", 64, POOL_DRAW_TYPES)
 	GpuKernels.add(out, "pool_view_faint", K_POOL_VIEW_FAINT, ["WORLD", "DISHP", "PUFF", "PDLO", "PDHI", "PSCALE", "INSIDE", "FAINTLO", "FAINTHI"], faint, 64, POOL_DRAW_TYPES)

@@ -11,7 +11,7 @@ layout(set = 0, binding = 4, std430) buffer B_PAYLOAD { uvec4 PAYLOAD[]; };
 layout(set = 0, binding = 5, std430) buffer B_IDTEX { uint IDTEX[]; };
 layout(set = 0, binding = 6, std430) buffer B_PICN { uint PICN[]; };
 layout(set = 0, binding = 7, std430) buffer B_PREVXY { uint PREVXY[]; };
-layout(set = 0, binding = 8, std430) buffer B_LASTPIC { uint LASTPIC[]; };
+layout(set = 0, binding = 8, std430) buffer B_SLOTHEAD { uint SLOTHEAD[]; };
 const uint BLK_SHIFT = 8u;
 const uint BLK_SLOTS = 256u;
 const uint CNT_BUPS = 0u;
@@ -27,13 +27,6 @@ const uint DS_WORDS = 32u;
 const uint IDT_HI = 1u;
 const uint IDT_LO = 0u;
 const uint IDT_WORDS = 2u;
-const uint LP_COUNT = 1u;
-const uint LP_ID_HI = 1u;
-const uint LP_ID_LO = 0u;
-const uint LP_ROW = 0u;
-const uint LP_WORDS = 4u;
-const uint LP_X = 2u;
-const uint LP_Y = 3u;
 const uint NO_DISH = 4294967295u;
 const uint PAYLOAD_TEX_WIDTH = 2048u;
 const uint PL_BLUE_SHIFT = 8u;
@@ -58,6 +51,9 @@ const uint R_SAT = 17u;
 const uint R_VAL = 18u;
 const uint R_X = 1u;
 const uint R_Y = 2u;
+const uint SH_COUNT = 1u;
+const uint SH_ROW = 0u;
+const uint SH_WORDS = 4u;
 const uint WD_LEDGER = 10u;
 const uint WD_SLOTS = 0u;
 
@@ -98,35 +94,42 @@ vec3 from_hsv(float h, float s, float v) {
 }
 
 bool id_before(uint hi_a, uint lo_a, uint hi_b, uint lo_b) { return hi_a < hi_b || (hi_a == hi_b && lo_a < lo_b); }
-vec2 place_before(uint d, uint lo, uint hi, vec2 here) {
-	if (LASTPIC[LP_ROW] != d + 1u) return here;
-	uint a = 0u, n = LASTPIC[LP_COUNT], b = n;
+uint BEFORE;  // the first texel of the slot the picture before was made in
+bool was_before(uint m, uint lo, uint hi) { uint o = (BEFORE + m) * IDT_WORDS; return id_before(IDTEX[o + IDT_HI], IDTEX[o + IDT_LO], hi, lo); }
+vec2 place_before(uint d, uint k, uint lo, uint hi, vec2 here, uint slot) {
+	if (SLOTHEAD[slot * SH_WORDS + SH_ROW] != d + 1u) return here;
+	uint n = SLOTHEAD[slot * SH_WORDS + SH_COUNT], a = min(k, n), c = a, s = 1u;
+	while (c < n && was_before(c, lo, hi)) { a = c + 1u; c = min(c + s, n); s <<= 1u; }
+	uint b = min(c + 1u, n);
 	while (a < b) {
-		uint m = (a + b) >> 1u, o = (m + 1u) * LP_WORDS;
-		if (id_before(LASTPIC[o + LP_ID_HI], LASTPIC[o + LP_ID_LO], hi, lo)) a = m + 1u; else b = m;
+		uint m = (a + b) >> 1u;
+		if (was_before(m, lo, hi)) a = m + 1u; else b = m;
 	}
-	uint o = (a + 1u) * LP_WORDS;
-	if (a < n && LASTPIC[o + LP_ID_LO] == lo && LASTPIC[o + LP_ID_HI] == hi) return vec2(uintBitsToFloat(LASTPIC[o + LP_X]), uintBitsToFloat(LASTPIC[o + LP_Y]));
-	return here;
+	if (a >= n) return here;
+	uint o = (BEFORE + a) * IDT_WORDS;
+	if (IDTEX[o + IDT_LO] != lo || IDTEX[o + IDT_HI] != hi) return here;
+	uvec4 px = PAYLOAD[BEFORE + a];
+	return vec2(uintBitsToFloat(px[PL_X]), uintBitsToFloat(px[PL_Y]));
 }
 
 uint byte_of(float v) { return uint(clamp(v * 255.0 + 0.5, 0.0, 255.0)); }
 void f(uint k) {
-	uint d = uint(pcs.pa), o = uint(pcs.pc) * uint(pcs.pb) + k;
-	if (k == 0u) PICN[uint(pcs.pd)] = DS(d, DS_COUNT);
+	uint d = uint(pcs.pa), room = uint(pcs.pb), slot = uint(pcs.pc), before = uint(pcs.pd) / 8u, o = slot * room + k;
+	BEFORE = before * room;
+	if (k == 0u) { PICN[uint(pcs.pd) % 8u] = DS(d, DS_COUNT); SLOTHEAD[slot * SH_WORDS + SH_ROW] = d + 1u; SLOTHEAD[slot * SH_WORDS + SH_COUNT] = min(DS(d, DS_COUNT), room); }
 	uvec4 px = uvec4(0u);
 	uint lo = 0u, hi = 0u;
 	vec2 was = vec2(0.0);
 	if (k < DS(d, DS_COUNT)) {
 		uint b = (DS(d, DS_START) + k) * RECORD_WORDS;
+		lo = BUPS_U[b + R_ID_LO]; hi = BUPS_U[b + R_ID_HI];
 		if (BUPS[b + R_PY] != -2.0) {
 			px[PL_X] = floatBitsToUint(BUPS[b + R_X]);
 			px[PL_Y] = floatBitsToUint(BUPS[b + R_Y]);
 			px[PL_SHAPE] = packHalf2x16(vec2(BUPS[b + R_MASS] * P[P_MASS_UM], atan(BUPS[b + R_DY], BUPS[b + R_DX])));
 			vec3 col = from_hsv(BUPS[b + R_HUE], BUPS[b + R_SAT], BUPS[b + R_VAL]);
 			px[PL_COLOR] = (byte_of(col.r) << PL_RED_SHIFT) | (byte_of(col.g) << PL_GREEN_SHIFT) | (byte_of(col.b) << PL_BLUE_SHIFT);
-			lo = BUPS_U[b + R_ID_LO]; hi = BUPS_U[b + R_ID_HI];
-			was = place_before(d, lo, hi, vec2(BUPS[b + R_X], BUPS[b + R_Y]));
+			was = place_before(d, k, lo, hi, vec2(BUPS[b + R_X], BUPS[b + R_Y]), before);
 		}
 	}
 	PAYLOAD[o] = px;

@@ -200,16 +200,17 @@ func c4_publish() -> void:
 	var pay: RID = core.textures("payload")[got["payload"]]
 	var ids: RID = core.textures("ids")[got["payload"]]
 	var texels := core.rd.texture_get_data(pay, 0).size() / GpuLayout.PAYLOAD_BYTES
-	ok(core.rd.texture_get_data(pay, 0) == core.rd.buffer_get_data(core.arena.buf("PAYLOAD"), 0, texels * GpuLayout.PAYLOAD_BYTES), "C4 the payload texture is the PAYLOAD buffer (%d texels)" % texels)
+	var first := core._pic_slot * texels  # (the slot the picture was made in: SimCore._picture_slots)
+	ok(core.rd.texture_get_data(pay, 0) == core.rd.buffer_get_data(core.arena.buf("PAYLOAD"), first * GpuLayout.PAYLOAD_BYTES, texels * GpuLayout.PAYLOAD_BYTES), "C4 the payload texture is the PAYLOAD buffer's slot (%d texels)" % texels)
 	var idt := core.rd.texture_get_data(ids, 0)
-	var idbuf := core.rd.buffer_get_data(core.arena.buf("IDTEX"), 0, texels * GpuLayout.IDT_BYTES)
-	var before := core.rd.buffer_get_data(core.arena.buf("PREVXY"), 0, texels * GpuLayout.PV_BYTES)
+	var idbuf := core.rd.buffer_get_data(core.arena.buf("IDTEX"), first * GpuLayout.IDT_BYTES, texels * GpuLayout.IDT_BYTES)
+	var before := core.rd.buffer_get_data(core.arena.buf("PREVXY"), first * GpuLayout.PV_BYTES, texels * GpuLayout.PV_BYTES)
 	var same := idt.size() == texels * GpuLayout.IDS_BYTES
 	for k in texels if same else 0:
 		same = same and idt.decode_u64(k * GpuLayout.IDS_BYTES) == idbuf.decode_u64(k * GpuLayout.IDT_BYTES) and idt.decode_u64(k * GpuLayout.IDS_BYTES + GpuLayout.IDS_PREV_X * 4) == before.decode_u64(k * GpuLayout.PV_BYTES)
 		if not same:
 			break
-	ok(same, "C4 the id texture is the IDTEX and PREVXY buffers")
+	ok(same, "C4 the id texture is the IDTEX and PREVXY buffers' slot")
 	var n := DishGrid.cells_across(900.0, 100)
 	for pair in [["haze", "HAZEPIX"], ["steer", "STEERPIX"]]:
 		var tex: RID = core.textures(pair[0])[got[pair[0]]]

@@ -101,7 +101,8 @@ var _id_ring: Array = []  ## with `cpu_handover`, the ids of the last ID_RING pa
 var _id_ring_next := 0
 var _id_ring_bytes := 0  ## each slot's size
 var _temp_sets: Array[RID] = []  ## the copy kernels' sets of one publish
-var _pic_dish: CoreDish = null  ## the dish the last bup picture was made of (LASTPIC holds it): a picture of another starts with no places before
+var _pic_dish: CoreDish = null  ## the dish the last bup picture was made of: a picture of another starts with no places before
+var _pic_slot := 0  ## the slot of PAYLOAD, IDTEX and PREVXY the last bup picture was made in (`_picture_slots`)
 var _profile: Variant = null  ## while `profile_steps` runs: kernel name -> Array of µs, each dispatch its own submit
 var _scratch := RID()  ## where `read_parts` gathers what it reads (up to SCRATCH_KEEP bytes)
 var _scratch_bytes := 0
@@ -1943,6 +1944,20 @@ func _disp_track(cl: int, row: int, which: int) -> void:
 	_disp(cl, "pool_track", _groups(maxi(count(row), 64)), float(row), float(which))
 
 
+## The slots the next `n` bup pictures are made in, in the order they are recorded, each [its slot, the slot of the picture before it]:
+## the slots in turn (SimArena.picture_slots), so a picture never writes the slot of the picture before it, which it finds its bups'
+## places before in, and the byte path's pictures of one iteration (at most GpuLayout.PICTURES_MOST) never write each other's. Every
+## list that records a picture is submitted, so the slots follow the pictures as they run.
+func _picture_slots(n: int) -> Array:
+	var out: Array = []
+	var slots := arena.picture_slots()
+	for i in n:
+		var before := _pic_slot % slots
+		_pic_slot = (before + 1) % slots
+		out.append([_pic_slot, before])
+	return out
+
+
 ## `pool_track_picture` of set `which`, after the bup picture in slot `slot` (`room` texels a slot) in the same list: its answers carry
 ## where each bup was in the picture before (GpuLayout.R_PX, R_PY).
 func _disp_track_picture(cl: int, row: int, which: int, slot: int, room: int) -> void:
@@ -2153,14 +2168,16 @@ func _publish_stage(view: ViewRequest, expect: int, steps := 0, pictures := 1) -
 	if fw >= 0 or sw >= 0:
 		arena.put_small("VQ", PackedFloat32Array([view.steer.x, view.steer.y, view.steer_alpha, float(_consts["steering_window"])]).to_byte_array())
 		_free_sets_using(["VQ"])
-	if w >= 0 and _pic_dish != cd:  # (LASTPIC holds another dish's picture, or none: this dish's first picture has no places before)
-		rd.buffer_clear(arena.buf("LASTPIC"), 0, GpuLayout.LP_BYTES)
+	if w >= 0 and _pic_dish != cd:  # (the slots hold another dish's pictures, or none: this dish's first picture has no places before)
+		arena.put_small("SLOTHEAD", arena.zeros((GpuLayout.PICTURES_MOST + 1) * GpuLayout.SH_WORDS * 4))
 		_pic_dish = cd
 	var tracking := w >= 0 and not view.track.is_empty() and count(row) > 0
 	if tracking:
 		_put_track(view.track, 0)
 	var room := arena.draw_rows() * width
 	var shots: Array = []
+	var slot := 0
+	var before := 0
 	if w >= 0:
 		var taken: Array = [w]
 		for j in mini(mini(pictures, GpuLayout.PICTURES_MOST), steps) - 1:
@@ -2168,16 +2185,21 @@ func _publish_stage(view: ViewRequest, expect: int, steps := 0, pictures := 1) -
 			if i < 0:
 				break
 			taken.append(i)
-			shots.append({"w": i, "slot": j + 1 if cpu_handover else 0, "count_at": j + 1, "set": GpuLayout.ANSWER_SETS + j})
+			shots.append({"w": i, "count_at": j + 1, "set": GpuLayout.ANSWER_SETS + j})
+		var slots := _picture_slots(shots.size() + 1)
 		for j in shots.size():
 			var shot: Dictionary = shots[j]
+			shot["slot"] = slots[j][0]
+			shot["before"] = slots[j][1]
 			shot["step"] = ((j + 1) * steps) / (shots.size() + 1)
 			shot["expect"] = mini(mini(_expected_count(row, shot["step"]), expect), room)
 			if tracking:
 				_put_track(view.track, shot["set"])
 		arena.put_small("PICN", arena.zeros(GpuLayout.PICTURES_MOST * 4))
+		slot = slots[-1][0]
+		before = slots[-1][1]
 	return {"view": view, "row": row, "texels": texels, "room": room, "expect": mini(expect, room), "nn": nn, "w": w, "fw": fw, "sw": sw,
-		"tw": tw, "tracking": tracking, "shots": shots}
+		"tw": tw, "tracking": tracking, "shots": shots, "slot": slot, "before": before}
 
 
 ## A bup picture within the steps of the list `cl` (`shot`: one of `_publish_stage`'s "shots"), after the step it was chosen for: the
@@ -2186,11 +2208,10 @@ func _publish_stage(view: ViewRequest, expect: int, steps := 0, pictures := 1) -
 func _record_shot(cl: int, pub: Dictionary, shot: Dictionary) -> void:
 	var row: int = pub["row"]
 	var room: int = pub["room"]
-	_disp(cl, "pool_payload", _groups(pub["texels"]), float(row), float(room), float(shot["slot"]), float(shot["count_at"]))
-	_disp(cl, "pool_payload_keep", _groups(pub["texels"]), float(row), float(room))
+	_disp(cl, "pool_payload", _groups(pub["texels"]), float(row), float(room), float(shot["slot"]), float(int(shot["count_at"]) + 8 * int(shot["before"])))
 	if not cpu_handover:
 		var w: int = shot["w"]
-		_copy(cl, "pool_copy_payload", {"PAYTEX": _textures["payload"][w], "IDS": _textures["ids"][w]}, GpuLayout.PAYLOAD_TEX_WIDTH, room, float(row))
+		_copy(cl, "pool_copy_payload", {"PAYTEX": _textures["payload"][w], "IDS": _textures["ids"][w]}, GpuLayout.PAYLOAD_TEX_WIDTH, room, float(row), float(shot["slot"]))
 	if pub["tracking"]:
 		_disp_track_picture(cl, row, shot["set"], shot["slot"], room)
 
@@ -2205,13 +2226,12 @@ func _publish_record(cl: int, pub: Dictionary) -> void:
 	var nn: int = pub["nn"]
 	var room: int = pub["room"]
 	if pub["w"] >= 0:
-		_disp(cl, "pool_payload", _groups(pub["texels"]), float(row), float(room))
-		_disp(cl, "pool_payload_keep", _groups(pub["texels"]), float(row), float(room))
+		_disp(cl, "pool_payload", _groups(pub["texels"]), float(row), float(room), float(pub["slot"]), float(8 * int(pub["before"])))
 		if not cpu_handover:
 			var w: int = pub["w"]
-			_copy(cl, "pool_copy_payload", {"PAYTEX": _textures["payload"][w], "IDS": _textures["ids"][w]}, GpuLayout.PAYLOAD_TEX_WIDTH, room, float(row))
+			_copy(cl, "pool_copy_payload", {"PAYTEX": _textures["payload"][w], "IDS": _textures["ids"][w]}, GpuLayout.PAYLOAD_TEX_WIDTH, room, float(row), float(pub["slot"]))
 	if pub["tracking"]:
-		_disp_track_picture(cl, row, 0, 0, room)
+		_disp_track_picture(cl, row, 0, pub["slot"], room)
 	if pub["fw"] >= 0 or pub["sw"] >= 0:
 		_disp(cl, "pool_view_faint_clear", _groups(nn * nn), float(row))
 		_disp(cl, "pool_view_faint", _groups(maxi(_wd(GpuLayout.WD_CLOUD_SLOTS), 64)), float(row))
@@ -2255,8 +2275,9 @@ func _publish_parts(pub: Dictionary, parts: Array, direct: Array) -> void:
 		return
 	var nn: int = pub["nn"]
 	if pub["w"] >= 0:
-		direct.append(["payload", "PAYLOAD", 0, int(pub["expect"]) * GpuLayout.PAYLOAD_BYTES])
-		direct.append(["prev", "PREVXY", 0, int(pub["expect"]) * GpuLayout.PV_BYTES])
+		var first := int(pub["slot"]) * int(pub["room"])
+		direct.append(["payload", "PAYLOAD", first * GpuLayout.PAYLOAD_BYTES, int(pub["expect"]) * GpuLayout.PAYLOAD_BYTES])
+		direct.append(["prev", "PREVXY", first * GpuLayout.PV_BYTES, int(pub["expect"]) * GpuLayout.PV_BYTES])
 	if pub["fw"] >= 0:
 		direct.append(["haze", "HAZEPIX", 0, nn * nn * 4])
 	if pub["sw"] >= 0:
@@ -2318,8 +2339,8 @@ func _publish_take(pub: Dictionary, got: Dictionary) -> Dictionary:
 	if cpu_handover:
 		handed = {}
 		if w >= 0:
-			handed["payload"] = _handed_part(got, "payload", "PAYLOAD", 0, n, GpuLayout.PAYLOAD_BYTES)
-			handed["prev"] = _handed_part(got, "prev", "PREVXY", 0, n, GpuLayout.PV_BYTES)
+			handed["payload"] = _handed_part(got, "payload", "PAYLOAD", int(pub["slot"]) * int(pub["room"]), n, GpuLayout.PAYLOAD_BYTES)
+			handed["prev"] = _handed_part(got, "prev", "PREVXY", int(pub["slot"]) * int(pub["room"]), n, GpuLayout.PV_BYTES)
 		if pub["fw"] >= 0:
 			handed["haze"] = got.get("haze", PackedByteArray())
 		if pub["sw"] >= 0:
@@ -2343,7 +2364,7 @@ func _publish_take(pub: Dictionary, got: Dictionary) -> Dictionary:
 		return out
 	publish_seq += 1
 	if cpu_handover and out.has("payload"):
-		_keep_ids(n)
+		_keep_ids(n, int(pub["slot"]) * int(pub["room"]))
 	for kind: String in out:
 		if cpu_handover:
 			break
@@ -2539,8 +2560,8 @@ func retired_textures() -> Dictionary:
 	return out
 
 
-## A copy kernel with image bindings: its storage buffers by name, its images from `images`; `pc` its third push constant.
-func _copy(cl: int, kname: String, images: Dictionary, width: int, texels: int, pc := 0.0) -> void:
+## A copy kernel with image bindings: its storage buffers by name, its images from `images`; `pc` and `pd` its third and fourth push constants.
+func _copy(cl: int, kname: String, images: Dictionary, width: int, texels: int, pc := 0.0, pd := 0.0) -> void:
 	var k: Dictionary = _made[kname]
 	var uniforms: Array[RDUniform] = []
 	var names: Array = k["buffers"]
@@ -2560,7 +2581,7 @@ func _copy(cl: int, kname: String, images: Dictionary, width: int, texels: int, 
 	var set_rid := rd.uniform_set_create(uniforms, k["shader"], 0)
 	rd.compute_list_bind_compute_pipeline(cl, k["pipeline"])
 	rd.compute_list_bind_uniform_set(cl, set_rid, 0)
-	rd.compute_list_set_push_constant(cl, PackedFloat32Array([float(width), float(texels), pc, 0.0]).to_byte_array(), 16)
+	rd.compute_list_set_push_constant(cl, PackedFloat32Array([float(width), float(texels), pc, pd]).to_byte_array(), 16)
 	rd.compute_list_dispatch(cl, _groups(texels), 1, 1)
 	rd.compute_list_add_barrier(cl)
 	_temp_sets.append(set_rid)

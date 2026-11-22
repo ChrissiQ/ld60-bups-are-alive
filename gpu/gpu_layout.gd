@@ -272,17 +272,11 @@ const IDS_PREV_Y := 3
 const IDS_BYTES := IDS_WORDS * 4
 const PV_WORDS := 2  ## PREVXY: where the bup was in the picture before, x and y (float bits; its place in this picture when it was in none)
 const PV_BYTES := PV_WORDS * 4
-## LASTPIC: the last bup picture made, kept for the next to find each bup's place before in. Its first LP_WORDS are a header (LP_ROW:
-## the dish row + 1, 0 for none; LP_COUNT: the texels kept), then LP_WORDS a texel in the picture's order (which is the ids' rising order):
-## the id's low and high word, x and y.
-const LP_WORDS := 4
-const LP_ROW := 0
-const LP_COUNT := 1
-const LP_ID_LO := 0
-const LP_ID_HI := 1
-const LP_X := 2
-const LP_Y := 3
-const LP_BYTES := LP_WORDS * 4
+## SLOTHEAD: what each slot of PAYLOAD, IDTEX and PREVXY holds, SH_WORDS a slot (SH_ROW: the dish row + 1, 0 for none; SH_COUNT: the
+## texels written), so the next picture can find its bups in it.
+const SH_WORDS := 4
+const SH_ROW := 0
+const SH_COUNT := 1
 const PAYLOAD_TEX_WIDTH := 2048  ## a texture's width: a dish's n bups take ceil(n / 2048) rows
 
 ## STATS per dish: D_MAX rows of one sample for the state at the end plus STATS_ITER_SAMPLES for the iteration's steps (sample words: ST_*).

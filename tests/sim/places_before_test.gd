@@ -1,5 +1,5 @@
 extends SceneTree
-## Where each bup was in the picture before (`pool_payload`'s PREVXY, found by id in LASTPIC; the ids texture's IDS_PREV_*, the bytes
+## Where each bup was in the picture before (`pool_payload`'s PREVXY, found by id in the slot of the picture before; the ids texture's IDS_PREV_*, the bytes
 ## handed over, a tracked bup's R_PX and R_PY), against the ids the pictures carry. Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/places_before_test.gd
 ##
