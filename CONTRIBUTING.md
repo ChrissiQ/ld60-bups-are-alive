@@ -39,6 +39,8 @@ The quick ones cover the interface (`ui_lint_test`, `strings_test`, `fonts_test`
 
 Where a test's header lists expected values, a tag beside a figure says where it comes from: `[derived]` is worked out from the code's rules and constants, `[measured]` was read from a run (the text beside it says of what, and on what where that matters). Work out what a test should find before it first runs; do not fit an expectation to the test's own output.
 
+A fact taken from published work is cited by its key in [docs/sources.md](docs/sources.md) (`[search: @Biselli2020]`), which says how to cite and what each tag means; a new source gets its entry there in the same change, and `tests/sources_test.gd` checks the keys. Some older lines still name their source in prose.
+
 ## Commits and pull requests
 
 - Commit messages are one short line in the present tense, third person: "Fixes source selection", "Adds a layers panel".

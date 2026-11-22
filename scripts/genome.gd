@@ -102,7 +102,7 @@ const REACH_RATE := 1.0e-5 * exp(-5.0) * (TRAIT_MUTATIONS + HARMFUL_MUTATIONS) /
 # steps here: a neutral potentiation, then the key itself, which only a potentiated lineage can make.
 const KEY_POTENTIATION_RATE := 1.0e-5  ## the chance a division potentiates its daughter's line [choice: no measured rate; the potentiating change of the experiment was neutral, so it costs nothing]
 const KEY_RATE := 3.0e-6  ## the chance a division of a potentiated line makes the key [choice: the measured 6.6e-13 per division scaled up the way the mutation rates are, to about once or twice a simulated week in a dish of a hundred thousand]
-const KEY_FACTOR := 2.2  ## how many times faster a bup with the key takes acetate up: from 0.45 of its glucose rate to about its whole glucose rate [search: growth on acetate alone is 0.27-0.45 per hour, against about 1 on glucose (Pinhal et al. 2019; Basan et al. 2020), and the acs mutants of the chemostats close that gap (Treves et al. 1998)]
+const KEY_FACTOR := 2.2  ## how many times faster a bup with the key takes acetate up: from 0.45 of its glucose rate to about its whole glucose rate [search: growth on acetate alone is 0.27-0.45 per hour, against about 1 on glucose (@Pinhal2019; @Basan2020), and the acs mutants of the chemostats close that gap (Treves et al. 1998)]
 const KEY_COST := 0.03  ## the share of its growth a bup with the key gives up (the cost of the extra enzyme) [choice: less than a raised ceiling's 5%; proteome costs of this size are a few percent (Ni et al. 2020)]
 
 ## The level of a bup's key (its record's `reach` word keeps it in bits 8-9: 0 none, 1 potentiated, 2 the key).
