@@ -45,7 +45,7 @@ const OVERFLOW_BUDGET := 2  ## the room an iteration needed would pass the memor
 const SCRATCH_KEEP := 1 << 23  ## bytes: a read up to this goes through the kept scratch buffer; a larger one (a dish's records) through one made for it and freed after it, so no buffer outside the memory budget stays
 const EVENT_READ_MARGIN := 1.25  ## the room over the most events a step of the last iterations had that an iteration reads back with its sync ...
 const EVENT_READ_SLACK := 1024  ## ... and the events more (a step that had more has the rest read after)
-const SUBMIT_MS := 4.0  ## the most GPU time a step's work is given in one submit (`_part_done`, and the field's diffusion rounds): under half a display frame at 120 Hz, so the interface's frames get the card between submits [measured at 999 dishes of 300 µm in water, Apple Silicon, Metal: submits of about 4 ms gave a frame p95 of 8.7 ms, of about 9 ms 9.3 ms, the step's 140 ms of rounds in one submit 12.6-12.8 ms; the 4 ms submits cost 2-3% of the speed]
+const FIELD_SUBMIT_MS := 4.0  ## the most GPU time the field's diffusion rounds of a step are given in one submit: under half a display frame at 120 Hz, so the interface's frames get the card between submits [measured at 999 dishes of 300 µm in water, Apple Silicon, Metal: submits of about 4 ms gave a frame p95 of 8.7 ms, of about 9 ms 9.3 ms, the step's 140 ms of rounds in one submit 12.6-12.8 ms; the 4 ms submits cost 2-3% of the speed]
 const COUNT_READ_MARGIN := 1.25  ## the share over a dish's births a step in its last iteration that `_expected_count` allows for each step to come
 
 var rd: RenderingDevice
@@ -113,10 +113,6 @@ var _tile_rounds := PackedInt32Array()  ## the tiles of pool_fdiff that run in e
 var _split_usec := 0  ## the time `run`'s list spent in the field's own submits and waits (counted as the card's, not the recording's)
 var _submit_usec_most := 0  ## the longest single submit and wait of `run`'s list (the screen's frames share the card with it)
 var _round_tile_ms := 0.0  ## the GPU time of a diffusion round, a tile, as the field's own submits measured it (0: not known yet; `_record_step`)
-const STEP_PARTS := 8  ## the parts a step is recorded in (`_part_done`), each ending after one of the long kernels at many bups: the field and the lists, the swim, the apply, the transfers, life, the deaths and the husks, the compaction, the rest
-var _part_ms := PackedFloat64Array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])  ## each part's GPU time, learnt from the submits (0: not known yet)
-var _open_parts := PackedInt32Array()  ## the parts recorded since the last submit
-var _open_ms := 0.0  ## their GPU time, as learnt
 var _tile_key := PackedInt32Array()  ## what TILES was built from: each dish's row, cells across and iterations
 var _lists_marked := false  ## whether the step being recorded lists only the squares near a bup (`_marks_pay`)
 const MARKS_BUPS_PER_CLOUD := 2  ## the marks pay while the record slots in use number under this many a cloud slot ...
@@ -788,9 +784,8 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 					shot += 1
 		if stats:
 			_record_stats(cl, 0, maxi(steps - 1, 0))
-			cl = _split_heavy(cl)
-		cl = _answers_record(cl, staged)
-		cl = _publish_record(cl, pub)
+		_answers_record(cl, staged)
+		_publish_record(cl, pub)
 		if husk_most > 0:  # (the dish's live husks after the steps, packed into HUSK2, the cull's scratch, which no later kernel of the list uses)
 			_disp(cl, "pool_husk_view", _groups(maxi(_wd(GpuLayout.WD_HUSK_SLOTS), 64)), float(husk_row))
 		rd.compute_list_end()
@@ -964,7 +959,7 @@ func _sync_tiles() -> void:
 
 ## The step `s` of a batch, in the order of kernels_life.gd's header, recorded into list `cl` (-1: each dispatch its own submit, for
 ## `profile_steps`). Returns the list the rest of the batch goes into: the field's diffusion rounds are split into submits of at most
-## SUBMIT_MS each by the time a round's tile was measured to take (many dishes of many rounds, small ones in water, make a step
+## FIELD_SUBMIT_MS each by the time a round's tile was measured to take (many dishes of many rounds, small ones in water, make a step
 ## of a hundred ms or more of them, 999 dishes of 300 µm about 140 ms, which in one submit leaves the interface's frames late), and each
 ## split ends the list, submits, waits and begins a new one.
 func _record_step(cl: int, s: int) -> int:
@@ -995,7 +990,7 @@ func _record_step(cl: int, s: int) -> int:
 		var tiles := 0  ## the tiles recorded since the last submit, and whether all of them are diffusion rounds (the first submit holds the step's kernels before them)
 		var rounds_only := false
 		for r in _tile_rounds.size():
-			if cl >= 0 and tiles > 0 and (_round_tile_ms <= 0.0 or (tiles + _tile_rounds[r]) * _round_tile_ms > SUBMIT_MS):
+			if cl >= 0 and tiles > 0 and (_round_tile_ms <= 0.0 or (tiles + _tile_rounds[r]) * _round_tile_ms > FIELD_SUBMIT_MS):
 				var t0 := Time.get_ticks_usec()
 				rd.compute_list_end()
 				rd.submit()
@@ -1003,8 +998,6 @@ func _record_step(cl: int, s: int) -> int:
 				var waited := Time.get_ticks_usec() - t0
 				_split_usec += waited
 				_submit_usec_most = maxi(_submit_usec_most, waited)
-				_open_parts = PackedInt32Array()
-				_open_ms = 0.0
 				if rounds_only:
 					var per := waited / 1000.0 / tiles
 					_round_tile_ms = per if _round_tile_ms <= 0.0 else lerpf(_round_tile_ms, per, 0.25)
@@ -1019,33 +1012,28 @@ func _record_step(cl: int, s: int) -> int:
 	_record_lists(cl, hg)
 	if lone_field:
 		_disp(cl, "pool_clear", cg)
-	cl = _part_done(cl, 0)
 	_disp(cl, "pool_puff_clear", hg)
 	var reads := "" if _lists_marked else "_all"
 	for kname: String in (["pool_swim", "pool_demand"] if lone_passes else ["pool_swim_demand"]):
 		_disp(cl, kname + reads, bg)
 	if _lists_marked:
 		_disp(cl, "pool_bin_misses", bg)
-	cl = _part_done(cl, 1)
 	_disp(cl, "pool_cells", cg)
 	_disp(cl, "pool_puff_scale", hg)
 	var buckets := GpuKernelsLife.conj_buckets(slots)
 	_disp(cl, "pool_conj_clear", maxi(bg, _groups(buckets)))
 	for kname: String in (["pool_apply", "pool_conj_count"] if lone_passes else ["pool_apply_count"]):
 		_disp(cl, kname if kname == "pool_conj_count" else kname + reads, bg)
-	cl = _part_done(cl, 2)
 	_disp(cl, "pool_puff_commit", hg)
 	_disp(cl, "pool_ac_cells", cg)
 	_scan(cl, "pool_conj_scan", buckets)
 	_disp(cl, "pool_conj_scatter", bg)
-	cl = _part_done(cl, 3)
 	if lone_passes:
 		for kname: String in lone_order:
 			_disp(cl, kname, bg)
 	else:
 		_disp(cl, "pool_ac_conj_life", bg)
 		_disp(cl, "pool_donor_life", maxi(1, bg / 16))
-	cl = _part_done(cl, 4)
 	_scan(cl, "pool_scan_s", slots)
 	_scan(cl, "pool_scan_k", slots)
 	_disp(cl, "pool_finalize", 1)
@@ -1061,12 +1049,10 @@ func _record_step(cl: int, s: int) -> int:
 	_disp(cl, "pool_cloud_live", hg)
 	_disp(cl, "pool_husk_live", kg)
 	_disp(cl, "pool_cloud_cadence", D_MAX / 64)
-	cl = _part_done(cl, 5)
 	_disp(cl, "pool_events", bg, float(s), 0.0)
 	_disp(cl, "pool_blk_fill", maxi(1, bg / 64))
 	_disp(cl, "pool_compact", bg)
 	_disp(cl, "pool_setcount", D_MAX / 64, 1.0)
-	cl = _part_done(cl, 6)
 	_flipped = not _flipped
 	if _world_step % CLOUD_COMPACT_EVERY == CLOUD_COMPACT_EVERY - 1:
 		var hint := maxi(_wd(GpuLayout.WD_CLOUD_SLOTS), 64)
@@ -1082,62 +1068,8 @@ func _record_step(cl: int, s: int) -> int:
 		_disp(cl, "pool_husk_compact", kg)
 		_disp(cl, "pool_husk_copy", _groups(hint * 8))
 		_disp(cl, "pool_husk_set_count", 1)
-	cl = _part_done(cl, 7)
 	_world_step += 1
 	return cl
-
-
-## Between the passes after the steps (the statistics, the answers, the pictures), each a pass over every bup of the pool: the open list
-## `cl` is submitted and waited for and a new one begun when the world is heavy enough that a step does not fit one submit (its parts'
-## learnt times come to more than SUBMIT_MS), for the reason `_part_done` gives. -1 (profiling) records no list.
-func _split_heavy(cl: int) -> int:
-	if cl < 0:
-		return cl
-	var step_ms := 0.0
-	for ms in _part_ms:
-		step_ms += ms
-	if step_ms <= SUBMIT_MS:
-		return cl
-	var t0 := Time.get_ticks_usec()
-	rd.compute_list_end()
-	rd.submit()
-	rd.sync()
-	var waited := Time.get_ticks_usec() - t0
-	_split_usec += waited
-	_submit_usec_most = maxi(_submit_usec_most, waited)
-	_open_parts = PackedInt32Array()
-	_open_ms = 0.0
-	return rd.compute_list_begin()
-
-
-## Part `part` of a step has been recorded into the open list `cl` (STEP_PARTS parts a step, in turn). When the next part would take the
-## submit past SUBMIT_MS of GPU time (as each part was learnt to take), or a part's time is not known yet, the list is submitted and
-## waited for here and a new one begun: the screen draws on the same card, and a frame due while one long submit runs waits for it
-## (a 2-million-bup step is tens of ms). The wait is shared among the parts it held by their learnt times. -1 (profiling) records no list.
-func _part_done(cl: int, part: int) -> int:
-	if cl < 0:
-		return cl
-	_open_parts.append(part)
-	_open_ms += _part_ms[part]
-	var next := (part + 1) % STEP_PARTS
-	if _part_ms[part] > 0.0 and _part_ms[next] > 0.0 and _open_ms + _part_ms[next] <= SUBMIT_MS:
-		return cl
-	var t0 := Time.get_ticks_usec()
-	rd.compute_list_end()
-	rd.submit()
-	rd.sync()
-	var waited := Time.get_ticks_usec() - t0
-	_split_usec += waited
-	_submit_usec_most = maxi(_submit_usec_most, waited)
-	var known := 0.0
-	for p in _open_parts:
-		known += _part_ms[p]
-	for p in _open_parts:
-		var share := waited / 1000.0 * (_part_ms[p] / known if known > 0.0 else 1.0 / _open_parts.size())
-		_part_ms[p] = share if _part_ms[p] <= 0.0 else lerpf(_part_ms[p], share, 0.25)
-	_open_parts = PackedInt32Array()
-	_open_ms = 0.0
-	return rd.compute_list_begin()
 
 
 ## The clouds' lookup lists made afresh from the clouds as they are (every step makes them before anything reads them; the words a cloud
@@ -1815,7 +1747,7 @@ func answer(questions: Array) -> Dictionary:
 	var got := {}
 	if not (staged["sets"] as Array).is_empty():
 		var cl := rd.compute_list_begin()
-		cl = _answers_record(cl, staged)
+		_answers_record(cl, staged)
 		rd.compute_list_end()
 		var reads := _request(_answers_parts(staged), [])
 		rd.submit()
@@ -1923,7 +1855,7 @@ func _answers_stage(questions: Array) -> Dictionary:
 
 ## The answers' kernels for the staged sets, into the open list `cl`. Each bounds its loop by what the device holds when it runs (the
 ## dish's segment, the slots in use), so the counts the host knows before the steps size only the dispatch.
-func _answers_record(cl: int, staged: Dictionary) -> int:
+func _answers_record(cl: int, staged: Dictionary) -> void:
 	for e: Dictionary in staged["sets"]:
 		var s: int = e["set"]
 		var row: int = e["row"]
@@ -1931,7 +1863,6 @@ func _answers_record(cl: int, staged: Dictionary) -> int:
 		for i in genes.size():
 			if int(genes[i]) >= 0:
 				_disp(cl, "pool_fraction", _bup_groups(), float(GpuLayout.R_SPEED + int(genes[i])), float(row), _float_at_least(float(e["thresholds"][i])), float(s * GpuLayout.FRACTIONS + i))
-				cl = _split_heavy(cl)
 		if not (e["ids"] as PackedInt64Array).is_empty():
 			_disp_track(cl, row, s)
 			if e["steer"]:
@@ -1944,7 +1875,6 @@ func _answers_record(cl: int, staged: Dictionary) -> int:
 			_disp(cl, "pool_husk_near", kg, float(row), float(e["husks"]), float(s))
 			_disp(cl, "pool_husk_near2", kg, float(row), float(e["husks"]), float(s))
 			_disp(cl, "pool_husk_near3", 1, float(row), float(e["husks"]), float(s))
-	return cl
 
 
 ## The parts of the question buffers the staged sets' answers are in, for `_request`.
@@ -2187,7 +2117,7 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 	if pub.is_empty():
 		return {}
 	var cl := rd.compute_list_begin()
-	cl = _publish_record(cl, pub)
+	_publish_record(cl, pub)
 	rd.compute_list_end()
 	var parts: Array = []
 	var direct: Array = []
@@ -2297,9 +2227,9 @@ func _record_shot(cl: int, pub: Dictionary, shot: Dictionary) -> void:
 
 ## The pictures' kernels into the open list `cl` (nothing for a `pub` of {}). The payload and its copy run over the dish's bups as the
 ## device has them then, within the buffers' room.
-func _publish_record(cl: int, pub: Dictionary) -> int:
+func _publish_record(cl: int, pub: Dictionary) -> void:
 	if pub.is_empty():
-		return cl
+		return
 	var row: int = pub["row"]
 	var view: ViewRequest = pub["view"]
 	var nn: int = pub["nn"]
@@ -2313,7 +2243,6 @@ func _publish_record(cl: int, pub: Dictionary) -> int:
 			_copy(cl, "pool_copy_payload", {"PAYTEX": _textures["payload"][w], "IDS": _textures["ids"][w]}, GpuLayout.PAYLOAD_TEX_WIDTH, room, float(row), float(pub["slot"]))
 	if pub["tracking"]:
 		_disp_track_picture(cl, row, 0, pub["slot"], room)
-	cl = _split_heavy(cl)
 	if pub["fw"] >= 0 or pub["sw"] >= 0:
 		_disp(cl, "pool_view_faint_clear", _groups(nn * nn), float(row))
 		_disp(cl, "pool_view_faint", _groups(maxi(_wd(GpuLayout.WD_CLOUD_SLOTS), 64)), float(row))
@@ -2327,14 +2256,12 @@ func _publish_record(cl: int, pub: Dictionary) -> int:
 		if not cpu_handover:
 			_copy_pix(cl, "STEERPIX", _textures["steer"][pub["sw"]], nn, nn * nn)
 	if pub["tw"] >= 0:
-		cl = _split_heavy(cl)
 		var tiles := D_MAX * GpuKernelsDraw.THUMB_TILE * GpuKernelsDraw.THUMB_TILE
 		_disp(cl, "pool_thumb_clear", _groups(tiles))
 		_disp(cl, "pool_thumb_splat", _bup_groups())
 		_disp(cl, "pool_thumb_resolve", _groups(tiles))
 		if not cpu_handover:
 			_copy_pix(cl, "THUMBS", _textures["thumbs"][pub["tw"]], GpuKernelsDraw.THUMB_ATLAS, GpuKernelsDraw.THUMB_ATLAS * GpuKernelsDraw.THUMB_ATLAS)
-	return cl
 
 
 ## What the pictures read back, added to `parts` and `direct` (`_request`'s): the tracked bups' records (set 0 of TR) and, with
