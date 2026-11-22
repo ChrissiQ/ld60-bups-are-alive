@@ -3,7 +3,7 @@ extends SceneTree
 ## and the others; bloom 1, husks and starvation on as the defaults have them), asked x10,000, `settle=` s, then `seconds=` s of frames.
 ## Prints the frames (late: over 1.5 display frames, as the F3 overlay counts; p50, p95, p99, worst), the slide (stalls and jumps of the
 ## drawn simulated time, as slide_test's M), the speed reached, and the simulation's iterations (their time, the time in submits and the
-## longest single submit, `submit_ms_most`), and the main thread's process step (the time from `process_frame` to the end of the last
+## longest single submit, `submit_ms_most`; the three longest iterations' timing in full), and the main thread's process step (the time from `process_frame` to the end of the last
 ## node's `_process`) with how many late frames had a long one. `still=1` keeps the share at 1 (no drawing between pictures), `paused=1`
 ## pauses the game for the window (the screen alone), `speed=` asks another speed, each a diagnosis. Run windowed, e.g.:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 1600x1000 -s tests/sim/stutter_probe.gd -- dishes=2
@@ -107,6 +107,7 @@ func _run() -> void:
 	var last_drawn := -1.0
 	var sync: Array = []
 	var most: Array = []
+	var timings: Array = []
 	var iters: Array = []
 	var seen := -1
 	var clock0: float = w.latest().sim_time
@@ -134,6 +135,7 @@ func _run() -> void:
 		if n != seen:
 			seen = n
 			iters.append(float(t.get("iteration_ms", 0.0)))
+			timings.append(t.duplicate())
 			sync.append(float(t.get("sync_ms", 0.0)))
 			most.append(float(t.get("submit_ms_most", 0.0)))
 	var wall := (Time.get_ticks_usec() - wall0) / 1e6
@@ -153,6 +155,14 @@ func _run() -> void:
 	var c := most.duplicate()
 	c.sort()
 	print("STUTTER iterations %d: iteration p50 %.1f max %.1f ms; in submits p50 %.1f max %.1f ms; longest submit p50 %.1f p95 %.1f max %.1f ms" % [iters.size(), _q(a, 0.5), a[-1] if not a.is_empty() else 0.0, _q(b, 0.5), b[-1] if not b.is_empty() else 0.0, _q(c, 0.5), _q(c, 0.95), c[-1] if not c.is_empty() else 0.0])
+	timings.sort_custom(func(x: Dictionary, y: Dictionary) -> bool: return float(x.get("iteration_ms", 0.0)) > float(y.get("iteration_ms", 0.0)))
+	for k in mini(3, timings.size()):
+		var t: Dictionary = timings[k]
+		var parts := ""
+		for key: String in t:
+			if t[key] is float or t[key] is int:
+				parts += " %s=%.1f" % [key, float(t[key])]
+		print("STUTTER longest iteration %d:%s; phases %s" % [k + 1, parts, str(t.get("ph", {}))])
 	var late_proc := 0
 	var late_all := 0
 	var proc_sorted := procs.duplicate()
