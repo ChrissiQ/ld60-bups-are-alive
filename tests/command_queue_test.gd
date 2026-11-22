@@ -217,7 +217,7 @@ func _client_on_fake() -> void:
 	for i in 4:
 		w.poll()
 	var rate := w.picture_rate()
-	TestUtil.check(rate["shown"] == 2 and rate["published"] == 2 and rate["longest_hold_frames"] == 2 and is_equal_approx(rate["sim_s_per_picture"], 20.0), "two publishes in one snapshot: shown on two frames, the second still up two frames later (got %s)" % [rate])
+	TestUtil.check(rate["shown"] == 1 and rate["published"] == 2 and rate["skipped"] == 1 and rate["longest_hold_frames"] == 3, "two publishes in one snapshot, the playout's first: the newest shown at once (its clock starts there), the older skipped, still up three frames later (got %s)" % [rate])
 
 
 func _service() -> void:

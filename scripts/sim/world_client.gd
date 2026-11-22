@@ -10,25 +10,19 @@ extends RefCounted
 ## a snapshot's timing["refused"], and in every later one until a snapshot that carried it is acknowledged: `poll` frees its row and emits
 ## `refused` once for it, by the snapshot that first carried it (timing["refused_seq"]; a backend without that key carries each refusal once).
 ##
-## The main view's picture is played out at most one publish a frame (`shown_payload`, `playout`), oldest first, never going back to an
-## older publish. A frame that brings publishes shows the oldest waiting one at once; the rest are spread over the frames until the next
-## arrival is due (`gap`: the frames between arrivals, smoothed), so an iteration's burst of pictures (SimThread._pictures_for) is shown
-## one picture every gap / burst frames rather than all in one frame. The pace is the waiting publishes over gap - 1 frames (one frame
-## of margin for a late iteration), and at least one a frame while it is under two frames: at one publish a frame, when two land in one
-## frame (an iteration ended just after the last poll) the second is shown on the next, and a frame that then brings none still gets a new
-## picture. At most WAITING_MOST are kept waiting; the oldest of more are skipped. Publishes of a dish that is no longer the main view's
-## (`set_view`) are dropped, waiting or arriving.
-##
-## Between pictures the view draws each bup part of the way from its place in the picture before to its place in the one shown
-## (`shown_share`): the frames since the shown picture came up over the frames it is expected to stay up (`expected_up`: until the playout
-## shows the next waiting one, or with none waiting until the next arrival is due), so the bups move on every frame, about a picture behind
-## the newest. A publish at the same simulated time as the one shown, of the same dish (a pass of no steps: the simulation carries that
-## picture's places before into it), goes on with its share and its frames where they were, so the motion does not stop for it. Paused,
-## the share is 1: the picture shown, still.
+## The main view's picture is played out on a clock of simulated time of its own (`Playout`), a little behind the newest publish that has
+## arrived (`shown_payload`, `shown_share`): the picture shown is the first whose simulated time is at or past the clock, and the view draws
+## each bup the share of the way from its place in the picture before to its place in that one that the clock has gone between the two
+## pictures' times. The clock runs at the pace the publishes arrive at (simulated seconds a real second, smoothed), trimmed to keep it
+## LEAD_SPANS arrivals' worth of simulated time behind the newest, so a picture that comes a little late is met by the lead and the bups
+## move on every frame at an even speed instead of stopping at each picture and jumping at the next; each picture's time on screen comes
+## from when the pictures really arrived. The display runs that lead behind the simulation. A publish at the same simulated time as the
+## newest, of the same dish (a pass of no steps: the simulation carries that picture's places before into it), takes its place. At most
+## WAITING_MOST wait past the one shown (the oldest of more are skipped), and a clock left far behind (SNAP_SPANS arrivals' worth) is
+## brought up to the lead. Paused, the newest is shown, still (the share is 1). Publishes of a dish that is no longer the main view's
+## (`set_view`) are dropped, waiting or arriving, and the clock starts again with the next.
 
 const WAITING_MOST := GpuLayout.PICTURES_MOST + 2  ## publishes seen and not yet shown that the playout keeps: an iteration's burst and two more (SimCore.PAYLOAD_TEXTURES holds their textures)
-const GAP_MOST := 30.0  ## frames: the most one gap between arrivals counts for in `gap` (a pause publishes nothing for a while)
-const GAP_WEIGHT := 0.25  ## the weight of the newest gap in `gap`
 const PICTURE_WINDOW_MSEC := 1000  ## how far back `picture_rate` counts
 
 signal snapshot_changed(snap: Snapshot)
@@ -38,12 +32,9 @@ var backend: SimBackend
 var _used := {}  ## client row -> true
 var _last_seq := -1
 var display_ms := 0.0  ## the display's frame (ms), from the screen's refresh rate, sent with every set_time for the governor's pacing (0: not known, no pacing)
-var _waiting: Array = []  ## publishes seen and not yet shown, oldest first (at most WAITING_MOST after a frame)
-var _shown: PayloadInfo = null
+var _playout := Playout.new()
 var _view_row := -1  ## the main view's dish (`set_view`; -1: not told, nothing is dropped)
-var _pace: Array = [0.0, 1.0]  ## the playout's pace: [pictures owed, pictures a frame] (`playout`)
-var _gap := 1.0  ## frames between the frames that brought publishes, smoothed (GAP_WEIGHT)
-var _last_arrival := -1  ## the poll that last brought a publish
+var _last_poll_usec := -1
 var _new_pictures: Array = []  ## [msec, poll, sim time] of each frame that showed the main view a new publish, the last PICTURE_WINDOW_MSEC
 var _arrivals: Array = []  ## msec of each publish that arrived, the last PICTURE_WINDOW_MSEC
 var _known_publish := -1  ## the newest publish seen
@@ -51,9 +42,97 @@ var _refusals_taken := {}  ## row -> the snapshot that first carried the last re
 var _polls := 0  ## frames polled so far (the question latency counts in these)
 var _asked := {}  ## row -> {bup id: [poll, snapshot seq, msec] of its first question not yet answered}
 var _pick_latency := {"last": 0, "max": 0, "last_ms": 0.0}  ## frames and ms from a bup's first question to its first answer
-var _shown_frames := 0  ## frames since the shown publish came up
-var _shown_for := 1.0  ## frames it is expected to stay up (`expected_up`)
 var _paused := false  ## as the last `set_time` said
+
+
+## The main view's playout on its own clock of simulated time (see the header). `step` once a frame with the publishes that arrived, the
+## frame's real length and whether the game is paused; then `shown` and `share` are the frame's.
+class Playout:
+	extends RefCounted
+	const LEAD_SPANS := 2.0  ## the lead the clock keeps behind the newest publish, on average, in arrivals' worth of simulated time: an arrival up to twice the usual time apart is met without a stop
+	const SNAP_SPANS := 4.0  ## a clock further behind than this many arrivals' worth is brought up to the lead (after a stall or a hitch)
+	const PACE_WEIGHT := 0.2  ## the weight of the newest arrival in the smoothed pace and span
+	const TRIM := 0.5  ## how hard the pace is trimmed toward the lead, set at each arrival and held to the next (an even speed between them): the rate is the pace times 1 + TRIM x (lead - its aim) / its aim ...
+	const TRIM_MOST := 0.5  ## ... at most this far from the pace either way
+	const DT_MOST := 0.25  ## s: the most one frame moves the clock (a long hitch does not run it past the pictures)
+
+	var shown: PayloadInfo = null  ## the picture shown this frame
+	var share := 1.0  ## how far between the picture before and `shown` the clock is this frame
+	var skipped := 0  ## publishes passed without being shown, so far
+	var snaps := 0  ## times the clock was brought up to the lead, so far (a jump of the drawing)
+	var last_dt := 0.0  ## the real length the last step moved the clock by (s)
+	var clock := -1.0  ## simulated s (-1: none yet)
+	var queue: Array = []  ## publishes not yet passed, oldest first: the first is the one shown
+	var pace := 0.0  ## simulated s a real s that the publishes arrive at: the smoothed span over the smoothed time between arrivals (a mean of each arrival's own ratio would run fast when the times vary)
+	var interval := 0.0  ## real s between arrivals, smoothed
+	var span := 0.0  ## simulated s between arrivals, smoothed
+	var per := 1.0  ## publishes an arrival brings, smoothed
+	var rate := 0.0  ## simulated s a real s the clock runs at until the next arrival
+	var before := -1.0  ## the simulated time of the picture before the one shown (-1: none)
+	var _since_arrival := 0.0  ## real s since the last arrival
+	var _last_t := -1.0  ## the newest simulated time that arrived
+	var _fresh := true  ## no arrival yet to measure the next from (the start, a pause, a dish switch)
+
+	## The playout starts again (another dish, or none).
+	func reset() -> void:
+		clock = -1.0
+		queue = []
+		before = -1.0
+		_last_t = -1.0
+		_fresh = true
+
+	## One frame: `arrived` the publishes that came (oldest first), `dt` the frame's real length (s).
+	func step(arrived: Array, dt: float, paused: bool) -> void:
+		dt = clampf(dt, 0.0, DT_MOST)
+		last_dt = dt
+		_since_arrival += dt
+		var came := 0
+		for p: PayloadInfo in arrived:
+			if not queue.is_empty() and p.sim_time <= (queue[-1] as PayloadInfo).sim_time:
+				if p.sim_time == (queue[-1] as PayloadInfo).sim_time:
+					queue[-1] = p  # (a pass of no steps: the same moment again)
+				continue
+			queue.append(p)
+			came += 1
+		if came > 0:
+			var newest := (queue[-1] as PayloadInfo).sim_time
+			if not _fresh and not paused and _last_t >= 0.0 and _since_arrival > 0.0:
+				var gone := newest - _last_t
+				span = gone if span <= 0.0 else lerpf(span, gone, PACE_WEIGHT)
+				interval = _since_arrival if interval <= 0.0 else lerpf(interval, _since_arrival, PACE_WEIGHT)
+				pace = span / interval
+				per = lerpf(per, float(came), PACE_WEIGHT)
+			_last_t = newest
+			_since_arrival = 0.0
+			_fresh = paused
+			if clock >= 0.0 and span > 0.0:
+				# (the lead's aim just after an arrival: LEAD_SPANS arrivals' worth on average over the time to the next, so half an arrival's
+				# worth more; never more than WAITING_MOST - 1 publishes' worth, which the queue holds with the one shown and room for one more)
+				var aim := minf((LEAD_SPANS + 0.5) * span, (WorldClient.WAITING_MOST - 1) * span / maxf(per, 1.0))
+				var lead := newest - clock
+				if lead > SNAP_SPANS * span:
+					clock = newest - aim
+					lead = aim
+					snaps += 1
+				rate = pace * (1.0 + clampf(TRIM * (lead - aim) / aim, -TRIM_MOST, TRIM_MOST))
+		if paused:
+			_fresh = true
+		if queue.is_empty():
+			return
+		var last := (queue[-1] as PayloadInfo).sim_time
+		if clock < 0.0 or paused:
+			clock = last
+		else:
+			clock = minf(clock + dt * rate, last)
+		while queue.size() > 1 and ((queue[0] as PayloadInfo).sim_time < clock or queue.size() > WorldClient.WAITING_MOST + 1):
+			var gone_by := queue.pop_front() as PayloadInfo
+			if gone_by != shown and not paused:
+				skipped += 1
+			before = gone_by.sim_time
+			clock = maxf(clock, before)
+		shown = queue[0]
+		var t := shown.sim_time
+		share = 1.0 if paused or before < 0.0 or t <= before else clampf((clock - before) / (t - before), 0.0, 1.0)
 
 
 ## The game's world: the SimService autoload's (null where it is not there). Reached through the tree, not the autoload's name, so the
@@ -144,7 +223,9 @@ func set_time(speed: float, paused: bool, real_dt: float) -> void:
 func set_view(row: int, view: ViewRequest) -> void:
 	if row != _view_row:
 		_view_row = row
-		_waiting = _of_row(_waiting, row)
+		_playout.queue = _of_row(_playout.queue, row)
+		if _playout.queue.is_empty():
+			_playout.reset()
 	var v := ViewRequest.new()
 	v.row = row
 	v.camera = view.camera
@@ -216,59 +297,25 @@ func latest() -> Snapshot:
 	return backend.latest()
 
 
+## How far the drawing runs behind the newest publish that arrived: {sim_s (simulated time between the clock and it), ms (that at the
+## pace the publishes arrive at), pictures (the publishes waiting past the one shown, and the share of the shown one still to go)}.
+func lag() -> Dictionary:
+	var q := _playout.queue
+	if q.is_empty() or _playout.clock < 0.0:
+		return {"sim_s": 0.0, "ms": 0.0, "pictures": 0.0}
+	var sim_s: float = (q[-1] as PayloadInfo).sim_time - _playout.clock
+	return {"sim_s": sim_s, "ms": 1000.0 * sim_s / _playout.pace if _playout.pace > 0.0 else 0.0, "pictures": float(q.size() - 1) + (1.0 - _playout.share)}
+
+
 ## The main view's picture this frame (null before the first publish): see the header.
 func shown_payload() -> PayloadInfo:
-	return _shown
+	return _playout.shown
 
 
 ## How far the view draws the bups this frame from their places in the picture before (0) to their places in the one shown (1): see the
 ## header. 1 while paused or before the first publish.
 func shown_share() -> float:
-	if _paused or _shown == null:
-		return 1.0
-	return clampf(float(_shown_frames) / _shown_for, 0.0, 1.0)
-
-
-## The frames a publish just shown is expected to stay up: with publishes `waiting` after it, until the playout's pace (`pace`, as
-## `playout` returns it) shows the next; with none, until the next arrival is due (`gap` frames after the last, which came
-## `since_arrival` frames ago). At least one.
-static func expected_up(waiting: Array, pace: Array, gap: float, since_arrival: int) -> float:
-	if not waiting.is_empty():
-		var rate: float = pace[1]
-		return maxf(ceilf((1.0 - 1e-6 - float(pace[0])) / maxf(rate, 1e-6)), 1.0)
-	return maxf(gap - float(since_arrival), 1.0)
-
-
-## One frame of the playout: `waiting` (publishes seen and not shown, oldest first) with the publishes that `arrived` this frame, the
-## pace from the last frame (`pace`: [pictures owed, pictures a frame]) and `gap` (frames between arrivals). Returns [the publish to show
-## now (null: keep the one shown), what waits after, the pace after]. A frame with arrivals shows the oldest at once and sets the rate
-## for the rest: the waiting over the gap - 1 frames until the next arrival is due, at least one a frame while that is under two frames;
-## a frame without shows the oldest once a picture's worth has built up. At most WAITING_MOST are left waiting (with more, the oldest
-## are skipped).
-static func playout(waiting: Array, arrived: Array, pace := [0.0, 1.0], gap := 1.0) -> Array:
-	var all := waiting + arrived
-	var owed: float = pace[0]
-	var rate: float = pace[1]
-	var show: PayloadInfo = null
-	if not arrived.is_empty():
-		var keep := mini(all.size() - 1, WAITING_MOST)
-		show = all[all.size() - 1 - keep]
-		all = all.slice(all.size() - keep)
-		owed = 0.0
-		rate = float(all.size()) / maxf(gap - 1.0, 1.0)
-	elif not all.is_empty():
-		owed += rate
-		if owed >= 1.0 - 1e-6:
-			owed = minf(owed - 1.0, 1.0)
-			show = all.pop_front()
-	if all.is_empty():
-		owed = 0.0
-	return [show, all, [owed, rate]]
-
-
-## The frames between arrivals, smoothed: `gap` with a new gap of `frames` (capped at GAP_MOST).
-static func next_gap(gap: float, frames: int) -> float:
-	return lerpf(gap, minf(float(frames), GAP_MOST), GAP_WEIGHT)
+	return 1.0 if _paused or _playout.shown == null else _playout.share
 
 
 ## Once a frame on the main thread: a newer snapshot is acknowledged and emitted, the rows of refused dishes are freed, and the playout
@@ -284,28 +331,16 @@ func poll() -> void:
 				arrived.append(p)
 				_known_publish = p.seq
 	arrived = _of_row(arrived, _view_row)
-	if not arrived.is_empty():
-		if _last_arrival >= 0:
-			_gap = next_gap(_gap, _polls - _last_arrival)
-		_last_arrival = _polls
-	var step := playout(_waiting, arrived, _pace, _gap)
-	_pace = step[2]
+	var usec := Time.get_ticks_usec()
+	var dt := (usec - _last_poll_usec) / 1e6 if _last_poll_usec >= 0 else 0.0
+	_last_poll_usec = usec
+	var was := _playout.shown
+	_playout.step(arrived, dt, _paused)
 	var now := Time.get_ticks_msec()
 	for _p: PayloadInfo in arrived:
 		_arrivals.append(now)
-	if step[0] != null:
-		var next := step[0] as PayloadInfo
-		var goes_on := _shown != null and next.row == _shown.row and next.sim_time == _shown.sim_time
-		_shown = next
-		_new_pictures.append([now, _polls, next.sim_time])
-		if goes_on:
-			_shown_frames += 1
-		else:
-			_shown_frames = 0
-			_shown_for = expected_up(step[1], _pace, _gap, _polls - _last_arrival)
-	else:
-		_shown_frames += 1
-	_waiting = step[1]
+	if _playout.shown != null and _playout.shown != was:
+		_new_pictures.append([now, _polls, _playout.shown.sim_time])
 	_forget_pictures(now)
 	if snap == null or snap.seq <= 0 or snap.seq == _last_seq:
 		return
@@ -327,7 +362,8 @@ func poll() -> void:
 
 ## How often the main view's picture changed in the last PICTURE_WINDOW_MSEC: {shown (new pictures shown), published (publishes that
 ## arrived; more than shown when some were skipped), longest_hold_frames (the most frames one picture stayed up, the one up now
-## included), sim_s_per_picture (the mean simulated time between them)}.
+## included), sim_s_per_picture (the mean simulated time between them), skipped (publishes the playout passed without showing, so far),
+## lag (`lag`)}.
 func picture_rate() -> Dictionary:
 	_forget_pictures(Time.get_ticks_msec())
 	var longest := 0
@@ -338,7 +374,8 @@ func picture_rate() -> Dictionary:
 	var per := 0.0
 	if _new_pictures.size() > 1:
 		per = (float(_new_pictures[-1][2]) - float(_new_pictures[0][2])) / (_new_pictures.size() - 1)
-	return {"shown": _new_pictures.size(), "published": _arrivals.size(), "longest_hold_frames": longest, "sim_s_per_picture": per}
+	return {"shown": _new_pictures.size(), "published": _arrivals.size(), "longest_hold_frames": longest, "sim_s_per_picture": per,
+		"skipped": _playout.skipped, "lag": lag()}
 
 
 ## The publishes of `pictures` that are of dish `row` (all of them for a row of -1).

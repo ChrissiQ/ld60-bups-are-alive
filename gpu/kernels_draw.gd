@@ -57,7 +57,7 @@ const POOL_DRAW_TYPES := {
 ## (the host zeroes it first, so a dish with no bups reads 0). `pcs.pd` / 8 % 8 is the slot the picture before it was made in
 ## (SimCore._picture_slots), and `pcs.pd` of 64 or more says no step ran since that picture (a pass of no steps: an edit, a question,
 ## the view asked again): the bups are where they were, so a bup found there takes that picture's place before, and the motion the
-## picture before showed goes on (WorldClient.playout counts such a picture as the one before it, going on). PREVXY is where each bup was in that picture (when it was of the same dish row), found by its id: a dish's
+## picture before showed goes on (WorldClient's playout puts such a picture in the place of the one before it). PREVXY is where each bup was in that picture (when it was of the same dish row), found by its id: a dish's
 ## bups lie in the rising order of their ids (compaction keeps the survivors' order and puts the newborns, whose ids are past every older
 ## one, after them; a pipette's moved bups keep their order), so a search over the picture before finds a bup that was in it. The bups of
 ## that picture that are still here come first, in its order, so one at texel k was at texel k or past it: the search starts there and

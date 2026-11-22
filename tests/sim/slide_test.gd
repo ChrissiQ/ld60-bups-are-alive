@@ -13,6 +13,14 @@ extends SceneTree
 ##    picture with other bytes; such pairs are some of the frames (pictures are held several frames at 2M).
 ## C  Zoomed in (1 px a µm about the dish's middle: a bup of 2 µm or more is a capsule there, and some hundreds are in view): the same of the capsules' instances (the first
 ##    INSTANCES of them, their places).
+## M  The motion, zoomed out, over FRAMES frames before Z and with nothing read back (a read back stalls the card the simulation shares;
+##    WorldClient's playout keeps its clock of simulated time a lead behind the newest picture, so a picture a little late does not stop the
+##    bups): the simulated time drawn this frame is the picture before's time and the share of the way to the shown one's (the bups move
+##    with simulated time, and pictures need not be evenly spaced in it); a stall is a frame whose drawn time did not move, a jump one
+##    whose drawn time moved over 3 times the median speed (simulated s a real s, over the real time the playout's clock moved by that
+##    frame, `Playout.last_dt`, which the frame's start does not mark). Stalls are at most 2% of the frames, no jump comes, the clock is
+##    never brought up to the lead (`Playout.snaps`) and no picture is skipped. The lag (WorldClient.lag, in ms and pictures, averaged over the frames) is printed. (A build whose playout
+##    has no clock counts the stalls by the share alone.)
 ## S  The share of bups whose place before (the ids texture's, or the bytes handed over) differs from their place: on the shared path,
 ##    over the bups that are in both of two pictures shown one after the other (matched by id), within 0.02 of the share whose place
 ##    changed from the first picture to the second; on the byte handover (no ids on this side) it is printed. Either is above 0.5 (most
@@ -77,6 +85,14 @@ func _run() -> void:
 		TestUtil.finish(self, "OK slide_test")
 		return
 	print("     %d bups in the dish, speed reached x%.0f, density ready %s" % [d.population(), WorldClient.shared().latest().achieved_speed, v.density_ready()])
+	var skipped_at: int = WorldClient.shared().picture_rate().get("skipped", 0)
+	var pl0: Variant = WorldClient.shared().get("_playout")
+	var snaps_at: int = pl0.snaps if pl0 != null else 0
+	var mo := await _frames(d, func() -> int: return 0)
+	var skipped: int = int(WorldClient.shared().picture_rate().get("skipped", 0)) - skipped_at
+	var snaps: int = (pl0.snaps - snaps_at) if pl0 != null else 0
+	var motion: Dictionary = mo[3]
+	TestUtil.show(motion["stalls"] <= FRAMES / 50 and motion["jumps"] == 0 and skipped == 0 and snaps == 0, "M zoomed out: %d stalled frames of %d (share held at 1: %d), %d jumps (speed over 3 x the median %.2f; the fastest %.2f), %d snaps, %d pictures skipped; lag %.0f ms, %.2f pictures on average; %d new pictures" % [motion["stalls"], FRAMES, motion["at_one"], motion["jumps"], motion["median"], motion["largest"], snaps, skipped, motion["lag_ms"], motion["lag_pictures"], mo[2]])
 	var z := await _frames(d, func() -> int: return _density_hash(v))
 	TestUtil.show(z[0] > 0 and z[1] == z[0], "Z zoomed out: %d pairs of frames between pictures (of %d frames), the density picture changed in %d; %d new pictures" % [z[0], FRAMES, z[1], z[2]])
 	var zoom: Vector2 = m.camera.zoom
@@ -100,7 +116,8 @@ func _run() -> void:
 
 
 ## Over FRAMES frames: [pairs of consecutive frames with the same picture and another share, of those the pairs whose `look` differs,
-## new pictures].
+## new pictures, {stalls, at_one (stalls at a share of 1), jumps, median, largest (speeds: simulated s drawn a real s, or pictures a
+## second without a clock), lag_ms, lag_pictures}].
 func _frames(d: Dish, look: Callable) -> Array:
 	var v := d.drawing.view
 	var pairs := 0
@@ -109,8 +126,18 @@ func _frames(d: Dish, look: Callable) -> Array:
 	var last_seq := -1
 	var last_share := -1.0
 	var last_look := 0
+	var advances: Array = []
+	var stalls := 0
+	var at_one := 0
+	var lag_ms := 0.0
+	var lag_pictures := 0.0
+	var speeds: Array = []
+	var last_drawn := -1.0
+	var usec := Time.get_ticks_usec()
 	for i in FRAMES:
 		await process_frame
+		var dt := (Time.get_ticks_usec() - usec) / 1e6
+		usec = Time.get_ticks_usec()
 		var seq := v.payload().seq
 		var share := d.drawing.share()
 		var now: int = look.call()
@@ -119,10 +146,30 @@ func _frames(d: Dish, look: Callable) -> Array:
 			changed += 1 if now != last_look else 0
 		if seq != last_seq:
 			pictures += 1
+		var pl: Variant = WorldClient.shared().get("_playout")
+		var drawn: float = (pl.before + share * (v.payload().sim_time - pl.before)) if pl != null and pl.before >= 0.0 else -1.0
+		if i > 0:
+			var advance := share - last_share if seq == last_seq else (1.0 - last_share) + share
+			if drawn >= 0.0 and last_drawn >= 0.0:
+				advance = drawn - last_drawn
+			advances.append(advance)
+			speeds.append(advance / maxf(pl.last_dt if pl != null else dt, 1e-4))
+			if absf(advance) < 1e-6:
+				stalls += 1
+				at_one += 1 if share >= 1.0 else 0
+		var lag: Dictionary = WorldClient.shared().lag() if WorldClient.shared().has_method("lag") else {"ms": 0.0, "pictures": 0.0}
+		lag_ms += float(lag["ms"]) / FRAMES
+		lag_pictures += float(lag["pictures"]) / FRAMES
 		last_seq = seq
 		last_share = share
 		last_look = now
-	return [pairs, changed, pictures]
+		last_drawn = drawn
+	var sorted := speeds.duplicate()
+	sorted.sort()
+	var median: float = sorted[sorted.size() / 2] if not sorted.is_empty() else 0.0
+	var jumps := speeds.filter(func(a: float) -> bool: return a > 3.0 * median).size() if median > 0.0 else 0
+	return [pairs, changed, pictures, {"stalls": stalls, "at_one": at_one, "jumps": jumps, "median": median,
+		"largest": sorted[-1] if not sorted.is_empty() else 0.0, "lag_ms": lag_ms, "lag_pictures": lag_pictures}]
 
 
 func _density_hash(v: ViewRenderer) -> int:
