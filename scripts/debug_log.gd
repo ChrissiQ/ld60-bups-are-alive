@@ -26,7 +26,7 @@ static func report(dish: Dish, scene: Node, extra: Dictionary) -> String:
 			"mode": Session.Mode.keys()[Session.mode],
 			"load_requested": Session.load_requested,
 			"tutorial_wanted": Session.tutorial_wanted,
-			"free_start": Session.free_start.to_dict(),
+			"free_start": Session.free_start.to_dict(),  # (the setup screens' last choices, not necessarily this game's)
 		},
 		"screen": extra,
 	}

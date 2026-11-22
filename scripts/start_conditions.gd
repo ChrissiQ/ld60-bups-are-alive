@@ -69,9 +69,14 @@ func spread_founders() -> void:
 		founders.append({"color": Genome.hex_of(color)})
 
 
-## An independent copy. Goes through to_dict/from_dict, so a new field only has to be added there.
+## An independent copy with the same values (not brought into range: a start a test builds outside it stays as it is). Goes through to_dict, so a new
+## field only has to be added there.
 func copy() -> StartConditions:
-	return StartConditions.from_dict(to_dict())
+	var c := StartConditions.new()
+	var d := to_dict()
+	for key: String in d:
+		c.set(key, d[key])
+	return c
 
 
 func to_dict() -> Dictionary:

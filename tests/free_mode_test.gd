@@ -706,6 +706,15 @@ func _initialize() -> void:
 	TestUtil.check(m.pause_menu.initial_panel.visible and m.pause_menu.initial_bups.value_label.text == "150" and m.pause_menu.initial_nutrients.value_label.text == "40/mm²" and m.pause_menu.initial_rate.value_label.text == "11.0 /mm²/h" and m.pause_menu.initial_dish.value_label.text == "0.3 mm" and m.pause_menu.initial_limit.value_label.text == UiText.thousands(chosen.bup_limit), "the Escape menu records how the dish started, unchanged by later changes (dish %s)" % m.pause_menu.initial_dish.value_label.text)
 	TestUtil.check(m.pause_menu.initial_bups.name_label.text == Strings.t("pause.record_bups") and m.pause_menu.initial_rate.name_label.text == Strings.t("pause.record_nutrient_feed"), "its rows carry their labels")
 	TestUtil.check(m.pause_menu.initial_running.visible and m.pause_menu.initial_running.name_label.text == Strings.t("pause.record_device") and m.pause_menu.initial_running.value_label.text == "Test GPU", "the record names the device the world simulates on")
+	var later := TestUtil.small_start()  # (the setup screens' choices change after the game began: the menu still shows the game's own start)
+	later.bups = 77
+	later.nutrient_density = 90
+	later.feed_density = 3.0
+	Session.free_start = later
+	m._close_menu()
+	m._open_menu()
+	TestUtil.check(m.pause_menu.initial_bups.value_label.text == "150" and m.pause_menu.initial_nutrients.value_label.text == "40/mm²" and m.pause_menu.initial_rate.value_label.text == "11.0 /mm²/h", "the Escape menu shows the game's own start, not the setup's later choices (%s, %s, %s)" % [m.pause_menu.initial_bups.value_label.text, m.pause_menu.initial_nutrients.value_label.text, m.pause_menu.initial_rate.value_label.text])
+	Session.free_start = chosen
 	fake.device = ""
 	m.pause_menu.open(m.dish, true, chosen)
 	TestUtil.check(m.pause_menu.initial_running.value_label.text == Strings.t("pause.running_cpu"), "...and says CPU when the world has no device")

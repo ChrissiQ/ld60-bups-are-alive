@@ -61,6 +61,8 @@ const LONGEST_CLOCK_HOURS := 999999  ## the top bar keeps room for the clock up 
 ## exactly two ways: no goals, and no saving.
 var free_mode := Session.mode == Session.Mode.FREE
 var save_path := SaveGame.PATH  ## where the game is saved and loaded from (a test sets a scratch file before the screen is in the tree)
+## What a free game was struck from, kept as it began (the setup screens' choices change later; null in goal mode).
+var started_as: StartConditions = null
 var tracker := GoalTracker.new()
 var dishes: Array[Dish] = []  ## every dish that runs; `dish` is the one in the main view and the only one shown (the others are parked, Dish.park: see the strip). Every dish sits at the screen's origin, so what is drawn is in the main dish's own coordinates
 var _view_before_extinct: Dish = null  ## the dish that was in the main view when the first dish in `_extinct_queue` was brought into view: the view goes back to it afterwards
@@ -272,7 +274,8 @@ func _exit_tree() -> void:
 
 func _begin_dish() -> void:
 	_begin_game(world_time())  # (the game begins with its dish, at the world's time)
-	dish.strike(Session.free_start if free_mode else null)
+	started_as = Session.free_start.copy() if free_mode else null
+	dish.strike(started_as)
 	if dish.row >= 0:
 		_asked_rows[dish.row] = dish
 	tracker.apply_costs(dish)  # (strike resets it: experiment 2 and after costs what it did)
@@ -435,6 +438,7 @@ func _on_tool_selected(new_tool: Toolbar.Tool) -> void:
 func debug_state() -> Dictionary:
 	return {
 		"mode": "free" if free_mode else "goals",
+		"started_as": started_as.to_dict() if started_as != null else {},
 		"goal_index": tracker.index,
 		"sim_speed": sim_speed,
 		"achieved_speed": achieved_speed,
@@ -550,7 +554,7 @@ func _open_menu() -> void:
 	hud_layer.process_mode = Node.PROCESS_MODE_DISABLED  # no toolbar shortcuts or clicks behind the menu
 	dish.clear_hover()
 	Encyclopedia.set_fact("husks", dishes.any(func(d: Dish) -> bool: return d.has_husks()))  # (the game's husk options: any running dish having one)
-	pause_menu.open(dish, free_mode, Session.free_start)
+	pause_menu.open(dish, free_mode, started_as)
 
 
 func _close_menu() -> void:
