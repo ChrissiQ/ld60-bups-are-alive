@@ -54,8 +54,10 @@ const POOL_DRAW_TYPES := {
 ## past the dish's bups are zero (length 0: nothing drawn), but for a dead bup's id, which keeps the ids in their order. The length is the
 ## body's true length, with no minimum and no trail; the angle is where it faces. The picture goes into slot `pcs.pc` of PAYLOAD, IDTEX
 ## and PREVXY (`pcs.pb` texels a slot), what it holds into the slot's SLOTHEAD row, and the count it was made from into PICN[`pcs.pd` % 8]
-## (the host zeroes it first, so a dish with no bups reads 0). `pcs.pd` / 8 is the slot the picture before it was made in
-## (SimCore._picture_slots). PREVXY is where each bup was in that picture (when it was of the same dish row), found by its id: a dish's
+## (the host zeroes it first, so a dish with no bups reads 0). `pcs.pd` / 8 % 8 is the slot the picture before it was made in
+## (SimCore._picture_slots), and `pcs.pd` of 64 or more says no step ran since that picture (a pass of no steps: an edit, a question,
+## the view asked again): the bups are where they were, so a bup found there takes that picture's place before, and the motion the
+## picture before showed goes on (WorldClient.playout counts such a picture as the one before it, going on). PREVXY is where each bup was in that picture (when it was of the same dish row), found by its id: a dish's
 ## bups lie in the rising order of their ids (compaction keeps the survivors' order and puts the newborns, whose ids are past every older
 ## one, after them; a pipette's moved bups keep their order), so a search over the picture before finds a bup that was in it. The bups of
 ## that picture that are still here come first, in its order, so one at texel k was at texel k or past it: the search starts there and
@@ -66,6 +68,7 @@ const PAYLOAD_FUNCS := """
 bool id_before(uint hi_a, uint lo_a, uint hi_b, uint lo_b) { return hi_a < hi_b || (hi_a == hi_b && lo_a < lo_b); }
 uint BEFORE;  // the first texel of the slot the picture before was made in
 bool was_before(uint m, uint lo, uint hi) { uint o = (BEFORE + m) * IDT_WORDS; return id_before(IDTEX[o + IDT_HI], IDTEX[o + IDT_LO], hi, lo); }
+bool CARRY;  // no step since the picture before: a bup found there takes its place before
 vec2 place_before(uint d, uint k, uint lo, uint hi, vec2 here, uint slot) {
 	if (SLOTHEAD[slot * SH_WORDS + SH_ROW] != d + 1u) return here;
 	uint n = SLOTHEAD[slot * SH_WORDS + SH_COUNT], a = min(k, n), c = a, s = 1u;
@@ -78,6 +81,7 @@ vec2 place_before(uint d, uint k, uint lo, uint hi, vec2 here, uint slot) {
 	if (a >= n) return here;
 	uint o = (BEFORE + a) * IDT_WORDS;
 	if (IDTEX[o + IDT_LO] != lo || IDTEX[o + IDT_HI] != hi) return here;
+	if (CARRY) return vec2(uintBitsToFloat(PREVXY[(BEFORE + a) * PV_WORDS]), uintBitsToFloat(PREVXY[(BEFORE + a) * PV_WORDS + 1u]));
 	uvec4 px = PAYLOAD[BEFORE + a];
 	return vec2(uintBitsToFloat(px[PL_X]), uintBitsToFloat(px[PL_Y]));
 }
@@ -86,8 +90,9 @@ vec2 place_before(uint d, uint k, uint lo, uint hi, vec2 here, uint slot) {
 const K_POOL_PAYLOAD := COLOUR_FUNCS + PAYLOAD_FUNCS + """
 uint byte_of(float v) { return uint(clamp(v * 255.0 + 0.5, 0.0, 255.0)); }
 void f(uint k) {
-	uint d = uint(pcs.pa), room = uint(pcs.pb), slot = uint(pcs.pc), before = uint(pcs.pd) / 8u, o = slot * room + k;
+	uint d = uint(pcs.pa), room = uint(pcs.pb), slot = uint(pcs.pc), before = (uint(pcs.pd) / 8u) % 8u, o = slot * room + k;
 	BEFORE = before * room;
+	CARRY = uint(pcs.pd) >= 64u;
 	if (k == 0u) { PICN[uint(pcs.pd) % 8u] = DS(d, DS_COUNT); SLOTHEAD[slot * SH_WORDS + SH_ROW] = d + 1u; SLOTHEAD[slot * SH_WORDS + SH_COUNT] = min(DS(d, DS_COUNT), room); }
 	uvec4 px = uvec4(0u);
 	uint lo = 0u, hi = 0u;

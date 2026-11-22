@@ -27,7 +27,8 @@ extends SceneTree
 ##   of the true one), so the share runs 0, 1/n, ... (n - 1)/n and
 ##   the next picture starts at 0 where the last would have reached 1. Through `poll` on FakeSimBackend with one publish every 4 frames,
 ##   the shares of the last 4 frames are 0, 0.25, 0.5, 0.75 once the gap has settled (it reaches 4 within 0.01 after 20 arrivals, as it
-##   moves a quarter of the way a gap); paused (set_time), the share is 1.
+##   moves a quarter of the way a gap); a publish then at the same simulated time as the one shown (a pass of no steps) goes on with its
+##   share (0.75, then 1.0 a frame later, not 0); paused (set_time), the share is 1.
 
 
 func _initialize() -> void:
@@ -121,6 +122,15 @@ func _share() -> void:
 	for i in 4:
 		near = near and absf(float(last[i]) - want[i]) < 0.01
 	TestUtil.check(near, "one publish every 4 frames through poll: the last frames' shares are 0, 0.25, 0.5, 0.75 (got %s)" % [last])
+	var again := Snapshot.new()  # (a pass of no steps two frames into the last picture: the same simulated time, a new publish)
+	again.seq = 1000
+	var same := _publish(500, 0)
+	same.sim_time = w.shown_payload().sim_time
+	var at := w.shown_share()
+	again.payloads.append(same)
+	fake.serve(again)
+	w.poll()
+	TestUtil.check(w.shown_payload().seq == 500 and absf(w.shown_share() - (at + 0.25)) < 0.01, "a publish at the same simulated time goes on with the share (%.2f, then %.2f)" % [at, w.shown_share()])
 	w.set_time(1.0, true, 1.0 / 60.0)
 	TestUtil.check(w.shown_share() == 1.0, "paused: the share is 1 (got %f)" % w.shown_share())
 
@@ -129,6 +139,7 @@ static func _publish(seq: int, row := -1) -> PayloadInfo:
 	var p := PayloadInfo.new()
 	p.seq = seq
 	p.row = row
+	p.sim_time = float(seq)
 	return p
 
 

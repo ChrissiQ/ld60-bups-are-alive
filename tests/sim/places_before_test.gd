@@ -14,8 +14,9 @@ extends SceneTree
 ##    for the first after them) when that picture holds the id, else its own place; over the pictures some bups are newborns (in no
 ##    picture before) and some of the picture before's bups are gone (dead), so both cases are met;
 ## T  the tracked founder's answer carries its place before (R_PX, R_PY) as its texel has it.
-## Then the dish is pipetted (a 300 µm disc about its middle into a new dish): S  the source's next picture holds the rest, its places
-## before found as in P; F  the new dish's first picture, after it, has every place before equal to the place (a picture of another dish
+## Then the dish is pipetted (a 300 µm disc about its middle into a new dish): S  the source's next picture holds the rest, and as no step
+## ran since the picture before (a pipette is a pass of no steps), each bup's place before is that picture's place before for it, bit for
+## bit (the motion that picture showed goes on); F  the new dish's first picture, after it, has every place before equal to the place (a picture of another dish
 ## row came before), and its ids rise. Then it is frozen and thawed: F  the thawed dish's first picture has every place before equal to the place (a new
 ## dish to the core), and after 3 more steps P holds again (the thaw kept the order: O).
 
@@ -95,7 +96,7 @@ func _picture(h: SimHarness, handed: bool, index: int, n: int, seq: int, bytes: 
 
 
 ## [rising, places before as the rule has them, newborns, gone] of picture `p` against the picture made before it (`before`: {} for none).
-static func _compare(before: Dictionary, p: Dictionary) -> Array:
+static func _compare(before: Dictionary, p: Dictionary, carried := false) -> Array:
 	var at := {}
 	if not before.is_empty():
 		for k in (before["ids"] as PackedInt64Array).size():
@@ -110,7 +111,9 @@ static func _compare(before: Dictionary, p: Dictionary) -> Array:
 			rising = false
 		if at.has(id):
 			kept += 1
-			right = right and p["px"][k] == before["x"][at[id]] and p["py"][k] == before["y"][at[id]]
+			var wx: int = before["px"][at[id]] if carried else before["x"][at[id]]
+			var wy: int = before["py"][at[id]] if carried else before["y"][at[id]]
+			right = right and p["px"][k] == wx and p["py"][k] == wy
 		else:
 			born += 1
 			right = right and p["px"][k] == p["x"][k] and p["py"][k] == p["y"][k]
@@ -169,8 +172,8 @@ func _check(handed: bool) -> void:
 	var got: Dictionary = h.core.publish(_view(0))
 	got["row"] = 0
 	var source: Array = _pictures(h, handed, got)
-	var r_src := _compare(last, source[0]) if not source.is_empty() else [false, false, 0, 0]
-	TestUtil.check(r_src[0] and r_src[1], "%s: S the source after the pipette: rising %s, its places before the picture before's %s (gone %d, moved %d)" % [path, r_src[0], r_src[1], r_src[3], moved])
+	var r_src := _compare(last, source[0], true) if not source.is_empty() else [false, false, 0, 0]
+	TestUtil.check(r_src[0] and r_src[1], "%s: S the source after the pipette: rising %s, its places before carried from the picture before %s (gone %d, moved %d)" % [path, r_src[0], r_src[1], r_src[3], moved])
 	got = h.core.publish(_view(dest))
 	got["row"] = dest
 	var fresh: Array = _pictures(h, handed, got)

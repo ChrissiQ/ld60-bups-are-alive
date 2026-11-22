@@ -96,6 +96,7 @@ vec3 from_hsv(float h, float s, float v) {
 bool id_before(uint hi_a, uint lo_a, uint hi_b, uint lo_b) { return hi_a < hi_b || (hi_a == hi_b && lo_a < lo_b); }
 uint BEFORE;  // the first texel of the slot the picture before was made in
 bool was_before(uint m, uint lo, uint hi) { uint o = (BEFORE + m) * IDT_WORDS; return id_before(IDTEX[o + IDT_HI], IDTEX[o + IDT_LO], hi, lo); }
+bool CARRY;  // no step since the picture before: a bup found there takes its place before
 vec2 place_before(uint d, uint k, uint lo, uint hi, vec2 here, uint slot) {
 	if (SLOTHEAD[slot * SH_WORDS + SH_ROW] != d + 1u) return here;
 	uint n = SLOTHEAD[slot * SH_WORDS + SH_COUNT], a = min(k, n), c = a, s = 1u;
@@ -108,14 +109,16 @@ vec2 place_before(uint d, uint k, uint lo, uint hi, vec2 here, uint slot) {
 	if (a >= n) return here;
 	uint o = (BEFORE + a) * IDT_WORDS;
 	if (IDTEX[o + IDT_LO] != lo || IDTEX[o + IDT_HI] != hi) return here;
+	if (CARRY) return vec2(uintBitsToFloat(PREVXY[(BEFORE + a) * PV_WORDS]), uintBitsToFloat(PREVXY[(BEFORE + a) * PV_WORDS + 1u]));
 	uvec4 px = PAYLOAD[BEFORE + a];
 	return vec2(uintBitsToFloat(px[PL_X]), uintBitsToFloat(px[PL_Y]));
 }
 
 uint byte_of(float v) { return uint(clamp(v * 255.0 + 0.5, 0.0, 255.0)); }
 void f(uint k) {
-	uint d = uint(pcs.pa), room = uint(pcs.pb), slot = uint(pcs.pc), before = uint(pcs.pd) / 8u, o = slot * room + k;
+	uint d = uint(pcs.pa), room = uint(pcs.pb), slot = uint(pcs.pc), before = (uint(pcs.pd) / 8u) % 8u, o = slot * room + k;
 	BEFORE = before * room;
+	CARRY = uint(pcs.pd) >= 64u;
 	if (k == 0u) { PICN[uint(pcs.pd) % 8u] = DS(d, DS_COUNT); SLOTHEAD[slot * SH_WORDS + SH_ROW] = d + 1u; SLOTHEAD[slot * SH_WORDS + SH_COUNT] = min(DS(d, DS_COUNT), room); }
 	uvec4 px = uvec4(0u);
 	uint lo = 0u, hi = 0u;

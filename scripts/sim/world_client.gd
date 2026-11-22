@@ -22,7 +22,9 @@ extends RefCounted
 ## Between pictures the view draws each bup part of the way from its place in the picture before to its place in the one shown
 ## (`shown_share`): the frames since the shown picture came up over the frames it is expected to stay up (`expected_up`: until the playout
 ## shows the next waiting one, or with none waiting until the next arrival is due), so the bups move on every frame, about a picture behind
-## the newest. Paused, the share is 1: the picture shown, still.
+## the newest. A publish at the same simulated time as the one shown, of the same dish (a pass of no steps: the simulation carries that
+## picture's places before into it), goes on with its share and its frames where they were, so the motion does not stop for it. Paused,
+## the share is 1: the picture shown, still.
 
 const WAITING_MOST := GpuLayout.PICTURES_MOST + 2  ## publishes seen and not yet shown that the playout keeps: an iteration's burst and two more (SimCore.PAYLOAD_TEXTURES holds their textures)
 const GAP_MOST := 30.0  ## frames: the most one gap between arrivals counts for in `gap` (a pause publishes nothing for a while)
@@ -292,10 +294,15 @@ func poll() -> void:
 	for _p: PayloadInfo in arrived:
 		_arrivals.append(now)
 	if step[0] != null:
-		_shown = step[0]
-		_new_pictures.append([now, _polls, (step[0] as PayloadInfo).sim_time])
-		_shown_frames = 0
-		_shown_for = expected_up(step[1], _pace, _gap, _polls - _last_arrival)
+		var next := step[0] as PayloadInfo
+		var goes_on := _shown != null and next.row == _shown.row and next.sim_time == _shown.sim_time
+		_shown = next
+		_new_pictures.append([now, _polls, next.sim_time])
+		if goes_on:
+			_shown_frames += 1
+		else:
+			_shown_frames = 0
+			_shown_for = expected_up(step[1], _pace, _gap, _polls - _last_arrival)
 	else:
 		_shown_frames += 1
 	_waiting = step[1]

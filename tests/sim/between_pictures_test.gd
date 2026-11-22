@@ -6,7 +6,9 @@ extends SceneTree
 ## payload's texels in order. Windowed only, on either path. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/between_pictures_test.gd
 ##   (and with `-- --cpu-handover` after the script: the byte handover)
-## The hold is no set_time once the run has gone on RUN_FRAMES frames; a publish that still comes during the checks (a command the dish
+## The run is paced as on a 60 Hz display (60 frames a second, the governor told a 60 Hz frame), where the commands the dish sends during
+## the hold start passes of no steps that publish the picture again; such a picture carries the motion of the one before (SimCore,
+## WorldClient's header), so M holds through them. The hold is no set_time once the run has gone on RUN_FRAMES frames; a publish that still comes during the checks (a command the dish
 ## sends may start a pass) changes the picture under them, so the run and the checks are made again, up to ATTEMPTS times.
 ##
 ## Expected values [derived from GpuKernelsView.place_at: a bup is drawn at was (1 - t) + here t, here exactly at t = 1]:
@@ -188,6 +190,8 @@ func _run() -> void:
 	root.add_child(camera)
 	await process_frame
 	camera.make_current()
+	Engine.max_fps = 60  # (a 60 Hz display: see the header)
+	d.world.display_ms = 1000.0 / 60.0
 	d.strike(start)
 	var t0 := Time.get_ticks_msec()
 	while Time.get_ticks_msec() - t0 < 5000 and d.drawing.view == null:

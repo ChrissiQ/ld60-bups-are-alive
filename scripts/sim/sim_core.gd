@@ -103,6 +103,7 @@ var _id_ring_bytes := 0  ## each slot's size
 var _temp_sets: Array[RID] = []  ## the copy kernels' sets of one publish
 var _pic_dish: CoreDish = null  ## the dish the last bup picture was made of: a picture of another starts with no places before
 var _pic_slot := 0  ## the slot of PAYLOAD, IDTEX and PREVXY the last bup picture was made in (`_picture_slots`)
+var _moved_since_pic := true  ## steps ran (or bups were moved) since the last bup picture: the next one's places before are its bups' places in that picture; else that picture's own places before go on
 var _profile: Variant = null  ## while `profile_steps` runs: kernel name -> Array of µs, each dispatch its own submit
 var _scratch := RID()  ## where `read_parts` gathers what it reads (up to SCRATCH_KEEP bytes)
 var _scratch_bytes := 0
@@ -498,6 +499,7 @@ static func cap_for(limit: int) -> int:
 ## passes follow the new grid. Returns {row, removed, deaths (death event bytes, GpuLayout.ED_*)}, or {} when the dish could not be loaded
 ## again within the budget (then it is back as it was, and `errors` says why).
 func resize(row: int, new_radius: float, resolution := -1) -> Dictionary:
+	_moved_since_pic = true  # (bups past the new edge are moved inside it)
 	if not _dishes.has(row):
 		return {}
 	var cd: CoreDish = _dishes[row]
@@ -756,6 +758,8 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 	var t_pub := Time.get_ticks_usec()
 	var pictures: int = plan.pictures if plan != null and plan.get("pictures") is int else 1
 	var pub := _publish_stage(view, _expected_count(view.row, steps) if view != null and _dishes.has(view.row) else 0, steps, pictures)
+	if steps > 0:
+		_moved_since_pic = true  # (set before the pictures are recorded: the last picture follows the steps)
 	var shots: Array = pub.get("shots", [])
 	var answer_usec := t_pub - t_ask
 	var publish_usec := Time.get_ticks_usec() - t_pub
@@ -2171,6 +2175,7 @@ func _publish_stage(view: ViewRequest, expect: int, steps := 0, pictures := 1) -
 	if w >= 0 and _pic_dish != cd:  # (the slots hold another dish's pictures, or none: this dish's first picture has no places before)
 		arena.put_small("SLOTHEAD", arena.zeros((GpuLayout.PICTURES_MOST + 1) * GpuLayout.SH_WORDS * 4))
 		_pic_dish = cd
+		_moved_since_pic = true
 	var tracking := w >= 0 and not view.track.is_empty() and count(row) > 0
 	if tracking:
 		_put_track(view.track, 0)
@@ -2226,7 +2231,9 @@ func _publish_record(cl: int, pub: Dictionary) -> void:
 	var nn: int = pub["nn"]
 	var room: int = pub["room"]
 	if pub["w"] >= 0:
-		_disp(cl, "pool_payload", _groups(pub["texels"]), float(row), float(room), float(pub["slot"]), float(8 * int(pub["before"])))
+		var same := 0 if _moved_since_pic else 64  # (no step since the picture before: its motion goes on)
+		_moved_since_pic = false
+		_disp(cl, "pool_payload", _groups(pub["texels"]), float(row), float(room), float(pub["slot"]), float(8 * int(pub["before"]) + same))
 		if not cpu_handover:
 			var w: int = pub["w"]
 			_copy(cl, "pool_copy_payload", {"PAYTEX": _textures["payload"][w], "IDS": _textures["ids"][w]}, GpuLayout.PAYLOAD_TEX_WIDTH, room, float(row), float(pub["slot"]))
