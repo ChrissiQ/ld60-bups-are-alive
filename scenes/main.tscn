@@ -31,6 +31,7 @@
 [ext_resource type="PackedScene" path="res://ui/layers_panel.tscn" id="layers_panel"]
 [ext_resource type="PackedScene" path="res://ui/dish_strip.tscn" id="dish_strip"]
 [ext_resource type="Script" path="res://ui/tray_section.gd" id="tray_section"]
+[ext_resource type="PackedScene" path="res://ui/timing_overlay.tscn" id="timing_overlay"]
 [ext_resource type="Script" path="res://ui/graph_controls.gd" id="graph_controls"]
 [ext_resource type="Script" path="res://ui/freezer_shelf.gd" id="freezer_shelf"]
 [ext_resource type="PackedScene" path="res://ui/dish_actions.tscn" id="dish_actions"]
@@ -922,6 +923,9 @@ bbcode_enabled = true
 fit_content = true
 scroll_active = false
 autowrap_mode = 3
+
+[node name="TimingOverlay" parent="HUD/Frame/Layout/Middle/Main/Row/Stage" instance=ExtResource("timing_overlay")]
+unique_name_in_owner = true
 
 [node name="Banner" type="Label" parent="HUD/Frame/Layout/Middle/Main/Row/Stage" unique_id=1097942447]
 unique_name_in_owner = true

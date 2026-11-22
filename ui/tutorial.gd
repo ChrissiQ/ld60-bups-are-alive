@@ -137,9 +137,9 @@ func _process(_delta: float) -> void:
 	_layout()  # (what is lit can move: the window changes shape, a panel appears)
 
 
-## The keys the tour leaves to the rest of the game: the debug log and full screen are taken from the tour too.
+## The keys the tour leaves to the rest of the game: the debug log, the timing overlay and full screen are taken from the tour too.
 func lets_through(event: InputEventKey) -> bool:
-	return event.keycode == KEY_F12 or UserSettings.is_fullscreen_key(event)
+	return event.keycode == KEY_F12 or event.keycode == KEY_F3 or UserSettings.is_fullscreen_key(event)
 
 
 func _input(event: InputEvent) -> void:

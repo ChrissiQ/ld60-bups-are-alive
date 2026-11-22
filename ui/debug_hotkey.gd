@@ -2,6 +2,7 @@ extends Node
 ## F12 on any screen writes the debug log and a screenshot (see DebugLog), then says so for a few seconds (autoload
 ## "DebugHotkey"). The screen can add what only it knows by having a `debug_state()` method, and its dish (if it has one) is
 ## the one in the log: a `dish` property.
+## F3 shows or hides the timing overlay (TimingOverlay) on the screen that has one (the game screen: a `timing_overlay` property, in its stage). Off at start, not saved.
 
 const NOTICE_SECONDS := 3.0  ## how long the notice stays up
 const FREEZE_FRAMES := 3  ## frames the game stands still before the screenshot is taken, so the picture has caught up with the state the log reads
@@ -23,18 +24,32 @@ func _watch_window(node: Node) -> void:
 
 
 func _on_window_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F12:
-		write()
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_F12:
+			write()
+		elif event.keycode == KEY_F3:
+			toggle_overlay()
 
 
 func _process(_delta: float) -> void:
 	notice.visible = Time.get_ticks_msec() < _notice_until
 
 
+## Shows or hides the current screen's timing overlay (none on a screen without one).
+func toggle_overlay() -> void:
+	var scene := get_tree().current_scene
+	var overlay: TimingOverlay = scene.get("timing_overlay") if scene != null else null
+	if overlay != null:
+		overlay.visible = not overlay.visible
+
+
 ## Before anything else sees the key, so that no screen (a menu, the tour) can take it.
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F12:
 		write()
+		get_viewport().set_input_as_handled()
+	elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F3:
+		toggle_overlay()
 		get_viewport().set_input_as_handled()
 
 
