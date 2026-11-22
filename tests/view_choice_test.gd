@@ -82,11 +82,11 @@ func _run() -> void:
 	for i in 8:
 		await process_frame
 	TestUtil.check(m._extinct_queue.has(dying) and m.paused and m.banner.text == Strings.t("hud.banner_dish_extinct", [m._dish_numbers[dying]]), "a dish out of view that dies out pauses the game and says which")
-	TestUtil.check(m.dish == home, "...with the view on the dish the player chose")
+	TestUtil.check(m.dish == dying, "...and brings it into view, wherever the view was (a surprise, not the player's doing)")
 	m.toolbar.set_paused(false)
 	for i in 4:
 		await process_frame
-	TestUtil.check(not is_instance_valid(dying) and m.dish == home, "resuming deletes it and the view is still on that dish")
+	TestUtil.check(not is_instance_valid(dying) and m.dish == home, "resuming deletes it and the view goes back to the dish the player chose")
 
 	# The dish in view dying out is the one shown, and its neighbour comes into view when play resumes.
 	var before: int = m.dishes.size()

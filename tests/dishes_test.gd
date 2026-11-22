@@ -20,9 +20,9 @@ extends SceneTree
 ##    Trashing the 501st dish of the strip frees its number for a pipette: while its answer is awaited no dish can be added, and its new
 ##    dish is shown by that number.
 ##  - The dishes have one clock: their times are equal after any frame, and both move while the game runs.
-##  - A dish that dies out (FakeWorld.kill) out of view: the game pauses with banner "DISH 2 WENT EXTINCT" and the view stays where it is, one
-##    `extinct` signal however many snapshots say so; resuming sends one REMOVE_DISH for its row and deletes it; the view stays on the dish
-##    being looked at; one in view that dies out goes to the dish before it; number 2 is not reused (not all 999 have been handed out).
+##  - A dish that dies out (FakeWorld.kill) out of view: the game pauses on it with banner "DISH 2 WENT EXTINCT", one `extinct`
+##    signal however many snapshots say so; resuming sends one REMOVE_DISH for its row and deletes it; the view goes to the dish before it
+##    (or back to the one being looked at); number 2 is not reused (not all 999 have been handed out).
 ##  - The last dish dying out ends the game: the end dialog, and neither the pause button nor Space resumes; starting again strikes
 ##    a dish afresh (bups once a snapshot shows it).
 ##  - The pipette at (18, 0) with radius 30 over 10 bups at (4i, 0), 5 at (200 + i, 100), a parent at (300, 0) and its child
@@ -95,7 +95,7 @@ func _run() -> void:
 	var views := fake.calls_of(SimCommand.KIND_SET_VIEW)
 	TestUtil.check(not views.is_empty() and int(views[-1]["args"]["row"]) == first.row, "a dish back in view tells the world afresh what it shows (the last view asked is its row)")
 
-	# A dish that dies out: the game pauses and says so; resuming deletes it (the view moves only if it was the dish in view).
+	# A dish that dies out: the game pauses on it and says so; resuming deletes it and goes to the dish before it.
 	var third: Dish = m.add_dish(chosen)
 	await process_frame
 	TestUtil.check(m.dishes.size() == 3 and m.dish == first, "three dishes before one dies out")
@@ -105,7 +105,7 @@ func _run() -> void:
 	fake.kill(other_row)
 	for i in 5:
 		await process_frame
-	TestUtil.check(m.paused and m.dish == first and m.banner.text == Strings.t(EXTINCT_BANNER, [2]), "a dish that dies out out of view: the game pauses and says which, and the view stays (%s)" % m.banner.text)
+	TestUtil.check(m.paused and m.dish == other and m.banner.text == Strings.t(EXTINCT_BANNER, [2]), "a dish that dies out out of view: the game pauses, shows it and says which (%s)" % m.banner.text)
 	TestUtil.check(m.dishes.size() == 3 and not m.toolbar.resume_locked, "...and it stays until play is resumed")
 	TestUtil.check(signals[0] == 1, "it says so once, though every snapshot since has it extinct (%d)" % signals[0])
 	var removes_before := fake.calls_of(SimCommand.KIND_REMOVE_DISH).size()
@@ -116,7 +116,7 @@ func _run() -> void:
 	var removed := fake.calls_of(SimCommand.KIND_REMOVE_DISH).slice(removes_before)
 	TestUtil.check(m.dishes.size() == 2 and not is_instance_valid(other), "resuming deletes the dish")
 	TestUtil.check(removed.size() == 1 and removed[0]["args"]["row"] == other_row and not fake.rows().has(other_row), "...and takes it out of the world: one REMOVE_DISH for its row")
-	TestUtil.check(m.dish == first and m.banner.text == "" and not m.paused, "the view is still on the dish being looked at, the banner clears and play goes on")
+	TestUtil.check(m.dish == first and m.banner.text == "" and not m.paused, "the view goes to the dish before it, the banner clears and play goes on")
 	TestUtil.check(m.dish_strip.count() == 2 and m._dish_numbers.values().has(3) and not m._dish_numbers.values().has(2), "its number is not shown, nor reused before every number has been handed out")
 	fake.kill(first.row)
 	for i in 5:
@@ -140,7 +140,7 @@ func _run() -> void:
 	await process_frame
 	TestUtil.check(not m.holds.has(&"end") and not m.toolbar.resume_locked and m.dish.population() > 0 and m.dishes.size() == 1, "starting again begins the dish afresh")
 
-	# A dish that dies out while another is being looked at: the view stays on what was being looked at, and is not moved to the dish before the dead one.
+	# A dish that dies out while another is being looked at: afterwards the view goes back to what was being looked at, not to the dish before the dead one.
 	var base: Dish = m.dish
 	var dying: Dish = m.add_dish(chosen)
 	var watched: Dish = m.add_dish(chosen)
@@ -150,11 +150,11 @@ func _run() -> void:
 	fake.kill(dying.row)
 	for i in 5:
 		await process_frame
-	TestUtil.check(m.paused and m.dish == watched, "a dish that dies out while another is in view leaves the view on that one")
+	TestUtil.check(m.paused and m.dish == dying, "a dish that dies out while another is in view is shown, as before")
 	m.toolbar.set_paused(false)
 	for i in 3:
 		await process_frame
-	TestUtil.check(m.dishes.size() == 3 - 1 and m.dish == watched and not is_instance_valid(dying), "after it goes, the view is still on the dish that was being looked at, not the one before the dead dish")
+	TestUtil.check(m.dishes.size() == 3 - 1 and m.dish == watched and not is_instance_valid(dying), "after it goes, the view is back on the dish that was being looked at, not the one before the dead dish")
 	dying = m.add_dish(chosen)
 	await process_frame
 	fake.kill(dying.row)
@@ -164,7 +164,7 @@ func _run() -> void:
 	m.toolbar.set_paused(false)
 	for i in 3:
 		await process_frame
-	TestUtil.check(m.dish == base, "if the player moved to another dish while the news was up, they stay where they went")
+	TestUtil.check(m.dish == base, "if the player moved to another dish while it was shown, they stay where they went")
 	m.queue_free()
 	await process_frame
 	m = load(Scenes.GAME).instantiate()
