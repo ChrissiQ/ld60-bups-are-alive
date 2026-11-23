@@ -1,11 +1,206 @@
-# The in-game screen
+# The interface
 
-How the game screen, its tray and the panels in it are built: read before changing the in-game screen, the tray, the freezer, the bup's panel, the genome map, or the encyclopedia and tooltips. The project's rules for every change are in [AGENTS.md](../AGENTS.md).
+How the game's interface is styled and built, from the design system down to the individual panels. Read this before changing any scene, theme, control, dialog or panel, including the in-game screen, the tray, the freezer, the bup's panel, the genome map, the encyclopedia and the tooltips. The project's rules for every change are in [AGENTS.md](../AGENTS.md).
 
-- **In-game screen:** `HUD/Frame/Layout`: the top bar (readout, dish tabs that scroll (each with a small live picture of its dish), layer toggles, playback, menu), then the middle (tool rail and stage; the right-hand tray). The dish is framed in `%Stage` (`StageInput.fit_camera`, again whenever the stage resizes). **Everything that is a panel lives in the tray**, which scrolls when short: the goal, the card of what is picked (a bup, a source, a plankton: only while something is), then accordion sections, all alike (collapsible, draggable, never hidden by a pick): the **Dish** (its bloom and feed rates, Freeze and Trash), its **Dish details** (`TraySection`, `ui/tray_section.gd`: a `SectionButton` heading with a chevron at its right, content under it, put as the node's children in the scene; the panel (`TraySectionPanel`) has no vertical margin: the heading brings its own room above and below and the content (`SectionBody`) its own below, so an open section is not padded twice): **Graph** (Y opens and closes it; a dish switch when there are several dishes, the time span switch, the trait drop-down, the plot), **All dish details** (the dishes running, the bups in all of them and the traits averaged over every bup of every dish), the watch list, and the **Freezer**. Add a new panel as a plain `TraySection` node of `scenes/main.tscn` (script `ui/tray_section.gd`, no scene or subclass of its own, no size flag or `reset_size` of its own) with its content as children; logic that fills the content goes in a content component the section holds (as `WatchList` is for the Watching section). A panel that is its own scene or a subclass ends up unlike the others (it cannot collapse, does not shrink, and has its own width), and `tests/tray_sections_test.gd` fails on any section that is not the same as the rest: same script, same flags and theme, the same width as the others in every state, and only its heading when collapsed. Sections are reordered by dragging their headings (`TraySection` `_drag_data`/`_can_drop`: the heading lifts the section out, a `DropSlot` "Move here" (`ui/drop_slot.gd`, theme type `DropSlot`) marks where it lands and follows the pointer, Esc or a release outside the tray puts it back, saved on drop as `UserSettings.tray_order` in preferences, a global setting; `apply_order`; "Use defaults" clears it). What the pointer rests on is the hover card by the pointer and never moves the tray. `_adapt_layout` sizes the tray and the graph; no top-bar control is ever hidden: when the layer toggles do not fit beside the rest of the bar's row (the dish tabs having shrunk to two tabs and their arrows first) the tabs and the toggles move to a second row (`_fit_top_bar`: the speed text (`SpeedReadout`, "x10,000", and "x10,000 (x3,400)" with what is reached when that is under 85% of it; pause shows only in the ring and the lit buttons) leaves the readout for the row's left, the tabs sit between it and the toggles, centred in the free space when they fit and against the toggles when not, the toggles at the right; the speed label reserves the width of its longest text, so nothing moves when the speed changes and the tabs move only when the number of dishes does; that width is measured again when the label's own theme font size changes, never keyed on `UserSettings.text_factor()`, because `apply()` fires `size_changed` before the theme's fonts are rescaled), and the tabs shrink (arrows reach the rest) down to the arrows and a sliver of a tab if the window leaves nothing else (`tests/top_bar_test.gd`). Every layout-only container has `mouse_filter` ignore or it swallows clicks meant for the dish.
-- **Timing overlay (F3):** a debug aid, a child of the stage (`ui/timing_overlay.tscn`, `Main.timing_overlay`) in the stage's bottom left corner, so clear of the top bar, the tool rail and the tray, a `HudPanel` of label and `StatValue` rows that takes no mouse input. It is not part of the interface a player meets: it is in no list of controls, tour step or encyclopedia entry. Its rows are in AGENTS.md (Debug log).
-- **The encyclopedia and tooltips:** what the game's terms mean lives in the encyclopedia (`scripts/encyclopedia.gd` for the order, `[encyclopedia]` in `text/strings.cfg` for every word, `ui/encyclopedia_panel.gd`), reached from the title screen and the pause menu, and opened on an entry by a click on a band of the genome map (`Main._open_encyclopedia`); an article links to another with `[url=id]words[/url]`, and `tests/encyclopedia_test.gd` checks every link. A new term gets an entry, not a long tooltip (tooltips are names and icons only), and the `TooltipFit` autoload wraps every tooltip to `UiText.TOOLTIP_WIDTH` characters a line as the pointer reaches its control.
-- **The freezer:** a dish is frozen with the Freezer section's button ("Freeze this dish": the one in the main view) or by answering a pipette's question (`_ask_about_old_dish`: after the pipette makes its new dish the game holds and a dialog asks Keep, Freeze or Trash for the dish the bups came from; only a button answers; play, which the pipette timer was holding, goes on after). `Main.freeze_dish` keeps the dish's shown number, its host part (`Dish.host_part()`), its bup count and its picture, and asks the simulation for the dish (`Dish.freeze()`: a `SimReply` holding a `DishBlob`, whose lineage is `host["lineage"]`), then frees the dish (`_remove_dish`): a frozen dish is in no running list and has no row in the pool, so it is outside the world's clock and the all-dishes graph, and does not advance. `Main.thaw` makes a new `Dish` from the blob (`Dish.load_blob`, a new world row; `_register_dish` gives it the old shown number) and pads its history up to the world's time (`DishHistory.pad`); a thaw the pool has no room for (row below 0) shows the `banner.memory_budget` banner. `trash_dish` removes a dish for good. The last running dish can be neither frozen nor trashed; at `MAX_DISHES` (999, the interface's three digits; the world's own limit is `GpuLayout.D_MAX` rows) running a dish cannot be thawed (frozen ones do not count). When the last running dish dies out with dishes frozen the game does not end: it stays, empty, until one is unfrozen. The Freezer section lists the frozen dishes (`ui/freezer_shelf.gd`: a row each with its picture, "Dish N: M bups" and Unfreeze, Info and Trash icon buttons; Info opens a details line under the row, since a frozen dish is saved data, not a live `Dish` the dish card could show; Trash asks first). The freezer is not saved with a game (several dishes are not either). `tests/freezer_test.gd`.
-- **The bup's panel** (pinned: name row, then `BupGauges`, then born, divisions, steering, dish, the genome map, mutations, harm; the hover card has the same under its text): MASS and RESERVE are two bars (`ui/gauge_bar.gd`, `ui/bup_gauges.gd`). The mass bar's length is the body's (mass drawn as a length): a white tick at the birth mass, the end where it divides (`div_mass`: birth mass plus what its size gene adds, from the simulation), with starvation on a red tick at the death mass; its number is the mass. The reserve bar's track is the most the body can hold, its fill the energy, a tick and a muted band at `Cell.MAINTENANCE_FLOOR`; its fill and word are amber while it sits at the floor and the bup still grows (food-limited), red when starving (mass below birth mass with starvation on, or far below the floor without), green otherwise; amber is also this reserve state, besides goals and names. A dead bup's bars are what they were when it died, in grey: the record keeps `mass`, `energy` and `birth_mass` (taken by `record_death`, and carried by the GPU's death events, which are 14 words, words 8 and 9 the energy and the birth mass, 10-13 the genes; the layout is `gpu/gpu_layout.gd`'s `ED_*`). The divisions number shows in the flash colour for `FLASH_MSEC` after the bup divides (`UiText.numbers(text, "divisions")`, theme type `BrightFlash`).
-- **Under a modal nothing is hovered:** while a dialog is open (`DialogStyle.is_open()`, dialogs being windows of their own that `gui_get_hovered_control` does not count), the Escape menu is up or a quiet hold stills the world, `StageInput.blocked` (set by `Main`) makes `update_pointer` clear the dish's hover and the placement preview and look at nothing, so the hover card is hidden and the dish asks no question about what is under the pointer (`tests/modal_hover_test.gd`).
-- **The genome map:** a bup's genes are shown as a chromosome (`ui/genome_ribbon.gd`, `ui/genome_slot.gd`), the way a graphical genotype colours one: a bup is haploid with one chromosome, so the loci are bands down one bar in the fixed order `Genome.LOCI` (the donor's F factor, then speed, sense, metabolism, size in the order a donor transfers them, then the mutator and the acetate key), each band its locus's colour (`Genome.LOCUS_COLORS`) with the gene's symbol in it, its shade the allele (dim to bright across the gene's range), the value beside it. A bup without the F factor has an empty band there. A dead bup's family record keeps every gene (the F factor and the reach word too: the record takes them at birth, and a GPU birth event carries them in the upper bits of its mutations word; the genes and the reach word again at death, as a conjugation may have changed them, from the death event), so its map is the one it had in life. A new gene or flag goes in `Genome.LOCI`, the ribbon's `show_bup`, and the `[genome]` strings.
+- [Overview](#overview)
+- [Styling and the design system](#styling-and-the-design-system)
+- [The game screen](#the-game-screen)
+- [Panels](#panels)
+- [Checks after a change](#checks-after-a-change)
+
+## Overview
+
+The interface is scenes (`scenes/`, `ui/`) styled by one theme. The theme (`scenes/menu_theme.tres`) is generated from design tokens, so the look is one system and never a per-node choice. Layouts are containers, never hand-placed offsets.
+
+Where the game's screen code lives:
+
+| Part | Files |
+|---|---|
+| A dish in the game: its row in the simulation, its edits, picking, layers, what it shows from the newest snapshot | `scripts/dish.gd` |
+| Drawing a dish | `scripts/dish_drawing.gd` |
+| A dish's save format | `scripts/dish_codec.gd` |
+| The game screen: wiring and the per-tool clicks | `scripts/main.gd` |
+| The screen's camera and pointer input | `ui/stage_input.gd` |
+| The info panel and the hover card | `ui/inspector.gd`, `ui/panel_text.gd` |
+| The lineage browser and its stack | `ui/lineage_view.gd` |
+| What holds the game (pauses and holds) | `scripts/play_holds.gd` |
+| A dish's selection and hover | `Dish.selected`, `Dish.hovered`, `scripts/dish_pick.gd` |
+| State carried between screens | `scripts/session.gd` |
+| How a dish begins | `scripts/start_conditions.gd` |
+| The experiments' goals | `scripts/goal_tracker.gd` |
+| Screen paths | `scripts/scenes.gd` |
+
+## Styling and the design system
+
+### The theme is generated
+
+The theme comes from `tools/gen_theme.py`, which reads design tokens from `design/tokens.json` (W3C Design Tokens format, read by `tools/design_tokens.py`): colours, fonts and weights, sizes (px), radii and spacing. The design system page, `docs/design-system.html`, is generated by `tools/gen_design.py` and is the source of truth for tokens, type, spacing, radii and components. Do not restate them in comments or other docs.
+
+To change the look, edit a token in `design/tokens.json` (or a variation in `gen_theme.py`), then run from the project root:
+
+```
+python3 tools/gen_theme.py
+python3 tools/gen_design.py
+godot --headless --path . --import
+```
+
+Never edit `scenes/menu_theme.tres` or `docs/design-system.html` by hand. `tests/design_tokens_test.gd` fails when either is stale, and when a generator holds a colour, size or gap written as a number instead of a token.
+
+The page documents the game and says nothing of CSS; its own text is plain web styling, not the design system. Any text in its examples is the game's own wording from `text/strings.cfg`, never invented. It reads the interface-size constants (`SCALE_MIN`, `SCALE_MAX`, `ROOM_EXPONENT`, `PLEX_SIZE`, `MONO_SIZE`) from `scripts/user_settings.gd` and each font family's `body_height` from the tokens (measured from the font file). It checks text against the Xbox Accessibility Guidelines 101 and 102, which are written for games.
+
+### Styling rules
+
+`tests/ui_lint_test.gd` fails on any breach:
+
+- Style through the theme: use `theme_type_variation`, and add a variation to the theme when none fits (its base type must be a plain Control type, not another variation).
+- No per-node overrides, and no styles or colours built in code. Colours are allowed only in `dish.gd`, `dish_drawing.gd` and `genome.gd`.
+- Two typefaces in `fonts/`: IBM Plex Sans for text and Commit Mono for numbers. Which is used is set only in the theme.
+- Numeric settings go through `ui/setting_row.tscn`.
+
+The editor re-saves scenes and the theme in its own format (`&"Label"`), so lint patterns must tolerate both. Typed node exports in a `.tscn` need `node_paths=PackedStringArray("prop")`. A layout-only container needs `mouse_filter` ignore, or it swallows clicks meant for the dish.
+
+### Controls
+
+| Need | Use |
+|---|---|
+| A yes/no setting | `ToggleRow` (`ui/toggle_row.tscn`): its name, segmented On / Off buttons, and what it does written below, always in view. With `auto_text` it is a checkbox that dims the switch while the machine decides. |
+| Pages of one panel | Tabs: `TabButton` in `Segments`. |
+| Steps of a flow | `StepIndicator`. |
+| A section that hides detail | A header button with a chevron: `SectionButton`. |
+| A number | `SettingRow`. |
+| A secondary action | `SmallButton`, a real raised button. Reset sits at the left of the footer, Back and Next at the right. |
+| A warning | The coral icon (`WarningIcon`) and text (`Warning`) together. |
+
+Further rules:
+
+- Never use a bare toggle button, a borderless "ghost" button or a bare text link: an action always looks like a button.
+- Never put explanation only in a hover. Tooltips do not wrap and run off the screen, so keep them short, for names and icons.
+- Show keys in tooltips and the controls list, never in a button's or hint's text.
+- Do not use a toolbar button for a setting, and do not make something that is not a control look like one.
+
+### Dialogs
+
+Dialogs are styled in `scripts/dialog_style.gd`; the look is in the design system page under "Floating surfaces".
+
+### Interface size
+
+How the interface scales is in the design system page under "Interface size". For layout, never place a panel at a fixed pixel offset that a bigger font can overrun: use containers, a title's measured bottom, or a `ScrollContainer` as the fallback.
+
+Render a new or changed screen (a `SubViewport` holding it, saved as an image) and look at it at 100%, 150% and 250% in a busy state (several dishes, a picked bup, a full watch list, a tool open) before calling it done. A capture script can set `UserSettings.native_override` and `ui_scale`, then call `apply()`. Headless runs are given a 1280 x 720 window and ignore the saved preferences.
+
+### Accessibility
+
+Bups are artwork, not interface. Accessibility work (contrast, reduced motion, sizes) is for the interface; never alter bup colours or behaviour for it.
+
+### Keeping the system and the text current
+
+- **The design system.** A change that touches it (a colour, font, size, radius, spacing, component, layout rule or behaviour) ends with a review of `design/tokens.json`, `tools/gen_design.py` and the page, across every area and not only the part changed. An unused token is removed. A token whose purpose changed is renamed if its name is no longer accurate (names are roles, never appearances), with its description and the page's text updated. A new need reuses an existing token before adding one. The page's text describes the game as it is, with no trace of a superseded choice. Regenerate, then run `design_tokens_test` and `ui_lint_test`.
+- **The tutorial.** A changed or new interface part updates or adds a tutorial step (`Main._start_tutorial`; see [The tutorial](#the-tutorial)).
+- **The encyclopedia.** A change to what an entry says updates the entry (see [The encyclopedia and tooltips](#the-encyclopedia-and-tooltips)).
+
+## The game screen
+
+### Layout
+
+The screen is `HUD/Frame/Layout`: the top bar, then the middle (the tool rail and the stage, and at the right the tray). The top bar holds the readout, the dish tabs (they scroll, each with a small live picture of its dish), the layer toggles, playback and the menu. The dish is framed in `%Stage` (`StageInput.fit_camera`, called again whenever the stage resizes). `_adapt_layout` sizes the tray and the graph.
+
+**Everything that is a panel lives in the tray.** The tray scrolls when short and holds, from the top:
+
+1. The goal.
+2. The card of what is picked (a bup, a source or a plankton), only while something is picked.
+3. Accordion sections, all alike (collapsible, draggable, never hidden by a pick):
+   - **Dish**: its bloom and feed rates, Freeze and Trash.
+   - **Dish details**.
+   - **Graph**: Y opens and closes it; it has a dish switch when there are several dishes, the time span switch, the trait drop-down and the plot.
+   - **All dish details**: the dishes running, the bups in all of them and the traits averaged over every bup of every dish.
+   - The watch list.
+   - The **Freezer**.
+
+What the pointer rests on is the hover card by the pointer, and it never moves the tray.
+
+### Top bar
+
+No top-bar control is ever hidden. When the layer toggles do not fit beside the rest of the bar's row (the dish tabs having first shrunk to two tabs and their arrows), `_fit_top_bar` moves the tabs and the toggles to a second row:
+
+- The speed text leaves the readout for the row's left. It is `SpeedReadout`: "x10,000", or "x10,000 (x3,400)" with what is reached when that is under 85% of the asked speed. Pause shows only in the ring and the lit buttons.
+- The tabs sit between the speed text and the toggles: centred in the free space when they fit, against the toggles when not.
+- The toggles are at the right.
+
+The speed label reserves the width of its longest text, so nothing moves when the speed changes, and the tabs move only when the number of dishes does. That width is measured again when the label's own theme font size changes. It is never keyed on `UserSettings.text_factor()`, because `apply()` fires `size_changed` before the theme's fonts are rescaled.
+
+If the window leaves nothing else, the tabs shrink (the arrows reach the rest) down to the arrows and a sliver of a tab. `tests/top_bar_test.gd` covers it.
+
+### The tray and its sections
+
+A section is a `TraySection` (`ui/tray_section.gd`): a `SectionButton` heading with a chevron at its right, and its content under it, put as the node's children in the scene. The panel (`TraySectionPanel`) has no vertical margin: the heading brings its own room above and below and the content (`SectionBody`) its own below, so an open section is not padded twice.
+
+**Adding a panel.** Add a plain `TraySection` node to `scenes/main.tscn`, with script `ui/tray_section.gd`, no scene or subclass of its own, no size flag and no `reset_size` of its own, and its content as children. Logic that fills the content goes in a content component the section holds (`WatchList` is that for the Watching section). A panel that is its own scene or a subclass ends up unlike the others: it cannot collapse, does not shrink, and has its own width. `tests/tray_sections_test.gd` fails on any section that is not the same as the rest: same script, same flags and theme, the same width as the others in every state, and only its heading when collapsed.
+
+**Reordering.** Sections are reordered by dragging their headings (`TraySection` `_drag_data` and `_can_drop`):
+
+- The heading lifts the section out, and a `DropSlot` "Move here" (`ui/drop_slot.gd`, theme type `DropSlot`) marks where it lands and follows the pointer.
+- Esc, or a release outside the tray, puts it back.
+- The order is saved on drop as `UserSettings.tray_order` in the preferences, a global setting (`apply_order`). "Use defaults" clears it.
+
+### Hover under a modal
+
+While a dialog is open, the Escape menu is up, or a quiet hold stills the world, nothing is hovered. Dialogs are windows of their own that `gui_get_hovered_control` does not count, so `DialogStyle.is_open()` is the test for them. `StageInput.blocked` (set by `Main`) makes `update_pointer` clear the dish's hover and the placement preview and look at nothing. The hover card is then hidden and the dish asks no question about what is under the pointer. `tests/modal_hover_test.gd` covers it.
+
+## Panels
+
+### The bup's panel
+
+The pinned panel shows, in order: the name row, `BupGauges`, then born, divisions, steering, dish, the genome map, mutations and harm. The hover card has the same under its text.
+
+**The gauges.** MASS and RESERVE are two bars (`ui/gauge_bar.gd`, `ui/bup_gauges.gd`).
+
+- *Mass bar.* Its length is the body's (mass drawn as a length). A white tick marks the birth mass and the end is where it divides (`div_mass`: birth mass plus what its size gene adds, from the simulation). With starvation on, a red tick marks the death mass. Its number is the mass.
+- *Reserve bar.* Its track is the most the body can hold and its fill is the energy, with a tick and a muted band at `Cell.MAINTENANCE_FLOOR`. The fill and word are amber while the reserve sits at the floor and the bup still grows (food-limited), red when starving (mass below birth mass with starvation on, or far below the floor without), and green otherwise. Amber is also this reserve state, besides goals and names.
+
+**A dead bup** shows its bars as they were when it died, in grey. The record keeps `mass`, `energy` and `birth_mass` (taken by `record_death` and carried by the GPU's death events, which are 14 words: words 8 and 9 the energy and the birth mass, 10-13 the genes; the layout is `ED_*` in `gpu/gpu_layout.gd`).
+
+**The divisions number** shows in the flash colour for `FLASH_MSEC` after the bup divides (`UiText.numbers(text, "divisions")`, theme type `BrightFlash`).
+
+### The genome map
+
+A bup's genes are shown as a chromosome (`ui/genome_ribbon.gd`, `ui/genome_slot.gd`), the way a graphical genotype colours one. A bup is haploid with one chromosome, so the loci are bands down one bar in the fixed order `Genome.LOCI`: the donor's F factor, then speed, sense, metabolism and size (the order a donor transfers them), then the mutator and the acetate key. Each band has its locus's colour (`Genome.LOCUS_COLORS`) with the gene's symbol in it, its shade is the allele (dim to bright across the gene's range), and the value is beside it. A bup without the F factor has an empty band there.
+
+A dead bup's family record keeps every gene, so its map is the one it had in life. The record takes the F factor and the reach word at birth (a GPU birth event carries them in the upper bits of its mutations word) and the genes and the reach word again at death, because a conjugation may have changed them (from the death event).
+
+A new gene or flag goes in `Genome.LOCI`, the ribbon's `show_bup` and the `[genome]` strings.
+
+### The freezer
+
+**Freezing.** A dish is frozen with the Freezer section's button ("Freeze this dish": the one in the main view) or by answering a pipette's question. After the pipette makes its new dish, the game holds and a dialog asks Keep, Freeze or Trash for the dish the bups came from (`_ask_about_old_dish`). Only a button answers it, and play, which the pipette timer was holding, goes on after.
+
+`Main.freeze_dish` keeps the dish's shown number, its host part (`Dish.host_part()`), its bup count and its picture, and asks the simulation for the dish (`Dish.freeze()`: a `SimReply` holding a `DishBlob`, whose lineage is `host["lineage"]`). It then frees the dish (`_remove_dish`). A frozen dish is in no running list and has no row in the pool, so it is outside the world's clock and the all-dishes graph and does not advance.
+
+**Thawing.** `Main.thaw` makes a new `Dish` from the blob (`Dish.load_blob`, a new world row; `_register_dish` gives it the old shown number) and pads its history up to the world's time (`DishHistory.pad`). A thaw the pool has no room for (row below 0) shows the `banner.memory_budget` banner. `trash_dish` removes a dish for good.
+
+**Limits.**
+
+- The last running dish can be neither frozen nor trashed.
+- At `MAX_DISHES` (999, the interface's three digits; the world's own limit is `GpuLayout.D_MAX` rows) running, a dish cannot be thawed. Frozen dishes do not count.
+- When the last running dish dies out with dishes frozen, the game does not end: it stays, empty, until one is unfrozen.
+
+**The shelf.** The Freezer section lists the frozen dishes (`ui/freezer_shelf.gd`): a row each with its picture, "Dish N: M bups", and Unfreeze, Info and Trash icon buttons. Info opens a details line under the row, since a frozen dish is saved data and not a live `Dish` the dish card could show. Trash asks first. The freezer is not saved with a game (several dishes are not either). `tests/freezer_test.gd` covers it.
+
+### The encyclopedia and tooltips
+
+What the game's terms mean lives in the encyclopedia: `scripts/encyclopedia.gd` has the order, `[encyclopedia]` in `text/strings.cfg` every word, and `ui/encyclopedia_panel.gd` the panel. It is reached from the title screen and the pause menu, and opened on an entry by a click on a band of the genome map (`Main._open_encyclopedia`). An article links to another with `[url=id]words[/url]`, and `tests/encyclopedia_test.gd` checks every link.
+
+A new term gets an entry, not a long tooltip: tooltips are names and icons only. The `TooltipFit` autoload wraps every tooltip to `UiText.TOOLTIP_WIDTH` characters a line as the pointer reaches its control.
+
+What an entry says, and when it must change, is in [AGENTS.md](../AGENTS.md#the-encyclopedia).
+
+### The tutorial
+
+The tutorial runs on every goal-mode start, and in free mode only when switched on. Nothing about it is saved in goal mode. Its steps are in `Main._start_tutorial`, and `tests/tutorial_test.gd` covers it.
+
+### The timing overlay
+
+The F3 timing overlay is a debug aid and not part of the interface a player meets: it is in no list of controls, tour step or encyclopedia entry. It is a child of the stage (`ui/timing_overlay.tscn`, `Main.timing_overlay`) in the stage's bottom left corner, clear of the top bar, the tool rail and the tray, a `HudPanel` of label and `StatValue` rows that takes no mouse input. Its rows are in [debugging.md](debugging.md#the-timing-overlay-f3).
+
+## Checks after a change
+
+After any interface change run `ui_lint_test`, `strings_test`, `fonts_test`, `screens_test`, `settings_test`, `toolbar_test`, `free_mode_test`, `tutorial_test` and `debug_log_test`. After a design-system change add `design_tokens_test`. Run them as tracked tasks: a script error leaves a headless test hanging until its timeout. How to run tests is in [testing.md](testing.md).
