@@ -30,6 +30,8 @@ signal refused(row: int, why: String)
 
 var backend: SimBackend
 var _used := {}  ## client row -> true
+var _epoch := 0  ## how many times a row was handed out (`_reserve`)
+var _epochs := {}  ## client row -> the epoch of the dish it was last handed to: what that dish's snapshots and pictures carry (`epoch_of`)
 var _last_seq := -1
 var display_ms := 0.0  ## the display's frame (ms), from the screen's refresh rate, sent with every set_time for the governor's pacing (0: not known, no pacing)
 var _playout := Playout.new()
@@ -154,7 +156,7 @@ func _init(p_backend: SimBackend) -> void:
 func add_dish(spec: DishSpec) -> int:
 	var row := _reserve()
 	if row >= 0:
-		_send(SimCommand.KIND_ADD_DISH, {"row": row, "spec": spec.copy()})
+		_send(SimCommand.KIND_ADD_DISH, {"row": row, "epoch": _epochs[row], "spec": spec.copy()})
 	return row
 
 
@@ -175,7 +177,7 @@ func freeze(row: int) -> SimReply:
 func thaw(blob: DishBlob) -> int:
 	var row := _reserve()
 	if row >= 0:
-		_send(SimCommand.KIND_THAW, {"row": row, "blob": blob})
+		_send(SimCommand.KIND_THAW, {"row": row, "epoch": _epochs[row], "blob": blob})
 	return row
 
 
@@ -187,7 +189,7 @@ func pipette(row: int, centre: Vector2, radius: float) -> SimReply:
 		var r := SimReply.new()
 		r.complete(null, "no free row")
 		return r
-	return _send(SimCommand.KIND_PIPETTE, {"row": row, "centre": centre, "radius": radius, "new_row": dest}, true)
+	return _send(SimCommand.KIND_PIPETTE, {"row": row, "centre": centre, "radius": radius, "new_row": dest, "epoch": _epochs[dest]}, true)
 
 
 ## The dish's new size about its centre (µm), and with `resolution` > 0 its grid's most cells across (SimCore.resize). The reply's value:
@@ -430,8 +432,17 @@ func _reserve() -> int:
 	for row in GpuLayout.D_MAX:
 		if not _used.has(row):
 			_used[row] = true
+			_epoch += 1
+			_epochs[row] = _epoch
 			return row
 	return -1
+
+
+## Which dish holds a row now: each time a row is handed out its epoch is new, and the simulation stamps the states and pictures it makes of the
+## dish with the epoch it was given. A snapshot or a picture made before the dish was added (or of the dish that held the row before) carries
+## another epoch, and a dish ignores it, though its row and its number may be the same (the menu's backdrop is dish 1 of a new game).
+func epoch_of(row: int) -> int:
+	return int(_epochs.get(row, 0))
 
 
 func _send(kind: StringName, args: Dictionary, wants_reply := false) -> SimReply:

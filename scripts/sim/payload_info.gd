@@ -6,6 +6,7 @@ var texture_index := -1
 var count := 0
 var sim_time := 0.0
 var row := -1
+var epoch := 0  ## the epoch of the dish that held the row when it was made (WorldClient.epoch_of)
 var generation := 0  ## changes when the textures are re-made at another size
 var seq := 0  ## the number of the publish that wrote it (SimCore.publish_seq), which the main side gives back with each use
 var handles := PackedInt64Array()  ## the payload textures' native handles on the simulation's device (ViewRenderer.driver_handles), all SimCore.PAYLOAD_TEXTURES

@@ -63,6 +63,7 @@ func _serve(d: Dish, time: float, answers: Dictionary, worlds := {}, husk_view :
 	s.sim_time = time
 	var ds := DishState.new()
 	ds.number = d.number
+	ds.epoch = d.world.epoch_of(d.row)
 	ds.count = 10
 	ds.husk_count = 5
 	s.dishes[d.row] = ds

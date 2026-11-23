@@ -263,7 +263,7 @@ func take_parked(snap: Snapshot) -> bool:
 	if row < 0:
 		return false
 	var ds: DishState = snap.dishes.get(row)
-	if ds == null or ds.number != _number():
+	if not is_mine(ds):
 		return false
 	_state = ds
 	var samples: Array = snap.history.get(row, [])
@@ -602,7 +602,7 @@ func _on_snapshot(snap: Snapshot) -> void:
 		return
 	time = snap.sim_time
 	var ds: DishState = snap.dishes.get(row)
-	if ds == null or ds.number != _number():
+	if not is_mine(ds):
 		return
 	_state = ds
 	history.take(snap.history.get(row, []))
@@ -763,9 +763,15 @@ static func feed_per_second(density: float) -> float:
 func _now() -> DishState:
 	if _parked and world != null and row >= 0:
 		var ds: DishState = world.latest().dishes.get(row)
-		if ds != null and ds.number == _number():
+		if is_mine(ds):
 			_state = ds
 	return _state
+
+
+## Whether `ds`, the world's state of this dish's row, is of this dish: its number and the epoch of the dish the row was last given to
+## (WorldClient.epoch_of) are the dish's. A state made before the dish was added is of the dish that held the row before, whatever its number.
+func is_mine(ds: DishState) -> bool:
+	return ds != null and ds.number == _number() and world != null and ds.epoch == world.epoch_of(row)
 
 
 ## How many bups the newest snapshot counts in the dish.

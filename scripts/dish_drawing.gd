@@ -169,7 +169,7 @@ func take_payload() -> void:
 
 func _take(w: WorldClient, handles: Dictionary) -> void:
 	var shown := w.shown_payload()
-	if shown != null and shown.row == dish.row and shown.seq != _offered_payload:
+	if shown != null and shown.row == dish.row and shown.epoch == w.epoch_of(dish.row) and shown.seq != _offered_payload:
 		var p := _with_handles(shown, handles)
 		if p != null:
 			view.set_payload(p)
@@ -252,6 +252,7 @@ static func _with_handles(p: PayloadInfo, handles: Dictionary) -> PayloadInfo:
 	out.count = p.count
 	out.sim_time = p.sim_time
 	out.row = p.row
+	out.epoch = p.epoch
 	out.generation = p.generation
 	out.seq = p.seq
 	out.places = p.places

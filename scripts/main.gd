@@ -625,11 +625,11 @@ func _on_snapshot(snap: Snapshot) -> void:
 				_to_record.append(d)
 	for row: int in _asked_rows.keys():
 		var ds: DishState = snap.dishes.get(row)
-		if ds != null and ds.number == (_asked_rows[row] as Dish).number:
+		if (_asked_rows[row] as Dish).is_mine(ds):
 			_asked_rows.erase(row)
 	for row: int in _thawing.keys():
 		var ds: DishState = snap.dishes.get(row)
-		if ds != null and ds.number == (_thawing[row]["dish"] as Dish).number:
+		if (_thawing[row]["dish"] as Dish).is_mine(ds):
 			_thawed(row)
 
 
