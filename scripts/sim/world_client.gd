@@ -50,7 +50,7 @@ var _paused := false  ## as the last `set_time` said
 class Playout:
 	extends RefCounted
 	const LEAD_SPANS := 2.0  ## the lead the clock keeps behind the newest publish, on average, in arrivals' worth of simulated time: an arrival up to twice the usual time apart is met without a stop
-	const SNAP_SPANS := 4.0  ## a clock further behind than this many arrivals' worth is brought up to the lead (after a stall or a hitch)
+	const SNAP_SPANS := 4.0  ## a clock further behind than this many arrivals' worth (the usual, or this arrival's if more) is brought up to the lead (after a stall or a hitch)
 	const PACE_WEIGHT := 0.2  ## the weight of the newest arrival in the smoothed pace and span
 	const TRIM := 0.5  ## how hard the pace is trimmed toward the lead, set at each arrival and held to the next (an even speed between them): the rate is the pace times 1 + TRIM x (lead - its aim) / its aim ...
 	const TRIM_MOST := 0.5  ## ... at most this far from the pace either way
@@ -96,8 +96,8 @@ class Playout:
 			came += 1
 		if came > 0:
 			var newest := (queue[-1] as PayloadInfo).sim_time
+			var gone := newest - _last_t if _last_t >= 0.0 else 0.0
 			if not _fresh and not paused and _last_t >= 0.0 and _since_arrival > 0.0:
-				var gone := newest - _last_t
 				span = gone if span <= 0.0 else lerpf(span, gone, PACE_WEIGHT)
 				interval = _since_arrival if interval <= 0.0 else lerpf(interval, _since_arrival, PACE_WEIGHT)
 				pace = span / interval
@@ -110,7 +110,7 @@ class Playout:
 				# worth more; never more than WAITING_MOST - 1 publishes' worth, which the queue holds with the one shown and room for one more)
 				var aim := minf((LEAD_SPANS + 0.5) * span, (WorldClient.WAITING_MOST - 1) * span / maxf(per, 1.0))
 				var lead := newest - clock
-				if lead > SNAP_SPANS * span:
+				if lead > SNAP_SPANS * maxf(span, gone):  # (one arrival may bring several steps at once, the governor's probe of the step's cost: the trim catches that up without a jump)
 					clock = newest - aim
 					lead = aim
 					snaps += 1

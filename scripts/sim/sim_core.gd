@@ -113,6 +113,7 @@ var _husk_found := 0  ## the husks a read found past its bound, until a read is 
 var lone_field := false  ## checks only: a step runs the lone feed and diffusion passes (ping-pong, then pool_land_copy) in place of pool_fdiff (tools/gpu/fused_check.gd)
 var _tile_rounds := PackedInt32Array()  ## the tiles of pool_fdiff that run in each round (a prefix of TILES)
 var _split_usec := 0  ## the time `run`'s list spent in the field's own submits and waits (counted as the card's, not the recording's)
+var _submit_usec_most := 0  ## the longest single submit and wait of `run`'s list (the screen's frames share the card with it)
 var _round_tile_ms := 0.0  ## the GPU time of a diffusion round, a tile, as the field's own submits measured it (0: not known yet; `_record_step`)
 var _tile_key := PackedInt32Array()  ## what TILES was built from: each dish's row, cells across and iterations
 var _lists_marked := false  ## whether the step being recorded lists only the squares near a bup (`_marks_pay`)
@@ -771,6 +772,7 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 	var stats := steps > 0 or not _stats_fresh
 	var t0 := Time.get_ticks_usec()
 	_split_usec = 0
+	_submit_usec_most = 0
 	if stats or not (staged["sets"] as Array).is_empty() or not pub.is_empty() or husk_most > 0:
 		var cl := rd.compute_list_begin()
 		if steps > 0:
@@ -812,7 +814,8 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 	_apply_read_back(got["WORLD"], got["DSTATE"])
 	if stats:
 		_mark_stats_fresh(got["STATS"])
-	var out := {"steps": steps, "record_usec": t1 - t0 - _split_usec, "gpu_usec": t2 - t1 + _split_usec, "stats": got["STATS"], "births": PackedByteArray(), "deaths": PackedByteArray()}
+	_submit_usec_most = maxi(_submit_usec_most, t2 - t1)
+	var out := {"steps": steps, "record_usec": t1 - t0 - _split_usec, "gpu_usec": t2 - t1 + _split_usec, "submit_usec_most": _submit_usec_most, "stats": got["STATS"], "births": PackedByteArray(), "deaths": PackedByteArray()}
 	var deaths := 0
 	var births := 0
 	if steps > 0:
@@ -1001,6 +1004,7 @@ func _record_step(cl: int, s: int) -> int:
 				rd.sync()
 				var waited := Time.get_ticks_usec() - t0
 				_split_usec += waited
+				_submit_usec_most = maxi(_submit_usec_most, waited)
 				if rounds_only:
 					var per := waited / 1000.0 / tiles
 					_round_tile_ms = per if _round_tile_ms <= 0.0 else lerpf(_round_tile_ms, per, 0.25)
