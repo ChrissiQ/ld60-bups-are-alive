@@ -475,6 +475,7 @@ func _timing() -> Dictionary:
 	t["pool"] = _core.arena.report()
 	t["pool_in_use"] = _core.in_use()
 	t["memory_fraction"] = _core.arena.memory_fraction()
+	t["memory_budget_bytes"] = limits.memory_budget_bytes
 	t["memory_need_fraction"] = float(_core.need_bytes()) / maxf(float(limits.memory_budget_bytes), 1.0)
 	t["machine"] = limits.watch.report() if limits.watch != null else {}
 	t["next_growth_bytes"] = _core.arena.next_growth_bytes()
