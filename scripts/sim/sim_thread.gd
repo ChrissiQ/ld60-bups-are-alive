@@ -61,6 +61,8 @@ var _handles := {}  ## kind -> {generation, handles: Array (native handles), wid
 var _core: SimCore = null
 var _rows := {}  ## client row -> core row
 var _numbers := {}  ## client row -> dish number
+var _epochs := {}  ## client row -> the epoch the client gave the dish there (WorldClient.epoch_of)
+var _epochs_asked := {}  ## client row -> the epoch a command that adds a dish there brought, until the dish is mapped
 var _worlds := {}  ## client row -> DishWorld
 var _world_dirty := {}  ## client rows whose world copy must go out with the next snapshot
 var _plankton_seen := {}  ## client row -> the plankton count the last copy had
@@ -430,7 +432,7 @@ func _results(steps: int, d: float, t0: float, samples: Array, res: Dictionary, 
 		births += ds.decode_u32(GpuLayout.DS_BIRTHS * 4)
 		deaths += ds.decode_u32(GpuLayout.DS_DEATHS * 4)
 		rows.append({
-			"row": client, "core_row": cr, "number": _numbers[client], "count": count,
+			"row": client, "core_row": cr, "number": _numbers[client], "epoch": _epochs.get(client, 0), "count": count,
 			"clouds": ds.decode_u32(GpuLayout.DS_CLOUD_SLOTS * 4), "husks": ds.decode_u32(GpuLayout.DS_HUSKS * 4),
 			"lost": ds.decode_u32(GpuLayout.DS_BIRTHS_LOST * 4), "extinct": _had_bups.get(client, false) and count == 0,
 			"fractions": (_answers.get(client, {}) as Dictionary).get("fractions", {}),
@@ -577,6 +579,7 @@ func _published(v: ViewRequest, out: Dictionary, husks: Variant, t0: float, d: f
 		q.count = shot["count"]
 		q.sim_time = t0 + int(shot["step"]) * d
 		q.row = _view.row
+		q.epoch = _epochs.get(_view.row, 0)
 		q.generation = generation
 		if cpu_handover:
 			q.bytes = shot["bytes"]
@@ -592,6 +595,7 @@ func _published(v: ViewRequest, out: Dictionary, husks: Variant, t0: float, d: f
 		p.count = _core.count(v.row)
 		p.sim_time = governor.clock
 		p.row = _view.row
+		p.epoch = _epochs.get(_view.row, 0)
 		p.generation = generation
 		if cpu_handover:
 			p.bytes = handed["payload"]
@@ -739,14 +743,17 @@ func _handle(cmd: SimCommand) -> void:
 				_speed_marks.clear()
 			return
 		SimCommand.KIND_ADD_DISH:
+			_epochs_asked[int(a["row"])] = int(a.get("epoch", 0))
 			_add_dish(int(a["row"]), a["spec"])
 		SimCommand.KIND_REMOVE_DISH:
 			_remove_dish(int(a["row"]))
 		SimCommand.KIND_FREEZE:
 			_freeze(int(a["row"]), cmd.reply)
 		SimCommand.KIND_THAW:
+			_epochs_asked[int(a["row"])] = int(a.get("epoch", 0))
 			_thaw(int(a["row"]), a["blob"])
 		SimCommand.KIND_PIPETTE:
+			_epochs_asked[int(a["new_row"])] = int(a.get("epoch", 0))
 			_pipette(int(a["row"]), a["centre"], float(a["radius"]), int(a["new_row"]), cmd.reply)
 		SimCommand.KIND_RESIZE:
 			_resize(int(a["row"]), float(a["radius"]), int(a.get("resolution", -1)), cmd.reply)
@@ -812,11 +819,12 @@ func _add_dish(client: int, spec: DishSpec) -> void:
 func _map(client: int, cr: int) -> void:
 	_rows[client] = cr
 	_numbers[client] = _core.spec_of(cr).number
+	_epochs[client] = _epochs_asked.get(client, 0)
 	_world_dirty[client] = true
 
 
 func _unmap(client: int) -> void:
-	for d: Dictionary in [_rows, _numbers, _worlds, _world_dirty, _plankton_seen, _had_bups, _questions, _answers, _answered_msec]:
+	for d: Dictionary in [_rows, _numbers, _epochs, _worlds, _world_dirty, _plankton_seen, _had_bups, _questions, _answers, _answered_msec]:
 		d.erase(client)
 
 
