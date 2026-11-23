@@ -32,6 +32,7 @@ var means := {}  ## row -> the mean every statistic of that dish shows (1 when n
 
 var _dishes := {}  ## row -> {number, spec: DishSpec, bups: {id: Vector2 (dish-local)}, had_bups, asked: ids, over: {id: {word: value}}, world: DishWorld, world_version, world_sent}
 var _next_number := 1
+var _epochs := {}  ## row -> the epoch the command that filled it carried (as the simulation reports it)
 var _next_id := 1  ## the world's next bup id (one counter for every dish)
 var _seq := 0
 var _snapshot := Snapshot.new()
@@ -198,14 +199,17 @@ func submit(cmd: SimCommand) -> void:
 	var a := cmd.args
 	match cmd.kind:
 		SimCommand.KIND_ADD_DISH:
+			_epochs[int(a["row"])] = int(a.get("epoch", 0))
 			_add(int(a["row"]), a["spec"])
 		SimCommand.KIND_REMOVE_DISH:
 			_remove(int(a["row"]))
 		SimCommand.KIND_FREEZE:
 			_answer(cmd.reply, _freeze(int(a["row"])))
 		SimCommand.KIND_THAW:
+			_epochs[int(a["row"])] = int(a.get("epoch", 0))
 			_thaw(int(a["row"]), a["blob"])
 		SimCommand.KIND_PIPETTE:
+			_epochs[int(a["new_row"])] = int(a.get("epoch", 0))
 			_pipette(int(a["row"]), a["centre"], float(a["radius"]), int(a["new_row"]), cmd.reply)
 		SimCommand.KIND_SET_TIME:
 			_set_time(float(a["speed"]), bool(a["paused"]), float(a["real_dt"]))
@@ -424,6 +428,7 @@ func _publish(t0: float) -> void:
 		var d: Dictionary = _dishes[row]
 		var count: int = d["bups"].size()
 		var ds := FakeScenes.dish_state(d["number"], count, float(means.get(row, 1.0)))
+		ds.epoch = int(_epochs.get(row, 0))
 		ds.extinct = d["had_bups"] and count == 0
 		snap.dishes[row] = ds
 		var samples: Array = []
