@@ -19,6 +19,8 @@ extends SceneTree
 ## - Bursts of 6 every 8 frames (an iteration's pictures, SimThread._pictures_for): no stall, a new picture on 6 frames of every 8 on
 ##   average (all are shown), nothing skipped.
 ## - 12 publishes at once: at most WAITING_MOST wait past the one shown; the oldest are skipped.
+## - One publish every 4 frames, and once a publish 4 publishes' worth past the one before (an iteration of several steps): the clock is
+##   not brought up to the lead (no snap: that arrival's own span is allowed for), no stall.
 ## - A publish at the same simulated time as the newest (a pass of no steps) takes its place: the frame's advance is as the frames' before.
 ## - Paused: the newest is shown, at a share of 1.
 ## - Dish switch (poll on FakeSimBackend): three publishes of dish 0 arrive together (the newest shown); after set_view to dish 1 the
@@ -34,6 +36,7 @@ func _initialize() -> void:
 	_jitter()
 	_uneven()
 	_bursts()
+	_big_arrival()
 	_overflow()
 	_same_time()
 	_paused()
@@ -107,6 +110,23 @@ func _uneven() -> void:
 func _bursts() -> void:
 	var r := _played([6, 0, 0, 0, 0, 0, 0, 0], 60)
 	TestUtil.check(r["stalls"] == 0 and r["skipped"] == 0 and absf(float(r["changes"]) / r["frames"] - 0.75) < 0.03, "bursts of 6 every 8 frames: no stall (%d), none skipped (%d), new pictures on %.3f of the frames (want 0.75)" % [r["stalls"], r["skipped"], float(r["changes"]) / r["frames"]])
+
+
+func _big_arrival() -> void:
+	var pl := WorldClient.Playout.new()
+	var t := 0.0
+	var stalls := 0
+	var last := -1.0
+	for f in 400:
+		var arrived: Array = []
+		if f % 4 == 0:
+			t += SPAN * (4.0 if f == 300 else 1.0)
+			arrived.append(_publish(f + 1, t))
+		pl.step(arrived, DT, false)
+		if f >= WARM and pl.clock == last:
+			stalls += 1
+		last = pl.clock
+	TestUtil.check(pl.snaps == 0 and stalls == 0, "an arrival of 4 publishes' worth: no snap (%d), no stall (%d)" % [pl.snaps, stalls])
 
 
 func _overflow() -> void:
