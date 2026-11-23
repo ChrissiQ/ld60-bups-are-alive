@@ -12,6 +12,7 @@ extends SceneTree
 var _perf := load("res://tests/sim/perf_gates_test.gd")
 var _process_start := 0
 var _last_process_ms := 0.0
+var _bloom := 1.0
 var _marks := {}  ## mark name -> ms since process_frame, this frame
 
 
@@ -44,6 +45,10 @@ func _run() -> void:
 	var still := false
 	var hold := false
 	var asked := 10000.0
+	var dump := ""
+	var owner := false  ## the game screen as a played one has it: the overlay on, the layers hidden but the bups, the tray as played, bloom 2
+	var grow := false  ## the dishes grow from their founders instead of being filled at once
+	var bloom := 1.0
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("dishes="):
 			dishes = int(a.substr(7))
@@ -59,11 +64,21 @@ func _run() -> void:
 			asked = float(a.substr(6))
 		elif a == "paused=1":
 			hold = true
+		elif a.begins_with("dump="):
+			dump = a.substr(5)
+		elif a == "owner=1":
+			owner = true
+			bloom = 2.0
+		elif a == "grow=1":
+			grow = true
+		elif a.begins_with("bloom="):
+			bloom = float(a.substr(6))
 	var start := StartConditions.new()
 	start.bups = 4
 	start.bup_limit = bups
 	start.dish_radius = _perf.DISH_90MM
-	start.bloom_density = 1.0
+	_bloom = bloom
+	start.bloom_density = bloom
 	start.tutorial = false
 	start.spread_founders()
 	var m: Node = TestUtil.game_screen(self, start)
@@ -79,16 +94,26 @@ func _run() -> void:
 	m._set_paused(false)
 	m.sim_speed = 10000.0
 	var main_dish: Dish = m.dish
-	_fill(main_dish, m, bups)
+	if not grow:
+		_fill(main_dish, m, bups)
 	for k in dishes - 1:
 		var d: Dish = m.add_dish(start)
 		for i in 3600:
 			if d != null and d.row >= 0:
 				break
 			await process_frame
-		if d != null:
+		if d != null and not grow:
 			_fill(d, m, bups)
 	m.set_main_dish(main_dish)
+	if owner:
+		m.timing_overlay.visible = true
+		for layer: int in [Dish.Layer.MEDIUM, Dish.Layer.SOURCES, Dish.Layer.PLANKTON, Dish.Layer.STEERING, Dish.Layer.HUSKS]:
+			for d: Dish in m.dishes:
+				d.show_layer(layer, false)
+		m.graph_section.open = true
+		m.inspector.dish_card.open = true
+		m.dish_details.open = false
+		m.all_details.open = false
 	var w := WorldClient.shared()
 	var t0 := Time.get_ticks_msec()
 	while Time.get_ticks_msec() - t0 < settle * 1000.0:
@@ -117,6 +142,12 @@ func _run() -> void:
 		(at[1] as Node).add_child(mk)
 		(at[1] as Node).move_child(mk, at[2])
 	var segs: Array = []
+	var vp := root.get_viewport_rid()
+	RenderingServer.viewport_set_measure_render_time(vp, true)
+	var iter_at: Array = []  ## the newest iteration's number each frame
+	var gpus: Array = []  ## the root viewport's measured GPU render time each frame (ms)
+	var cpus: Array = []  ## its measured CPU render time
+	print("STUTTER window %s screen %s refresh %.1f Hz vsync %d driver %s" % [str(root.get_window().size), str(DisplayServer.screen_get_size(root.get_window().current_screen)), DisplayServer.screen_get_refresh_rate(root.get_window().current_screen), DisplayServer.window_get_vsync_mode(), RenderingServer.get_current_rendering_driver_name()])
 	var looks: Array = []  ## ms a family-tree look-up (Dish.has_record of a living bup) took each frame
 	var ids_now := main_dish.bup_ids()
 	var look_id: int = ids_now[ids_now.size() / 2] if not ids_now.is_empty() else -1
@@ -140,6 +171,8 @@ func _run() -> void:
 		frames.append((now - usec) / 1000.0)
 		usec = now
 		procs.append(_last_process_ms)  # (the frame before this one's process step: process_frame comes first)
+		gpus.append(RenderingServer.viewport_get_measured_render_time_gpu(vp))
+		cpus.append(RenderingServer.viewport_get_measured_render_time_cpu(vp) + RenderingServer.get_frame_setup_time_cpu())
 		var a: float = _marks.get("after_poll", 0.0)
 		var b: float = _marks.get("before_main", a)
 		var c: float = _marks.get("after_main_own", b)
@@ -161,6 +194,7 @@ func _run() -> void:
 			last_drawn = drawn
 		var t: Dictionary = w.latest().timing
 		var n := int(t.get("iterations", 0))
+		iter_at.append(n)
 		if n != seen:
 			seen = n
 			iters.append(float(t.get("iteration_ms", 0.0)))
@@ -213,6 +247,28 @@ func _run() -> void:
 			late_all += 1
 			if procs[i] > display_ms or (i + 1 < procs.size() and procs[i + 1] > display_ms):
 				late_proc += 1
+	if dump != "":  # one line a frame: its time, the process step in it, the viewport's GPU time, the newest iteration's number then
+		var f := FileAccess.open(dump, FileAccess.WRITE)
+		for i in frames.size():
+			f.store_line("%.3f %.3f %.3f %d" % [frames[i], procs[i], gpus[i], iter_at[i]])
+		f.close()
+	var bins := [0, 0, 0, 0, 0]
+	for fr: float in frames:
+		bins[0 if fr < 1.5 * display_ms else (1 if fr < 2.5 * display_ms else (2 if fr < 3.5 * display_ms else (3 if fr < 5.5 * display_ms else 4)))] += 1
+	print("STUTTER frames by display frames: under 1.5 %d, 1.5-2.5 %d, 2.5-3.5 %d, 3.5-5.5 %d, over 5.5 %d" % bins)
+	var rest: Array = []  ## each frame's time outside the process step (drawing, the wait for the card and the display)
+	var rest_late: Array = []
+	var gpu_late: Array = []
+	for i in frames.size():
+		rest.append(frames[i] - procs[i])
+		if frames[i] > 1.5 * display_ms:
+			rest_late.append(frames[i] - procs[i])
+			gpu_late.append(gpus[i])
+	for col: Array in [rest, rest_late, gpus, gpu_late, cpus]:
+		col.sort()
+	print("STUTTER outside the process step p50 %.2f p95 %.2f p99 %.2f ms, in late frames p50 %.2f max %.2f ms; viewport GPU p50 %.2f p95 %.2f p99 %.2f max %.2f ms, in late frames p50 %.2f; viewport CPU p50 %.2f p95 %.2f ms" % [_q(rest, 0.5), _q(rest, 0.95), _q(rest, 0.99), _q(rest_late, 0.5), rest_late[-1] if not rest_late.is_empty() else 0.0, _q(gpus, 0.5), _q(gpus, 0.95), _q(gpus, 0.99), gpus[-1] if not gpus.is_empty() else 0.0, _q(gpu_late, 0.5), _q(cpus, 0.5), _q(cpus, 0.95)])
+	var tm: Dictionary = w.latest().timing
+	print("STUTTER pool in use %s; dish husks %s; step_cost_ms %.1f" % [str(tm.get("pool_in_use", {})), str(m.dishes.map(func(d: Dish) -> int: return d.husk_count())), float(tm.get("step_cost_ms", 0.0))])
 	print("STUTTER main thread process time p50 %.2f p95 %.2f p99 %.2f max %.2f ms; late frames whose process time (that frame's or the next's) passed a display frame: %d of %d" % [_q(proc_sorted, 0.5), _q(proc_sorted, 0.95), _q(proc_sorted, 0.99), proc_sorted[-1] if not proc_sorted.is_empty() else 0.0, late_proc, late_all])
 	quit()
 
@@ -224,7 +280,7 @@ static func _q(sorted: Array, q: float) -> float:
 ## A dish put in the world again as perf_gates_test.filled_spec (`n` bups at once), as interface_gate does for gate A, with bloom 1.
 func _fill(d: Dish, m: Node, n: int) -> void:
 	var spec: DishSpec = _perf.filled_spec(n, _perf.DISH_90MM, d.number)
-	spec.bloom_density = 1.0
+	spec.bloom_density = _bloom
 	d._leave_world()
 	d.radius = spec.radius
 	d.resolution = spec.resolution
