@@ -3,6 +3,7 @@ extends RefCounted
 ## A plankton cell: it does nothing but float, and at some point it bursts and its contents become nutrient in
 ## the medium (the way phytoplankton lyse, leaving a short-lived cloud of food that bacteria can swim to).
 
+var id := -1  ## its id in its dish's world, which the dish's picture of it is kept under while it floats
 var pos: Vector2  ## relative to the dish centre, like the bups
 var born_at: float  ## simulation time (s) at which it appeared
 var burst_at: float  ## simulation time (s) at which it bursts (the player is not told)

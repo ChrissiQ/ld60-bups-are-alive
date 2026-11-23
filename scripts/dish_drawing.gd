@@ -43,7 +43,7 @@ var _husk_version := -1  ## the husk list last put into the husks' multimesh (Sn
 var _draw_key := []  ## what the dish was last drawn from (see `refresh`)
 var _plankton_picture: ImageTexture = null  ## what a small plankton is drawn from (made when first needed)
 var _plankton_mesh: MultiMesh = null  ## where each small plankton is, for drawing them all at once
-var _plankton_key: Array = []  ## what `_plankton_mesh` was last built for: how many plankton, the edit count and the radius drawn
+var _plankton_key: Array = []  ## what `_plankton_mesh` was last built for: the dish's edit count and the radius drawn
 var _plankton_built := 0  ## when it was (msec)
 
 
@@ -451,11 +451,11 @@ func _draw_source(source: NutrientSource) -> void:
 
 ## The plankton: outlines when they are big enough to see, and only those on screen; otherwise dots, all in a single draw.
 func _draw_all_plankton() -> void:
-	if dish.plankton.is_empty():
-		return
 	var r := dish.plankton_draw_radius()
 	if r < Dish.PLANKTON_DETAIL_PIXELS * dish.pixel():
 		_draw_plankton_pictures(r)
+		return
+	if dish.plankton.is_empty():
 		return
 	var seen := (dish.get_global_transform_with_canvas().affine_inverse() * dish.get_viewport_rect()).grow(r)
 	for cell in dish.plankton:
@@ -473,10 +473,10 @@ func _draw_plankton_pictures(r: float) -> void:
 		_plankton_mesh = MultiMesh.new()
 		_plankton_mesh.transform_format = MultiMesh.TRANSFORM_2D
 		_plankton_mesh.mesh = quad
-	var plankton := dish.plankton
 	var now := Time.get_ticks_msec()
-	var key := [plankton.size(), dish.edit_count, snappedf(r, 0.001)]
+	var key := [dish.edit_count, snappedf(r, 0.001)]
 	if key != _plankton_key and now - _plankton_built >= Dish.PLANKTON_PICTURE_REFRESH_MSEC:
+		var plankton := dish.plankton  # (the dish unpacks its newest copy of the plankton here, at most once for every rebuild)
 		_plankton_key = key
 		_plankton_built = now
 		var buffer := PackedFloat32Array()  # (a 2D transform is 8 floats: x.x, y.x, 0, origin.x, x.y, y.y, 0, origin.y)

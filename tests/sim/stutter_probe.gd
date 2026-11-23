@@ -1,7 +1,7 @@
 extends SceneTree
 ## Measurement probe: the game screen with `dishes=` dishes of 90 mm each put in the world filled to `bups=` bups at once (the main one
 ## and the others; bloom 1, husks and starvation on as the defaults have them), asked x10,000, `settle=` s, then `seconds=` s of frames.
-## Prints the frames (late: over 1.5 display frames, as the F3 overlay counts; p50, p95, p99, worst), the slide (stalls and jumps of the
+## Prints the plankton each dish holds, the frames (late: over 1.5 display frames, as the F3 overlay counts; p50, p95, p99, worst), the slide (stalls and jumps of the
 ## drawn simulated time, as slide_test's M), the speed reached, and the simulation's iterations (their time, the time in submits and the
 ## longest single submit, `submit_ms_most`; the three longest iterations' timing in full), and the main thread's process step (the time from `process_frame` to the end of the last
 ## node's `_process`) with how many late frames had a long one, and how long a look-up in the family tree takes on the main thread
@@ -303,6 +303,7 @@ func _measure(m: Node, w: WorldClient, main_dish: Dish, seconds: float, tag: Str
 	for col: Array in [rest, rest_late, gpus, gpu_late, cpus]:
 		col.sort()
 	print("STUTTER outside the process step p50 %.2f p95 %.2f p99 %.2f ms, in late frames p50 %.2f max %.2f ms; viewport GPU p50 %.2f p95 %.2f p99 %.2f max %.2f ms, in late frames p50 %.2f; viewport CPU p50 %.2f p95 %.2f ms" % [_q(rest, 0.5), _q(rest, 0.95), _q(rest, 0.99), _q(rest_late, 0.5), rest_late[-1] if not rest_late.is_empty() else 0.0, _q(gpus, 0.5), _q(gpus, 0.95), _q(gpus, 0.99), gpus[-1] if not gpus.is_empty() else 0.0, _q(gpu_late, 0.5), _q(cpus, 0.5), _q(cpus, 0.95)])
+	print("STUTTER plankton in each dish %s" % str(m.dishes.map(func(d: Dish) -> int: return d.plankton.size())))
 	var tm: Dictionary = w.latest().timing
 	print("STUTTER pool in use %s; dish husks %s; step_cost_ms %.1f" % [str(tm.get("pool_in_use", {})), str(m.dishes.map(func(d: Dish) -> int: return d.husk_count())), float(tm.get("step_cost_ms", 0.0))])
 	print("STUTTER main thread process time p50 %.2f p95 %.2f p99 %.2f max %.2f ms; late frames whose process time (that frame's or the next's) passed a display frame: %d of %d" % [_q(proc_sorted, 0.5), _q(proc_sorted, 0.95), _q(proc_sorted, 0.99), proc_sorted[-1] if not proc_sorted.is_empty() else 0.0, late_proc, late_all])
