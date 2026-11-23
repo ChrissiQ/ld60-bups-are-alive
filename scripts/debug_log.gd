@@ -13,6 +13,17 @@ const RIM_DIRECTIONS := 24  ## how many directions around the dish each is avera
 static var directory := "user://logs"  ## (the tests use another)
 
 
+## The display's frame as the game paces by it (`WorldClient.display_ms`, read once at start-up) beside what the screen reports now, and the window's mode.
+static func _display() -> Dictionary:
+	var world := WorldClient.shared()
+	return {
+		"assumed_frame_ms": world.display_ms if world != null else 0.0,
+		"refresh_hz_now": DisplayServer.screen_get_refresh_rate(),
+		"window_mode": DisplayServer.window_get_mode(),
+		"vsync_mode": DisplayServer.window_get_vsync_mode(),
+	}
+
+
 ## Everything worth knowing about the screen, the run and its dish (when there is one), as text. `extra` is what only the screen knows (speed, tour, goals).
 static func report(dish: Dish, scene: Node, extra: Dictionary) -> String:
 	var data := {
@@ -21,6 +32,7 @@ static func report(dish: Dish, scene: Node, extra: Dictionary) -> String:
 		"platform": OS.get_name(),
 		"fps": Engine.get_frames_per_second(),
 		"window": _window_size(),
+		"display": _display(),
 		"scene": scene.scene_file_path if scene != null else "",
 		"session": {
 			"mode": Session.Mode.keys()[Session.mode],

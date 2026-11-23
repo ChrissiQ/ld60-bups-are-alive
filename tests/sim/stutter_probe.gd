@@ -49,6 +49,11 @@ func _run() -> void:
 	var owner := false  ## the game screen as a played one has it: the overlay on, the layers hidden but the bups, the tray as played, bloom 2
 	var grow := false  ## the dishes grow from their founders instead of being filled at once
 	var bloom := 1.0
+	var full := false  ## switch the window to full screen once the game's hold on a script's window has ended
+	var pip := false  ## one dish grown, the others made from it with the pipette (as played), measured at each count in `counts`
+	var circle := 20000.0  ## the pipette's circle radius (um)
+	var counts: Array = [2, 3, 4]
+	var growmax := 600.0  ## the most seconds to wait for a dish to grow to its limit
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("dishes="):
 			dishes = int(a.substr(7))
@@ -71,6 +76,19 @@ func _run() -> void:
 			bloom = 2.0
 		elif a == "grow=1":
 			grow = true
+		elif a == "full=1":
+			full = true
+		elif a == "pip=1":
+			pip = true
+			grow = true
+			owner = true
+			bloom = 2.0
+		elif a.begins_with("circle="):
+			circle = float(a.substr(7)) * 1000.0
+		elif a.begins_with("counts="):
+			counts = Array(a.substr(7).split(",")).map(func(x: String) -> int: return int(x))
+		elif a.begins_with("growmax="):
+			growmax = float(a.substr(8))
 		elif a.begins_with("bloom="):
 			bloom = float(a.substr(6))
 	var start := StartConditions.new()
@@ -96,7 +114,7 @@ func _run() -> void:
 	var main_dish: Dish = m.dish
 	if not grow:
 		_fill(main_dish, m, bups)
-	for k in dishes - 1:
+	for k in (0 if pip else dishes - 1):
 		var d: Dish = m.add_dish(start)
 		for i in 3600:
 			if d != null and d.row >= 0:
@@ -115,6 +133,12 @@ func _run() -> void:
 		m.dish_details.open = false
 		m.all_details.open = false
 	var w := WorldClient.shared()
+	if full:
+		while Time.get_ticks_msec() < 13000:
+			await process_frame
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+		for i in 60:
+			await process_frame
 	var t0 := Time.get_ticks_msec()
 	while Time.get_ticks_msec() - t0 < settle * 1000.0:
 		await process_frame
@@ -141,8 +165,20 @@ func _run() -> void:
 		mk.probe = self
 		(at[1] as Node).add_child(mk)
 		(at[1] as Node).move_child(mk, at[2])
-	var segs: Array = []
+	if full:
+		print("STUTTER window mode %d size %s" % [DisplayServer.window_get_mode(), str(root.get_window().size)])
+	if not pip:
+		await _measure(m, w, main_dish, seconds, "fixed", dump, bups, still)
+		quit()
+		return
+	await _pipette_run(m, w, main_dish, seconds, dump, bups, still, circle, counts, growmax)
+	quit()
+
+
+## Measures `seconds` of frames (printed with `tag`); the marks and the end stamp are set up before.
+func _measure(m: Node, w: WorldClient, main_dish: Dish, seconds: float, tag: String, dump: String, bups: int, still: bool) -> void:
 	var vp := root.get_viewport_rid()
+	var segs: Array = []
 	RenderingServer.viewport_set_measure_render_time(vp, true)
 	var iter_at: Array = []  ## the newest iteration's number each frame
 	var gpus: Array = []  ## the root viewport's measured GPU render time each frame (ms)
@@ -210,7 +246,7 @@ func _run() -> void:
 	ss.sort()
 	var median: float = ss[ss.size() / 2] if not ss.is_empty() else 0.0
 	var jumps := speeds.filter(func(s: float) -> bool: return s > 3.0 * median).size() if median > 0.0 else 0
-	print("STUTTER dishes=%d bups=%d still=%s display %.2f ms: %d frames, late %d (%.3f), p50 %.2f p95 %.2f p99 %.2f worst %.2f ms; stalls %d, jumps %d; speed x%.0f; pops %s" % [dishes, bups, still, display_ms, frames.size(), late, float(late) / maxf(frames.size(), 1), _q(sorted, 0.5), _q(sorted, 0.95), _q(sorted, 0.99), sorted[-1] if not sorted.is_empty() else 0.0, stalls, jumps, reached, str(m.dishes.map(func(d: Dish) -> int: return d.population()))])
+	print("STUTTER %s dishes=%d bups=%d still=%s display %.2f ms: %d frames, late %d (%.3f), p50 %.2f p95 %.2f p99 %.2f worst %.2f ms; stalls %d, jumps %d; speed x%.0f; pops %s" % [tag, m.dishes.size(), bups, still, display_ms, frames.size(), late, float(late) / maxf(frames.size(), 1), _q(sorted, 0.5), _q(sorted, 0.95), _q(sorted, 0.99), sorted[-1] if not sorted.is_empty() else 0.0, stalls, jumps, reached, str(m.dishes.map(func(d: Dish) -> int: return d.population()))])
 	var a := iters.duplicate()
 	a.sort()
 	var b := sync.duplicate()
@@ -248,7 +284,7 @@ func _run() -> void:
 			if procs[i] > display_ms or (i + 1 < procs.size() and procs[i + 1] > display_ms):
 				late_proc += 1
 	if dump != "":  # one line a frame: its time, the process step in it, the viewport's GPU time, the newest iteration's number then
-		var f := FileAccess.open(dump, FileAccess.WRITE)
+		var f := FileAccess.open(dump + "_" + tag, FileAccess.WRITE)
 		for i in frames.size():
 			f.store_line("%.3f %.3f %.3f %d" % [frames[i], procs[i], gpus[i], iter_at[i]])
 		f.close()
@@ -270,7 +306,64 @@ func _run() -> void:
 	var tm: Dictionary = w.latest().timing
 	print("STUTTER pool in use %s; dish husks %s; step_cost_ms %.1f" % [str(tm.get("pool_in_use", {})), str(m.dishes.map(func(d: Dish) -> int: return d.husk_count())), float(tm.get("step_cost_ms", 0.0))])
 	print("STUTTER main thread process time p50 %.2f p95 %.2f p99 %.2f max %.2f ms; late frames whose process time (that frame's or the next's) passed a display frame: %d of %d" % [_q(proc_sorted, 0.5), _q(proc_sorted, 0.95), _q(proc_sorted, 0.99), proc_sorted[-1] if not proc_sorted.is_empty() else 0.0, late_proc, late_all])
-	quit()
+
+
+
+## The owner's way: the first dish grows to its limit, then each further dish is a pipette's circle from it (kept), grown to its limit in turn; the
+## frames are measured at each dish count in `counts`, and the card's usage and the pool are printed at each.
+func _pipette_run(m: Node, w: WorldClient, first: Dish, seconds: float, dump: String, bups: int, still: bool, circle: float, counts: Array, growmax: float) -> void:
+	var count_max: int = counts.max()
+	await _grow(m, first, growmax)
+	for count in range(2, count_max + 1):
+		m.set_main_dish(first)
+		for i in 30:
+			await process_frame
+		var before: int = m.dishes.size()
+		m.pipette(Vector2.ZERO, circle)
+		var waited := 0
+		while m.dishes.size() == before and waited < 1800:
+			await process_frame
+			waited += 1
+		for i in 10:
+			await process_frame
+		if m._old_dish != null:
+			m._answer_old_dish("keep")
+		if m.dishes.size() == before:
+			print("STUTTER pipette made no dish at count %d" % count)
+			return
+		var made: Dish = m.dishes[-1]
+		print("STUTTER count %d: pipette moved into dish %d; it starts with %d bups" % [count, made.number, made.population()])
+		await _grow(m, made, growmax)
+		m.set_main_dish(first)
+		m.sim_speed = 10000.0
+		if m.paused:
+			m._set_paused(false)
+		for i in 120:
+			await process_frame
+		if counts.has(count):
+			_report_memory(w, "count %d before" % count)
+			await _measure(m, w, first, seconds, "n%d" % count, dump, bups, still)
+			_report_memory(w, "count %d after" % count)
+
+
+## Waits until the dish holds its limit (or `limit` seconds have gone), keeping the game running at the asked speed.
+func _grow(m: Node, d: Dish, limit: float) -> void:
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < limit * 1000.0:
+		await process_frame
+		if m.paused and m._old_dish == null:
+			m.toolbar.set_paused(false)
+			m._set_paused(false)
+		m.sim_speed = 10000.0
+		if d.population() >= int(d.bup_limit * 0.97):
+			break
+	print("STUTTER dish %d grown to %d of %d in %.0f s" % [d.number, d.population(), d.bup_limit, (Time.get_ticks_msec() - t0) / 1000.0])
+
+
+func _report_memory(w: WorldClient, tag: String) -> void:
+	var tm: Dictionary = w.latest().timing
+	var mc: Dictionary = (tm.get("machine", {}) as Dictionary).get("machine", {})
+	print("STUTTER memory %s: pool held fraction %.2f need %.2f; card usage %.2f of budget %.2f GB; pool bytes %.2f GB; in use %s" % [tag, float(tm.get("memory_fraction", 0.0)), float(tm.get("memory_need_fraction", 0.0)), float(mc.get("card_usage", 0)) / 1e9, float(mc.get("card_budget", 0)) / 1e9, float((tm.get("pool", {}) as Dictionary).get("bytes", 0)) / 1e9, str(tm.get("pool_in_use", {}))])
 
 
 static func _q(sorted: Array, q: float) -> float:

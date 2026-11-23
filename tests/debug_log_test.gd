@@ -42,6 +42,7 @@ func _initialize() -> void:
 		TestUtil.check(data.has("backend") and data["backend"]["running"] == "gpu" and data["backend"]["gpu_available"] == GpuSimBackend.available(), "it says where the bups run: that the world simulates (the canned backend can)")
 		TestUtil.check(data["backend"].get("gpu_device") == "test device" and data["backend"].get("main_device") is String, "...both devices' names: the simulation's from the backend, the main one's from the renderer")
 		var be: Dictionary = data["backend"]
+		TestUtil.check(data.get("display") is Dictionary and (data["display"] as Dictionary).has("assumed_frame_ms") and float(data["display"]["assumed_frame_ms"]) > 0.0 and data["display"].has("refresh_hz_now"), "the log says the display's frame the game assumed, and the refresh rate the screen reports now")
 		for key in ["k", "step_s", "iteration_world_s", "duty", "T_ITER_ms", "step_ms_ema", "sync_ms", "publish_ms"]:
 			TestUtil.check(be["governor"].has(key) and (be["governor"][key] is float or be["governor"][key] is int), "the governor has the number %s" % key)
 		TestUtil.check(is_equal_approx(float(be["governor"]["iteration_world_s"]), float(be["governor"]["k"]) * float(be["governor"]["step_s"])), "...the world time of the last iteration is its steps times the step length")
