@@ -119,7 +119,10 @@ var bup_limit := StartConditions.DEFAULT_BUP_LIMIT:  ## the most bups the dish h
 		bup_limit = clampi(value, 1, StartConditions.MAX_BUP_LIMIT)
 		_send_params({"limit": bup_limit})
 var nutrients_placed := 0  ## how many units of nutrient the player has dropped in by hand
-var sources: Array[NutrientSource] = []  ## the sources, as the newest copy of the dish's world has them (their positions global)
+var sources: Array[NutrientSource]:  ## the sources, as the newest copy of the dish's world has them (their positions global)
+	get:
+		_take_sources()
+		return _sources_list
 var feed_density := 3.0:  ## units of nutrient fed in to each mm² of the dish every hour, spread evenly (a density, so the dish's size does not change it)
 	set(value):
 		feed_density = clampf(value, 0.0, StartConditions.MAX_FEED_DENSITY)
@@ -145,7 +148,10 @@ var upkeep_factor := 1.0:  ## multiplies what staying alive costs every bup (its
 	set(value):
 		upkeep_factor = maxf(value, 0.0)
 		_send_params({"upkeep": upkeep_factor})
-var plankton: Array[Plankton] = []  ## the plankton, as the newest copy of the dish's world has them (positions in the dish)
+var plankton: Array[Plankton]:  ## the plankton, as the newest copy of the dish's world has them (positions in the dish)
+	get:
+		_take_plankton()
+		return _plankton_list
 var time := 0.0:  ## the world's clock as the newest snapshot has it (one clock for every dish, read alike whether the dish is in view or parked)
 	get:
 		return world.latest().sim_time if world != null and row >= 0 and world.latest().seq > 0 else time
@@ -191,7 +197,12 @@ var _state: DishState = null  ## what the newest snapshot says of the dish (null
 var _answers := {}  ## the newest answers to its questions: {tracked: {id: record bytes}, steer: {id: Vector3}, probes: PackedFloat32Array}
 var _world_version := -1  ## the copy of the dish's world last taken
 var _sources_by_id := {}  ## a source's id in the dish's world -> its NutrientSource (kept, so a selection survives a new copy)
-var _plankton_by_key := {}  ## a plankton's [born_at, pos] -> its Plankton, likewise
+var _plankton_by_id := {}  ## a plankton's id in the dish's world -> its Plankton, likewise
+var _plankton_list: Array[Plankton] = []  ## what `plankton` hands out
+var _sources_list: Array[NutrientSource] = []  ## what `sources` hands out
+var _pending_world: DishWorldCopy = null  ## the newest copy of the dish's world, while its sources or plankton are not unpacked yet: each is unpacked when it is read (`sources`, `plankton`)
+var _sources_pending := false  ## the sources of `_pending_world` are not unpacked yet
+var _plankton_pending := false  ## the plankton of `_pending_world` are not unpacked yet
 var _asked := {}  ## the questions last sent (WorldClient.ask)
 var _fractions := {}  ## name -> [gene, threshold] for each share asked lately (fraction_with_gene_at_least)
 var _probe := Vector2.INF  ## the point of the dish whose medium is asked after (nutrient_reading)
@@ -272,7 +283,7 @@ func take_parked(snap: Snapshot) -> bool:
 		_thin_backlog()
 	var copy: DishWorldCopy = snap.worlds.get(row)
 	if copy != null and copy.version != _world_version:
-		_take_world(copy)
+		_hold_world(copy)
 	if ds.extinct and not _extinct_signalled:
 		_extinct_signalled = true
 		extinct.emit()
@@ -387,11 +398,14 @@ func _reset_runtime_state() -> void:
 	_husk_point = Vector2.INF
 	_husks_seen = {}
 	_sources_by_id = {}
-	_plankton_by_key = {}
+	_plankton_by_id = {}
+	_pending_world = null
+	_sources_pending = false
+	_plankton_pending = false
 	_resizes = []
 	pointed_bup = -1
-	sources.clear()
-	plankton.clear()
+	_sources_list.clear()
+	_plankton_list.clear()
 	history.reset()
 
 
@@ -608,7 +622,7 @@ func _on_snapshot(snap: Snapshot) -> void:
 	history.take(snap.history.get(row, []))
 	var copy: DishWorldCopy = snap.worlds.get(row)
 	if copy != null and copy.version != _world_version:
-		_take_world(copy)
+		_hold_world(copy)
 	_answers = snap.answers.get(row, {})
 	_flush_names()
 	if ds.extinct and not _extinct_signalled:
@@ -616,9 +630,24 @@ func _on_snapshot(snap: Snapshot) -> void:
 		extinct.emit()
 
 
-## The newest copy of the dish's world: its sources and plankton, each kept as the same object while it lasts (so what is picked stays picked).
-func _take_world(copy: DishWorldCopy) -> void:
+## The newest copy of the dish's world, kept to be unpacked when its sources or plankton are read: a dish that nothing reads (one out of view,
+## or one whose layers are hidden) does not pay for thousands of plankton every snapshot. `edit_count` tells screens that it came.
+func _hold_world(copy: DishWorldCopy) -> void:
 	_world_version = copy.version
+	_pending_world = copy
+	_sources_pending = true
+	_plankton_pending = true
+	edit_count += 1
+
+
+## Unpacks the sources of the newest copy of the dish's world, each kept as the same object while it lasts (so what is picked stays picked).
+func _take_sources() -> void:
+	if not _sources_pending:
+		return
+	_sources_pending = false
+	var copy := _pending_world
+	if not _plankton_pending:
+		_pending_world = null
 	_world_time = copy.time
 	var by_id := {}
 	var list: Array[NutrientSource] = []
@@ -641,23 +670,33 @@ func _take_world(copy: DishWorldCopy) -> void:
 			selected.forget(_sources_by_id[id])
 			hovered.forget(_sources_by_id[id])
 	_sources_by_id = by_id
-	sources = list
-	var by_key := {}
+	_sources_list = list
+
+
+## Unpacks the plankton of the newest copy of the dish's world, each kept as the same object while it floats (so what is picked stays picked).
+func _take_plankton() -> void:
+	if not _plankton_pending:
+		return
+	_plankton_pending = false
+	var copy := _pending_world
+	if not _sources_pending:
+		_pending_world = null
+	var by_id := {}
 	var floating: Array[Plankton] = []
 	for p: Dictionary in copy.plankton:
-		var key := [p["born_at"], p["pos"]]
-		var cell: Plankton = _plankton_by_key.get(key)
+		var id: int = p["id"]
+		var cell: Plankton = _plankton_by_id.get(id)
 		if cell == null:
 			cell = Plankton.new(p["pos"], p["born_at"], p["burst_at"], p["units"], p["shape"])
-		by_key[key] = cell
+			cell.id = id
+		by_id[id] = cell
 		floating.append(cell)
-	for key: Array in _plankton_by_key:
-		if not by_key.has(key):
-			selected.forget(_plankton_by_key[key])
-			hovered.forget(_plankton_by_key[key])
-	_plankton_by_key = by_key
-	plankton = floating
-	edit_count += 1
+	for picked: Plankton in [selected.plankton, hovered.plankton]:  # (only a picked one needs letting go: nothing else holds on to one)
+		if picked != null and by_id.get(picked.id) != picked:
+			selected.forget(picked)
+			hovered.forget(picked)
+	_plankton_by_id = by_id
+	_plankton_list = floating
 
 
 ## The questions the screen needs answered, sent when they change: the shares a goal watches, the selected and hovered bups' records
@@ -1204,6 +1243,7 @@ func clear_hover() -> void:
 
 ## The id a source has in the dish's world (-1: none known).
 func _source_id(source: NutrientSource) -> int:
+	_take_sources()
 	for id: int in _sources_by_id:
 		if _sources_by_id[id] == source:
 			return id

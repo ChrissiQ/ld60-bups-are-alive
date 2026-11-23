@@ -29,13 +29,14 @@ var nutrient_energy := 16.0  ## the energy in one unit of nutrient
 
 var rng := RandomNumberGenerator.new()
 
-var _plankton: Array = []  ## sorted by burst_at: {pos: Vector2, born_at, burst_at, units, shape}
+var _plankton: Array = []  ## sorted by burst_at: {id, pos: Vector2, born_at, burst_at, units, shape}; an entry is never changed once made, so a copy shares them
+var _next_plankton := 1  ## the id the next plankton gets (an id stays with its plankton while it floats, so the main thread can tell which are new; it takes no part in the simulation)
 var _sources: Dictionary = {}  ## id -> {pos: Vector2, rate, emitted, em_mass, em_age, em_lived, em_live (an emitter holds something)}
 var _next_source := 1
 var _bloom_due := 0.0
 var _burst_clock := 0.0  ## sim seconds since the plankton were last looked over for bursts
 var _pending: Dictionary = {}  ## the rows edits made (a removed source's release), handed out with the next window at step 0
-var _plankton_shared := false  ## a `checkpoint` holds `_plankton` as it is: the next arrival puts the plankton into a new array
+var _plankton_shared := false  ## a `checkpoint` or a `copy` holds `_plankton` as it is: the next arrival puts the plankton into a new array
 
 
 func _init(p_radius: float = 1000.0, p_seed: int = 1) -> void:
@@ -138,7 +139,7 @@ func checkpoint() -> Dictionary:
 	for id: int in _sources:
 		sources[id] = (_sources[id] as Dictionary).duplicate()
 	return {"time": time, "plankton": _plankton, "sources": sources, "bloom_due": _bloom_due, "burst_clock": _burst_clock, "pending": _pending,
-		"rng_state": rng.state}
+		"rng_state": rng.state, "next_plankton": _next_plankton}
 
 
 ## Back to a `checkpoint` taken before the windows since (no edit may come between them).
@@ -146,6 +147,7 @@ func restore(saved: Dictionary) -> void:
 	time = saved["time"]
 	_plankton = saved["plankton"]
 	_plankton_shared = true
+	_next_plankton = saved["next_plankton"]
 	_sources = saved["sources"]
 	_bloom_due = saved["bloom_due"]
 	_burst_clock = saved["burst_clock"]
@@ -211,7 +213,8 @@ func _random_spot() -> Vector2:
 
 func _add_plankton(pos: Vector2, now: float) -> void:
 	var life: float = Dish.PLANKTON_MEAN_LIFE * (1.0 + Dish.PLANKTON_LIFE_SPREAD * (2.0 * rng.randf() - 1.0))
-	var p := {"pos": pos, "born_at": now, "burst_at": now + life, "units": Dish.PLANKTON_UNITS, "shape": rng.randf() * TAU}
+	var p := {"id": _next_plankton, "pos": pos, "born_at": now, "burst_at": now + life, "units": Dish.PLANKTON_UNITS, "shape": rng.randf() * TAU}
+	_next_plankton += 1
 	if _plankton_shared:
 		_plankton = _plankton.duplicate()
 		_plankton_shared = false
@@ -281,16 +284,16 @@ func _release(s: Dictionary, step: int, into_pending: bool, out: Dictionary = {}
 	s["em_age"] = 0.0
 
 
-## A read-only copy of what the main thread needs: {time, radius, bloom_density, plankton: [{pos, born_at, burst_at, units, shape}], sources: {id: {pos, rate, emitted}}}.
+## A read-only copy of what the main thread needs: {time, radius, bloom_density, plankton: [{id, pos, born_at, burst_at, units, shape}], sources: {id: {pos, rate, emitted}}}.
+## The plankton array is the world's own, shared as `checkpoint` shares it (the world makes a new one before it changes the list), so a copy costs
+## no more for a thousand plankton than for one.
 func copy() -> Dictionary:
-	var ps: Array = []
-	for p in _plankton:
-		ps.append(p.duplicate())
+	_plankton_shared = true
 	var ss := {}
 	for id in _sources:
 		var s: Dictionary = _sources[id]
 		ss[id] = {"pos": s["pos"], "rate": s["rate"], "emitted": s["emitted"]}
-	return {"time": time, "radius": radius, "bloom_density": bloom_density, "plankton": ps, "sources": ss}
+	return {"time": time, "radius": radius, "bloom_density": bloom_density, "plankton": _plankton, "sources": ss}
 
 
 ## Everything, as plain data (emitters keep what they hold; the generator's seed and state).
@@ -322,6 +325,8 @@ func load_blob(blob: Dictionary, world_time: float) -> void:
 	_plankton = []
 	for p in blob["plankton"]:
 		var q: Dictionary = p.duplicate()
+		q["id"] = _next_plankton
+		_next_plankton += 1
 		q["born_at"] += shift
 		q["burst_at"] += shift
 		_plankton.append(q)
