@@ -54,6 +54,31 @@ func _initialize() -> void:
 		TestUtil.check(data["dish"].has("births_refused") and data["dish"]["births_refused"] is float,"the dish has its births refused at the pool's edge")
 		TestUtil.check(data["dish"].has("layers_hidden") and data["dish"]["layers_hidden"] is Array, "layers_hidden is an Array")
 		TestUtil.check(data["nutrient"]["by_distance_from_centre"].size() == DebugLog.RIM_FRACTIONS.size(), "it has the nutrient by distance from the centre")
+		var rf: Dictionary = data.get("recent_frames", {})
+		TestUtil.check(int(rf.get("frames", 0)) > 3 and float(rf.get("late_limit_ms", 0.0)) > 0.0 and rf.has("late_share") and rf.has("late_with_long_process_share"), "the log has the recent frames: a count, the late limit and shares (%s)" % str(rf.get("frames")))
+		for key in ["frame_ms", "process_ms", "poll_ms", "main_own_ms", "main_children_ms", "family_tree_lookup_ms"]:
+			TestUtil.check((rf.get(key, {}) as Dictionary).has("p95") and (rf.get(key, {}) as Dictionary).has("p99"), "...%s has its spread" % key)
+		TestUtil.check(float(rf["frame_ms"]["p50"]) > 0.0 and float(rf["process_ms"]["p95"]) > 0.0 and float(rf["main_own_ms"]["p95"]) > 0.0, "...frame, process and the game screen's own times are figures")
+		TestUtil.check((rf.get("parts_p95_ms", {}) as Dictionary).size() == 4 and rf.get("longest") is Array and (rf["longest"] as Array).size() > 0 and (rf["longest"][0] as Dictionary).has("seconds_before_key") and (rf["longest"][0] as Dictionary).has("pointer_over_stage"), "...the parts' p95 and the longest frames with their flags")
+		var ri: Dictionary = data.get("recent_iterations", {})
+		TestUtil.check(ri.has("iterations") and (ri.get("iteration_ms", {}) as Dictionary).has("p50") and (ri.get("sync_ms", {}) as Dictionary).has("p95") and (ri.get("submit_ms_most", {}) as Dictionary).has("max") and (ri.get("step_cost_ms", {}) as Dictionary).has("p95"), "the log has the recent iterations' figures")
+		# A record made by hand: one long frame with a long process step, a pointer over the dish and a new picture.
+		FrameRecord.clear()
+		for k in 6:
+			FrameRecord.begin()
+			if k == 3:
+				OS.delay_msec(40)
+				FrameRecord.note_flag(FrameRecord.NEW_PICTURE | FrameRecord.POINTER_DISH)
+			FrameRecord.end()
+		var fake := FrameRecord.recent_frames(16.0)
+		var worst: Dictionary = (fake["longest"] as Array)[0]
+		TestUtil.check(int(fake["frames"]) == 5 and int(fake["late"]) == 1 and float(worst["frame_ms"]) >= 39.0 and float(worst["process_ms"]) >= 39.0 and worst["new_picture"] and worst["pointer_over_dish"] and not worst["hover_card"], "a long frame is the longest, flagged, and counted late (%s)" % str(worst))
+		TestUtil.check(is_equal_approx(float(fake["late_with_long_process_share"]), 1.0) and float(fake["late_share"]) == 0.2, "...its process step passed a display frame")
+		TestUtil.check(FrameRecord.process_p95(10000.0) >= 39.0, "...and the overlay's figure takes it in")
+		for k in FrameRecord.CAPACITY + 10:
+			FrameRecord.begin()
+			FrameRecord.end()
+		TestUtil.check(int(FrameRecord.recent_frames(16.0, 0)["frames"]) <= FrameRecord.CAPACITY, "the ring holds no more than its capacity")
 		TestUtil.check(data["selected"].has("bup") and data["selected"]["bup"].has("genome") == false and data["selected"]["bup"].has("sense"), "it has the selected bup")
 		TestUtil.check(data["screen"]["tutorial_step"] == 0, "it says the tour is up, and where")
 	# The memory warning: the fraction and the state are in the log, and the screen's banner says it while it holds.

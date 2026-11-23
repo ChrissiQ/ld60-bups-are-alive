@@ -941,8 +941,11 @@ func lineage_chain(id: int) -> PackedInt64Array:
 
 
 func has_record(id: int) -> bool:
+	var since := Time.get_ticks_usec()
 	var store := lineage_store()
-	return id >= 0 and store != null and store.has_record(id)
+	var has: bool = id >= 0 and store != null and store.has_record(id)
+	FrameRecord.note_look(since)
+	return has
 
 
 ## For each id of `chain`, how many living bups of this dish have it in their line.

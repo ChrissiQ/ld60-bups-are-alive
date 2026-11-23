@@ -366,6 +366,7 @@ func _notification(what: int) -> void:
 
 
 func _process(delta: float) -> void:
+	var began := Time.get_ticks_usec()
 	holds.enforce()  # (the game waits while the tour is up, even on a step that asks the player to act)
 	if not menu_open and not tutorial.active:
 		stage_input.pan_with_keys(delta)
@@ -402,6 +403,22 @@ func _process(delta: float) -> void:
 	dish_strip.refresh(delta)
 	_update_hud()
 	_sync_bloom_panel()
+	FrameRecord.note_main(began, _frame_flags())
+
+
+## What the frame record notes of this frame besides its times: where the pointer is and what the screen shows of what is picked.
+func _frame_flags() -> int:
+	var mouse := stage.get_viewport().get_mouse_position()
+	var flags := 0
+	if stage.get_global_rect().has_point(mouse):
+		flags |= FrameRecord.POINTER_STAGE
+		if dish.contains(get_global_mouse_position()):
+			flags |= FrameRecord.POINTER_DISH
+	if inspector.hover_card.visible:
+		flags |= FrameRecord.HOVER_CARD
+	if not dish.selected.is_empty():
+		flags |= FrameRecord.SELECTION
+	return flags
 
 
 ## The panels about what is picked, brought up to date.

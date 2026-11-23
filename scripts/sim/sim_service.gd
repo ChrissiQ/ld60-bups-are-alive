@@ -50,7 +50,9 @@ func started() -> bool:
 
 func _process(_delta: float) -> void:
 	if _world != null:
+		var since := Time.get_ticks_usec()
 		_world.poll()
+		FrameRecord.note_poll(since)
 
 
 func _exit_tree() -> void:

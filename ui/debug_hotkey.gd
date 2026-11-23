@@ -10,10 +10,13 @@ const FREEZE_FRAMES := 3  ## frames the game stands still before the screenshot 
 @onready var notice: Label = $Layer/Notice
 
 var _notice_until := 0  ## when the notice goes (Time.get_ticks_msec: the log takes a while to write on a big dish, so counting frames' time would use the notice up before it is drawn)
+var _key_usec := 0  ## when F12 was pressed (the log's recent frames end there, not at the frames it holds the game for)
 var _logging := false  ## the log is being written (it waits a frame for the screenshot)
 
 
 func _ready() -> void:
+	add_child(FrameRecord.Stamp.new())  # (the record of recent frames runs always, with or without the overlay)
+	FrameRecord.clear()
 	get_tree().node_added.connect(_watch_window)  # (a dialog is a window of its own: its keys never reach the main one)
 
 
@@ -59,6 +62,7 @@ func write() -> void:
 	if _logging:
 		return
 	_logging = true
+	_key_usec = Time.get_ticks_usec()
 	notice.visible = false
 	_notice_until = 0
 	var was_paused := get_tree().paused
@@ -73,7 +77,7 @@ func write() -> void:
 	var scene := get_tree().current_scene
 	var dish: Dish = scene.get("dish") if scene != null else null
 	var state: Dictionary = scene.debug_state() if scene != null and scene.has_method("debug_state") else {}
-	var path := DebugLog.write(DebugLog.report(dish, scene, state), screenshot)
+	var path := DebugLog.write(DebugLog.report(dish, scene, state, _key_usec), screenshot)
 	get_tree().paused = was_paused
 	notice.text = Strings.t("debug.logged" if path != "" else "debug.failed")
 	_notice_until = Time.get_ticks_msec() + int(NOTICE_SECONDS * 1000.0)
