@@ -13,6 +13,7 @@ How the simulation runs, from the commands the game sends to the pictures it dra
 - [The nutrient field](#the-nutrient-field)
 - [Changing the simulation](#changing-the-simulation)
 - [Measured and not built](#measured-and-not-built)
+- [Where the code lives](#where-the-code-lives)
 
 ## Overview
 
@@ -448,3 +449,22 @@ A new constant in `SimConstants.build()` that the GPU reads is a `const` slot of
 ## Measured and not built
 
 **Dispatching by the live count** (measured on one-dish kernels, M1 Pro). The kernels ran over every slot, each returning past the count, at about 0.1 ms a step per 100,000 empty slots. An indirect dispatch (`compute_list_dispatch_indirect`) does not see a kernel's write made earlier in the same submit, but does see a `buffer_copy` between two lists. A copy per step needs a new compute list per step, which cost 60-85 us a step: the net was zero at a 106,000 limit and a loss at a full dish. The pooled kernels have not been measured this way.
+
+## Where the code lives
+
+| Class | File | Role |
+|---|---|---|
+| `SimService` | `scripts/sim/sim_service.gd` | Autoload; makes the backend. |
+| `WorldClient` | `scripts/sim/world_client.gd` | The main thread's only way to the simulation: commands, answers, snapshots, `Playout`. |
+| `SimBackend`, `GpuSimBackend`, `CpuSimBackend` | `scripts/sim/` | The seam, the GPU backend, the stub. |
+| `SimThread` | `scripts/sim/` | The loop of the sim thread. |
+| `Governor` | `scripts/sim/governor.gd` | Time into steps. |
+| `SimCore` | `scripts/sim/sim_core.gd` | Synchronous, threadless: records and runs iterations, answers, publishes. |
+| `SimArena` | `scripts/sim/` | The pool's buffers and textures. |
+| `DishWorld` | `scripts/sim/dish_world.gd` | A dish's plankton, bloom, sources and emitters on the host. |
+| `ResultWorker` | `scripts/sim/` | Family events, stats, snapshots. |
+| `ViewRenderer` | `scripts/sim/view_renderer.gd` | The main device's side of the pictures. |
+| `PoolLimits`, `MachineMemory`, `MemoryWatch` | `scripts/sim/` | The memory budget. |
+| `MemoryMode` | `scripts/memory_mode.gd` | The game's low-memory mode. |
+| `LineageStore`, `GpuMemory` | `native/src/` | The only C++. |
+| `GpuLayout`, `GpuKernels`, `ShaderSet` | `gpu/` | Layouts, kernel construction, the shader set. |
