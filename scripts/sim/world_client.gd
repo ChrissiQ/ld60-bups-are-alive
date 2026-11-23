@@ -343,6 +343,7 @@ func poll() -> void:
 		_arrivals.append(now)
 	if _playout.shown != null and _playout.shown != was:
 		_new_pictures.append([now, _polls, _playout.shown.sim_time])
+		FrameRecord.note_flag(FrameRecord.NEW_PICTURE)
 	_forget_pictures(now)
 	if snap == null or snap.seq <= 0 or snap.seq == _last_seq:
 		return

@@ -12,7 +12,7 @@ const REFRESH_MSEC := 250  ## how often the text is rewritten
 const LATE_FRAMES := 1.5  ## a frame is late when it took longer than this many display frames (the refresh rate's frame, `WorldClient.display_ms`): the next refresh was missed
 
 ## The rows, top to bottom: the label's key and the key of the value's text in [debug] of strings.cfg.
-const ROWS := ["pictures", "per_picture", "hold", "frames", "late", "asked", "reached", "pool", "need", "card", "system"]
+const ROWS := ["pictures", "per_picture", "hold", "frames", "late", "main_thread", "asked", "reached", "pool", "need", "card", "system"]
 
 ## The memory rows, which hide when their figure is not known.
 const MEMORY_ROWS := ["pool", "need", "card", "system"]
@@ -71,6 +71,7 @@ func refresh() -> void:
 	_write("hold", Strings.t("debug.overlay_hold_value", [int(pictures.get("longest_hold_frames", 0))]))
 	_write("frames", Strings.t("debug.overlay_frames_value", ["%.0f" % Engine.get_frames_per_second()]))
 	_write("late", Strings.t("debug.overlay_late_value", [int(round(late_share(world.display_ms if world != null else 0.0) * 100.0))]))
+	_write("main_thread", Strings.t("debug.overlay_main_thread_value", ["%.1f" % FrameRecord.process_p95(FrameRecord.WINDOW_MSEC)]))
 	_write("asked", Strings.t("debug.overlay_speed_value", [int(asked)]))
 	_write("reached", Strings.t("debug.overlay_speed_value", [int(reached)]))
 	var timing: Dictionary = world.latest().timing if world != null else {}
