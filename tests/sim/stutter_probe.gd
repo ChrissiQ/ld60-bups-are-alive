@@ -6,7 +6,9 @@ extends SceneTree
 ## longest single submit, `submit_ms_most`; the three longest iterations' timing in full), and the main thread's process step (the time from `process_frame` to the end of the last
 ## node's `_process`) with how many late frames had a long one, and how long a look-up in the family tree takes on the main thread
 ## (`Dish.has_record`, as the info panel and the hover card make every frame for the bup selected or under the pointer). `still=1` keeps the share at 1 (no drawing between pictures), `paused=1`
-## pauses the game for the window (the screen alone), `speed=` asks another speed, each a diagnosis. Run windowed, e.g.:
+## pauses the game for the window (the screen alone), `speed=` asks another speed, each a diagnosis; `played=1`, `grow=1`, `full=1`,
+## `pip=1` (with `circle=`, `counts=`, `growmax=`), `hoverpause=1`, `bloom=` and `dump=` set up the scene as the variables at the top of
+## `_run` say. Run windowed, e.g.:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 1600x1000 -s tests/sim/stutter_probe.gd -- dishes=2
 
 var _perf := load("res://tests/sim/perf_gates_test.gd")
@@ -46,7 +48,7 @@ func _run() -> void:
 	var hold := false
 	var asked := 10000.0
 	var dump := ""
-	var owner := false  ## the game screen as a played one has it: the overlay on, the layers hidden but the bups, the tray as played, bloom 2
+	var played := false  ## the game screen as it is played: the overlay on, the layers hidden but the bups, the tray as played, bloom 2
 	var grow := false  ## the dishes grow from their founders instead of being filled at once
 	var bloom := 1.0
 	var full := false  ## switch the window to full screen once the game's hold on a script's window has ended
@@ -54,6 +56,7 @@ func _run() -> void:
 	var circle := 20000.0  ## the pipette's circle radius (um)
 	var counts: Array = [2, 3, 4]
 	var growmax := 600.0  ## the most seconds to wait for a dish to grow to its limit
+	var hoverpause := false  ## `dishes=` dishes made by the pipette, then paused ones measured with the pointer moving over the dish (see _pause_scenarios)
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("dishes="):
 			dishes = int(a.substr(7))
@@ -71,8 +74,8 @@ func _run() -> void:
 			hold = true
 		elif a.begins_with("dump="):
 			dump = a.substr(5)
-		elif a == "owner=1":
-			owner = true
+		elif a == "played=1":
+			played = true
 			bloom = 2.0
 		elif a == "grow=1":
 			grow = true
@@ -81,7 +84,13 @@ func _run() -> void:
 		elif a == "pip=1":
 			pip = true
 			grow = true
-			owner = true
+			played = true
+			bloom = 2.0
+		elif a == "hoverpause=1":
+			hoverpause = true
+			pip = true
+			grow = true
+			played = true
 			bloom = 2.0
 		elif a.begins_with("circle="):
 			circle = float(a.substr(7)) * 1000.0
@@ -123,7 +132,7 @@ func _run() -> void:
 		if d != null and not grow:
 			_fill(d, m, bups)
 	m.set_main_dish(main_dish)
-	if owner:
+	if played:
 		m.timing_overlay.visible = true
 		for layer: int in [Dish.Layer.MEDIUM, Dish.Layer.SOURCES, Dish.Layer.PLANKTON, Dish.Layer.STEERING, Dish.Layer.HUSKS]:
 			for d: Dish in m.dishes:
@@ -171,6 +180,12 @@ func _run() -> void:
 		await _measure(m, w, main_dish, seconds, "fixed", dump, bups, still)
 		quit()
 		return
+	if hoverpause:
+		counts = []
+		await _pipette_run(m, w, main_dish, seconds, dump, bups, still, circle, counts, growmax, dishes)
+		await _pause_scenarios(m, w, seconds, dump, bups, circle)
+		quit()
+		return
 	await _pipette_run(m, w, main_dish, seconds, dump, bups, still, circle, counts, growmax)
 	quit()
 
@@ -203,6 +218,7 @@ func _measure(m: Node, w: WorldClient, main_dish: Dish, seconds: float, tag: Str
 	var wall0 := usec
 	while (Time.get_ticks_usec() - wall0) / 1e6 < seconds:
 		await process_frame
+		_walk_pointer()
 		var now := Time.get_ticks_usec()
 		frames.append((now - usec) / 1000.0)
 		usec = now
@@ -310,10 +326,10 @@ func _measure(m: Node, w: WorldClient, main_dish: Dish, seconds: float, tag: Str
 
 
 
-## The owner's way: the first dish grows to its limit, then each further dish is a pipette's circle from it (kept), grown to its limit in turn; the
+## The played way: the first dish grows to its limit, then each further dish is a pipette's circle from it (kept), grown to its limit in turn; the
 ## frames are measured at each dish count in `counts`, and the card's usage and the pool are printed at each.
-func _pipette_run(m: Node, w: WorldClient, first: Dish, seconds: float, dump: String, bups: int, still: bool, circle: float, counts: Array, growmax: float) -> void:
-	var count_max: int = counts.max()
+func _pipette_run(m: Node, w: WorldClient, first: Dish, seconds: float, dump: String, bups: int, still: bool, circle: float, counts: Array, growmax: float, until := 0) -> void:
+	var count_max: int = until if until > 0 else counts.max()
 	await _grow(m, first, growmax)
 	for count in range(2, count_max + 1):
 		m.set_main_dish(first)
@@ -345,6 +361,86 @@ func _pipette_run(m: Node, w: WorldClient, first: Dish, seconds: float, dump: St
 			_report_memory(w, "count %d before" % count)
 			await _measure(m, w, first, seconds, "n%d" % count, dump, bups, still)
 			_report_memory(w, "count %d after" % count)
+
+
+## The pipette's own pause and an ordinary one, each measured with the pointer still and then moving over the dish: the last dish made is
+## pipetted into a new one and kept (the game stays paused as the pipette's question left it), then the game runs on and is paused by the
+## pause control. Each prints the frames, the snapshots the simulation made per second and the passes its thread timed.
+func _pause_scenarios(m: Node, w: WorldClient, seconds: float, dump: String, bups: int, circle: float) -> void:
+	var source: Dish = m.dishes[-1]
+	m.set_main_dish(source)
+	m.sim_speed = 10000.0
+	if m.paused:
+		m.toolbar.set_paused(false)
+		m._set_paused(false)
+	for i in 180:
+		await process_frame
+	m.toolbar.set_paused(true)  # (paused before the pipette: the pipette's question holds the game and gives it back paused, one continuous pause)
+	m._set_paused(true)
+	for i in 60:
+		await process_frame
+	var before: int = m.dishes.size()
+	m.pipette(Vector2.ZERO, circle)
+	var waited := 0
+	while m.dishes.size() == before and waited < 1800:
+		await process_frame
+		waited += 1
+	for i in 10:
+		await process_frame
+	if m._old_dish != null:
+		m._answer_old_dish("keep")
+	print("STUTTER pipette into dish %d kept: dishes %d, paused %s, holds still the world %s, menu %s, pops %s" % [m.dishes[-1].number, m.dishes.size(), m.paused, m.holds.stills_world(), m.menu_open, str(m.dishes.map(func(d: Dish) -> int: return d.population()))])
+	await _phase(m, w, seconds, dump, bups, "pipette")
+	m.toolbar.set_paused(false)
+	m._set_paused(false)
+	for i in 240:
+		await process_frame
+	m.toolbar.set_paused(true)
+	m._set_paused(true)
+	print("STUTTER ordinary pause: paused %s, holds still the world %s" % [m.paused, m.holds.stills_world()])
+	await _phase(m, w, seconds, dump, bups, "ordinary")
+
+
+## Two measures of a pause, the pointer still and then moving, the dish in view the main one.
+func _phase(m: Node, w: WorldClient, seconds: float, dump: String, bups: int, kind: String) -> void:
+	for i in 60:
+		await process_frame
+	for moving in [false, true]:
+		_pointer_frame = -1 if not moving else 0
+		_pointer_stage = m.stage
+		_pointer_hits = 0
+		_seq0 = w.latest().seq
+		_t0 = Time.get_ticks_usec()
+		await _measure(m, w, m.dish, seconds, "%s_%s" % [kind, "moving" if moving else "still"], dump, bups, false)
+		var wall := (Time.get_ticks_usec() - _t0) / 1e6
+		var t: Dictionary = w.latest().timing
+		print("STUTTER %s %s: snapshots %.1f per second; pointer reached %d of the frames; sim thread passes %s, pass_ms %s, recent_iterations %s" % [kind, "moving" if moving else "still", float(w.latest().seq - _seq0) / wall, _pointer_hits, str(t.get("passes", "n/a")), str(t.get("pass_ms", "n/a")), str(t.get("recent_iterations", "n/a"))])
+	_pointer_frame = -1
+
+
+var _pointer_frame := -1  ## the frame of the pointer's walk over the stage, -1 when it is still
+var _pointer_stage: Control
+var _pointer_hits := 0
+var _seq0 := 0
+var _t0 := 0
+
+
+## One step of the pointer's walk over the middle of the stage.
+func _walk_pointer() -> void:
+	if _pointer_frame < 0 or _pointer_stage == null:
+		return
+	var rect := _pointer_stage.get_global_rect()
+	var reach := minf(rect.size.x, rect.size.y) * 0.3
+	var angle := _pointer_frame * 0.11
+	var at := rect.get_center() + Vector2(cos(angle), sin(angle * 0.7)) * reach * (0.4 + 0.6 * absf(sin(_pointer_frame * 0.017)))
+	_pointer_frame += 1
+	root.warp_mouse(at)
+	var ev := InputEventMouseMotion.new()
+	ev.position = at
+	ev.global_position = at
+	Input.parse_input_event(ev)
+	if root.get_mouse_position().distance_to(at) < 3.0:
+		_pointer_hits += 1
 
 
 ## Waits until the dish holds its limit (or `limit` seconds have gone), keeping the game running at the asked speed.

@@ -145,6 +145,14 @@ static func _shade_for(dialog: AcceptDialog) -> void:
 	_sync_scrim()
 
 
+## Whether any dialog is open: what is behind it takes no pointer (nothing under it is hovered).
+static func is_open() -> bool:
+	for dialog in _shown:
+		if is_instance_valid(dialog) and dialog.visible:
+			return true
+	return false
+
+
 static func _sync_scrim() -> void:
 	if _scrim != null and is_instance_valid(_scrim):
 		_scrim.visible = not _shown.is_empty()

@@ -32,6 +32,7 @@ var overlay: Node2D = null  ## the selection and hover rings, drawn above the bu
 var share_override := -1.0  ## checks only: at 0 to 1, the share of the way between pictures every frame draws at (`share`), in place of the playout's
 var _no_view := false  ## a view was tried and cannot draw here (no main device, or its kernels did not build)
 var _view_sent: Array = []  ## what the world was last told of the view
+var _view_forgotten := false  ## the view let go of its pictures since the world was last told of it (`ViewRequest.fresh`)
 var _id_asked := {true: [], false: []}  ## hover -> the questions to the simulation for a picked bup's id that are out, oldest first: {reply, answer} each
 var _id_asked_seq := {true: -1, false: -1}  ## hover -> the number of the newest answer whose bup's id was asked for
 var _id_known := {true: {}, false: {}}  ## hover -> the newest answer whose bup's id the simulation has given
@@ -141,6 +142,7 @@ func process() -> void:
 	_take(w, handles)
 	var field := w.latest().field_view
 	var haze: Dictionary = handles.get("haze", {})
+	var offered_before := [_offered_field, _offered_steer]
 	if field != null and field.texture_index >= 0 and field.seq != _offered_field and not field.haze_bytes.is_empty():
 		view.hand_over_picture("haze", field.haze_bytes, Vector2i(field.n, field.n), field.seq)
 		_offered_field = field.seq
@@ -154,6 +156,8 @@ func process() -> void:
 	elif field != null and field.steer_index >= 0 and field.steer_seq != _offered_steer and not steer.is_empty():
 		view.offer("steer", field.steer_index, int(steer["generation"]), PackedInt64Array(steer["handles"]), Vector2i(int(steer["width"]), int(steer["height"])), field.steer_seq)
 		_offered_steer = field.steer_seq
+	if offered_before != [_offered_field, _offered_steer]:
+		dish.queue_redraw()  # (a new picture of the medium is drawn now, so its use is told and the set it replaced can go: a paused world publishes no more)
 	draw_bups_view()
 	for b: Array in view.take_bound():
 		w.texture_bound(b[0], b[1], b[2], b[3])
@@ -194,6 +198,8 @@ func _send_view(w: WorldClient) -> void:
 	var v := ViewRequest.new()
 	v.camera = camera
 	v.pixel_um = dish.pixel()
+	v.fresh = _view_forgotten
+	_view_forgotten = false
 	v.want_field_view = field
 	v.want_husks = husks
 	v.want_thumbnails = dish.want_thumbnails
@@ -207,6 +213,7 @@ func _send_view(w: WorldClient) -> void:
 ## the pictures it holds (ViewRenderer.let_go: the textures it drew from will hold the other dishes' pictures), its last uses told first.
 func forget_view() -> void:
 	_view_sent = []
+	_view_forgotten = true
 	if density_sprite != null:
 		density_sprite.visible = false  # (shown again by the first build, the picture holding another dish's bups until then)
 	if view != null:

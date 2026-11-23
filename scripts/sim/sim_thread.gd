@@ -13,8 +13,8 @@ extends RefCounted
 ##   drain commands (each handled at once: an edit lands at the sim clock when drained); the pipettes whose new dish's grid is ready; the
 ##     grid of the main view's dish's next pipette started ahead on the worker pool
 ##   nothing owed (paused, or less than a step): if something changed, a pass of no steps (edits made, stats fresh, the questions due
-##     answered, pictures, a snapshot); then sleep until the next command (or, when that pass left the husks unread, until they may be
-##     read again)
+##     answered, a snapshot, and only the pictures that are out of date: see "Currency"); then sleep until the next command (or until the
+##     pace of a picture that is out of date comes round: `_owed_msec`)
 ##   else: k = the governor's steps within the pool's room and the history samples; the dishes' world events for the window, the
 ##     questions due and the view (with as many bup pictures, at evenly spaced steps, as display frames the last iteration spanned:
 ##     `_pictures_for`); run (the steps, then the answers and the pictures, with the asked-after bups' places, in one list,
@@ -23,6 +23,14 @@ extends RefCounted
 ##     iteration the memory budget refuses (no step ran: the questions are answered and the pictures published all the same) puts the
 ##     dishes' worlds back as they were before its events, and the next tries are fewer steps, then one step at most every
 ##     REFUSED_RETRY_MSEC (`_plan_steps`)
+##
+## Currency: a picture (payload, field, husks, thumbnails) shows the world as of `SimCore.version`, which every change that alters what a
+## picture shows raises (steps, edits, a dish added, loaded or removed, a pipette, a set field). A picture stays current while its key
+## holds: the same version, the same view row, the same dish epoch, the edits waiting and, for the field and the steering, the settings
+## that shape it. A pass made for something else (a question's answer, a camera that moved, the pointer over a bup) makes only the pictures
+## whose key has changed, so a hover or a pan on a paused world costs the answers and nothing of the pictures. A paced picture (field,
+## husks, thumbnails) waits for its pace even when stale. The screen's `ViewRequest.fresh` makes the payload again after it let go of its
+## pictures, and the bups a question pins (`"pinned"`: the selection, the pointed bup) make a payload that has their places.
 ##
 ## Shared textures: the core makes them on this device; `texture_handles` gives their native handles (for the main device to import,
 ## after a sync, which every publish has done), and `texture_bound` is how the main side tells each texture it used, on which frame and
@@ -72,7 +80,12 @@ var _answers := {}  ## client row -> {fractions: {name: share}, tracked: {id: re
 var _answered_msec := {}  ## client row -> when its questions were last answered
 var _refused := {}  ## client row -> why, for the next snapshot
 var _view: ViewRequest = null
-var _view_dirty := false
+var _view_dirty := false  ## the view's wants, scales or row changed since the last publish (a camera that only moved does not count: the pictures do not depend on it)
+var _current := {}  ## picture kind ("payload", "field", "husks", "thumbs") -> `_view_key` of what the newest one was made of: a pass of no steps makes only the kinds whose key has changed
+var _picture_tracked := PackedInt64Array()  ## the ids the newest bup picture looked up the places of
+var _passes := 0  ## passes of no steps made, and the ms of the thread they took
+var _pass_ms := 0.0
+var _retired_waiting := false  ## textures made afresh wait to be freed (under `_state`): the screen's frames wake the thread while they do
 var _field_msec := -1000000
 var _thumbs_msec := -1000000
 var _changed := true  ## a snapshot should go out even with no steps
@@ -84,7 +97,7 @@ var _field_version := 0
 var _thumbs: ThumbsInfo = null  ## the newest thumbnails' atlas
 var _husk_view: Dictionary = {}  ## Snapshot.husk_view as last read
 var _husk_msec := -1000000
-var _husks_owed := false  ## a publish left the husks unread (read at most every HUSK_VIEW_MSEC): with nothing owed, a pass reads them then
+var _owed_msec := -1  ## a publish left a paced picture (the field's, the husks', the thumbnails') of an older world than the view's: the real time the least pace lets it be made (-1: none is owed); a pass then makes it
 var _game_began := 0.0  ## s: the world time the game began at; the family tree's times count from it (WorldClient.begin_game)
 var _texture_rids := {}  ## kind -> the RIDs the handles were taken from
 var _texture_generation := 0
@@ -149,7 +162,10 @@ func status() -> Dictionary:
 func texture_bound(kind: String, index: int, frame: int, seq: int) -> void:
 	_state.lock()
 	_bound.append([kind, index, frame, seq])
+	var waiting := _retired_waiting
 	_state.unlock()
+	if waiting:
+		queue.wake()  # (textures made afresh are freed on the frames the screen tells of, which a paused thread would not see)
 
 
 ## kind -> {generation, handles (native, for texture_create_from_extension), width, height, format}: the shared textures as last made.
@@ -216,10 +232,10 @@ func _run() -> void:
 			if _changed or _view_dirty:
 				_quiet_pass()
 			var retry_at := _retry_msec if _retry_msec > Time.get_ticks_msec() else -1  # (a refused world's next try, still to come)
-			if _husks_owed:
-				_wait_for_command(_husk_msec + HUSK_VIEW_MSEC if retry_at < 0 else mini(_husk_msec + HUSK_VIEW_MSEC, retry_at))
-				if Time.get_ticks_msec() >= _husk_msec + HUSK_VIEW_MSEC:
-					_changed = true  # (a pass of no steps reads them; a command that came first is drained before it)
+			if _owed_msec >= 0:
+				_wait_for_command(_owed_msec if retry_at < 0 else mini(_owed_msec, retry_at))
+				if Time.get_ticks_msec() >= _owed_msec:
+					_changed = true  # (a pass of no steps makes it; a command that came first is drained before it)
 			elif retry_at >= 0:
 				_wait_for_command(retry_at)
 			else:
@@ -401,12 +417,15 @@ func _pictures_for(k: int) -> int:
 ## A pass of no steps: the queued edits are made, the stats are current, the questions due are answered and the pictures go out, in one
 ## list, and a snapshot shows what the commands did.
 func _quiet_pass() -> void:
+	var began := Time.get_ticks_usec()
 	var plan := IterationPlan.new()
 	plan.delta = governor.delta()
 	plan.questions = _due_questions()
-	plan.view = _view_request()
+	plan.view = _view_request(true)
 	var res := _core.run(0, governor.delta(), plan)
 	var item := _results(0, governor.delta(), governor.clock, [], res, plan)
+	_passes += 1
+	_pass_ms += (Time.get_ticks_usec() - began) / 1000.0
 	item["timing"] = _timing()
 	worker.push_iteration(item)
 	_changed = false
@@ -472,6 +491,8 @@ func _timing() -> Dictionary:
 	t["clock"] = governor.clock
 	t["delta"] = governor.delta()
 	t["iterations"] = _iterations
+	t["passes"] = _passes
+	t["pass_ms"] = _pass_ms
 	t["device"] = _status.get("device", "")
 	t["refused_iteration"] = _refusal if _refusal != "" else _core.draw_refusal
 	t["pool"] = _core.arena.report()
@@ -530,12 +551,17 @@ func _give_bound() -> void:
 	_state.unlock()
 	for b: Array in bound:
 		_core.texture_bound(b[0], b[1], b[2], b[3])
+	var waiting := not _core.retired_textures().is_empty()
+	_state.lock()
+	_retired_waiting = waiting
+	_state.unlock()
 
 
 ## What the next list publishes: the main view's dish's pictures (null when no dish is in view). The textures the main side has told of
 ## using are given to the core first, so it chooses from the newest.
-func _view_request() -> ViewRequest:
+func _view_request(quiet := false) -> ViewRequest:
 	if _view == null or not _rows.has(_view.row):
+		_current.clear()
 		return null
 	_give_bound()
 	var now := Time.get_ticks_msec()
@@ -546,11 +572,69 @@ func _view_request() -> ViewRequest:
 	v.steer = _view.steer
 	v.haze = _view.haze
 	v.steer_alpha = _view.steer_alpha
+	v.track = PackedInt64Array((_questions.get(_view.row, {}) as Dictionary).get("tracked", []))
+	if quiet:
+		# Nothing moved: a picture is made again only if what it shows has changed since (the world, the view's wants, an edit waiting), the
+		# paced ones no earlier than their pace says.
+		v.want_payload = not _is_current("payload", true) or _lacks_places()
+		v.want_field_view = _view.want_field_view and not _is_current("field", true) and (now - _field_msec >= FIELD_VIEW_MSEC or _view_dirty or _world_moved("field") or _core.retired_await_publish())
+		v.want_thumbnails = _view.want_thumbnails and not _is_current("thumbs", true) and (now - _thumbs_msec >= THUMBS_MSEC or _view_dirty)
+		v.want_husks = _view.want_husks and not _is_current("husks", true) and (now - _husk_msec >= HUSK_VIEW_MSEC or _view_dirty)
+		return v
 	v.want_field_view = _view.want_field_view and (now - _field_msec >= FIELD_VIEW_MSEC or _view_dirty)
 	v.want_thumbnails = _view.want_thumbnails and now - _thumbs_msec >= THUMBS_MSEC
 	v.want_husks = _view.want_husks and (now - _husk_msec >= HUSK_VIEW_MSEC or _view_dirty)
-	v.track = PackedInt64Array((_questions.get(_view.row, {}) as Dictionary).get("tracked", []))
 	return v
+
+
+## What the view's picture `kind` is made of now: the dish (its row and epoch), the world's version (`SimCore.version`) and, for the field's
+## pictures, how they are drawn. `pending`: edits are queued, which the next list makes, so the picture it makes is of another version.
+func _view_key(kind: String, pending: bool) -> Array:
+	var key: Array = [_view.row, _epochs.get(_view.row, 0), _core.version, pending]
+	if kind == "field":
+		key.append_array([_view.haze, _view.steer, _view.steer_alpha])
+	return key
+
+
+## Whether the world changed since the picture of `kind` the screen holds was made (not only a queued edit): such a picture is made at
+## once, not at its pace, which is for a screen asking again and again about a world that stands still.
+func _world_moved(kind: String) -> bool:
+	var held: Array = _current.get(kind, [])
+	return held.size() > 2 and held[2] != _core.version
+
+
+func _is_current(kind: String, check_edits: bool) -> bool:
+	if kind == "field" and _core.retired_await_publish():
+		return false
+	return _current.get(kind, []) == _view_key(kind, check_edits and _core.edits_pending())
+
+
+## Whether the screen holds a bup (selected, or pointed out) that the newest bup picture did not look up the place of: its ring is drawn from
+## the picture's place and length, so a picture is made that has it.
+func _lacks_places() -> bool:
+	for id: Variant in (_questions.get(_view.row, {}) as Dictionary).get("pinned", []):
+		if not _picture_tracked.has(int(id)):
+			return true
+	return false
+
+
+## The view the screen asks for, taken. Returns whether a pass is owed for it: what the pictures are made of changed (the dish, what is
+## wanted, how the field's pictures are drawn), or the screen let go of what it held (`ViewRequest.fresh`).
+func _take_view(v: ViewRequest) -> bool:
+	var old := _view
+	_view = v
+	if old == null or old.row != v.row or v.fresh:
+		_current.clear()
+		_view_dirty = true
+		return true
+	for pair: Array in [["field", old.want_field_view, v.want_field_view], ["husks", old.want_husks, v.want_husks], ["thumbs", old.want_thumbnails, v.want_thumbnails]]:
+		if bool(pair[2]) and not bool(pair[1]):  # (newly wanted: what the screen holds of it is from before)
+			_current.erase(pair[0])
+	var drawn := old.want_field_view != v.want_field_view or old.want_husks != v.want_husks or old.want_thumbnails != v.want_thumbnails \
+		or old.steer != v.steer or old.haze != v.haze or old.steer_alpha != v.steer_alpha
+	if drawn:
+		_view_dirty = true
+	return drawn
 
 
 ## After the list: what it published of `v` (`out`: SimCore.run's "published") as the snapshot's pictures, and the husks' list the list
@@ -561,13 +645,12 @@ func _published(v: ViewRequest, out: Dictionary, husks: Variant, t0: float, d: f
 	var payloads: Array = []
 	if v == null or _view == null or not _rows.has(_view.row):
 		_view_dirty = false
-		_husks_owed = false
+		_owed_msec = -1
 		return payloads
 	var now := Time.get_ticks_msec()
 	if not cpu_handover:
 		_take_handles()
 	var handed := _core.handed
-	_husks_owed = _view.want_husks and (not v.want_husks or husks == null)  # (a list that came back incomplete is read again, made for the count it found)
 	if v.want_husks:
 		_husk_msec = now
 		if husks != null:
@@ -632,7 +715,21 @@ func _published(v: ViewRequest, out: Dictionary, husks: Variant, t0: float, d: f
 			t.bytes = handed["thumbs"]
 			t.tile_rows = int(handed["thumb_rows"])
 		_thumbs = t
+	if out.has("payload"):
+		_current["payload"] = _view_key("payload", false)
+		_picture_tracked = v.track
+	if out.has("haze") or out.has("steer"):
+		_current["field"] = _view_key("field", false)
+	if out.has("thumbs"):
+		_current["thumbs"] = _view_key("thumbs", false)
+	if v.want_husks and husks != null:  # (a list that came back incomplete is read again, made for the count it found)
+		_current["husks"] = _view_key("husks", false)
 	_view_dirty = false
+	_owed_msec = -1
+	for owed: Array in [["field", _view.want_field_view, _field_msec, FIELD_VIEW_MSEC], ["husks", _view.want_husks, _husk_msec, HUSK_VIEW_MSEC], ["thumbs", _view.want_thumbnails, _thumbs_msec, THUMBS_MSEC]]:
+		if bool(owed[1]) and not _is_current(owed[0], false):
+			var due := int(owed[2]) + int(owed[3])
+			_owed_msec = due if _owed_msec < 0 else mini(_owed_msec, due)
 	return payloads
 
 
@@ -762,8 +859,8 @@ func _handle(cmd: SimCommand) -> void:
 		SimCommand.KIND_EDIT_WORLD:
 			_edit(int(a["row"]), a["edit"])
 		SimCommand.KIND_SET_VIEW:
-			_view = a["view"]
-			_view_dirty = true
+			if not _take_view(a["view"]):
+				return  # (a camera that only moved: nothing to publish, no pass owed)
 		SimCommand.KIND_ASK:
 			_questions[int(a["row"])] = a["questions"]
 			_answered_msec.erase(int(a["row"]))

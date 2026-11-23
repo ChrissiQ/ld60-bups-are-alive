@@ -574,17 +574,65 @@ const K_POOL_PROBE_FULL := """
 void f(uint k) {
 	uint d = uint(pcs.pb), i = uint(pcs.pd) * PROBES_MOST + k;
 	float x = SPQ[i * 4u], y = SPQ[i * 4u + 1u], speed = SPQ[i * 4u + 2u], sense_range = SPQ[i * 4u + 3u];
-	float c, gx, gy, pc, pgx, pgy, sg;
+	float c, gx, gy, pc = 0.0, pgx = 0.0, pgy = 0.0, sg;
 	readf_d(d, x, y, c, gx, gy);
+	uint o = i * PROBE_FLOATS;
+	uint e0, e1;
+	if (!bin_list(d, x, y, e0, e1)) {
+		// a square no list covers: the field's part is kept for `pool_probe_slots`, which adds the clouds' and finishes the answer
+		SPR[o] = gx; SPR[o + 1u] = gy; SPR[o + 3u] = c;
+		return;
+	}
 	puffs_at_d(d, x, y, pc, pgx, pgy, sg);
 	c += pc; gx += pgx; gy += pgy;
 	float glen = sqrt(gx * gx + gy * gy);
 	vec3 answer = vec3(0.0, 0.0, 0.5);
 	if (glen > 1e-12) answer = vec3(gx / glen, gy / glen, steering_chance_d(d, speed, sense_range, c, glen, pcs.pc));
-	uint o = i * PROBE_FLOATS;
 	SPR[o] = answer.x; SPR[o + 1u] = answer.y; SPR[o + 2u] = answer.z; SPR[o + 3u] = c; SPR[o + 4u] = glen;
 }
 GRID_LOOP(f, uint(pcs.pa))
+"""
+
+## The points of `pool_probe_full` whose square no list covers (a dish no step has listed yet, or a point far from every bup): a group of 64
+## threads a point, each going through every 64th cloud slot, and a fixed tree adding the threads' sums (the clouds' concentration and gradient),
+## so the cost is the slots over 64 instead of all of them in one thread. The same dispatch arguments as `pool_probe_full`, which ran first.
+const K_POOL_PROBE_SLOTS := """
+shared float sc[64];
+shared float sgx[64];
+shared float sgy[64];
+void main() {
+	uint k = gl_WorkGroupID.x;
+	if (k >= uint(pcs.pa)) return;
+	uint d = uint(pcs.pb), i = uint(pcs.pd) * PROBES_MOST + k;
+	float x = SPQ[i * 4u], y = SPQ[i * 4u + 1u], speed = SPQ[i * 4u + 2u], sense_range = SPQ[i * 4u + 3u];
+	uint e0, e1;
+	if (bin_list(d, x, y, e0, e1)) return;
+	uint t = gl_LocalInvocationID.x;
+	float c = 0.0, gx = 0.0, gy = 0.0;
+	for (uint e = t; e < e1; e += 64u) {
+		vec4 r0, r1;
+		if (!slot_entry(e, d, r0, r1)) continue;
+		float dx = x - r0.x, dy = y - r0.y, r2 = fma(dy, dy, dx * dx);
+		if (r2 <= r1.x) {
+			float v = r0.w;
+			float ci = r0.z / (6.2831853 * v) * exp(-r2 * 0.5 / v);
+			c += ci; gx -= ci * dx / v; gy -= ci * dy / v;
+		}
+	}
+	sc[t] = c; sgx[t] = gx; sgy[t] = gy;
+	barrier();
+	for (uint s = 32u; s > 0u; s >>= 1u) {
+		if (t < s) { sc[t] += sc[t + s]; sgx[t] += sgx[t + s]; sgy[t] += sgy[t + s]; }
+		barrier();
+	}
+	if (t != 0u) return;
+	uint o = i * PROBE_FLOATS;
+	gx = SPR[o] + sgx[0]; gy = SPR[o + 1u] + sgy[0]; c = SPR[o + 3u] + sc[0];
+	float glen = sqrt(gx * gx + gy * gy);
+	vec3 answer = vec3(0.0, 0.0, 0.5);
+	if (glen > 1e-12) answer = vec3(gx / glen, gy / glen, steering_chance_d(d, speed, sense_range, c, glen, pcs.pc));
+	SPR[o] = answer.x; SPR[o + 1u] = answer.y; SPR[o + 2u] = answer.z; SPR[o + 3u] = c; SPR[o + 4u] = glen;
+}
 """
 
 ## What a death gives back, for each dish. The dishes' death slots follow the step's other appends in the dish
@@ -715,6 +763,8 @@ static func _register_pool(out: Dictionary) -> void:
 	GpuKernels.add(out, "pool_cloud_cadence", K_POOL_CLOUD_CADENCE, ["DSTATE", "DISHP", "CLIVE"], "", 64, types)
 	GpuKernels.add(out, "pool_probe", K_POOL_PROBE, ["WORLD", "DISHP", "ENTD", "BINS", "BINC", "BMARK", "PUFF", "PDLO", "PDHI", "PSCALE", "PQ", "PR"], AFTER_COMMIT_FUNCS + POOL_CLOUD_FUNCS)
 	GpuKernels.add(out, "pool_probe_full", K_POOL_PROBE_FULL, ["P", "WORLD", "TABLE", "DISHP", "EFF", "ENTD", "BINS", "BINC", "BMARK", "PUFF", "PDLO", "PDHI", "PSCALE", "SPQ", "SPR"],
+		AFTER_COMMIT_FUNCS + GpuKernelsField.POOL_READF + GpuKernelsField.LOOKUP_FUNCS + POOL_CLOUD_FUNCS + POOL_STEER_FUNCS, 64, {"SPQ": "float", "SPR": "float"})
+	GpuKernels.add(out, "pool_probe_slots", K_POOL_PROBE_SLOTS, ["P", "WORLD", "TABLE", "DISHP", "EFF", "ENTD", "BINS", "BINC", "BMARK", "PUFF", "PDLO", "PDHI", "PSCALE", "SPQ", "SPR"],
 		AFTER_COMMIT_FUNCS + GpuKernelsField.POOL_READF + GpuKernelsField.LOOKUP_FUNCS + POOL_CLOUD_FUNCS + POOL_STEER_FUNCS, 64, {"SPQ": "float", "SPR": "float"})
 	assert(GpuLayout.D_MAX == 1024, "pool_death_bases takes four rows a thread of one group of 256")
 	GpuKernels.add(out, "pool_death_bases", K_POOL_DEATH_BASES, ["P", "DSTATE", "DISHP", "CBASE"], DEATH_FUNCS, 256, types)
