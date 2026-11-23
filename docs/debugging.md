@@ -48,7 +48,7 @@ For each iteration the newest timings report, it records `iteration_ms`, `sync_m
 
 ## The timing overlay (F3)
 
-F3 shows or hides the overlay on the game screen only. It is a child of the game screen's stage (`ui/timing_overlay.tscn`, `TimingOverlay`) in the stage's bottom left corner, off at start and not saved, and it takes no mouse input.
+F3 shows or hides the overlay on the game screen only. It is a child of the stage (`ui/timing_overlay.tscn`, `TimingOverlay`), off at start and not saved, and takes no mouse input.
 
 It shows these rows, smoothed over the last second and rewritten four times a second:
 

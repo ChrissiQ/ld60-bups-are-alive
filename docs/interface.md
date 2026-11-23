@@ -1,6 +1,6 @@
 # The interface
 
-How the game's interface is styled and built, from the design system down to the individual panels. Read this before changing any scene, theme, control, dialog or panel, including the in-game screen, the tray, the freezer, the bup's panel, the genome map, the encyclopedia and the tooltips. The project's rules for every change are in [AGENTS.md](../AGENTS.md).
+How the game's interface is styled and built, from the design system down to the individual panels. Read this before changing any scene, theme, control, dialog or panel, including the in-game screen, the tray, the freezer, the bup's panel, the genome map, the encyclopedia and the tooltips.
 
 - [Overview](#overview)
 - [Styling and the design system](#styling-and-the-design-system)
@@ -10,7 +10,7 @@ How the game's interface is styled and built, from the design system down to the
 
 ## Overview
 
-The interface is scenes (`scenes/`, `ui/`) styled by one theme. The theme (`scenes/menu_theme.tres`) is generated from design tokens, so the look is one system and never a per-node choice. Layouts are containers, never hand-placed offsets.
+The interface is scenes (`scenes/`, `ui/`) styled by one theme. The theme (`scenes/menu_theme.tres`) is generated from design tokens. Layouts are containers, never hand-placed offsets.
 
 Where the game's screen code lives:
 
@@ -86,17 +86,17 @@ Dialogs are styled in `scripts/dialog_style.gd`; the look is in the design syste
 
 How the interface scales is in the design system page under "Interface size". For layout, never place a panel at a fixed pixel offset that a bigger font can overrun: use containers, a title's measured bottom, or a `ScrollContainer` as the fallback.
 
-Render a new or changed screen (a `SubViewport` holding it, saved as an image) and look at it at 100%, 150% and 250% in a busy state (several dishes, a picked bup, a full watch list, a tool open) before calling it done. A capture script can set `UserSettings.native_override` and `ui_scale`, then call `apply()`. Headless runs are given a 1280 x 720 window and ignore the saved preferences.
+Render a new or changed screen (a `SubViewport` holding it, saved as an image) and look at it at 100%, 150% and 250% in a busy state (several dishes, a picked bup, a full watch list, a tool open) before calling it done. A capture script can set `UserSettings.native_override` and `ui_scale`, then call `apply()`.
 
 ### Accessibility
 
 Bups are artwork, not interface. Accessibility work (contrast, reduced motion, sizes) is for the interface; never alter bup colours or behaviour for it.
 
-### Keeping the system and the text current
+### Keeping the design system current
 
-- **The design system.** A change that touches it (a colour, font, size, radius, spacing, component, layout rule or behaviour) ends with a review of `design/tokens.json`, `tools/gen_design.py` and the page, across every area and not only the part changed. An unused token is removed. A token whose purpose changed is renamed if its name is no longer accurate (names are roles, never appearances), with its description and the page's text updated. A new need reuses an existing token before adding one. The page's text describes the game as it is, with no trace of a superseded choice. Regenerate, then run `design_tokens_test` and `ui_lint_test`.
-- **The tutorial.** A changed or new interface part updates or adds a tutorial step (`Main._start_tutorial`; see [The tutorial](#the-tutorial)).
-- **The encyclopedia.** A change to what an entry says updates the entry (see [The encyclopedia and tooltips](#the-encyclopedia-and-tooltips)).
+A change that touches the design system (a colour, font, size, radius, spacing, component, layout rule or behaviour) ends with a review of `design/tokens.json`, `tools/gen_design.py` and the page, across every area and not only the part changed. An unused token is removed. A token whose purpose changed is renamed if its name is no longer accurate (names are roles, never appearances), with its description and the page's text updated. A new need reuses an existing token before adding one. The page's text describes the game as it is, with no trace of a superseded choice. Regenerate, then run `design_tokens_test` and `ui_lint_test`.
+
+A changed or new interface part also updates or adds a tutorial step ([The tutorial](#the-tutorial)), and a change to what an entry says updates the entry ([AGENTS.md](../AGENTS.md#the-encyclopedia)).
 
 ## The game screen
 
@@ -163,7 +163,7 @@ The pinned panel shows, in order: the name row, `BupGauges`, then born, division
 
 ### The genome map
 
-A bup's genes are shown as a chromosome (`ui/genome_ribbon.gd`, `ui/genome_slot.gd`), the way a graphical genotype colours one. A bup is haploid with one chromosome, so the loci are bands down one bar in the fixed order `Genome.LOCI`: the donor's F factor, then speed, sense, metabolism and size (the order a donor transfers them), then the mutator and the acetate key. Each band has its locus's colour (`Genome.LOCUS_COLORS`) with the gene's symbol in it, its shade is the allele (dim to bright across the gene's range), and the value is beside it. A bup without the F factor has an empty band there.
+A bup's genes are shown as a chromosome (`ui/genome_ribbon.gd`, `ui/genome_slot.gd`). A bup is haploid with one chromosome, so the loci are bands down one bar in the fixed order `Genome.LOCI`: the donor's F factor, then speed, sense, metabolism and size (the order a donor transfers them), then the mutator and the acetate key. Each band has its locus's colour (`Genome.LOCUS_COLORS`) with the gene's symbol in it, its shade is the allele (dim to bright across the gene's range), and the value is beside it. A bup without the F factor has an empty band there.
 
 A dead bup's family record keeps every gene, so its map is the one it had in life. The record takes the F factor and the reach word at birth (a GPU birth event carries them in the upper bits of its mutations word) and the genes and the reach word again at death, because a conjugation may have changed them (from the death event).
 
@@ -173,7 +173,7 @@ A new gene or flag goes in `Genome.LOCI`, the ribbon's `show_bup` and the `[geno
 
 **Freezing.** A dish is frozen with the Freezer section's button ("Freeze this dish": the one in the main view) or by answering a pipette's question. After the pipette makes its new dish, the game holds and a dialog asks Keep, Freeze or Trash for the dish the bups came from (`_ask_about_old_dish`). Only a button answers it, and play, which the pipette timer was holding, goes on after.
 
-`Main.freeze_dish` keeps the dish's shown number, its host part (`Dish.host_part()`), its bup count and its picture, and asks the simulation for the dish (`Dish.freeze()`: a `SimReply` holding a `DishBlob`, whose lineage is `host["lineage"]`). It then frees the dish (`_remove_dish`). A frozen dish is in no running list and has no row in the pool, so it is outside the world's clock and the all-dishes graph and does not advance.
+`Main.freeze_dish` keeps the dish's shown number, its host part (`Dish.host_part()`), its bup count and its picture, and asks the simulation for the dish (`Dish.freeze()`: a `SimReply` holding a `DishBlob`, whose lineage is `host["lineage"]`). It then frees the dish (`_remove_dish`). A frozen dish is in no running list and has no row in the pool, so it is outside the world's clock and the all-dishes graph.
 
 **Thawing.** `Main.thaw` makes a new `Dish` from the blob (`Dish.load_blob`, a new world row; `_register_dish` gives it the old shown number) and pads its history up to the world's time (`DishHistory.pad`). A thaw the pool has no room for (row below 0) shows the `banner.memory_budget` banner. `trash_dish` removes a dish for good.
 
@@ -199,8 +199,8 @@ The tutorial runs on every goal-mode start, and in free mode only when switched 
 
 ### The timing overlay
 
-The F3 timing overlay is a debug aid and not part of the interface a player meets: it is in no list of controls, tour step or encyclopedia entry. It is a child of the stage (`ui/timing_overlay.tscn`, `Main.timing_overlay`) in the stage's bottom left corner, clear of the top bar, the tool rail and the tray, a `HudPanel` of label and `StatValue` rows that takes no mouse input. Its rows are in [debugging.md](debugging.md#the-timing-overlay-f3).
+The F3 timing overlay is a debug aid, not part of the interface a player meets: it is in no list of controls, tour step or encyclopedia entry. It is a `HudPanel` of label and `StatValue` rows in the stage's bottom left corner, clear of the top bar, the tool rail and the tray (`Main.timing_overlay`). Its rows are in [debugging.md](debugging.md#the-timing-overlay-f3).
 
 ## Checks after a change
 
-After any interface change run `ui_lint_test`, `strings_test`, `fonts_test`, `screens_test`, `settings_test`, `toolbar_test`, `free_mode_test`, `tutorial_test` and `debug_log_test`. After a design-system change add `design_tokens_test`. Run them as tracked tasks: a script error leaves a headless test hanging until its timeout. How to run tests is in [testing.md](testing.md).
+After any interface change run `ui_lint_test`, `strings_test`, `fonts_test`, `screens_test`, `settings_test`, `toolbar_test`, `free_mode_test`, `tutorial_test` and `debug_log_test`. After a design-system change add `design_tokens_test`. How to run them is in [testing.md](testing.md#headless-tests).

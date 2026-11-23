@@ -1,6 +1,6 @@
 # Instructions for coding agents
 
-Bups Are Alive is a realistic bacteria-evolution simulation and game: Godot 4.7 with GDScript for the game, and compute shaders on the GPU for the simulation. The only C++ is the family-tree store (`LineageStore`) and the graphics-memory query (`GpuMemory`). [README.md](README.md) says how to build and run it, and [CONTRIBUTING.md](CONTRIBUTING.md) what a good change looks like. This file is what every agent needs to know before changing the project; the docs listed under [Where to read next](#where-to-read-next) cover each area in depth.
+Bups Are Alive is a realistic bacteria-evolution simulation and game: Godot 4.7 with GDScript for the game, and compute shaders on the GPU for the simulation. The only C++ is the family-tree store (`LineageStore`) and the graphics-memory query (`GpuMemory`). [README.md](README.md) says how to build and run it, and [CONTRIBUTING.md](CONTRIBUTING.md) what a good change looks like. This file is what every agent needs to know before changing the project; [Where to read next](#where-to-read-next) lists the docs for each area.
 
 ## What the project is for
 
@@ -18,21 +18,19 @@ It is a laboratory for watching real evolution happen: bups eat, swim toward foo
 
 | Read | When |
 |---|---|
-| [docs/simulation.md](docs/simulation.md) | Changing `gpu/`, `scripts/sim/`, `tests/sim/`, `tools/gpu/`, the views, dishes, memory limits or the biology in the kernels. It holds the kernel rules (regenerating shaders, layouts, workgroups, the main `RenderingDevice`). |
-| [docs/interface.md](docs/interface.md) | Changing a scene, the theme, a control, a dialog, or any panel of the game screen. It holds the design-system rules. |
+| [docs/simulation.md](docs/simulation.md) | Changing `gpu/`, `scripts/sim/`, `tests/sim/`, `tools/gpu/`, the views, dishes, memory limits or the biology in the kernels. It holds the kernel rules (shaders, layouts, workgroups, the main `RenderingDevice`). |
+| [docs/interface.md](docs/interface.md) | Changing a scene, the theme, a control, a dialog or a panel of the game screen. It holds the design-system rules. |
 | [docs/testing.md](docs/testing.md) | Running or writing tests, especially the windowed (GPU) simulation tests, goldens and the software-GPU CI. |
 | [docs/debugging.md](docs/debugging.md) | Diagnosing a report: the F12 debug log and the F3 timing overlay. |
-| [docs/build-and-release.md](docs/build-and-release.md) | Rebuilding the native library, regenerating the motion table, exports and the release workflow. |
+| [docs/build-and-release.md](docs/build-and-release.md) | Rebuilding the native library, regenerating the motion table, exports and the release. |
 | [docs/sources.md](docs/sources.md) | Before researching or citing a fact from published work. |
-
-`docs/design-system.html` is generated (see [Generated files](#generated-files)).
 
 ## Layout
 
-- `scripts/`, `scenes/`, `ui/`: the game. Which file holds what on the game screen is in the table in [docs/interface.md](docs/interface.md#overview).
-- `scripts/sim/`: the simulation's host side. `gpu/`: the kernels, their layouts and the shader set. `native/src/`: only `LineageStore` (the family tree of every bup, a GDExtension), `GpuMemory` (what the graphics card's memory is and how much the system lets the game use) and their registration. `scripts/sim_constants.gd` builds the constants the kernels receive.
+- `scripts/`, `scenes/`, `ui/`: the game. The game screen's files are in [docs/interface.md](docs/interface.md#overview).
+- `scripts/sim/`: the simulation's host side. `gpu/`: the kernels, their layouts and the shader set. `native/src/`: `LineageStore` (the family tree of every bup, a GDExtension), `GpuMemory` (the graphics card's memory and how much the system lets the game use) and their registration. `scripts/sim_constants.gd` builds the constants the kernels receive.
 - `text/strings.cfg`: every word the player reads. `text/names.txt`: random bup names.
-- `tests/`: headless tests; `tests/sim/`: the windowed (GPU) simulation tests. `tools/`: generators and checks; `tools/gpu/`: the GPU path's ad hoc checks; `tools/ci/`: the compute probe the CI tests begin with. `.github/workflows/`: the lineage store's build, the simulation tests on a software GPU, and the release.
+- `tests/`: headless tests; `tests/sim/`: windowed (GPU) simulation tests. `tools/`: generators and checks; `tools/gpu/`: ad hoc checks of the GPU path; `tools/ci/`: the compute probe the CI tests begin with. `.github/workflows/`: the lineage store's build, the simulation tests on a software GPU, and the release.
 
 ## Hard rules
 
@@ -87,10 +85,10 @@ An entry never says what to click or press, and never what a control does: that 
 
 ## Running things
 
-Tests are headless scripts: `godot --headless --path . -s tests/<name>.gd` (`dialog_test` is a scene: `godot --headless --path . res://tests/dialog_test.tscn`). Each prints an OK line or the failures. Run `godot --headless --path . --import` after adding a `class_name` script or a new asset.
+How to run tests is in [docs/testing.md](docs/testing.md#headless-tests); run `godot --headless --path . --import` after adding a `class_name` script or a new asset.
 
-- After an interface change run the suite listed in [docs/interface.md](docs/interface.md#checks-after-a-change).
-- The simulation tests are slow and windowed ([docs/testing.md](docs/testing.md#simulation-tests)). Work out what the answer should be first, from sources or derivation, and use a test to confirm it once; do not run tests in a loop to discover what is correct ([docs/testing.md](docs/testing.md#writing-a-test)).
+- After an interface change run the suite in [docs/interface.md](docs/interface.md#checks-after-a-change).
+- The simulation tests are slow and windowed ([docs/testing.md](docs/testing.md#simulation-tests)). Work out the expected answer first, from sources or derivation, and use a test to confirm it once; never run tests in a loop to discover what is correct ([docs/testing.md](docs/testing.md#writing-a-test)).
 
 ## Gotchas
 

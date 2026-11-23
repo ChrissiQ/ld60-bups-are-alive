@@ -1,6 +1,6 @@
 # Testing
 
-How the project's tests are run, what kinds there are, and how to run windowed (GPU) runs safely. The project's rules for every change are in [AGENTS.md](../AGENTS.md); what each simulation test checks is in the section it belongs to in [simulation.md](simulation.md), and the interface suite is listed in [interface.md](interface.md#checks-after-a-change).
+How the project's tests are run, what kinds there are, and how to run windowed (GPU) runs safely. What each simulation test checks is in the section it belongs to in [simulation.md](simulation.md); the interface suite is listed in [interface.md](interface.md#checks-after-a-change).
 
 ## Kinds of test
 
@@ -30,11 +30,11 @@ godot --headless --path . res://tests/dialog_test.tscn     # dialog_test is a sc
 
 Work out what the answer should be first, from sources or derivation, and use the test to confirm it once. Do not run a test in a loop to discover what is correct: write down the expected number and why, and size the sample so it can tell the effect from noise. Where a test's header lists expected values, a tag beside a figure says where it comes from (`[derived]`, `[measured]`; see [CONTRIBUTING.md](../CONTRIBUTING.md#tests)).
 
-Outcomes are deterministic for a seed ([simulation.md](simulation.md#overview)); only timing varies. Timings are noisy on a busy machine, so compare variants in the same sitting.
+Outcomes are deterministic for a seed ([simulation.md](simulation.md#overview)); timings are noisy on a busy machine, so compare variants in the same sitting.
 
 ## Simulation tests
 
-The windowed tests in `tests/sim/` open a window and need a GPU. Helpers are `sim_harness.gd`, `scenario.gd` and `smoke.gd`.
+Helpers for the windowed tests in `tests/sim/` are `sim_harness.gd`, `scenario.gd` and `smoke.gd`.
 
 `tools/run_sim_tests.sh` (a script for macOS) runs them one after another through `tools/run_windowed.sh`, with a timeout each. `run_windowed.sh` holds a lock so only one GPU run happens at a time. Nothing else may use the GPU during timings.
 

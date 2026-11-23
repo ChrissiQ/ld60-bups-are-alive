@@ -4,7 +4,7 @@ How to rebuild the native library, regenerate the motion table, and what the exp
 
 ## Native code
 
-The only C++ is `LineageStore` and `GpuMemory`. On macOS, rebuild with:
+The C++ is `LineageStore` and `GpuMemory`. On macOS, rebuild with:
 
 ```
 cd native && scons platform=macos arch=universal target=template_debug api_version=4.5 -j8
