@@ -718,7 +718,11 @@ func _ask() -> void:
 	for place: Vector2 in _husks_seen.keys():
 		if place != selected.husk and place != hovered.husk:
 			_husks_seen.erase(place)
-	var q := {"fractions": _fractions.duplicate(), "tracked": tracked, "probes": [[_probe.x, _probe.y, PROBE_SPEED, PROBE_SENSE]] if _probe.is_finite() else [], "husks": husks}
+	var pinned: Array = []  ## the ones the screen holds (not the one the pointer passes over): their places in the bups' picture are looked up whenever one is made, and a picture is made that has them
+	for id in [selected.bup, pointed_bup]:
+		if id >= 0 and not pinned.has(id):
+			pinned.append(id)
+	var q := {"fractions": _fractions.duplicate(), "tracked": tracked, "pinned": pinned, "probes": [[_probe.x, _probe.y, PROBE_SPEED, PROBE_SENSE]] if _probe.is_finite() else [], "husks": husks}
 	if q != _asked:
 		_asked = q
 		_world().ask(row, q)

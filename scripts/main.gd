@@ -123,6 +123,7 @@ func _ready() -> void:
 	WorldClient.shared().refused.connect(_on_refused)
 	WorldClient.shared().snapshot_changed.connect(_on_snapshot)
 	stage_input.host = self
+	stage_input.blocked = func() -> bool: return menu_open or holds.stills_world() or get_node("/root/DialogStyle").is_open()
 	stage_input.camera = camera
 	stage_input.stage = stage
 	stage_input.tool_options = tool_options

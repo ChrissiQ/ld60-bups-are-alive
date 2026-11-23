@@ -70,6 +70,7 @@ var _overflow := 0  ## OVERFLOW_* bits, kept once seen (an overflow is never und
 var _edits: Array = []  ## [row, WorldEdit] for the next batch
 var _event_rows := {}  ## rows whose family events of the last iteration are in the ring
 var _stats_fresh := false  ## STATS sample 0 is every running dish's current state
+var version := 0  ## counts every change of what the pictures show (steps, edits made, a dish added, loaded, removed or resized, a pipette): a picture made at one version is the picture of every later one until it changes
 var draw_refusal := ""  ## why the pictures are not being published (their buffers would pass the memory budget); "" while they are
 var _mass_sum := {}  ## row -> the sum of the dish's bups' masses in STATS sample 0, while `_stats_fresh`
 var _entries_peak := 0  ## the most list entries asked for since the last shrink check
@@ -262,6 +263,7 @@ func add_dish(spec: DishSpec, grid: DishGrid = null) -> int:
 	ds.encode_u32(GpuLayout.DS_STEP * 4, s.step)
 	_put_segment(row, s.founders, ds)
 	_stats_fresh = false
+	version += 1
 	return row
 
 
@@ -287,6 +289,7 @@ func load_dish(blob: DishBlob, at_row := -1) -> int:
 	_append_slots("PUFF", GpuLayout.WD_CLOUD_SLOTS, blob.clouds, row)
 	_append_slots("HUSK", GpuLayout.WD_HUSK_SLOTS, blob.husks, row)
 	_stats_fresh = false
+	version += 1
 	_need_bytes = -1
 	return row
 
@@ -328,6 +331,7 @@ func remove_dish(row: int) -> PackedInt64Array:
 	_set_wd(GpuLayout.WD_CELLS, arena.cell_top)
 	_set_wd(GpuLayout.WD_BINS, arena.bin_top)
 	_stats_fresh = false
+	version += 1
 	_need_bytes = -1
 	_leave_owed = true
 	return ids
@@ -409,6 +413,7 @@ func pipette(row: int, centre: Vector2, radius: float, dest: Variant = null, gri
 	_read_back()
 	_event_rows.clear()
 	_mark_stats_fresh()
+	version += 1
 	var moved := _ds(dst, GpuLayout.DS_MOVED_IN)
 	return {"new_row": dst, "moved": moved, "ids": _ids_from(_ds(dst, GpuLayout.DS_START) + before, moved)}
 
@@ -709,9 +714,15 @@ func queue_edit(row: int, e: WorldEdit) -> bool:
 	return true
 
 
+## Whether edits are queued: the next list makes them, so what the pictures show changes with it.
+func edits_pending() -> bool:
+	return not _edits.is_empty()
+
+
 ## Sets dish `row`'s glucose grid (n² values, the dish's own cells).
 func set_field(row: int, values: PackedFloat32Array) -> void:
 	var cd: CoreDish = _dishes[row]
+	version += 1
 	assert(values.size() == cd.grid.n * cd.grid.n, "SimCore.set_field: %d values for a grid of %d" % [values.size(), cd.grid.n * cd.grid.n])
 	var b := values.to_byte_array()
 	rd.buffer_update(arena.buf("CONC"), cd.base * 4, b.size(), b)
@@ -765,6 +776,7 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 	var pictures: int = plan.pictures if plan != null and plan.get("pictures") is int else 1
 	var pub := _publish_stage(view, _expected_count(view.row, steps) if view != null and _dishes.has(view.row) else 0, steps, pictures)
 	if steps > 0:
+		version += 1
 		_moved_since_pic = true  # (set before the pictures are recorded: the last picture follows the steps)
 	var shots: Array = pub.get("shots", [])
 	var answer_usec := t_pub - t_ask
@@ -1553,6 +1565,7 @@ func _apply_edits() -> void:
 				_disp(cl, "pool_erase_puffs", _groups(maxi(_wd(GpuLayout.WD_CLOUD_SLOTS), 64)), float(row), e.position.x, e.position.y))
 	_edits.clear()
 	_stats_fresh = false
+	version += 1
 
 
 ## A dropped dose as a cloud of dish `row` (variance `v`, cut 1, as a plankton's burst: `_world_events`' discs), taken as the world's
@@ -1910,6 +1923,7 @@ func _answers_record(cl: int, staged: Dictionary) -> void:
 		var points: int = int(e["tracked_points"]) + int(e["asked"])
 		if points > 0:
 			_disp(cl, "pool_probe_full", 1, float(points), float(row), float(_consts["steering_window"]), float(s))
+			_disp(cl, "pool_probe_slots", points, float(points), float(row), float(_consts["steering_window"]), float(s))
 		if int(e["husks"]) > 0:
 			var kg := _groups(maxi(_wd(GpuLayout.WD_HUSK_SLOTS), 64))
 			_disp(cl, "pool_husk_near", kg, float(row), float(e["husks"]), float(s))
@@ -2176,6 +2190,8 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 func _publish_stage(view: ViewRequest, expect: int, steps := 0, pictures := 1) -> Dictionary:
 	if view == null or not _dishes.has(view.row):
 		return {}
+	if not (view.want_payload or view.want_field_view or view.want_thumbnails):
+		return {}
 	var row := view.row
 	var cd: CoreDish = _dishes[row]
 	var width := GpuLayout.PAYLOAD_TEX_WIDTH
@@ -2202,12 +2218,12 @@ func _publish_stage(view: ViewRequest, expect: int, steps := 0, pictures := 1) -
 	var sw: int
 	var tw: int
 	if cpu_handover:  # (no textures: the picture is read from the buffers it is laid out in, and the index is only the sign of "written")
-		w = 0
+		w = 0 if view.want_payload else -1
 		fw = 0 if view.want_field_view else -1
 		sw = fw
 		tw = 0 if view.want_thumbnails else -1
 	else:
-		w = _free_texture("payload", Vector2i(width, maxi(rows, arena.draw_rows())))  # (as tall as the buffers' room: made anew only when that grows)
+		w = _free_texture("payload", Vector2i(width, maxi(rows, arena.draw_rows()))) if view.want_payload else -1  # (as tall as the buffers' room: made anew only when that grows)
 		fw = _free_texture("haze", Vector2i(nn, nn)) if view.want_field_view else -1
 		sw = _free_texture("steer", Vector2i(nn, nn)) if view.want_field_view else -1
 		tw = _free_texture("thumbs", Vector2i(GpuKernelsDraw.THUMB_ATLAS, GpuKernelsDraw.THUMB_ATLAS)) if view.want_thumbnails else -1
@@ -2609,6 +2625,22 @@ func retired_textures() -> Dictionary:
 	for r: Dictionary in _retired_textures:
 		out[r["kind"]] = int(out.get(r["kind"], 0)) + 1
 	return out
+
+
+## Whether a haze or map set made afresh is waiting for the screen to move on from it, and no newer publish of its kind exists for the
+## screen to move on to: one publish is owed (the screen leaves a set only by drawing a newer publish, which a paused world makes only
+## when asked).
+func retired_await_publish() -> bool:
+	for r: Dictionary in _retired_textures:
+		var kind: String = r["kind"]
+		if (kind != "haze" and kind != "steer") or int(r["moved_on"]) >= 0:
+			continue
+		var newest := -1
+		for s: Variant in _texture_seqs[kind]:
+			newest = maxi(newest, int(s))
+		if newest <= int(r["last_seq"]):
+			return true
+	return false
 
 
 ## A copy kernel with image bindings: its storage buffers by name, its images from `images`; `pc` and `pd` its third and fourth push constants.

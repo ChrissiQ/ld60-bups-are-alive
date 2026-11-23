@@ -29,6 +29,7 @@ var tool_options: ToolOptions
 var banner: Label  ## the stage's banner, which sits at the top of the stage over the dish's frame
 var dish: Dish  ## the dish in the main view
 var tool := Toolbar.Tool.SELECT  ## the selected tool (the screen sets it)
+var blocked := Callable()  ## () -> bool, the screen's: something modal is up (a dialog, the menu, a hold that takes the screen's input), so nothing under it is hovered or previewed
 var following_id := -1  ## the bup the camera is keeping in the middle of the view, or -1
 var view_moved := false  ## the view was panned or zoomed by hand: a change of the window does not frame the dish again
 var hover_point := Vector2.ZERO  ## the spot in the dish the pointer is over, for the select tool's readout
@@ -294,7 +295,8 @@ func _selected_world_pos() -> Variant:
 func update_pointer() -> void:
 	# Nothing to look at again when neither the pointer, the view, the dish nor the tool has changed.
 	var viewport := host.get_viewport()
-	var stamp := [viewport.get_mouse_position(), camera.position, camera.zoom, dish.get_instance_id(), dish.time, dish.edit_count, dish.radius, tool, _dragging, viewport.gui_get_hovered_control() != null, tool_options.nutrient_count(), tool_options.brush_radius(), dish.pick_mode]
+	var modal := blocked.is_valid() and bool(blocked.call())
+	var stamp := [modal, viewport.get_mouse_position(), camera.position, camera.zoom, dish.get_instance_id(), dish.time, dish.edit_count, dish.radius, tool, _dragging, viewport.gui_get_hovered_control() != null, tool_options.nutrient_count(), tool_options.brush_radius(), dish.pick_mode]
 	if stamp == _pointer_stamp:
 		return
 	if dish.click_pending():  # (a moving view, as when following, would otherwise move the hover off the click's point every frame and lose the click)
@@ -303,8 +305,8 @@ func update_pointer() -> void:
 	dish.clear_hover()
 	dish.clear_place_preview()
 	hovering_point = false
-	# Skip while the mouse is over the toolbar/panels, or mid-drag.
-	if _dragging or viewport.gui_get_hovered_control() != null:
+	# Skip while a modal is up, the mouse is over the toolbar/panels, or mid-drag.
+	if modal or _dragging or viewport.gui_get_hovered_control() != null:
 		return
 	var world := host.get_global_mouse_position()
 	if not dish.contains(world):

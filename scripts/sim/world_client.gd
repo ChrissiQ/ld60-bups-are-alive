@@ -232,6 +232,7 @@ func set_view(row: int, view: ViewRequest) -> void:
 	v.row = row
 	v.camera = view.camera
 	v.pixel_um = view.pixel_um
+	v.fresh = view.fresh
 	v.want_field_view = view.want_field_view
 	v.want_thumbnails = view.want_thumbnails
 	v.want_husks = view.want_husks

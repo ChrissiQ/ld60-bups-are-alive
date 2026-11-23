@@ -194,14 +194,20 @@ float steering_chance_d(uint d, float speed, float sense_range, float c, float g
 void f(uint k) {
 	uint d = uint(pcs.pb), i = uint(pcs.pd) * PROBES_MOST + k;
 	float x = SPQ[i * 4u], y = SPQ[i * 4u + 1u], speed = SPQ[i * 4u + 2u], sense_range = SPQ[i * 4u + 3u];
-	float c, gx, gy, pc, pgx, pgy, sg;
+	float c, gx, gy, pc = 0.0, pgx = 0.0, pgy = 0.0, sg;
 	readf_d(d, x, y, c, gx, gy);
+	uint o = i * PROBE_FLOATS;
+	uint e0, e1;
+	if (!bin_list(d, x, y, e0, e1)) {
+		// a square no list covers: the field's part is kept for `pool_probe_slots`, which adds the clouds' and finishes the answer
+		SPR[o] = gx; SPR[o + 1u] = gy; SPR[o + 3u] = c;
+		return;
+	}
 	puffs_at_d(d, x, y, pc, pgx, pgy, sg);
 	c += pc; gx += pgx; gy += pgy;
 	float glen = sqrt(gx * gx + gy * gy);
 	vec3 answer = vec3(0.0, 0.0, 0.5);
 	if (glen > 1e-12) answer = vec3(gx / glen, gy / glen, steering_chance_d(d, speed, sense_range, c, glen, pcs.pc));
-	uint o = i * PROBE_FLOATS;
 	SPR[o] = answer.x; SPR[o + 1u] = answer.y; SPR[o + 2u] = answer.z; SPR[o + 3u] = c; SPR[o + 4u] = glen;
 }
 GRID_LOOP(f, uint(pcs.pa))
