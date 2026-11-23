@@ -2,8 +2,8 @@ class_name TimingOverlay
 extends MarginContainer
 ## F3 on the game screen shows how smoothly the dish in view is drawn, smoothed over the last WINDOW_MSEC and rewritten REFRESH_MSEC
 ## apart (see DebugHotkey, which owns the key). Its figures come from where the F12 log gets them:
-## `WorldClient.picture_rate()` (pictures, holds, simulated time between them), the engine's frame rate, the screen's playback
-## speed and the speed reached, and the memory figures of the newest snapshot's timing (`memory_fraction`, `memory_need_fraction`,
+## `WorldClient.picture_rate()` (pictures, holds, simulated time between them), the engine's frame rate, the frame record's
+## main-thread time (`FrameRecord`), and the memory figures of the newest snapshot's timing (`memory_fraction`, `memory_need_fraction`,
 ## `memory_budget_bytes` and the machine's `MachineMemory` figures the memory watch reads every few seconds). A memory row whose
 ## figures are not known is hidden. Nothing here takes the mouse.
 
@@ -12,7 +12,7 @@ const REFRESH_MSEC := 250  ## how often the text is rewritten
 const LATE_FRAMES := 1.5  ## a frame is late when it took longer than this many display frames (the refresh rate's frame, `WorldClient.display_ms`): the next refresh was missed
 
 ## The rows, top to bottom: the label's key and the key of the value's text in [debug] of strings.cfg.
-const ROWS := ["pictures", "per_picture", "hold", "frames", "late", "main_thread", "asked", "reached", "pool", "need", "card", "system"]
+const ROWS := ["pictures", "per_picture", "hold", "frames", "late", "main_thread", "pool", "need", "card", "system"]
 
 ## The memory rows, which hide when their figure is not known.
 const MEMORY_ROWS := ["pool", "need", "card", "system"]
@@ -57,13 +57,10 @@ func _process(_delta: float) -> void:
 		refresh()
 
 
-## Rewrites the figures from what is known now. `screen` is the game screen (its `sim_speed` and `achieved_speed`).
+## Rewrites the figures from what is known now.
 func refresh() -> void:
 	var world := WorldClient.shared()
 	var pictures: Dictionary = world.picture_rate() if world != null else {}
-	var screen := get_tree().current_scene
-	var asked: float = screen.get("sim_speed") if screen != null and screen.get("sim_speed") != null else 0.0
-	var reached: float = screen.get("achieved_speed") if screen != null and screen.get("achieved_speed") != null else 0.0
 	var seconds_per_picture := float(pictures.get("sim_s_per_picture", 0.0))
 	_write("pictures", Strings.t("debug.overlay_pictures_value", ["%.1f" % (float(pictures.get("shown", 0)) * 1000.0 / WorldClient.PICTURE_WINDOW_MSEC)]))
 	# (A duration between two pictures, often well under a second at low speed, so it is in seconds, not SimClock.format's minutes.)
@@ -72,8 +69,6 @@ func refresh() -> void:
 	_write("frames", Strings.t("debug.overlay_frames_value", ["%.0f" % Engine.get_frames_per_second()]))
 	_write("late", Strings.t("debug.overlay_late_value", [int(round(late_share(world.display_ms if world != null else 0.0) * 100.0))]))
 	_write("main_thread", Strings.t("debug.overlay_main_thread_value", ["%.1f" % FrameRecord.process_p95(FrameRecord.WINDOW_MSEC)]))
-	_write("asked", Strings.t("debug.overlay_speed_value", [int(asked)]))
-	_write("reached", Strings.t("debug.overlay_speed_value", [int(reached)]))
 	var timing: Dictionary = world.latest().timing if world != null else {}
 	show_memory(memory_figures(timing))
 

@@ -59,7 +59,6 @@ It shows these rows, smoothed over the last second and rewritten four times a se
 | Screen redraws a second (while the bups slide between pictures every redraw moves them) | `Engine.get_frames_per_second()` |
 | Share of late redraws (longer than 1.5 display frames) | `WorldClient.display_ms` |
 | The main thread's process time per frame at the 95th percentile over the last ten seconds | `FrameRecord.process_p95`, the same record as the log's `recent_frames` |
-| Playback speed asked and reached | the screen's `sim_speed` and `achieved_speed` |
 | Graphics memory the pool holds, and the memory the running dishes need, each against the pool's working budget | the newest snapshot's timing; `TimingOverlay.memory_figures`, the figures the F12 log's `memory` holds; `memory_need_fraction` is what the memory warning judges by |
 | The card's usage against its budget, on a card with memory of its own that reports both; or, where the graphics memory is the system's, the system memory in use against the installed memory | `MachineMemory`'s `physical` and `available`, refreshed at the memory watch's pace |
 
