@@ -344,7 +344,7 @@ The code is the end of `pool_life`.
 
 A bup's record word 14 is its donor flag (0 or 1; the drag cost is worked out from the speed gene). A donor (`Genome.DONOR_*`, `CONJ_*`) copies a run of its genes into a non-donor it touches.
 
-The kernels `pool_conj_clear`, `pool_conj_count`, `pool_conj_scan`, `pool_conj_scatter` and `pool_conj_apply` run before `pool_life`. They keep a hashed table of donors by 20 um cell for each dish; each recipient looks at the cells as far round it as the largest donor could touch it, and changes only itself. `tests/sim/conjugation_isolation_test.gd` checks that dishes do not touch.
+The kernels `pool_conj_clear`, `pool_conj_count`, `pool_conj_scan`, `pool_conj_scatter` and `pool_conj_apply` run before `pool_life`. They keep a hashed table of donors by 20 µm cell for each dish; each recipient looks at the cells as far round it as the largest donor could touch it, and changes only itself. `tests/sim/conjugation_isolation_test.gd` checks that dishes do not touch.
 
 ### Raised ceilings
 
@@ -388,7 +388,7 @@ The field pass is fused. `pool_fdiff` (`gpu/kernels_field.gd`) does the feed and
 - Field traffic is about 74 B a cell a step at 2 iterations.
 - Per-kernel profiles of small dispatches are unreliable here: compare paths by interleaved wall-time batches.
 
-**Splitting the rounds into submits.** The iterations are D x the step / (a cell's width)^2, so a 300 um dish in water at 20 s steps runs 129 rounds. Many such dishes give a step of a hundred milliseconds or more of rounds (999 such dishes: about 140 ms), and one submit that long leaves the interface's frames late. `SimCore._record_step` therefore splits the rounds into submits of at most `FIELD_SUBMIT_MS` (4 ms, under half a display frame at 120 Hz), judging by the time a round's tile took in the field's own earlier submits, so the frames get the card between them.
+**Splitting the rounds into submits.** The iterations are D x the step / (a cell's width)^2, so a 300 µm dish in water at 20 s steps runs 129 rounds. Many such dishes give a step of a hundred milliseconds or more of rounds (999 such dishes: about 140 ms), and one submit that long leaves the interface's frames late. `SimCore._record_step` therefore splits the rounds into submits of at most `FIELD_SUBMIT_MS` (4 ms, under half a display frame at 120 Hz), judging by the time a round's tile took in the field's own earlier submits, so the frames get the card between them.
 
 At 999 such dishes this gave a frame p95 of 8.7 ms against 12.7 in one submit, at 2-3% of the speed (measured on Apple Silicon, Metal). A step whose rounds take under 4 ms in all is never split; that includes any dish of about 9 mm or more in water at 100 cells across, which runs one round.
 
@@ -448,7 +448,7 @@ A new constant in `SimConstants.build()` that the GPU reads is a `const` slot of
 
 ## Measured and not built
 
-**Dispatching by the live count** (measured on one-dish kernels, M1 Pro). The kernels ran over every slot, each returning past the count, at about 0.1 ms a step per 100,000 empty slots. An indirect dispatch (`compute_list_dispatch_indirect`) does not see a kernel's write made earlier in the same submit, but does see a `buffer_copy` between two lists. A copy per step needs a new compute list per step, which cost 60-85 us a step: the net was zero at a 106,000 limit and a loss at a full dish. The pooled kernels have not been measured this way.
+**Dispatching by the live count** (measured on one-dish kernels, M1 Pro). The kernels ran over every slot, each returning past the count, at about 0.1 ms a step per 100,000 empty slots. An indirect dispatch (`compute_list_dispatch_indirect`) does not see a kernel's write made earlier in the same submit, but does see a `buffer_copy` between two lists. A copy per step needs a new compute list per step, which cost 60-85 µs a step: the net was zero at a 106,000 limit and a loss at a full dish. The pooled kernels have not been measured this way.
 
 ## Where the code lives
 

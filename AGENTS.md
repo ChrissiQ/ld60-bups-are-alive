@@ -12,7 +12,7 @@ It is a laboratory for watching real evolution happen: bups eat, swim toward foo
 
 **Platform.** Windows with a desktop gaming GPU is the first-class platform, and the performance targets (the x10,000 top speed) are judged there. A cost in speed or smoothness on other machines (Apple Silicon, for example) is acceptable when it benefits Windows, and NVIDIA-only features are acceptable. Say what a performance figure was measured on, in the generic sense ("Windows, Direct3D 12"; "Apple Silicon, Metal").
 
-**Clocks and units.** There are exactly two clocks: real time, and the simulation clock (playback speed multiplies it). Do not invent a scaled "game clock"; show times with `SimClock.format`. Units are um and seconds. "Metabolism" is a gene, nothing else.
+**Clocks and units.** There are exactly two clocks: real time, and the simulation clock (playback speed multiplies it). Do not invent a scaled "game clock"; show times with `SimClock.format`. Units are µm and seconds. "Metabolism" is a gene, nothing else.
 
 ## Where to read next
 
