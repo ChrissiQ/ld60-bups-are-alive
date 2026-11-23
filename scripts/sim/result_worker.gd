@@ -12,6 +12,7 @@ extends RefCounted
 const MAX_ITERATIONS := 2
 const PUSH_WAIT_USEC := 200
 
+const APPLY_PART := 4096  ## the most family events one LineageStore.apply_events call takes (`apply_in_parts`): about a couple of ms of the store's lock at the measured cost of an event
 var store: Object = null  ## the LineageStore (null: no lineage is kept)
 var lineage_usec := 0  ## µs spent applying lineage, in all
 
@@ -134,6 +135,52 @@ func _run() -> void:
 				_iteration(item)
 
 
+## The family events of an iteration into `store` (LineageStore.apply_events), in calls of at most APPLY_PART events: the store holds its
+## lock through a call, and the main thread looks a bup up in it every frame (the info panel's and the hover card's bup), so one call
+## for a 2-million-bup dish's tens of thousands of events made the frame that asked wait tens of ms. The events are in the order of their
+## steps (`step` words, GpuLayout.EB_STEP and ED_STEP), and the store adds a step's births before its deaths and a step's births or
+## deaths in any order among themselves, so each call takes part of one step's births, or part of its deaths, in that order: the
+## store ends as one call would leave it.
+static func apply_in_parts(store: Object, births: PackedByteArray, deaths: PackedByteArray, first_step_end: float, step_s: float) -> void:
+	var birth_bytes := GpuLayout.BIRTH_WORDS * 4
+	var death_bytes := GpuLayout.DEATH_WORDS * 4
+	var born := births.size() / birth_bytes
+	var died := deaths.size() / death_bytes
+	var none := PackedByteArray()
+	var bi := 0
+	var di := 0
+	while bi < born or di < died:
+		var step := GpuLayout.EV_STEP_MASK + 1
+		if bi < born:
+			step = births.decode_u32(bi * birth_bytes + GpuLayout.EB_STEP * 4) & GpuLayout.EV_STEP_MASK
+		if di < died:
+			step = mini(step, deaths.decode_u32(di * death_bytes + GpuLayout.ED_STEP * 4) & GpuLayout.EV_STEP_MASK)
+		var b_end := _step_end(births, birth_bytes, GpuLayout.EB_STEP, bi, born, step)
+		var d_end := _step_end(deaths, death_bytes, GpuLayout.ED_STEP, di, died, step)
+		while bi < b_end:
+			var to := mini(bi + APPLY_PART, b_end)
+			store.apply_events(births.slice(bi * birth_bytes, to * birth_bytes), none, first_step_end, step_s)
+			bi = to
+		while di < d_end:
+			var to := mini(di + APPLY_PART, d_end)
+			store.apply_events(none, deaths.slice(di * death_bytes, to * death_bytes), first_step_end, step_s)
+			di = to
+
+
+## The first event at or past `from` (of `count`, each `bytes` long, its step in word `word`) whose step is past `step`: a halving
+## search, as the events are in the order of their steps.
+static func _step_end(events: PackedByteArray, bytes: int, word: int, from: int, count: int, step: int) -> int:
+	var lo := from
+	var hi := count
+	while lo < hi:
+		var mid := (lo + hi) >> 1
+		if (events.decode_u32(mid * bytes + word * 4) & GpuLayout.EV_STEP_MASK) <= step:
+			lo = mid + 1
+		else:
+			hi = mid
+	return lo
+
+
 func _iteration(item: Dictionary) -> void:
 	var t0 := Time.get_ticks_usec()
 	var steps: int = item["steps"]
@@ -142,7 +189,7 @@ func _iteration(item: Dictionary) -> void:
 		var deaths: PackedByteArray = item["deaths"]
 		var began := float(item.get("game_began", 0.0))  # (the family tree's times are the game's: SimThread, WorldClient.begin_game)
 		if births.size() > 0 or deaths.size() > 0:
-			store.apply_events(births, deaths, float(item["t0"]) + float(item["delta"]) - began, float(item["delta"]))
+			apply_in_parts(store, births, deaths, float(item["t0"]) + float(item["delta"]) - began, float(item["delta"]))
 		store.set_time(float(item["sim_time"]) - began)
 	var lineage_us := Time.get_ticks_usec() - t0
 	lineage_usec += lineage_us

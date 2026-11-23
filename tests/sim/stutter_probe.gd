@@ -4,13 +4,15 @@ extends SceneTree
 ## Prints the frames (late: over 1.5 display frames, as the F3 overlay counts; p50, p95, p99, worst), the slide (stalls and jumps of the
 ## drawn simulated time, as slide_test's M), the speed reached, and the simulation's iterations (their time, the time in submits and the
 ## longest single submit, `submit_ms_most`; the three longest iterations' timing in full), and the main thread's process step (the time from `process_frame` to the end of the last
-## node's `_process`) with how many late frames had a long one. `still=1` keeps the share at 1 (no drawing between pictures), `paused=1`
+## node's `_process`) with how many late frames had a long one, and how long a look-up in the family tree takes on the main thread
+## (`Dish.has_record`, as the info panel and the hover card make every frame for the bup selected or under the pointer). `still=1` keeps the share at 1 (no drawing between pictures), `paused=1`
 ## pauses the game for the window (the screen alone), `speed=` asks another speed, each a diagnosis. Run windowed, e.g.:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 --windowed --resolution 1600x1000 -s tests/sim/stutter_probe.gd -- dishes=2
 
 var _perf := load("res://tests/sim/perf_gates_test.gd")
 var _process_start := 0
 var _last_process_ms := 0.0
+var _marks := {}  ## mark name -> ms since process_frame, this frame
 
 
 ## Stamps the end of each frame's process step (it runs after every other node's `_process`).
@@ -19,6 +21,14 @@ class EndStamp:
 	var probe: Object
 	func _process(_delta: float) -> void:
 		probe._last_process_ms = (Time.get_ticks_usec() - probe._process_start) / 1000.0
+
+
+## Stamps a point within the process step (where it sits in the tree): the time since `process_frame`, by its name.
+class Mark:
+	extends Node
+	var probe: Object
+	func _process(_delta: float) -> void:
+		probe._marks[name] = (Time.get_ticks_usec() - probe._process_start) / 1000.0
 
 
 func _initialize() -> void:
@@ -99,6 +109,17 @@ func _run() -> void:
 	stamp.process_priority = 1 << 30
 	root.add_child(stamp)
 	process_frame.connect(func() -> void: _process_start = Time.get_ticks_usec())
+	var service := root.get_node("SimService")
+	for at: Array in [["after_poll", root, service.get_index() + 1], ["before_main", root, m.get_index()], ["after_main_own", m, 0]]:
+		var mk := Mark.new()
+		mk.name = at[0]
+		mk.probe = self
+		(at[1] as Node).add_child(mk)
+		(at[1] as Node).move_child(mk, at[2])
+	var segs: Array = []
+	var looks: Array = []  ## ms a family-tree look-up (Dish.has_record of a living bup) took each frame
+	var ids_now := main_dish.bup_ids()
+	var look_id: int = ids_now[ids_now.size() / 2] if not ids_now.is_empty() else -1
 	var display_ms: float = w.display_ms
 	var frames: Array = []
 	var procs: Array = []
@@ -119,6 +140,14 @@ func _run() -> void:
 		frames.append((now - usec) / 1000.0)
 		usec = now
 		procs.append(_last_process_ms)  # (the frame before this one's process step: process_frame comes first)
+		var a: float = _marks.get("after_poll", 0.0)
+		var b: float = _marks.get("before_main", a)
+		var c: float = _marks.get("after_main_own", b)
+		segs.append([a, b - a, c - b, _last_process_ms - c])
+		if look_id >= 0:
+			var tl := Time.get_ticks_usec()
+			main_dish.has_record(look_id)
+			looks.append((Time.get_ticks_usec() - tl) / 1000.0)
 		var pl: WorldClient.Playout = w._playout
 		var v := main_dish.drawing.view
 		if v != null and pl.before >= 0.0:
@@ -163,6 +192,18 @@ func _run() -> void:
 			if t[key] is float or t[key] is int:
 				parts += " %s=%.1f" % [key, float(t[key])]
 		print("STUTTER longest iteration %d:%s; phases %s" % [k + 1, parts, str(t.get("ph", {}))])
+	var names := ["poll and snapshot", "other autoloads", "Main's own _process", "Main's children (dishes, interface)"]
+	for j in 4:
+		var col: Array = segs.map(func(x: Array) -> float: return x[j])
+		var late_col: Array = []
+		for i in range(1, frames.size()):
+			if frames[i] > 1.5 * display_ms:
+				late_col.append(maxf(segs[i][j], segs[i + 1][j] if i + 1 < segs.size() else 0.0))
+		col.sort()
+		late_col.sort()
+		print("STUTTER process part %-38s p50 %.2f p95 %.2f p99 %.2f ms; in late frames p50 %.2f max %.2f ms" % [names[j], _q(col, 0.5), _q(col, 0.95), _q(col, 0.99), _q(late_col, 0.5), late_col[-1] if not late_col.is_empty() else 0.0])
+	looks.sort()
+	print("STUTTER family-tree look-up on the main thread (Dish.has_record) p50 %.3f p95 %.3f p99 %.3f max %.3f ms over %d frames" % [_q(looks, 0.5), _q(looks, 0.95), _q(looks, 0.99), looks[-1] if not looks.is_empty() else 0.0, looks.size()])
 	var late_proc := 0
 	var late_all := 0
 	var proc_sorted := procs.duplicate()
