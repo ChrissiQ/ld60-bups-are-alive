@@ -95,9 +95,33 @@ func _initialize() -> void:
 		await process_frame
 	overlay.refresh()
 	for row: String in TimingOverlay.ROWS:
+		if row in TimingOverlay.MEMORY_ROWS:
+			continue
 		var shown: String = overlay._values[row].text
 		TestUtil.check(shown.length() > 0 and shown.find("%") < 0 or row == "late", "the overlay's %s row has a figure (%s)" % [row, shown])
 		TestUtil.check(shown.strip_edges() != "" and (shown[0].is_valid_int() or shown[0] == "x"), "...which starts with a number (%s)" % shown)
+	# The memory rows: a discrete card gives the pool, need and card rows; a shared-memory machine the pool, need and system rows; an unknown figure hides its row.
+	var gib := int(TimingOverlay.GIB)
+	var base := {"memory_budget_bytes": 12 * gib, "memory_fraction": 0.5, "memory_need_fraction": 0.25}
+	var card_timing := base.duplicate()
+	card_timing["machine"] = {"machine": {"shared": 0, "card_budget": 8 * gib, "card_usage": 2 * gib, "physical": 32 * gib, "available": 16 * gib}}
+	var f := TimingOverlay.memory_figures(card_timing)
+	TestUtil.check(f.has("pool") and f.has("need") and f.has("card") and not f.has("system"), "a card with usage and budget shows its row, not the system's")
+	overlay.show_memory(f)
+	TestUtil.check(overlay._values["pool"].text == "6.00 of 12.00 GB (50%)" and overlay._values["need"].text == "3.00 of 12.00 GB (25%)" and overlay._values["card"].text == "2.00 of 8.00 GB (25%)", "the memory rows read in gigabytes (%s | %s | %s)" % [overlay._values["pool"].text, overlay._values["need"].text, overlay._values["card"].text])
+	TestUtil.check(overlay._values["pool"].visible and overlay._captions["card"].visible and not overlay._values["system"].visible and not overlay._captions["system"].visible, "the known rows show, the system row is hidden")
+	var shared_timing := base.duplicate()
+	shared_timing["machine"] = {"machine": {"shared": 1, "card_budget": -1, "card_usage": -1, "physical": 16 * gib, "available": 4 * gib}}
+	f = TimingOverlay.memory_figures(shared_timing)
+	overlay.show_memory(f)
+	TestUtil.check(f.has("system") and not f.has("card") and overlay._values["system"].text == "12.00 of 16.00 GB (75%)" and not overlay._values["card"].visible, "shared graphics memory shows the system's memory in use")
+	var unknown_timing := base.duplicate()
+	unknown_timing["machine"] = {"machine": {"shared": 0, "card_budget": 8 * gib, "card_usage": -1, "physical": -1, "available": -1}}
+	f = TimingOverlay.memory_figures(unknown_timing)
+	overlay.show_memory(f)
+	TestUtil.check(not f.has("card") and not f.has("system") and not overlay._values["card"].visible and not overlay._values["system"].visible, "a device row whose figure is unknown is hidden")
+	overlay.show_memory(TimingOverlay.memory_figures({}))
+	TestUtil.check(not overlay._values["pool"].visible and not overlay._values["need"].visible, "with no budget known the pool rows are hidden")
 	TestUtil.check(overlay.late_share(16.7) >= 0.0 and overlay.late_share(16.7) <= 1.0, "the late share is a share")
 	overlay._frames = [[0, 10], [0, 40], [0, 20], [0, 25]]
 	TestUtil.check(is_equal_approx(overlay.late_share(16.0), 0.5), "a frame is late past 1.5 display frames (two of four are)")
