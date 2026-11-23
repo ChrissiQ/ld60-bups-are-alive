@@ -19,7 +19,7 @@ How the simulation runs, from the commands the game sends to the pictures it dra
 
 The simulation is **one pooled world on the GPU**. Every running dish's bups, nutrient grid, plankton clouds and husks share one set of buffers, and a dish's run does not depend on what else is in the pool. The model lives in the compute kernels and nowhere else; the host code (`scripts/sim/`, one snake_case file a class: `SimCore` is `sim_core.gd`) schedules them, moves data and applies edits.
 
-There is no CPU simulation and no backend setting. A machine that cannot make a local `RenderingDevice` with the imported `pool_*` shaders, and a headless run, get `CpuSimBackend`, a stub that runs nothing (`can_simulate()` is false, commands are dropped, the snapshot is empty).
+There is no CPU simulation, no backend setting and no automatic choice between backends. A machine that cannot make a local `RenderingDevice` with the imported `pool_*` shaders, and a headless run, get `CpuSimBackend`, a stub that runs nothing (`can_simulate()` is false, commands are dropped, the snapshot is empty).
 
 An outcome is deterministic for a seed and identical on any thread count. Only timing varies, and the step the `Governor` chooses (see [Time and speed](#time-and-speed)) differs between machines; tools and tests that drive `SimCore` set the step themselves.
 
@@ -70,6 +70,7 @@ It applies the events in calls of at most `ResultWorker.APPLY_PART` events (`app
 The screen asks questions of the simulation (`WorldClient.ask`: shares, tracked bups, probes, husks). A dish's questions are answered at most every `SimThread.ANSWER_MSEC` (`_due_questions`), from the state after the iteration's steps.
 
 - Each dish whose questions need the card takes a set of the question buffers (`GpuLayout.ANSWER_SETS`; set 0 is the publish's tracked bups). A dish past the last set is answered in the next list.
+- The answer kernels bound their loops by what the card holds when they run, not by counts the host knew when it recorded them (`pool_track` reads the dish's segment from `DSTATE`).
 - The tracked bups' places become probe points on the card (`pool_track_points`), so the steering at each comes from the same list.
 - `SimCore.answer` (and `track`, `probe`, `husk_near`, `fraction_with_gene_at_least`) runs the same kernels in a list of their own, for tests and tools.
 
