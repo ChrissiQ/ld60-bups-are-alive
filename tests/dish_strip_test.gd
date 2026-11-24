@@ -65,7 +65,14 @@ func _run() -> void:
 		m.add_dish(chosen)
 	for i in 3:
 		await process_frame
-	TestUtil.check(strip.count() == 999 and strip.count_label.text == "..999" and strip.count_label.visible, "999 entries, counted as '..999' and shown as they do not all fit (%s)" % strip.count_label.text)
+	TestUtil.check(strip.count() == 999 and strip.count_label.text == "..999", "999 entries, counted as '..999' (%s)" % strip.count_label.text)
+	for i in 3:
+		await process_frame
+	var bar_end := strip.scroll.get_h_scroll_bar()
+	TestUtil.check(strip.scroll.scroll_horizontal >= bar_end.max_value - bar_end.page - 0.5 and not strip.count_label.visible, "999 dishes just made: the strip is scrolled to the newest tab, and shows no count as there is nothing past it (%d)" % strip.scroll.scroll_horizontal)
+	strip.scroll.scroll_horizontal = 0
+	await process_frame
+	TestUtil.check(strip.count_label.visible, "scrolled to the start, where the tabs do not all show, the more-marker is shown")
 	var widths := {}
 	for tab: Button in strip._tabs:
 		widths[tab.size.x] = true

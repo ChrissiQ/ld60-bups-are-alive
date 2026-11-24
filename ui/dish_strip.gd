@@ -1,8 +1,8 @@
 class_name DishStrip
 extends PanelContainer
 ## Every dish that is running, a tab each in the top bar in the order they came: a small picture of it (its tile of the simulation's
-## thumbnails' atlas, redrawn once a second: ThumbAtlas, DishThumb) and its number (its bups are in its tip), and beside the tabs how many
-## dishes there are. The dish in the main view is lit, and a click on another reports it (`dish_chosen`) for the screen to bring into the
+## thumbnails' atlas, redrawn once a second: ThumbAtlas, DishThumb) and its number (its bups are in its tip), and beside the tabs, while some are out of view
+## to the right, how many dishes there are (a marker that there are more). The dish in the main view is lit, and a click on another reports it (`dish_chosen`) for the screen to bring into the
 ## main view. The strip is hidden while there is only one dish.
 ##
 ## The tabs scroll sideways inside a width the top bar can afford (`max_width`), and only those in view and OVERSCAN either side are made:
@@ -53,6 +53,8 @@ var _atlas_version := -1
 var _tab_width := 0.0  ## every tab's width
 var _measured_for := []  ## what `_tab_width` was measured for: [digits, font size]
 var _since := REFRESH_SECONDS
+var _reveal_pending := false  ## a scroll to the newest tab is on its way
+var _overflowing := false  ## the tabs do not all fit (the arrows are there)
 var _held := 0  ## the arrow held down: -1 the left one, 1 the right one, 0 none
 var _held_for := 0.0  ## how long it has been held, from minus the delay before it starts repeating
 var _held_total := 0.0
@@ -79,7 +81,9 @@ func _process(delta: float) -> void:
 		return
 	var bar := scroll.get_h_scroll_bar()
 	previous_button.disabled = scroll.scroll_horizontal <= 0
-	next_button.disabled = scroll.scroll_horizontal >= bar.max_value - bar.page - 0.5
+	var at_end := scroll.scroll_horizontal >= bar.max_value - bar.page - 0.5
+	next_button.disabled = at_end
+	count_label.visible = _overflowing and not at_end  # (the count stands for the tabs out of view: none past the last one)
 	if _held != 0:
 		_held_for += delta
 		_held_total += delta
@@ -165,6 +169,22 @@ func light(main_dish: Dish) -> void:
 	_lit = main_dish
 	_lay_out()
 	_scroll_to_lit.call_deferred()  # (once the row has its new width: a tab just added is past the old end)
+
+
+## Scrolls to the newest tab (a dish just made), so it is in view whichever dish is lit.
+func reveal_newest() -> void:
+	if _reveal_pending:
+		return
+	_reveal_pending = true
+	_scroll_to_end.call_deferred()
+
+
+## (A frame on: the scroll container has taken the row's new width by then, and would hold the scroll to the old one before.)
+func _scroll_to_end() -> void:
+	await get_tree().process_frame
+	_reveal_pending = false
+	if is_node_ready():
+		scroll.scroll_horizontal = int(maxf(_content_width() - _view_width(), 0.0))
 
 
 ## Brings the lit tab into view (in the middle of it) when it is not.
@@ -320,6 +340,7 @@ func _fit() -> void:
 	var needed := _content_width()
 	var overflow := needed > max_width  # (the count and the arrows come only when the tabs do not all fit)
 	var room := max_width - (_count_width() if overflow else 0.0)
+	_overflowing = overflow
 	count_label.visible = overflow
 	previous_button.visible = overflow
 	next_button.visible = overflow

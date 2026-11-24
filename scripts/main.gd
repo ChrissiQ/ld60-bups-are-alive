@@ -816,6 +816,7 @@ func _register_dish(d: Dish, label := -1) -> void:
 			lineage.on_selection_changed())
 	dish_strip.add(d, label)
 	dish_strip.light(dish)
+	dish_strip.reveal_newest()
 
 
 ## The number a new dish is shown by: 1, 2, 3... until MAX_DISHES have been handed out in this game, then the lowest that no running or frozen dish
