@@ -37,9 +37,9 @@
 //    import or discard is adding or taking away, which are counted for the ids it has done; every tombstone's id has a claim;
 //  - an operation keeps ids and indices only: no iterator, pointer or reference into records, pins, claim_counts or tombstones lives across
 //    a boundary, and each slice looks its records up again.
-// The game calls apply_events, export_dish, release_dish, import_bytes and retarget_ids on one thread (its result worker) only, so those
-// never interleave with each other; discard_frozen, pin, unpin, set_custom_name and every query may come from another thread at any boundary.
-// Two operations on the same dish number never overlap (a frozen dish is trashed only after its freeze has returned).
+// The game calls apply_events, export_dish, release_dish, import_bytes, retarget_ids and discard_frozen on one thread (its result worker)
+// only, in order, so those never interleave with each other; pin, unpin, set_custom_name and every query may come from another thread at
+// any boundary. discard_frozen may come from another thread too, but two operations on the same dish number must never overlap.
 class LineageStore : public godot::RefCounted {
 	GDCLASS(LineageStore, godot::RefCounted)
 
