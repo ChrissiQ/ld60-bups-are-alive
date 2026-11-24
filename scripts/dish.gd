@@ -338,9 +338,30 @@ func _world() -> WorldClient:
 	return world
 
 
-## The dish's family tree: the world's LineageStore (null when the backend keeps none).
+## The dish's family tree: the world's LineageStore (null when the backend keeps none). It runs behind the snapshots (WorldClient's
+## header): a bup shown may have no record yet (`lineage_ticket`, `lineage_has`).
 func lineage_store() -> Object:
 	return _world().lineage()
+
+
+## The ticket of the family tree's steps behind what the newest snapshot shows (Snapshot.lineage_ticket).
+func lineage_ticket() -> int:
+	return _world().latest().lineage_ticket
+
+
+## Whether the family tree has done the steps up to `ticket`: a record still missing then is gone, not just not known yet.
+func lineage_has(ticket: int) -> bool:
+	return _world().lineage_has(ticket)
+
+
+## Whether every bup's home in the family tree is known (no pipette's retarget is still to come: WorldClient.homes_known).
+func homes_known() -> bool:
+	return _world().homes_known()
+
+
+## The number of the dish a bup lives in, from its family record (`info`): WorldClient.home_of.
+func _home(id: int, info: Dictionary) -> int:
+	return _world().home_of(id, int(info.get("home", _number())))
 
 
 ## Seeds the dish's founders' places and its patches' landscape, and the dish's own random numbers in the world, so a run repeats.
@@ -831,7 +852,7 @@ func has_bup(id: int) -> bool:
 	if store == null:
 		return false
 	var info: Dictionary = store.info(id)
-	return not info.is_empty() and info["alive"] and int(info.get("home", _number())) == _number()
+	return not info.is_empty() and info["alive"] and _home(id, info) == _number()
 
 
 ## The ids of the bups alive in this dish, from the family tree.
@@ -841,7 +862,7 @@ func bup_ids() -> PackedInt64Array:
 	if store == null:
 		return out
 	for id: int in store.alive_ids():
-		if int((store.info(id) as Dictionary).get("home", _number())) == _number():
+		if _home(id, store.info(id)) == _number():
 			out.append(id)
 	return out
 
@@ -957,7 +978,7 @@ func rename_bup(id: int, text: String) -> void:
 	if store != null and store.has_record(id):
 		store.set_custom_name(id, BupNames.clean(text))
 	else:
-		_pending_names[id] = BupNames.clean(text)  # (a founder's record comes with the dish's first snapshot)
+		_pending_names[id] = BupNames.clean(text)  # (its record comes when the family tree gets to its birth: `_flush_names` gives it the name then)
 
 
 ## Everything known about a bup, alive or dead (LineageStore.info; empty once its record is dropped), with a living bup's present figures
@@ -971,7 +992,7 @@ func lineage_info(id: int) -> Dictionary:
 		return {}
 	if info["alive"]:
 		info.merge(bup_info(id), true)
-	var home := int(info.get("home", _number()))
+	var home := _home(id, info)
 	if home != _number():
 		info["moved_to"] = home
 	return info
@@ -991,7 +1012,7 @@ func has_record(id: int) -> bool:
 	return has
 
 
-## For each id of `chain`, how many living bups of this dish have it in their line.
+## For each id of `chain`, how many living bups of this dish have it in their line (by their homes in the family tree: see `homes_known`).
 func living_descendants_of(chain: PackedInt64Array) -> PackedInt32Array:
 	var store := lineage_store()
 	if store == null:
@@ -1002,7 +1023,7 @@ func living_descendants_of(chain: PackedInt64Array) -> PackedInt32Array:
 
 
 ## Asks for a bup's record (and its ancestors') to be kept after it dies, until it is unpinned: a pin held by this dish's number.
-## False when there was no record to pin (the store may have dropped it since `has_record` answered: the worker prunes a dead bup's record
+## False when there was no record to pin (the store may have dropped it since `has_record` answered: the lineage worker prunes a dead bup's record
 ## whenever nothing holds it).
 func pin_bup(id: int) -> bool:
 	var store := lineage_store()

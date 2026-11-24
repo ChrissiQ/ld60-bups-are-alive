@@ -29,8 +29,11 @@ main thread                      sim thread (SimThread)               ResultWork
 Main, Dish, views                drain commands
   |  commands (WorldClient)  ->  Governor: how many steps, how long
   |                              SimCore.run: steps + answers + pictures
-  |  SimReply, Snapshot      <-  (local RenderingDevice, one sync)  ->  family events -> LineageStore
-  |  pictures (Playout)      <-                                         stats -> Snapshot (mutex swap)
+  |  Snapshot, SimReply      <-  (local RenderingDevice, one sync)  ->  stats -> Snapshot (mutex swap)
+  |  pictures (Playout)      <-                                  |
+  |                                                              |      LineageWorker thread
+  |  LineageStore queries,   <-                                  +--->  family events, lineage steps
+  |  freeze and save replies                                            -> LineageStore (its one writer)
 ViewRenderer (main device): view_* kernels, MultiMesh, picks
 ```
 
@@ -42,7 +45,7 @@ ViewRenderer (main device): view_* kernels, MultiMesh, picks
 
 The main thread talks to the simulation only through `WorldClient` (`scripts/sim/world_client.gd`, `WorldClient.shared()`):
 
-- **Commands** go in a queue: `add_dish`, `remove_dish`, `freeze`, `thaw`, `pipette`, `resize`, `set_params`, `edit_world`, `set_time`, `set_view`, `ask`, `inspect`, `save_all` and others.
+- **Commands** go in a queue: `add_dish`, `remove_dish`, `freeze`, `thaw`, `pipette`, `resize`, `set_params`, `edit_world`, `set_time`, `set_view`, `ask`, `inspect`, `save_all`, `discard_frozen` (the family tree lets go of a frozen dish's claims, in order with the dish's freeze in the lineage worker's queue) and others.
 - **Answers** come back as a `SimReply`.
 - **What the world looks like** is the newest `Snapshot` (`latest()`, `snapshot_changed`).
 
@@ -55,15 +58,30 @@ The sim thread (`SimThread`) owns a local `RenderingDevice`, a `SimCore` and a `
 1. Records the steps.
 2. After them, in the same compute list, records the answers to the questions due and the main dish's pictures.
 3. Submits, then syncs once, with one read-back of the dish state, stats, family events, answers and the pictures' bytes.
-4. Hands what was read to `ResultWorker`.
+4. Hands the family events to `LineageWorker` and the rest of what was read to `ResultWorker` (`SimThread._hand_on`).
 
 An iteration the memory budget refuses puts the dishes' worlds back (`DishWorld.restore`) and is retried with fewer steps.
 
 ### Results and the family tree
 
-`ResultWorker` (a second thread) applies the family events to `LineageStore`, decodes the stats, and builds the `Snapshot` it swaps in under a mutex.
+Two threads take what an iteration read back, each with its own queue, and neither waits on the other:
 
-It applies the events in calls of at most `ResultWorker.APPLY_PART` events (`apply_in_parts`: a step at a time, its births before its deaths, so the store ends as one call would leave it). The store holds its lock through a call, and the main thread looks a bup up every frame. One call for the events of two 2-million-bup dishes would hold the lock for tens of ms: about 8% of frames at 60 Hz were late, against under 1% in parts (measured on an NVIDIA card, Direct3D 12).
+- **`ResultWorker`** decodes the stats and builds the `Snapshot` it swaps in under a mutex. Its queue holds at most `MAX_ITERATIONS` (2) iterations; past that the sim thread waits.
+- **`LineageWorker`** is the one thread that writes `LineageStore` (the store's threading contract, in `native/src/lineage_store.h`). It takes each iteration's family events and, between them, the lineage steps of the commands, in the order the sim thread asked them: a dish's founders, a dish removed or resized (its deaths), a freeze (export, then the reply with the blob, then release), a thaw (import), a pipette (retarget), a frozen dish discarded, a save (each running dish's export, then the reply). Its queue is bounded by the bytes of family events it holds (`LineageWorker.MAX_BYTES`, 512 MiB: about 4 s of events of a world of two 2-million-bup dishes, by an estimate its comment gives, so a freeze of such a dish on a slower machine does not stop the simulation); past that the sim thread waits.
+
+A reply that needs the store (a freeze's blob, a save's blobs) is completed by the lineage worker after its step. A reply that needs only the sim thread's work (a pipette's, a resize's) is completed by the result worker, after the snapshots of the iterations before it and before the next one's, and does not wait for the family tree.
+
+**What lags.** The store runs behind the snapshots by what the lineage worker has queued: usually part of an iteration, and for the length of a freeze's export and release (up to a few seconds for a 2-million-bup dish) while one is done. Each push returns a ticket, each snapshot carries the ticket of every lineage step asked before its iteration (`Snapshot.lineage_ticket`), and `WorldClient.lineage_has(ticket)` says whether the store has done them. Meanwhile:
+
+- a bup a snapshot shows may have no record yet (`Dish.has_record` false): the inspector keeps such a selection and shows nothing of it until the record comes, and lets go of a selection only when its record is still missing after the steps behind what was shown (the record is gone); the hover card and the watch list leave out a bup with no record;
+- a thawed dish runs and shows at once, and its bups' records come when the lineage worker has imported its part;
+- a pipette's bups keep the old dish as their home in the store until the retarget is done: `WorldClient.moved` (from the pipette's answer) and `home_of` give their new dish meanwhile (`Dish.has_bup`, `bup_ids`, `lineage_info`), and counts by home (`Dish.living_descendants_of`, the lineage panel's "alive elsewhere") are not shown until `WorldClient.homes_known`.
+
+The snapshot's timing carries the lineage worker's figures (`lineage_ms`: the last iteration's events it applied; `lineage_queue`, `lineage_queue_bytes`, `lineage_behind_s`: how far the store is behind the snapshot), which the F12 log reports.
+
+The lineage worker applies the events in calls of at most `LineageWorker.APPLY_PART` events (`apply_in_parts`: a step at a time, its births before its deaths, so the store ends as one call would leave it). The store holds its lock through a call, and the main thread looks a bup up every frame. One call for the events of two 2-million-bup dishes would hold the lock for tens of ms: about 8% of frames at 60 Hz were late, against under 1% in parts (measured on an NVIDIA card, Direct3D 12).
+
+**Shutdown.** `SimThread.stop` stops the loop, lets both queues take pushes without waiting (so the sim thread cannot hang on a full one), joins the sim thread, then lets each worker finish what is queued and joins it: every lineage step runs and every reply waiting on one is completed, so stopping with a long backlog takes as long as the backlog. Leaving a game does not stop the threads: the menu's backdrop runs in the same world, and the steps of the dishes the game left (`release_dish`, `discard_frozen`) run in order behind it.
 
 ### Questions
 
@@ -228,6 +246,8 @@ The pool is bounded by what the machine can give the GPU. The pieces:
 
 **Extinction.** A dish that dies out pauses the game on it (`_on_dish_extinct`); resuming deletes it (`_retire_extinct`) unless it is the last running one. When the last running dish dies out, the game ends (`_game_over`, `EndDialog`) if the freezer is empty, and otherwise stays empty until a dish is unfrozen.
 
+A freeze reads the dish whole on the simulation thread and takes it out of the world at once; its reply (the `DishBlob` with the dish's part of the family tree) comes from the lineage worker, which exports the dish's lineage in order with the events before it and answers with it before it releases the dish from the store, so with that worker behind it comes late. The screen does not wait for it, and a trash or the end of the game puts `discard_frozen` in the same queue after it. The other dishes, the snapshots, a pipette's answer and an unfrozen dish's showing do not wait for it either ([Results and the family tree](#results-and-the-family-tree)); only the family tree runs behind meanwhile.
+
 Goal mode stays single (the pipette is locked there). Freezing and thawing: [interface.md](interface.md#the-freezer). Tests and tools: `tests/dishes_test.gd`, `tools/gpu/dishes_check.gd`, `tools/gpu/dishes_perf.gd`.
 
 ### The pipette
@@ -236,7 +256,7 @@ Goal mode stays single (the pipette is locked there). Freezing and thawing: [int
 
 - The waiting pipette keeps its source dish's number and is refused if that dish has left its row by the time the grid is ready, because a freed row is given out again at once (`tests/sim/pipette_row_reuse_test.gd`).
 - `Main._finish_pipette` adopts the new `Dish` (`adopt`) and then asks Keep, Freeze or Trash about the old one (`_ask_about_old_dish`).
-- The family tree stays in `LineageStore` under the same ids.
+- The family tree stays in `LineageStore` under the same ids; the lineage worker gives the moved bups their new home (`retarget_ids`), which the reply's `lineage` ticket tells (`WorldClient.moved`).
 
 The watch list is one for all dishes (`WatchList.dishes`), the layer buttons are one choice for every dish, and each dish keeps the zoom and position the camera had when it was last looked at (`Dish.view_zoom`). With the timer on (`tool_options.pipette_timer_changed`), the game pauses every so many simulated hours until a pipette moves bups (`Toolbar.resume_locked`).
 
@@ -463,7 +483,8 @@ A new constant in `SimConstants.build()` that the GPU reads is a `const` slot of
 | `SimCore` | `scripts/sim/sim_core.gd` | Synchronous, threadless: records and runs iterations, answers, publishes. |
 | `SimArena` | `scripts/sim/` | The pool's buffers and textures. |
 | `DishWorld` | `scripts/sim/dish_world.gd` | A dish's plankton, bloom, sources and emitters on the host. |
-| `ResultWorker` | `scripts/sim/` | Family events, stats, snapshots. |
+| `ResultWorker` | `scripts/sim/` | Stats, snapshots, the replies in order with them. |
+| `LineageWorker` | `scripts/sim/` | The family tree's thread: family events and lineage steps into `LineageStore`. |
 | `ViewRenderer` | `scripts/sim/view_renderer.gd` | The main device's side of the pictures. |
 | `PoolLimits`, `MachineMemory`, `MemoryWatch` | `scripts/sim/` | The memory budget. |
 | `MemoryMode` | `scripts/memory_mode.gd` | The game's low-memory mode. |

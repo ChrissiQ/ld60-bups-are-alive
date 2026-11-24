@@ -4,7 +4,7 @@ extends SceneTree
 ## Expected values [derived from the real Snapshot and its client]:
 ##  - every member of `Snapshot` (read from the script) is present in a canned snapshot with the declared type: seq/sim_time/
 ##    achieved_speed/paused: int/float/float/bool, dishes/history/answers/worlds/timing/totals: Dictionary, payloads: Array, husk_view: Dictionary, payload/field_view/thumbs: objects of
-##    PayloadInfo/FieldViewInfo/ThumbsInfo; `Snapshot` has exactly 15 members;
+##    PayloadInfo/FieldViewInfo/ThumbsInfo; `Snapshot` has exactly 16 members;
 ##  - a DishState's stats keys equal the keys of the population statistics the game reads, in order (measured once: count, speed, sense, metabolism, size,
 ##    harm, mutations, mutator, donor, key, generation = 11);
 ##  - a tracked answer is GpuLayout.ANSWER_BYTES (96) bytes; a record GpuLayout.RECORD_BYTES (112); records(3) is 336 bytes with ids 1..3;
@@ -19,7 +19,7 @@ extends SceneTree
 const SNAPSHOT_MEMBERS := {
 	"seq": TYPE_INT, "sim_time": TYPE_FLOAT, "achieved_speed": TYPE_FLOAT, "paused": TYPE_BOOL, "dishes": TYPE_DICTIONARY,
 	"history": TYPE_DICTIONARY, "answers": TYPE_DICTIONARY, "payload": TYPE_OBJECT, "payloads": TYPE_ARRAY, "field_view": TYPE_OBJECT, "thumbs": TYPE_OBJECT, "totals": TYPE_DICTIONARY,
-	"husk_view": TYPE_DICTIONARY, "worlds": TYPE_DICTIONARY, "timing": TYPE_DICTIONARY,
+	"husk_view": TYPE_DICTIONARY, "worlds": TYPE_DICTIONARY, "timing": TYPE_DICTIONARY, "lineage_ticket": TYPE_INT,
 }
 
 

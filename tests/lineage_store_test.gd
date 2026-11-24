@@ -4,7 +4,7 @@ extends SceneTree
 ##  - the two event streams recorded from the game's earlier CPU simulation, the one the pooled world replaced (tools/gpu/golden/lineage_*), replayed into a store that starts from the stream's
 ##    initial records, give the final records of the capture, compared by id (the order of an export's records is not stable);
 ##  - an export recorded from that simulation (golden/parity/lineage_export.bin.gz) imported into an empty store exports the same records;
-##  - an iteration's events applied in parts (ResultWorker.apply_in_parts: at most APPLY_PART events a call, a step at a time, its births
+##  - an iteration's events applied in parts (LineageWorker.apply_in_parts: at most APPLY_PART events a call, a step at a time, its births
 ##    before its deaths) leave the store as one call does, every record's info, holds and chain alike, over two steps of 10,000 and 9,000
 ##    births and 3,000 and 2,000 deaths (more than one part each; some die in the step they are born in);
 ##  - the cases of a pipette, freeze, thaw and trash on a store holding two or three dishes (cases (a)-(g), and (h):
@@ -503,10 +503,10 @@ func _parts_match_one_call() -> void:
 	var one := _new_store()
 	one.apply_events(births, deaths, 600.0, 20.0)
 	var parts := _new_store()
-	ResultWorker.apply_in_parts(parts, births, deaths, 600.0, 20.0)
+	LineageWorker.apply_in_parts(parts, births, deaths, 600.0, 20.0)
 	var a := _snapshot(one, ids)
 	var b := _snapshot(parts, ids)
-	TestUtil.check(a.size() > 0 and a == b and 10000 > ResultWorker.APPLY_PART, "an iteration's events in parts of %d leave the store as one call does (%d records alike: %s)" % [ResultWorker.APPLY_PART, a.size(), a == b])
+	TestUtil.check(a.size() > 0 and a == b and 10000 > LineageWorker.APPLY_PART, "an iteration's events in parts of %d leave the store as one call does (%d records alike: %s)" % [LineageWorker.APPLY_PART, a.size(), a == b])
 
 
 ## Event `e` with its step word (at `word`) set to step `step` of dish A.

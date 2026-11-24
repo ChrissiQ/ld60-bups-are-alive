@@ -3,7 +3,7 @@ extends SceneTree
 ## Windowed only. On macOS:
 ##   tools/run_windowed.sh <out> -- --path . --rendering-driver metal --position 6000,6000 -s tests/sim/two_games_test.gd
 ##
-## Expected values [derived from `SimCore.begin_game`, `ResultWorker` and the family tree's rules]:
+## Expected values [derived from `SimCore.begin_game`, `LineageWorker` and the family tree's rules]:
 ##  - Game 1 (30 founders in dish 1, run for 2,400 s of world time at x600) has divided: the world's next id is past 31, so there are ids
 ##    to collide with. A pipette makes dish 2 (the first game's numbers go 1, 2).
 ##  - With both dishes trashed the family tree holds nothing (no record, claim or tombstone).
@@ -58,13 +58,13 @@ static func _frames(thread: SimThread, frames: int, speed: float, paused := fals
 		OS.delay_msec(16)
 
 
-## Waits until the sim thread has drained what was sent and the worker has done what that queued.
+## Waits until the sim thread has drained what was sent and the workers have done what that queued.
 static func _settle(thread: SimThread) -> void:
 	var r := SimReply.new()
 	thread.submit(SimCommand.new(SimThread.KIND_INSPECT, {"call": func(_core: SimCore, _rows: Dictionary) -> int: return 0}, r))
 	_wait(r)
 	var until := Time.get_ticks_msec() + 5000
-	while thread.worker.queued() > 0 and Time.get_ticks_msec() < until:
+	while thread.queued() > 0 and Time.get_ticks_msec() < until:
 		OS.delay_msec(5)
 	OS.delay_msec(50)
 

@@ -21,6 +21,11 @@ extends RefCounted
 ## WAITING_MOST wait past the one shown (the oldest of more are skipped), and a clock left far behind (SNAP_SPANS arrivals' worth) is
 ## brought up to the lead. Paused, the newest is shown, still (the share is 1). Publishes of a dish that is no longer the main view's
 ## (`set_view`) are dropped, waiting or arriving, and the clock starts again with the next.
+##
+## The family tree (`lineage`) runs behind the snapshots by what its own thread has queued (LineageWorker): a bup a snapshot shows may have
+## no record yet, a thawed dish's records come a little after the dish, and a pipette's bups keep their old dish as their home in the store
+## until it has done the retarget. `lineage_has` tells whether a step is in the store yet (each snapshot carries the ticket of the steps
+## before it), and `home_of` gives a moved bup's dish meanwhile.
 
 const WAITING_MOST := GpuLayout.PICTURES_MOST + 2  ## publishes seen and not yet shown that the playout keeps: an iteration's burst and two more (SimCore.PAYLOAD_TEXTURES holds their textures)
 const PICTURE_WINDOW_MSEC := 1000  ## how far back `picture_rate` counts
@@ -45,6 +50,7 @@ var _polls := 0  ## frames polled so far (the question latency counts in these)
 var _asked := {}  ## row -> {bup id: [poll, snapshot seq, msec] of its first question not yet answered}
 var _pick_latency := {"last": 0, "max": 0, "last_ms": 0.0}  ## frames and ms from a bup's first question to its first answer
 var _paused := false  ## as the last `set_time` said
+var _moved: Array = []  ## [ticket, {id: true}, dish number] of each pipette whose retarget the family tree has not done yet (`moved`)
 
 
 ## The main view's playout on its own clock of simulated time (see the header). `step` once a frame with the publishes that arrived, the
@@ -173,6 +179,12 @@ func freeze(row: int) -> SimReply:
 	return r
 
 
+## A frozen dish is trashed (or left behind with the game): the family tree lets go of what it kept for it. The simulation does it in order with the
+## dish's freeze, so one still on its way out of the world is let go of when it has arrived.
+func discard_frozen(number: int) -> void:
+	_send(SimThread.KIND_DISCARD_FROZEN, {"number": number})
+
+
 ## A frozen or saved dish comes back at the world's time; its row now.
 func thaw(blob: DishBlob) -> int:
 	var row := _reserve()
@@ -182,7 +194,8 @@ func thaw(blob: DishBlob) -> int:
 
 
 ## The bups of dish `row` within `radius` µm of `centre` (dish-local) move, alive and with their ids, into a new dish like it. The reply's
-## value: {new_row, number (the new dish's), moved, ids}; null with an error when it was refused (the row it held is free again).
+## value: {new_row, number (the new dish's), moved, ids, lineage (the ticket of the family tree's retarget: `moved`)}; null with an error
+## when it was refused (the row it held is free again).
 func pipette(row: int, centre: Vector2, radius: float) -> SimReply:
 	var dest := _reserve()
 	if dest < 0:
@@ -421,6 +434,46 @@ func texture_bound(kind: String, index: int, frame: int, seq: int) -> void:
 ## The family tree (a LineageStore; null when the backend keeps none).
 func lineage() -> Object:
 	return backend.lineage() if backend.has_method("lineage") else null
+
+
+## Whether the family tree has done the steps up to `ticket` (Snapshot.lineage_ticket, a pipette reply's "lineage"): a record missing
+## after them is gone, before them not known yet. A backend whose family tree never runs behind has always done them.
+func lineage_has(ticket: int) -> bool:
+	return not backend.has_method("lineage_done") or backend.lineage_done() >= ticket
+
+
+## A pipette's answer: the bups `ids` (as the answer lists them) live in dish `number` now, and until the family tree has done the retarget
+## (`ticket`) `home_of` says so in place of their records.
+func moved(ids: Variant, number: int, ticket: int) -> void:
+	if lineage_has(ticket):
+		return
+	var held := {}
+	for id: int in ids:
+		held[id] = true
+	_moved.append([ticket, held, number])
+
+
+## The number of the dish bup `id` lives in, given the home its family record names (`recorded`): that one, unless a pipette moved the bup
+## and the family tree has not caught up with it yet.
+func home_of(id: int, recorded: int) -> int:
+	if _moved.is_empty():
+		return recorded
+	_forget_moved()
+	for i in range(_moved.size() - 1, -1, -1):
+		if (_moved[i][1] as Dictionary).has(id):
+			return _moved[i][2]
+	return recorded
+
+
+## Whether every bup's home in the family tree is its dish's (no pipette's retarget is still to come), so counts by home are right.
+func homes_known() -> bool:
+	_forget_moved()
+	return _moved.is_empty()
+
+
+func _forget_moved() -> void:
+	while not _moved.is_empty() and lineage_has(int(_moved[0][0])):
+		_moved.pop_front()
 
 
 ## The rows handed out and not yet given back.

@@ -16,7 +16,7 @@ extends SceneTree
 ## - no overflow and no error from the sim at the end (inspect: SimCore.overflow() 0; status errors empty).
 ## - the interface unfrozen: no main frame over FROZEN_MS = 250 ms after the set-up [placeholder: an unfrozen bound, not smoothness; the
 ##   interface's smoothness is measured by tests/sim/interface_gate.gd].
-## - shutdown: the sim thread stops, frees its device, the worker drains, and both threads are joined within JOIN_MS = 5,000 ms
+## - shutdown: the sim thread stops, frees its device, the two workers drain, and the three threads are joined within JOIN_MS = 5,000 ms
 ##   [derived: the loop checks its stop flag between iterations]; status alive false afterwards.
 
 const WATCHDOG_S := 10.0
@@ -130,7 +130,7 @@ func _initialize() -> void:
 	var t_join := Time.get_ticks_msec()
 	_backend.shutdown()
 	var join_ms := Time.get_ticks_msec() - t_join
-	TestUtil.show(join_ms <= JOIN_MS and not _backend.status().get("alive", true), "shutdown joined both threads in %d ms (status %s)" % [join_ms, _backend.status()])
+	TestUtil.show(join_ms <= JOIN_MS and not _backend.status().get("alive", true), "shutdown joined the threads in %d ms (status %s)" % [join_ms, _backend.status()])
 	TestUtil.finish(self, "OK soak_test")
 
 

@@ -175,6 +175,16 @@ A new gene or flag goes in `Genome.LOCI`, the ribbon's `show_bup` and the `[geno
 
 `Main.freeze_dish` keeps the dish's shown number, its host part (`Dish.host_part()`), its bup count and its picture, and asks the simulation for the dish (`Dish.freeze()`: a `SimReply` holding a `DishBlob`, whose lineage is `host["lineage"]`). It then frees the dish (`_remove_dish`). A frozen dish is in no running list and has no row in the pool, so it is outside the world's clock and the all-dishes graph.
 
+**While the freeze is answered.** The dish leaves the running dishes at once; the blob comes a frame or a few later, longer for a big dish or while the family tree's worker is behind (it does the freeze's export in order with everything else). Nothing holds the screen meanwhile, and the other dishes run on and are drawn: only the family tree waits for the freeze ([simulation.md](simulation.md#results-and-the-family-tree)). The dish's row says "Freezing" (`FreezerShelf.is_freezing`: its reply has not answered; `Main._freezing` lists those entries, and `_finish_replies` refreshes the shelf when one has answered), with Unfreeze and Info off since there is no blob yet and the details line is the status. What else can be done:
+
+- *Another freeze*: allowed; each has its own row and its own reply, and the family tree's worker does them in order.
+- *Trash a freezing dish*: done at once, `WorldClient.discard_frozen`, a command the simulation puts in the family tree's queue after the freeze, so the claims the freeze makes on the family tree are let go of right after. The blob is dropped when it comes. Leaving the game does the same for every entry (`Main._exit_tree`), so no claim outlives the game.
+- *A pipette or an unfreeze of another dish*: allowed. Their answers (the pipette's reply, the unfrozen dish in a snapshot) do not wait for the family tree. The moved bups keep their old dish as their home in the family tree until it has done the pipette's retarget; `WorldClient.home_of` gives their new one meanwhile, and counts by home (`Dish.living_descendants_of`, the lineage panel's "alive elsewhere") are not shown until `WorldClient.homes_known`. An unfrozen dish's bups have no family record until the family tree has imported its part.
+- *A save*: free mode, the only mode with a freezer, saves nothing, so a save never waits for a freeze.
+- *A bup the family tree has not recorded yet* has no family record, so `Dish.has_record` is false. Its selection stays and nothing is shown of it until the record comes; the inspector drops a selection with no record only once the family tree has done the steps behind what the screen showed when it was picked (`Dish.lineage_ticket`, `lineage_has`), when the record is gone. There is no error.
+
+The quiet hold (`PlayHolds.hold_quietly`, `&"sim_reply"`) remains for a pipette's answer, an unfrozen dish not shown yet and a save.
+
 **Thawing.** `Main.thaw` makes a new `Dish` from the blob (`Dish.load_blob`, a new world row; `_register_dish` gives it the old shown number) and pads its history up to the world's time (`DishHistory.pad`). A thaw the pool has no room for (row below 0) shows the `banner.memory_budget` banner. `trash_dish` removes a dish for good.
 
 **Limits.**
@@ -183,7 +193,7 @@ A new gene or flag goes in `Genome.LOCI`, the ribbon's `show_bup` and the `[geno
 - At `MAX_DISHES` (999, the interface's three digits; the world's own limit is `GpuLayout.D_MAX` rows) running, a dish cannot be thawed. Frozen dishes do not count.
 - When the last running dish dies out with dishes frozen, the game does not end: it stays, empty, until one is unfrozen.
 
-**The shelf.** The Freezer section lists the frozen dishes (`ui/freezer_shelf.gd`): a row each with its picture, "Dish N: M bups", and Unfreeze, Info and Trash icon buttons. Info opens a details line under the row, since a frozen dish is saved data and not a live `Dish` the dish card could show. Trash asks first. The freezer is not saved with a game (several dishes are not either). `tests/freezer_test.gd` covers it.
+**The shelf.** The Freezer section lists the frozen dishes (`ui/freezer_shelf.gd`): a row each with its picture, "Dish N: M bups", and Unfreeze, Info and Trash icon buttons. Info opens a details line under the row, since a frozen dish is saved data and not a live `Dish` the dish card could show; a dish still freezing shows its status there instead. Trash asks first. The freezer is not saved with a game (several dishes are not either). `tests/freezer_test.gd` covers it.
 
 ### The encyclopedia and tooltips
 

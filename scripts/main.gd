@@ -74,7 +74,7 @@ var _labels_given := 0  ## the shown numbers handed out so far this game: one by
 var _label_of := {}  ## world number -> the number it was shown by, for every dish of this game (a bup that moved to a dish since gone names it so)
 var game_began := 0.0  ## the world time this game began at: the world's clock runs from the start of the program, so what the screen shows is the time since
 var _world_last := -1.0  ## the world's time at the last frame (-1: none yet)
-var holds: PlayHolds  ## what holds the game besides the player: the pipette's timer (&"pipette"), the question about the old dish (&"old_dish"), the tour (&"tour"), the end of the game (&"end"), and quietly the wait for the simulation's answer (&"sim_reply")
+var holds: PlayHolds  ## what holds the game besides the player: the pipette's timer (&"pipette"), the question about the old dish (&"old_dish"), the tour (&"tour"), the end of the game (&"end"), and quietly the wait for the simulation's answer to a pipette, an unfreeze or a save (&"sim_reply"; a freeze holds nothing: its row in the freezer says it is under way)
 var _pipette_hours := 0.0  ## the pipette timer: the game pauses for the pipette every this many simulated hours (0: off)
 var _pipette_clock := 0.0  ## simulated seconds since the last pause for the pipette
 var _pipette_pulse: Tween
@@ -90,6 +90,7 @@ var _to_trash: Dish  ## the dish the trash question (from its card or the freeze
 var _old_dish: Dish  ## the dish a pipette took bups from, while the question about it is up (null: no question)
 var _pipette_pending := {}  ## a pipette waiting for the simulation's answer: {reply, source}
 var _thawing := {}  ## row -> {entry, dish}: an unfrozen dish the simulation has not shown yet (its entry stays in the freezer until it has; a refusal puts it back as it was)
+var _freezing: Array[Dictionary] = []  ## the freezer entries whose freeze the simulation has not answered yet (the dishes are out of the world; their rows say "freezing")
 var _asked_rows := {}  ## row -> the Dish added there, until a snapshot shows it (a refusal takes it out again)
 var _by_row := {}  ## world row -> the running dish in it (`_dish_in_row`)
 var _by_row_count := -1  ## how many dishes ran when `_by_row` was made
@@ -261,10 +262,8 @@ func _apply_tray_order() -> void:
 func _exit_tree() -> void:
 	var w := WorldClient.shared()
 	if w != null:
-		var store := w.lineage()
-		if store != null:
-			for entry: Dictionary in freezer_shelf.entries:
-				store.discard_frozen(int(entry["number"]))
+		for entry: Dictionary in freezer_shelf.entries:
+			w.discard_frozen(int(entry["number"]))  # (ordered after a freeze still under way: its claims are let go of when they are made)
 		if w.refused.is_connected(_on_refused):
 			w.refused.disconnect(_on_refused)
 		if w.snapshot_changed.is_connected(_on_snapshot):
@@ -430,8 +429,8 @@ func _update_info_panel() -> void:
 ## An entry of the watch list was clicked: that bup (living or not), in whichever dish it is in, in the inspect panel.
 func _open_watched(watched_in: Dish, id: int) -> void:
 	set_main_dish(watched_in)  # (the bup may be in another dish: the view goes there)
-	if not dish.has_record(id):
-		return
+	if not dish.has_record(id) and dish.lineage_has(dish.lineage_ticket()):
+		return  # (its record is gone; one the family tree has not reached yet, as a thawed dish's, is selected and shown once it comes)
 	dish.selected.bup = id
 	stage_input.stop_following()
 
@@ -586,9 +585,10 @@ func _sync_hud_input() -> void:
 	hud_layer.process_mode = Node.PROCESS_MODE_DISABLED if menu_open or holds.stills_world() else Node.PROCESS_MODE_INHERIT
 
 
-## The quiet hold (PlayHolds.hold_quietly) is on while an answer is awaited: a pipette's, a freeze's, an unfrozen dish not shown yet, a save.
+## The quiet hold (PlayHolds.hold_quietly) is on while an answer is awaited: a pipette's, an unfrozen dish not shown yet, a save. A freeze's is not
+## waited for: the dish has left the running dishes and its row in the freezer says it is freezing.
 func _sync_reply_hold() -> void:
-	var waiting := not _pipette_pending.is_empty() or not _thawing.is_empty() or _save_pending != null or freezer_shelf.entries.any(_waits)
+	var waiting := not _pipette_pending.is_empty() or not _thawing.is_empty() or _save_pending != null
 	if waiting:
 		holds.hold_quietly(&"sim_reply")
 	else:
@@ -602,22 +602,19 @@ static func _waits(entry: Dictionary) -> bool:
 	return reply != null and not reply.is_done()
 
 
-## Once a frame: the answers that have come. A frozen dish whose blob has come is unfrozen or trashed if that was asked meanwhile; one the
-## simulation could not freeze (it answered with nothing) leaves the freezer; a save is written.
+## Once a frame: the answers that have come. A frozen dish whose blob has come shows as frozen; one the simulation could not freeze (it answered
+## with nothing) leaves the freezer; a save is written.
 func _finish_replies() -> void:
-	for entry: Dictionary in freezer_shelf.entries.duplicate():
+	var answered := false
+	for entry: Dictionary in _freezing.duplicate():
 		if _waits(entry):
 			continue
-		if entry.get("reply") != null and (entry["reply"] as SimReply).value() == null:
+		_freezing.erase(entry)
+		answered = true
+		if (entry["reply"] as SimReply).value() == null:
 			freezer_shelf.remove(entry)
-			continue
-		var then: String = entry.get("then", "")
-		entry.erase("then")
-		match then:
-			"thaw":
-				thaw(entry)
-			"trash":
-				_trash_frozen(entry)
+	if answered:
+		freezer_shelf.refresh()
 	if _save_pending != null and _save_pending.is_done():
 		_write_save(_save_pending.value())
 		_save_pending = null
@@ -783,6 +780,7 @@ func _finish_pipette() -> void:
 		return
 	var number := int(got["number"])
 	_next_dish_number = maxi(_next_dish_number, number + 1)
+	WorldClient.shared().moved(got["ids"], number, int(got.get("lineage", 0)))  # (their homes in the family tree follow when it gets to the retarget)
 	var receiver := Dish.new()
 	receiver.visible = false  # (it comes into view below; what it draws is made then)
 	add_child(receiver)
@@ -939,8 +937,9 @@ func _pipetting_from(d: Dish) -> bool:
 	return not _pipette_pending.is_empty() and _pipette_pending["source"] == d
 
 
-## Puts a dish in the freezer: the simulation takes it out of the world whole (its DishBlob, with its part of the family tree, a frame or a few later), and it leaves
-## the running dishes. It does not advance until `thaw` brings it back under its own number. The last running dish cannot be frozen. The main view leaves it
+## Puts a dish in the freezer: it leaves the running dishes at once, and the simulation takes it out of the world whole (its DishBlob, with its part of the family tree,
+## a frame or a few later: longer for a big dish, or while the family tree's worker is behind). Its row in the freezer says it is freezing until then, and the
+## screen and the other dishes go on meanwhile (another dish can be frozen, thawed or pipetted from, any can be trashed, nothing is held). It does not advance until `thaw` brings it back under its own number. The last running dish cannot be frozen. The main view leaves it
 ## first, so its lineage stack lets go of the bups it held before the dish's family is written out.
 func freeze_dish(d: Dish) -> void:
 	if not dishes.has(d) or dishes.size() < 2 or _pipetting_from(d):
@@ -958,9 +957,10 @@ func freeze_dish(d: Dish) -> void:
 		"picture": ImageTexture.create_from_image(picture) if picture != null else null,
 	}
 	entry["reply"] = d.freeze()
+	if entry["reply"] != null:
+		_freezing.append(entry)  # (until `_finish_replies` has seen its answer, which is nothing when the simulation could not freeze it: it leaves the freezer then)
 	freezer_shelf.add(entry)
 	_remove_dish(d)
-	_sync_reply_hold()
 	_show_banner(Strings.t("hud.banner_frozen", [label]), BANNER_BRIEF_SECONDS)
 
 
@@ -973,17 +973,14 @@ func _ask_to_trash_frozen(entry: Dictionary) -> void:
 
 
 ## Takes a frozen dish out of the freezer for good: the family tree lets go of the records it was keeping the death times of for it (LineageStore.discard_frozen).
-## A dish still on its way out of the world is trashed once its freeze has answered (its claims on those records are made then).
+## The simulation does that in order with the dish's freeze, so a dish still on its way out of the world is trashed at once too: its blob is dropped when it comes
+## and its claims on those records are let go of right after they are made.
 func _trash_frozen(entry: Dictionary) -> void:
 	if not freezer_shelf.entries.has(entry):
 		return
-	if _waits(entry):
-		entry["then"] = "trash"
-		return
+	_freezing.erase(entry)
 	freezer_shelf.remove(entry)
-	var store := WorldClient.shared().lineage()
-	if store != null:
-		store.discard_frozen(int(entry["number"]))
+	WorldClient.shared().discard_frozen(int(entry["number"]))
 	_show_banner(Strings.t("hud.banner_trashed", [entry["label"]]), BANNER_BRIEF_SECONDS)
 
 
@@ -1009,14 +1006,12 @@ func trash_dish(d: Dish) -> void:
 
 ## A frozen dish runs again, as one of the running dishes, from the world's time on (the time it was frozen is not simulated: the simulation moves its
 ## plankton's and bloom's times on, and its history goes on level for the time it was away), under the number it had. Its entry leaves the freezer when a
-## snapshot shows it (`_thawed`); one asked for while its freeze has not answered is unfrozen when it has.
+## snapshot shows it (`_thawed`), which does not wait for a freeze still under way; its bups' family records come when the family tree gets to them. Not
+## while its own freeze has not answered: its dish has no blob yet.
 func thaw(entry: Dictionary) -> void:
 	if not freezer_shelf.entries.has(entry) or entry.get("thawing", false):
 		return
 	if _too_many_running():
-		return
-	if _waits(entry):
-		entry["then"] = "thaw"
 		return
 	var reply: SimReply = entry.get("reply")
 	var blob: DishBlob = reply.value() if reply != null else null

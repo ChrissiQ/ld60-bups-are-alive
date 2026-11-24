@@ -1,9 +1,10 @@
 class_name ResultWorker
 extends RefCounted
-## The second thread of the simulation: it takes what each iteration read back (the sim thread copies the raw bytes and
-## hands them over at once, then records the next batch), applies the family events to the LineageStore, decodes the stats, builds the
-## next Snapshot and swaps it in under a mutex. The lineage steps of a pipette, a freeze, a trash, a thaw and a save come as operations
-## queued between the iterations, so they run in event order; a reply that waits on one is completed by it.
+## The thread that turns what each iteration read back into the next Snapshot: the sim thread copies the raw bytes and hands them over at
+## once, then records the next batch; this thread decodes the stats, builds the snapshot and swaps it in under a mutex. It never touches the
+## family tree (LineageWorker does): a long lineage step never holds up the snapshots. A reply the main thread must have in order with the
+## snapshots (a pipette's, a resize's) comes as an operation queued between the iterations (`push_op`) and is completed here, after the
+## snapshots of the iterations before it and before the snapshot of the next.
 ##
 ## The queue holds at most MAX_ITERATIONS iterations: a slow worker makes the sim thread wait, never the interface. What a snapshot
 ## carries that happens once (history samples, a publish, a dish world's new copy, a refused dish) stays in every snapshot until the main thread
@@ -12,9 +13,7 @@ extends RefCounted
 const MAX_ITERATIONS := 2
 const PUSH_WAIT_USEC := 200
 
-const APPLY_PART := 4096  ## the most family events one LineageStore.apply_events call takes (`apply_in_parts`): about a couple of ms of the store's lock at the measured cost of an event
-var store: Object = null  ## the LineageStore (null: no lineage is kept)
-var lineage_usec := 0  ## µs spent applying lineage, in all
+var lineage: LineageWorker = null  ## the family tree's thread, whose figures each snapshot's timing carries (null: none)
 
 var _thread := Thread.new()
 var _mutex := Mutex.new()
@@ -38,8 +37,8 @@ var _payloads: Array = []  ## [PayloadInfo, seq] of each publish not yet acknowl
 var _payload_seq := -1  ## the publish last listed
 
 
-func _init(p_store: Object = null) -> void:
-	store = p_store
+func _init(p_lineage: LineageWorker = null) -> void:
+	lineage = p_lineage
 
 
 func start() -> void:
@@ -84,7 +83,7 @@ func push_iteration(item: Dictionary) -> bool:
 	return false
 
 
-## Queues `call(store)` to run after everything queued before it (a lineage step, a reply's completion).
+## Queues `call()` to run after everything queued before it (a reply's completion, in order with the snapshots).
 func push_op(call: Callable) -> void:
 	_mutex.lock()
 	_items.append({"kind": "op", "call": call})
@@ -130,69 +129,12 @@ func _run() -> void:
 				_iterations -= 1
 			_mutex.unlock()
 			if item["kind"] == "op":
-				(item["call"] as Callable).call(store)
+				(item["call"] as Callable).call()
 			else:
 				_iteration(item)
 
 
-## The family events of an iteration into `store` (LineageStore.apply_events), in calls of at most APPLY_PART events: the store holds its
-## lock through a call, and the main thread looks a bup up in it every frame (the info panel's and the hover card's bup), so one call
-## for a 2-million-bup dish's tens of thousands of events made the frame that asked wait tens of ms. The events are in the order of their
-## steps (`step` words, GpuLayout.EB_STEP and ED_STEP), and the store adds a step's births before its deaths and a step's births or
-## deaths in any order among themselves, so each call takes part of one step's births, or part of its deaths, in that order: the
-## store ends as one call would leave it.
-static func apply_in_parts(store: Object, births: PackedByteArray, deaths: PackedByteArray, first_step_end: float, step_s: float) -> void:
-	var birth_bytes := GpuLayout.BIRTH_WORDS * 4
-	var death_bytes := GpuLayout.DEATH_WORDS * 4
-	var born := births.size() / birth_bytes
-	var died := deaths.size() / death_bytes
-	var none := PackedByteArray()
-	var bi := 0
-	var di := 0
-	while bi < born or di < died:
-		var step := GpuLayout.EV_STEP_MASK + 1
-		if bi < born:
-			step = births.decode_u32(bi * birth_bytes + GpuLayout.EB_STEP * 4) & GpuLayout.EV_STEP_MASK
-		if di < died:
-			step = mini(step, deaths.decode_u32(di * death_bytes + GpuLayout.ED_STEP * 4) & GpuLayout.EV_STEP_MASK)
-		var b_end := _step_end(births, birth_bytes, GpuLayout.EB_STEP, bi, born, step)
-		var d_end := _step_end(deaths, death_bytes, GpuLayout.ED_STEP, di, died, step)
-		while bi < b_end:
-			var to := mini(bi + APPLY_PART, b_end)
-			store.apply_events(births.slice(bi * birth_bytes, to * birth_bytes), none, first_step_end, step_s)
-			bi = to
-		while di < d_end:
-			var to := mini(di + APPLY_PART, d_end)
-			store.apply_events(none, deaths.slice(di * death_bytes, to * death_bytes), first_step_end, step_s)
-			di = to
-
-
-## The first event at or past `from` (of `count`, each `bytes` long, its step in word `word`) whose step is past `step`: a halving
-## search, as the events are in the order of their steps.
-static func _step_end(events: PackedByteArray, bytes: int, word: int, from: int, count: int, step: int) -> int:
-	var lo := from
-	var hi := count
-	while lo < hi:
-		var mid := (lo + hi) >> 1
-		if (events.decode_u32(mid * bytes + word * 4) & GpuLayout.EV_STEP_MASK) <= step:
-			lo = mid + 1
-		else:
-			hi = mid
-	return lo
-
-
 func _iteration(item: Dictionary) -> void:
-	var t0 := Time.get_ticks_usec()
-	var steps: int = item["steps"]
-	if store != null and steps > 0:
-		var births: PackedByteArray = item["births"]
-		var deaths: PackedByteArray = item["deaths"]
-		var began := float(item.get("game_began", 0.0))  # (the family tree's times are the game's: SimThread, WorldClient.begin_game)
-		if births.size() > 0 or deaths.size() > 0:
-			apply_in_parts(store, births, deaths, float(item["t0"]) + float(item["delta"]) - began, float(item["delta"]))
-		store.set_time(float(item["sim_time"]) - began)
-	var lineage_us := Time.get_ticks_usec() - t0
-	lineage_usec += lineage_us
 	_snap_mutex.lock()
 	var acked := _acked
 	_snap_mutex.unlock()
@@ -203,6 +145,7 @@ func _iteration(item: Dictionary) -> void:
 	snap.sim_time = item["sim_time"]
 	snap.achieved_speed = item["achieved"]
 	snap.paused = item["paused"]
+	snap.lineage_ticket = int(item.get("lineage_ticket", 0))
 	var stats: PackedByteArray = item["stats"]
 	for r: Dictionary in item["rows"]:
 		var row: int = r["row"]
@@ -250,8 +193,13 @@ func _iteration(item: Dictionary) -> void:
 	snap.thumbs = item.get("thumbs")
 	snap.totals = DishState.aggregate(snap.dishes)
 	var timing: Dictionary = (item["timing"] as Dictionary).duplicate()
-	timing["lineage_ms"] = lineage_us / 1000.0
 	timing["worker_queue"] = queued()
+	if lineage != null:
+		var f := lineage.figures()
+		timing["lineage_ms"] = f["events_ms"]  # (the last iteration whose events the family tree has applied: it may be behind this one)
+		timing["lineage_queue"] = f["queue"]
+		timing["lineage_queue_bytes"] = f["bytes"]
+		timing["lineage_behind_s"] = maxf(float(item["sim_time"]) - float(item.get("game_began", 0.0)) - float(f["time"]), 0.0) if f["queue"] > 0 else 0.0
 	var refusals := {}
 	var refusal_seqs := {}
 	for row: int in _refused:

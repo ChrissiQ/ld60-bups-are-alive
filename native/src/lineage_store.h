@@ -9,15 +9,37 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <mutex>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 // The family tree of every running dish: who each bup came from, kept while a living bup or a pin holds it. One store for every dish
-// (ids are unique across dishes), written from the births and deaths a batch of GPU steps made and read by the game. Every method takes
-// the store's mutex, so one thread can apply events while another reads. Times are whole minutes of simulation time.
+// (ids are unique across dishes), written from the births and deaths a batch of GPU steps made and read by the game. Times are whole
+// minutes of simulation time.
+//
+// Every method holds the store's one mutex while it works, so one thread can apply events while another reads. The long ones (export_dish,
+// release_dish, import_bytes, discard_frozen, and apply_events while it makes the records' map bigger) work in slices: each holds the
+// mutex for at most about SLICE, then lets in any thread that waits on the store, and takes it again. A thread that asks the store
+// anything therefore waits about a slice at most, however big the dish. The other methods are short and hold it once (apply_events is
+// given a bounded batch: see LineageWorker.APPLY_PART).
+//
+// At every slice boundary (between two slices of a long operation, where another thread may run any method):
+//  - every record's `holds` is the number of records that name it as their parent plus its pins, and an operation's own temporary holds
+//    (an export's on the records the dish pins, an import's on each record its export lists, each dropped before the operation returns);
+//  - every record's parent is 0 or a record of the store (a record an import inserted ahead of its parent has parent 0 until the import
+//    links it);
+//  - a dead record with no holds is freed, except the one a freeing cut short by the boundary resumes from (a record the operation itself
+//    left unheld, which it frees or finds held, or gone, when it resumes);
+//  - claim_counts[id] is the number of frozen dishes whose claims (dish_claims) list id, apart from the claims of the one dish a release,
+//    import or discard is adding or taking away, which are counted for the ids it has done; every tombstone's id has a claim;
+//  - an operation keeps ids and indices only: no iterator, pointer or reference into records, pins, claim_counts or tombstones lives across
+//    a boundary, and each slice looks its records up again.
+// The game calls apply_events, export_dish, release_dish, import_bytes, retarget_ids and discard_frozen on one thread (its lineage worker)
+// only, in order, so those never interleave with each other; pin, unpin, set_custom_name and every query may come from another thread at
+// any boundary. discard_frozen may come from another thread too, but two operations on the same dish number must never overlap.
 class LineageStore : public godot::RefCounted {
 	GDCLASS(LineageStore, godot::RefCounted)
 
@@ -48,14 +70,106 @@ public:
 	};
 
 private:
+	using RecordMap = std::unordered_map<int64_t, Record>;
+
+	// The records: one hash map, grown in slices (make_room). Growing a map in one go (a rehash) moves every entry and would hold the
+	// mutex for as long; instead a bigger map is made outside the mutex and the records are moved into it a few at a time, the rest
+	// still found in the old one meanwhile. Outside a growth, a look-up is one map's.
+	struct RecordTable {
+		RecordMap main;
+		RecordMap old; // while it grows: the records not moved yet
+		bool growing = false;
+
+		RecordMap &map_of(int64_t id) { return growing && main.count(id) == 0 && old.count(id) > 0 ? old : main; }
+		const Record *find(int64_t id) const {
+			auto it = main.find(id);
+			if (it != main.end()) {
+				return &it->second;
+			}
+			if (growing) {
+				it = old.find(id);
+				if (it != old.end()) {
+					return &it->second;
+				}
+			}
+			return nullptr;
+		}
+		Record *find(int64_t id) { return const_cast<Record *>(static_cast<const RecordTable *>(this)->find(id)); }
+		bool contains(int64_t id) const { return find(id) != nullptr; }
+		Record &operator[](int64_t id) { return main[id]; } // (for an id it does not have)
+		int64_t size() const { return (int64_t)(main.size() + old.size()); }
+		std::array<const RecordMap *, 2> parts() const { return { &main, &old }; }
+		// Whether `count` records fit without a rehash.
+		bool fits(size_t count) const { return (float)count <= (float)main.bucket_count() * main.max_load_factor(); }
+		// `bigger` (empty, with room) becomes the map, the records still to move are in `old`.
+		void begin_growth(RecordMap &bigger) {
+			old.swap(main);
+			main.swap(bigger);
+			growing = true;
+		}
+		// One record moved; false once none is left to move.
+		bool move_one() {
+			if (old.empty()) {
+				return false;
+			}
+			main.insert(old.extract(old.begin()));
+			return true;
+		}
+		// Growing ends; `emptied` takes the old map's (empty) table, to be let go outside the mutex.
+		void end_growth(RecordMap &emptied) {
+			emptied.swap(old);
+			growing = false;
+		}
+	};
+
+	// A hash map from id split into SHARDS maps, so that growing one (a rehash, which moves every entry of the map) moves a SHARDS-th of
+	// the entries and fits in a slice: the claims and the tombstones. A run of RUN consecutive ids shares a shard (the runs are spread
+	// by a mix), so that a frozen dish's claims, sorted and mostly runs of consecutive ids, are added and taken away a table at a time.
+	template <typename V>
+	struct ShardedMap {
+		static constexpr int SHARDS = 256;
+		std::array<std::unordered_map<int64_t, V>, SHARDS> shards;
+
+		static constexpr int RUN_BITS = 10; // RUN = 1024
+		static int shard_of(int64_t id) { return (int)((((uint64_t)id >> RUN_BITS) * 0x9E3779B97F4A7C15ull) >> 56); }
+		std::unordered_map<int64_t, V> &map_of(int64_t id) { return shards[shard_of(id)]; }
+		V *find(int64_t id) {
+			auto &m = map_of(id);
+			auto it = m.find(id);
+			return it == m.end() ? nullptr : &it->second;
+		}
+		const V *find(int64_t id) const {
+			const auto &m = shards[shard_of(id)];
+			auto it = m.find(id);
+			return it == m.end() ? nullptr : &it->second;
+		}
+		bool contains(int64_t id) const { return find(id) != nullptr; }
+		V &operator[](int64_t id) { return map_of(id)[id]; }
+		int64_t size() const {
+			int64_t n = 0;
+			for (const auto &m : shards) {
+				n += (int64_t)m.size();
+			}
+			return n;
+		}
+	};
+
+	// How long one slice of a long operation holds the mutex, and how many units of work (a record looked at, written, inserted or
+	// freed; a claim added or taken away) it does between two looks at the clock.
+	static constexpr std::chrono::microseconds SLICE{ 1000 };
+	static constexpr int UNITS_PER_LOOK = 64;
+	class Lock;
+
 	mutable std::mutex mutex;
-	std::unordered_map<int64_t, Record> records;
+	mutable std::atomic<int> waiting{ 0 }; // threads blocked on the mutex: a slice boundary lets them in before it takes the mutex again
+	RecordTable records;
 	// The pins: for each pinned id, how many pins each holder (a dish number) has on it. Each raises the record's `holds`.
 	std::unordered_map<int64_t, std::unordered_map<int, int>> pins;
-	// For frozen dishes, ids and times only: the frozen dishes whose blob lists an id, and the death time of an id that was pruned
-	// while a frozen dish listed it.
-	std::unordered_map<int64_t, std::unordered_set<int>> frozen_claims;
-	std::unordered_map<int64_t, int> tombstones;
+	// For frozen dishes, ids and times only: the ids each frozen dish's blob lists (sorted), how many frozen dishes list each id, and the
+	// death time of an id that was freed while a frozen dish listed it.
+	std::unordered_map<int, std::vector<int64_t>> dish_claims;
+	ShardedMap<int> claim_counts;
+	ShardedMap<int> tombstones;
 	double now_seconds = 0.0;
 	double reserve_per_mass = 8.0; // what a body can store per unit of mass (the record keeps the reserve it could hold when it died)
 	double add_mass_factor = 0.5; // what a bup adds to its birth mass, times its size gene squared, before it divides
@@ -63,9 +177,12 @@ private:
 	int now_minutes() const { return (int)(now_seconds / 60.0); }
 	void make_record(int64_t id, int64_t parent, const Record &fields, int dish);
 	void record_death(int64_t id, const Record &fields, int dish);
+	void free_found(RecordMap &m, RecordMap::iterator it, Lock *slices);
 	void free_if_unused(int64_t id);
+	void make_room(size_t count, size_t buckets, Lock &lock);
 	void drop_pins_of(int holder, std::vector<int64_t> &touched);
-	void release_claims_of(int number);
+	void add_claims(int number, std::vector<int64_t> ids, Lock &lock);
+	void release_claims_of(int number, Lock &lock);
 	godot::Dictionary record_info(int64_t id, const Record &r) const;
 	godot::PackedByteArray write_records(const std::vector<int64_t> &ids) const;
 
@@ -95,15 +212,15 @@ public:
 	void retarget_ids(const godot::PackedInt64Array &ids, int number); // sets `home`, nothing else
 
 	// {bytes, ids}: the records of the dish's living bups and of what its pins hold, with every ancestor of each (whichever dish also
-	// references them), in the format of export_bytes, and the ids written.
-	godot::Dictionary export_dish(int number, const godot::PackedInt64Array &live) const;
+	// references them), in the format of export_bytes, and the ids written. The set is what the dish's pins held when the export began.
+	godot::Dictionary export_dish(int number, const godot::PackedInt64Array &live);
 	// The dish leaves (frozen or trashed): its pins go, its living bups are not alive from `minutes`, and what nothing holds is freed;
 	// a freed record another frozen dish claims is tombstoned at its `died` (`minutes` for a bup alive here). A freeze passes the ids
 	// its blob lists, which become the dish's claims (after the freeing, so its own records leave no tombstone).
 	void release_dish(int number, const godot::PackedInt64Array &live, int minutes, const godot::PackedInt64Array &claimed_ids = godot::PackedInt64Array());
 	void discard_frozen(int number); // a frozen dish is trashed: its claims go, and the tombstones nothing claims
 	// An idempotent merge of an export: only ids the store lacks are inserted; `live` become alive in dish `number`; `watched` are pinned
-	// for the dish where it does not pin them already.
+	// for the dish where it does not pin them already. A malformed export changes nothing.
 	void import_bytes(const godot::PackedByteArray &data, const godot::PackedInt64Array &watched, const godot::PackedInt64Array &live, int number);
 
 	godot::PackedByteArray export_bytes() const; // every record: a 32-bit count, the records (RECORD_BYTES each), then the names

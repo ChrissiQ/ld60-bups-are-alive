@@ -100,9 +100,13 @@ func step_back() -> void:
 
 
 ## Who of a lineage is alive in the other dishes: ancestor id -> [[how many, the dish's number], ...]. Worked out when the lineage is first shown and then at most every
-## ELSEWHERE_MSEC (a pass over the family tree for each other dish: its living bups whose home it is).
+## ELSEWHERE_MSEC (a pass over the family tree for each other dish: its living bups whose home it is). Nothing while a pipette's bups still
+## have their old dish as their home in the family tree (`Dish.homes_known`): the counts are not known yet.
 func alive_elsewhere(chain: PackedInt64Array) -> Dictionary:
 	if dishes.size() < 2 or chain.is_empty():
+		return {}
+	if not dish.homes_known():
+		_elsewhere_stamp = []
 		return {}
 	var stamp := [chain[-1], Time.get_ticks_msec() / ELSEWHERE_MSEC]
 	if _elsewhere_stamp == stamp:

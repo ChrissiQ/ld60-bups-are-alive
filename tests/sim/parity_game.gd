@@ -10,8 +10,8 @@ extends RefCounted
 ##   exercised. A test comparing reads with a fixture to 1e-4 puts it at the origin (Main's first slot): a world coordinate is a float32,
 ##   whose step at 4e5 µm is 0.03 µm, which moves a read on a cloud's flank by up to 0.2% (measured: point (1524, 247) of the fixture).
 ## - `frame` tells the world the speed and pause each frame with the frame's real length (Main._advance_world's call).
-## - `settle` waits until the sim thread has drained what was sent and the result worker has done what that queued (the LineageStore lags
-##   the pool by the worker's queue): a check of the store against the pool is made paused and settled.
+## - `settle` waits until the sim thread has drained what was sent and the workers have done what that queued (the LineageStore lags
+##   the pool by the lineage worker's queue): a check of the store against the pool is made paused and settled.
 ## - `fixture_dish` loads the fixture state (tools/gpu/golden/parity: 20,000 bups, its nutrient grid and 60 clouds, radius 3000,
 ##   100 cells across) as a dish of the world, paused, and checks that the pool holds it word for word before any test reads it.
 ## - `total` is the dish's nutrient as the fixture counted it: the grid and the deposits waiting for it (energy: concentration
@@ -123,13 +123,13 @@ func inspect(call: Callable) -> Variant:
 	return await reply_value(world.inspect(call))
 
 
-## Waits until the sim thread has done everything sent before and the result worker has nothing queued, then a few frames (the
+## Waits until the sim thread has done everything sent before and the workers have nothing queued, then a few frames (the
 ## snapshot that shows it).
 func settle(speed := 1.0, paused := true) -> void:
 	await reply_value(world.inspect(func(_core: SimCore, _rows: Dictionary) -> int: return 0), speed, paused)
 	var thread: Variant = world.backend.get("thread")
 	for i in WAIT_FRAMES:
-		if thread == null or thread.worker.queued() == 0:
+		if thread == null or thread.queued() == 0:
 			break
 		await frame(speed, paused)
 	await run_frames(3, speed, paused)

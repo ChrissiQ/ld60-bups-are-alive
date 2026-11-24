@@ -35,13 +35,13 @@ func _frames(thread: SimThread, frames: int, paused: bool) -> void:
 		OS.delay_msec(16)
 
 
-## After every command sent so far has been done and the results the worker holds have been applied.
+## After every command sent so far has been done and what the workers hold has been applied.
 func _settle(thread: SimThread) -> void:
 	var r := SimReply.new()
 	thread.submit(SimCommand.new(SimThread.KIND_INSPECT, {"call": func(_core: SimCore, _rows: Dictionary) -> int: return 0}, r))
 	_wait(r)
 	var until := Time.get_ticks_msec() + 5000
-	while thread.worker.queued() > 0 and Time.get_ticks_msec() < until:
+	while thread.queued() > 0 and Time.get_ticks_msec() < until:
 		OS.delay_msec(5)
 	OS.delay_msec(100)
 

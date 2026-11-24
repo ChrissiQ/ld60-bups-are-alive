@@ -65,8 +65,8 @@ extends SceneTree
 ##   read in the code: SimCore.pipette reads back DSTATE and WORLD and the moved ids only (`_ids_from`), the store gets `retarget_ids`];
 ##   the reply within one iteration of the command [derived: the sim thread drains a command between iterations, so it waits at most an
 ##   iteration and the rest after it; the new dish's grid was made ahead for the main view's dish (SimThread._make_grid_ahead), so the
-##   retarget is done at once, one pipette pass; the worker answers after the iteration it holds (its lineage), and the main thread sees
-##   the reply at its next frame: <= the longest iteration seen + its rest + the pass + the worker's lineage + a display frame]. The
+##   retarget is done at once, one pipette pass; the result worker answers after the iteration it holds, without waiting for the family
+##   tree, and the main thread sees the reply at its next frame: <= the longest iteration seen + its rest + the pass + a display frame]. The
 ##   bound of T_ITER + sync is a placeholder (Governor.T_ITER_MS is a target for an iteration's steps, not a bound on one: a 1M
 ##   step alone is longer) and is printed beside it. The screen's side of the reply (a Dish adopting the receiver, as Main._finish_pipette does, and drawing it: its MultiMesh made for
 ##   twice the payload's count, at most the limit's): adopt < one display frame and no frame of the 20 after it over 3 display frames
@@ -687,13 +687,11 @@ func _row_55() -> void:
 	var t_before := w.latest().timing
 	var most_iteration := float(t_before.get("iteration_ms", 0.0))
 	var most_rest := float(t_before.get("rest_ms", 0.0))
-	var most_lineage := float(t_before.get("lineage_ms", 0.0))
 	while not reply.is_done() and (Time.get_ticks_usec() - c0) / 1000.0 < WAIT_MSEC:
 		await process_frame
 		worst_ms = maxf(worst_ms, tell.call() * 1000.0)
 		most_iteration = maxf(most_iteration, float(w.latest().timing.get("iteration_ms", 0.0)))
 		most_rest = maxf(most_rest, float(w.latest().timing.get("rest_ms", 0.0)))
-		most_lineage = maxf(most_lineage, float(w.latest().timing.get("lineage_ms", 0.0)))
 	var reply_ms := (Time.get_ticks_usec() - c0) / 1000.0
 	var t := w.latest().timing
 	var iterations := int(t.get("iterations", 0)) - it0
@@ -717,12 +715,12 @@ func _row_55() -> void:
 		DishGrid.make(spec.radius, spec.resolution, spec.patchiness, 1234 + k)
 		grid_ms.append((Time.get_ticks_usec() - g0) / 1000.0)
 	grid_ms.sort()
-	var bound := most_iteration + most_rest + own_pass + most_lineage + DISPLAY_FRAME_MS
-	print("PIPETTE1M [measured] 1M dish at x10,000: %d bups moved; the call %d us on the main thread; reply after %.1f ms (%d iterations ended meanwhile; the longest iteration seen %.2f ms, rest %.2f ms; its retarget pass %.2f ms; the worker's longest lineage %.2f ms; last sync %.2f ms); the worst frame of the wait %.1f ms; a new dish's grid (DishGrid.make, 100 cells, on this thread: made ahead, so not waited for) %.1f ms median of 3; a second pipette's pass alone (SimCore.pipette with its grid made, %d bups) %.1f ms" % [moved, call_us, reply_ms, iterations, most_iteration, most_rest, own_pass, most_lineage, float(t.get("sync_ms", 0.0)), worst_ms, grid_ms[1], timed.value()[1], pass_ms])
+	var bound := most_iteration + most_rest + own_pass + DISPLAY_FRAME_MS
+	print("PIPETTE1M [measured] 1M dish at x10,000: %d bups moved; the call %d us on the main thread; reply after %.1f ms (%d iterations ended meanwhile; the longest iteration seen %.2f ms, rest %.2f ms; its retarget pass %.2f ms; last sync %.2f ms); the worst frame of the wait %.1f ms; a new dish's grid (DishGrid.make, 100 cells, on this thread: made ahead, so not waited for) %.1f ms median of 3; a second pipette's pass alone (SimCore.pipette with its grid made, %d bups) %.1f ms" % [moved, call_us, reply_ms, iterations, most_iteration, most_rest, own_pass, float(t.get("sync_ms", 0.0)), worst_ms, grid_ms[1], timed.value()[1], pass_ms])
 	TestUtil.show(moved > 0 and call_us < 1000 and worst_ms <= 3.0 * DISPLAY_FRAME_MS, "1M pipette: the pipette of a 1M dish moved %d bups; the main thread's call %d us (< 1 ms), no frame of the wait over 3 display frames (worst %.1f ms)" % [moved, call_us, worst_ms])
 	print("PIPETTE1M [measured] the screen's side of the reply: Dish.adopt of the receiver (the source's 1M limit) %.2f ms; the worst of the 20 frames after it, the receiver drawn in the main view (its picture made for its count), %.1f ms; Main's own part (_finish_pipette: the strip, the dish set) not measured here" % [adopt[0], adopt[1]])
 	TestUtil.show(adopt[0] < DISPLAY_FRAME_MS and adopt[1] <= 3.0 * DISPLAY_FRAME_MS, "1M pipette: taking the reply stalls no frame (adopt %.2f ms, then the worst frame %.1f ms)" % [adopt[0], adopt[1]])
-	TestUtil.show(reply_ms <= bound, "1M pipette: the reply within one iteration of the command (<= the longest iteration %.1f + its rest %.1f + its pass %.1f + the worker's lineage %.1f + a display frame = %.1f ms [derived]): %.1f ms (T_ITER %.0f ms + sync %.1f = %.1f ms, the placeholder)" % [most_iteration, most_rest, own_pass, most_lineage, bound, reply_ms, Governor.T_ITER_MS, float(t.get("sync_ms", 0.0)), Governor.T_ITER_MS + float(t.get("sync_ms", 0.0))])
+	TestUtil.show(reply_ms <= bound, "1M pipette: the reply within one iteration of the command (<= the longest iteration %.1f + its rest %.1f + its pass %.1f + a display frame = %.1f ms [derived]): %.1f ms (T_ITER %.0f ms + sync %.1f = %.1f ms, the placeholder)" % [most_iteration, most_rest, own_pass, bound, reply_ms, Governor.T_ITER_MS, float(t.get("sync_ms", 0.0)), Governor.T_ITER_MS + float(t.get("sync_ms", 0.0))])
 
 
 ## The screen's side of a pipette's reply: Dish nodes for the source (out of the main view) and the receiver (adopted from the reply, in the

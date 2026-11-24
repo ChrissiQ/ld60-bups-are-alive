@@ -181,12 +181,12 @@ func inspect(call: Callable) -> Variant:
 	return await value_of(WorldClient.shared().inspect(call))
 
 
-## The sim thread has done what was sent and the result worker what that queued; then the snapshot that shows it.
+## The sim thread has done what was sent and the workers what that queued; then the snapshot that shows it.
 func settle() -> void:
 	await inspect(func(_c: SimCore, _r: Dictionary) -> int: return 0)
 	var thread: Variant = WorldClient.shared().backend.get("thread")
 	for i in 600:
-		if thread == null or thread.worker.queued() == 0:
+		if thread == null or thread.queued() == 0:
 			break
 		await frame()
 	await frames(4)
