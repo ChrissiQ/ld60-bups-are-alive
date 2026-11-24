@@ -33,7 +33,6 @@ signal bup_limit_chosen(limit: int)
 @onready var initial_stationary: StatRow = %StationaryRow  ## shown when the dish was started with starvation set other than by default
 @onready var initial_plankton_husks: StatRow = %PlanktonHusksRow  ## shown when the dish was started with plankton husks set other than by default
 @onready var initial_husks: StatRow = %HusksRow  ## shown when the dish was started with bup husks set other than by default
-@onready var initial_running: StatRow = %RunningRow  ## the device the world simulates on (unlike the rest of the record, this is read when the menu opens)
 @onready var initial_limit: StatRow = %LimitRow
 @onready var dish_row: SettingRow = %DishSettingRow
 @onready var limit_row: SettingRow = %LimitSettingRow
@@ -102,9 +101,6 @@ func open(dish: Dish, free_mode: bool, started_as: StartConditions = null) -> vo
 		initial_plankton_husks.visible = started_as.plankton_husks != defaults.plankton_husks
 		initial_plankton_husks.value_text = Strings.t("pause.husks_value" if started_as.plankton_husks else "pause.husks_off_value")
 		initial_limit.value_text = UiText.thousands(started_as.bup_limit)
-	if _record_shown:
-		var device: String = WorldClient.shared().backend.device_name()
-		initial_running.value_text = device if device != "" else Strings.t("pause.running_cpu")
 	quit_button.text = Strings.t("pause.quit") if free_mode else Strings.t("pause.save_quit")
 	if free_mode:
 		_opening = true

@@ -1,13 +1,11 @@
 extends SceneTree
 ## Run: godot --headless --path . -s tests/pause_menu_test.gd
-## Checks the pause menu's record of how a free-mode dish started: the rows show the start conditions, the rows at their defaults are hidden, the device row
-## names the device the world simulates on (read when the menu opens, "CPU" when the world names none), the GPU setting's row is never shown
-## (hidden: the world always runs on the GPU), and the quit button's words.
-## The world is a FakeWorld, whose `device` is what the menu reads.
+## Checks the pause menu's record of how a free-mode dish started: the rows show the start conditions, the rows at their defaults are hidden, the GPU setting's
+## row is never shown (hidden: the world always runs on the GPU), and the quit button's words.
 
 
 func _initialize() -> void:
-	var fake := TestUtil.use_fake_world(self)
+	TestUtil.use_fake_world(self)
 	var dish := Dish.new()
 	root.add_child(dish)
 	dish.set_seed(5)
@@ -24,7 +22,6 @@ func _initialize() -> void:
 	start.nutrient_resolution = 200
 	start.medium_thickness = 10.0
 	start.stationary_phase = not StartConditions.new().stationary_phase
-	fake.device = "Test GPU"
 	menu.open(dish, true, start)
 	TestUtil.check(menu.initial_panel.visible, "free mode with a start shows the record")
 	TestUtil.check(menu.initial_limit.value_label.text == "5,000" and menu.initial_limit.name_label.text == Strings.t("pause.record_bup_limit"), "the limit row reads 5,000 ('%s')" % menu.initial_limit.value_label.text)
@@ -32,19 +29,10 @@ func _initialize() -> void:
 	TestUtil.check(menu.initial_thickness.visible and menu.initial_thickness.value_label.text == "10" + Strings.t("pause.times_water") and menu.initial_thickness.name_label.text == Strings.t("pause.record_medium_thickness"), "the thickness row reads 10 x water ('%s')" % menu.initial_thickness.value_label.text)
 	TestUtil.check(menu.initial_stationary.visible and menu.initial_stationary.value_label.text == Strings.t("pause.stationary_value" if start.stationary_phase else "pause.stationary_off_value") and menu.initial_stationary.name_label.text == Strings.t("pause.record_stationary"), "the starvation row shows its value")
 	TestUtil.check(not menu.initial_husks.visible and not menu.initial_plankton_husks.visible, "the husk rows are hidden at their defaults")
-	TestUtil.check(menu.initial_running.visible and menu.initial_running.name_label.text == Strings.t("pause.record_device") and menu.initial_running.value_label.text == "Test GPU", "the device row names the world's device ('%s')" % menu.initial_running.value_label.text)
 
 	# Defaults: the detail, thickness and starvation rows hide.
 	menu.open(dish, true, StartConditions.new())
 	TestUtil.check(not menu.initial_detail.visible and not menu.initial_thickness.visible and not menu.initial_stationary.visible, "rows at their defaults are hidden")
-
-	# The device is read each time the menu opens, and a world with no device is the CPU.
-	fake.device = ""
-	menu.open(dish, true, start)
-	TestUtil.check(menu.initial_running.value_label.text == Strings.t("pause.running_cpu") and Strings.t("pause.running_cpu") == "CPU", "a world with no device says CPU ('%s')" % menu.initial_running.value_label.text)
-	fake.device = "Other GPU"
-	menu.open(dish, true, start)
-	TestUtil.check(menu.initial_running.value_label.text == "Other GPU", "...and the device is read again when the menu opens")
 
 	# The switches that are not at their defaults show, with their rows.
 	var more := StartConditions.new()

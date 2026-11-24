@@ -31,7 +31,7 @@ var paused := false
 var refusing_iteration := ""
 var memory_fraction := 0.0  ## the share of the memory budget the snapshots say is held
 var need_fraction := 0.0  ## the share of it the running dishes are said to need (what the warning follows)
-var device := "fake world"  ## what device_name() answers ("": a world with no device, which the record shows as CPU)
+var device := "fake world"  ## what device_name() answers ("": a world with no device)
 var means := {}  ## row -> the mean every statistic of that dish shows (1 when not set)
 var hold_worker := false  ## the family tree's work waits (in order) until `release_worker`
 
