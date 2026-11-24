@@ -3,8 +3,9 @@ extends VBoxContainer
 ## What is inside the tray's "Freezer" section: the buttons that freeze or trash the dish in view, a note while nothing is frozen, and a row for each frozen dish (its picture,
 ## its number and bups, and icon buttons to unfreeze it, show what is known of it or trash it). The section itself is a plain TraySection that holds this as its content. It keeps
 ## the frozen dishes (`entries`, in the order they went in): {number (its world number), label (the number it is shown by), data ({time}: when it was frozen), picture (a
-## texture of its tile, or null), bups}. The screen does the
-## freezing, thawing and trashing; this only holds and shows.
+## texture of its tile, or null), bups, reply (the freeze's SimReply: the dish is in the freezer for good once it has answered)}. A dish whose freeze has not answered
+## is shown as freezing: its details line says so, and unfreezing it and its info are off (trashing it is not). The screen does the
+## freezing, thawing and trashing, and calls `refresh` when a freeze has answered; this only holds and shows.
 ##
 ## The rows scroll inside a height of their own (up to SCROLL_MAX_HEIGHT), and only those in view and OVERSCAN either side are made: they are reused for other entries as
 ## the list scrolls, and a spacer at each end stands for the rest, so a thousand frozen dishes cost what a screenful does. Every row is as tall as the first one made (and its
@@ -74,6 +75,16 @@ func rows_made() -> int:
 	return _rows.size()
 
 
+## Whether the dish of `entry` is still on its way out of the world: its freeze has not answered, so there is no blob to unfreeze or tell of.
+static func is_freezing(entry: Dictionary) -> bool:
+	var reply: SimReply = entry.get("reply")
+	return reply != null and not reply.is_done()
+
+
+func _details_open(entry: Dictionary) -> bool:
+	return is_freezing(entry) or _shown_info.has(entry)
+
+
 ## Makes the rows in view and OVERSCAN either side (and no more), shows in each the entry its place stands for, and sizes the spacers for the rest.
 func _lay_out() -> void:
 	if not is_node_ready():
@@ -91,7 +102,7 @@ func _lay_out() -> void:
 	var y := 0.0
 	for i in n:
 		tops[i] = y
-		y += _row_height + (_details_height if _shown_info.has(entries[i]) else 0.0) + sep
+		y += _row_height + (_details_height if _details_open(entries[i]) else 0.0) + sep
 	tops[n] = y
 	var height := minf(y - sep, SCROLL_MAX_HEIGHT)
 	scroll.custom_minimum_size.y = height
@@ -185,8 +196,11 @@ func _bind(box: Control, entry: Dictionary) -> void:
 	(box.get_node("Row/Picture") as TextureRect).queue_redraw()
 	(box.get_node("Row/Caption") as Label).text = Strings.t("hud.frozen_row", [entry["label"], UiText.thousands(entry["bups"])])
 	var details: Label = box.get_node("Details")
-	details.text = Strings.t("hud.frozen_info", [SimClock.format(float(entry["data"].get("time", 0.0))), UiText.thousands(entry["bups"])])
-	details.visible = _shown_info.has(entry)
+	var freezing := is_freezing(entry)
+	details.text = Strings.t("hud.frozen_pending") if freezing else Strings.t("hud.frozen_info", [SimClock.format(float(entry["data"].get("time", 0.0))), UiText.thousands(entry["bups"])])
+	details.visible = _details_open(entry)
+	(box.get_node("Row/Unfreeze") as Button).disabled = freezing
+	(box.get_node("Row/Info") as Button).disabled = freezing
 
 
 func _icon_button(button_name: String, icon: Texture2D, tip: String, action: Callable) -> Button:

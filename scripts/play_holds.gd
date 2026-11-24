@@ -5,7 +5,7 @@ extends RefCounted
 ## whether the game was already paused when it began, which is what `release` can give back. The toolbar's `resume_locked` is written here
 ## and nowhere else.
 ##
-## A quiet hold (`hold_quietly`) is the wait for the simulation's answer to a freeze, a pipette, an unfreeze or a save: the world stands
+## A quiet hold (`hold_quietly`) is the wait for the simulation's answer to a pipette, an unfreeze or a save: the world stands
 ## still and the screen takes no input until the answer comes (a frame or a few), and nothing on screen changes: the toolbar is not
 ## paused, so the game is as it was the moment the answer is in.
 

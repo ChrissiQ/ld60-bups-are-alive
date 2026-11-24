@@ -42,7 +42,7 @@ ViewRenderer (main device): view_* kernels, MultiMesh, picks
 
 The main thread talks to the simulation only through `WorldClient` (`scripts/sim/world_client.gd`, `WorldClient.shared()`):
 
-- **Commands** go in a queue: `add_dish`, `remove_dish`, `freeze`, `thaw`, `pipette`, `resize`, `set_params`, `edit_world`, `set_time`, `set_view`, `ask`, `inspect`, `save_all` and others.
+- **Commands** go in a queue: `add_dish`, `remove_dish`, `freeze`, `thaw`, `pipette`, `resize`, `set_params`, `edit_world`, `set_time`, `set_view`, `ask`, `inspect`, `save_all`, `discard_frozen` (the family tree lets go of a frozen dish's claims, in order with the dish's freeze in the worker's queue) and others.
 - **Answers** come back as a `SimReply`.
 - **What the world looks like** is the newest `Snapshot` (`latest()`, `snapshot_changed`).
 
@@ -227,6 +227,8 @@ The pool is bounded by what the machine can give the GPU. The pieces:
 **A dish's plankton and sources** reach it as a `DishWorldCopy`, made when its world changed in an iteration. The plankton array is the `DishWorld`'s own, shared and never changed in place; each plankton is an immutable entry whose `id` stays with it while it floats. `Dish` keeps only the newest copy (`_hold_world`) and unpacks it into `Plankton` and `NutrientSource` objects, kept by id so a pick survives, when `plankton` or `sources` is read. A dish that is not drawn, or whose layers are hidden, costs no unpacking however many plankton float (about 2,000 on a 90 mm dish at bloom 2, a few ms to unpack).
 
 **Extinction.** A dish that dies out pauses the game on it (`_on_dish_extinct`); resuming deletes it (`_retire_extinct`) unless it is the last running one. When the last running dish dies out, the game ends (`_game_over`, `EndDialog`) if the freezer is empty, and otherwise stays empty until a dish is unfrozen.
+
+A freeze reads the dish whole on the simulation thread and takes it out of the world at once; its reply (the `DishBlob` with the dish's part of the family tree) comes from the result worker, which exports and releases the dish's lineage in order with the events before it, so with the worker behind it comes late. The screen does not wait for it, and a trash or the end of the game puts `discard_frozen` in the same queue after it. The worker's queue is bounded, so a slow worker stalls the simulation thread and the snapshots (and with them a pipette's answer and an unfrozen dish's showing), not the interface.
 
 Goal mode stays single (the pipette is locked there). Freezing and thawing: [interface.md](interface.md#the-freezer). Tests and tools: `tests/dishes_test.gd`, `tools/gpu/dishes_check.gd`, `tools/gpu/dishes_perf.gd`.
 

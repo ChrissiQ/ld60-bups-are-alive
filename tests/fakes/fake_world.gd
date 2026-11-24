@@ -11,8 +11,10 @@ extends SimBackend
 ##
 ## A reply completes `reply_frames` set_times after its command (the simulation's come after its next iteration); a save's at once (the quit
 ## save waits for it). `refuse_next(kind)` refuses the next add, unfreeze, pipette or resize as the memory budget does;
-## `refusing_iteration` stands the world still with a reason, as a refused iteration does. It extends SimBackend, not FakeSimBackend:
-## WorldClient finds the family tree through a method named `lineage`, which FakeSimBackend's variable of that name rules out.
+## `refusing_iteration` stands the world still with a reason, as a refused iteration does. `hold_worker` keeps the family tree's work (a
+## freeze's export and release, a trash's release, a discard, the births `add_bups` makes) waiting in order, as the simulation's result worker
+## does when it is behind, until `release_worker`; a freeze's reply comes after its export, so it waits too. It extends SimBackend, not
+## FakeSimBackend: WorldClient finds the family tree through a method named `lineage`, which FakeSimBackend's variable of that name rules out.
 
 const START_CLOCK := 3661.0  ## s: the world's clock when the fake is made (the program has run a while before the game: not a multiple of INTERVAL)
 const MAX_FRAME_SECONDS := 0.1  ## the longest frame the clock owes (Governor's)
@@ -29,6 +31,7 @@ var memory_fraction := 0.0  ## the share of the memory budget the snapshots say 
 var need_fraction := 0.0  ## the share of it the running dishes are said to need (what the warning follows)
 var device := "fake world"  ## what device_name() answers ("": a world with no device, which the record shows as CPU)
 var means := {}  ## row -> the mean every statistic of that dish shows (1 when not set)
+var hold_worker := false  ## the family tree's work waits (in order) until `release_worker`
 
 var _dishes := {}  ## row -> {number, spec: DishSpec, bups: {id: Vector2 (dish-local)}, had_bups, asked: ids, over: {id: {word: value}}, world: DishWorld, world_version, world_sent}
 var _next_number := 1
@@ -40,6 +43,7 @@ var _pending: Array[Dictionary] = []  ## {reply, value, error, due}
 var _refuse := {}  ## kind -> true: the next command of that kind is refused
 var _refused := {}  ## row -> why, for the next snapshot
 var _frame := 0
+var _worker_ops: Array[Callable] = []  ## the family tree's work held back, in the order it was asked
 
 
 func _init() -> void:
@@ -61,6 +65,26 @@ func latest() -> Snapshot:
 
 func lineage() -> LineageStore:
 	return store
+
+
+## The family tree's work held back by `hold_worker` is done, in order, and no more is held.
+func release_worker() -> void:
+	hold_worker = false
+	while not _worker_ops.is_empty():
+		_worker_ops.pop_front().call()
+
+
+## How much of the family tree's work is waiting.
+func worker_backlog() -> int:
+	return _worker_ops.size()
+
+
+## `op` is the family tree's work: done now, or after what is held back when the worker is held (the order is kept).
+func _store_op(op: Callable) -> void:
+	if hold_worker or not _worker_ops.is_empty():
+		_worker_ops.append(op)
+	else:
+		op.call()
 
 
 func shutdown() -> void:
@@ -113,7 +137,8 @@ func add_bups(row: int, at: Array, parent := -1) -> PackedInt64Array:
 		for i in ids.size():
 			births.encode_u32((i * GpuLayout.BIRTH_WORDS + GpuLayout.EB_PARENT_LO) * 4, parent & 0xFFFFFFFF)
 			births.encode_u32((i * GpuLayout.BIRTH_WORDS + GpuLayout.EB_PARENT_HI) * 4, (parent >> 32) & 0xFFFFFFFF)
-	store.apply_events(births, PackedByteArray(), clock, 0.0)
+	var at_clock := clock
+	_store_op(func() -> void: store.apply_events(births, PackedByteArray(), at_clock, 0.0))
 	d["had_bups"] = true
 	return ids
 
@@ -204,7 +229,10 @@ func submit(cmd: SimCommand) -> void:
 		SimCommand.KIND_REMOVE_DISH:
 			_remove(int(a["row"]))
 		SimCommand.KIND_FREEZE:
-			_answer(cmd.reply, _freeze(int(a["row"])))
+			_freeze(int(a["row"]), cmd.reply)
+		SimThread.KIND_DISCARD_FROZEN:
+			var number := int(a["number"])
+			_store_op(func() -> void: store.discard_frozen(number))
 		SimCommand.KIND_THAW:
 			_epochs[int(a["row"])] = int(a.get("epoch", 0))
 			_thaw(int(a["row"]), a["blob"])
@@ -309,13 +337,16 @@ func _live(row: int) -> PackedInt64Array:
 func _remove(row: int) -> void:
 	if not _dishes.has(row):
 		return
-	store.release_dish(_dishes[row]["number"], _live(row), int(clock / 60.0))
+	var number: int = _dishes[row]["number"]
+	var live := _live(row)
+	var minutes := int(clock / 60.0)
+	_store_op(func() -> void: store.release_dish(number, live, minutes))
 	_dishes.erase(row)
 
 
 ## The dish as the simulation gathers it: its records and a DSTATE that counts them, an empty field of its grid's size and a world at the
 ## clock (what DishCodec needs to read it back), and its part of the family tree.
-func _blob(row: int) -> DishBlob:
+func _blob(row: int, with_lineage := true) -> DishBlob:
 	var d: Dictionary = _dishes[row]
 	var spec: DishSpec = d["spec"]
 	var blob := DishBlob.new()
@@ -333,19 +364,29 @@ func _blob(row: int) -> DishBlob:
 	w.time = clock
 	w.set_bloom(spec.bloom_density)
 	blob.world = w.save()
-	var ex: Dictionary = store.export_dish(d["number"], _live(row))
-	blob.host["lineage"] = ex["bytes"]
-	blob.host["lineage_ids"] = ex["ids"]
+	if with_lineage:
+		var ex: Dictionary = store.export_dish(d["number"], _live(row))
+		blob.host["lineage"] = ex["bytes"]
+		blob.host["lineage_ids"] = ex["ids"]
 	return blob
 
 
-func _freeze(row: int) -> Variant:
+## The dish leaves the world at once; its lineage is exported and released, and the reply completes, once the worker gets to it.
+func _freeze(row: int, reply: SimReply) -> void:
 	if not _dishes.has(row):
-		return null
-	var blob := _blob(row)
-	store.release_dish(_dishes[row]["number"], _live(row), int(clock / 60.0), blob.host["lineage_ids"])
+		_answer(reply, null, "no such dish")
+		return
+	var blob := _blob(row, false)
+	var number: int = _dishes[row]["number"]
+	var live := _live(row)
+	var minutes := int(clock / 60.0)
 	_dishes.erase(row)
-	return blob
+	_store_op(func() -> void:
+		var ex: Dictionary = store.export_dish(number, live)
+		blob.host["lineage"] = ex["bytes"]
+		blob.host["lineage_ids"] = ex["ids"]
+		store.release_dish(number, live, minutes, ex["ids"])
+		_answer(reply, blob))
 
 
 func _thaw(row: int, blob: DishBlob) -> void:

@@ -39,6 +39,7 @@ extends RefCounted
 const KIND_INSPECT := &"inspect"  ## tests and tools: args {call: Callable(core: SimCore, rows: Dictionary client -> core row)}; the reply's value is what it returns
 const KIND_WORLD_SEED := &"world_seed"  ## args {seed}: the world's seed (new dishes' seeds are drawn from it and their number)
 const KIND_IDS_AT := &"ids_at"  ## args {seq, indices}: the ids of the bups at those texels of payload number `seq` (WorldClient.ids_at; SimCore.ids_at); the reply's value is a PackedInt64Array, -1 where unknown
+const KIND_DISCARD_FROZEN := &"discard_frozen"  ## args {number}: a frozen dish is trashed or left behind (WorldClient.discard_frozen): the family tree lets go of its claims, after any freeze of it still in the worker's queue
 const KIND_BEGIN_GAME := &"begin_game"  ## args {game_began}: a new game (WorldClient.begin_game): the numbers start again, the family tree's times count from it
 const HUSK_VIEW_MSEC := 100  ## the least real time between two reads of the main dish's husks (dish.gd's HUSK_REFRESH_MSEC)
 const FIELD_VIEW_MSEC := 100  ## the least real time between two field pictures (dish.gd's HAZE_REFRESH_MSEC)
@@ -871,6 +872,12 @@ func _handle(cmd: SimCommand) -> void:
 		KIND_BEGIN_GAME:
 			_core.begin_game()
 			_game_began = float(a["game_began"])
+		KIND_DISCARD_FROZEN:
+			var number := int(a["number"])
+			worker.push_op(func(st: Object) -> void:
+				if st != null:
+					st.discard_frozen(number))
+			return  # (it changes nothing the snapshot shows: none is owed)
 		KIND_IDS_AT:
 			if cmd.reply != null:
 				cmd.reply.complete(_core.ids_at(int(a["seq"]), a["indices"]) if _core.cpu_handover else PackedInt64Array())

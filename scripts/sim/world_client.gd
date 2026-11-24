@@ -173,6 +173,12 @@ func freeze(row: int) -> SimReply:
 	return r
 
 
+## A frozen dish is trashed (or left behind with the game): the family tree lets go of what it kept for it. The simulation does it in order with the
+## dish's freeze, so one still on its way out of the world is let go of when it has arrived.
+func discard_frozen(number: int) -> void:
+	_send(SimThread.KIND_DISCARD_FROZEN, {"number": number})
+
+
 ## A frozen or saved dish comes back at the world's time; its row now.
 func thaw(blob: DishBlob) -> int:
 	var row := _reserve()
