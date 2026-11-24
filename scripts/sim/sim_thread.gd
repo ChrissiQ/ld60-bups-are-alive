@@ -998,7 +998,8 @@ func _remove_dish(client: int) -> void:
 
 
 ## Freeze: the dish is read whole and leaves the world; then, after the events before it, the lineage worker exports its lineage into the
-## blob and releases the dish from the store, and completes the reply with the blob. The other dishes and the snapshots go on meanwhile.
+## blob and completes the reply with the blob, and only then releases the dish from the store (the blob is complete once exported, and the
+## release of a big dish takes about as long as its export). The other dishes and the snapshots go on meanwhile.
 func _freeze(client: int, reply: SimReply) -> void:
 	if not _rows.has(client):
 		if reply != null:
@@ -1016,8 +1017,10 @@ func _freeze(client: int, reply: SimReply) -> void:
 			var ex: Dictionary = st.export_dish(number, live)
 			blob.host["lineage"] = ex["bytes"]
 			blob.host["lineage_ids"] = ex["ids"]
+			if reply != null:
+				reply.complete(blob)
 			st.release_dish(number, live, minutes, ex["ids"])
-		if reply != null:
+		elif reply != null:
 			reply.complete(blob))
 
 
