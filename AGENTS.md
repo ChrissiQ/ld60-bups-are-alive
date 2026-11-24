@@ -25,13 +25,6 @@ It is a laboratory for watching real evolution happen: bups eat, swim toward foo
 | [docs/build-and-release.md](docs/build-and-release.md) | Rebuilding the native library, regenerating the motion table, exports and the release. |
 | [docs/sources.md](docs/sources.md) | Before researching or citing a fact from published work. |
 
-## Layout
-
-- `scripts/`, `scenes/`, `ui/`: the game. The game screen's files are in [docs/interface.md](docs/interface.md#overview).
-- `scripts/sim/`: the simulation's host side. `gpu/`: the kernels, their layouts and the shader set. `native/src/`: `LineageStore` (the family tree of every bup, a GDExtension), `GpuMemory` (the graphics card's memory and how much the system lets the game use) and their registration. `scripts/sim_constants.gd` builds the constants the kernels receive.
-- `text/strings.cfg`: every word the player reads. `text/names.txt`: random bup names.
-- `tests/`: headless tests; `tests/sim/`: windowed (GPU) simulation tests. `tools/`: generators and checks; `tools/gpu/`: ad hoc checks of the GPU path; `tools/ci/`: the compute probe the CI tests begin with. `.github/workflows/`: the lineage store's build, the simulation tests on a software GPU, and the release.
-
 ## Hard rules
 
 - **Never edit a generated file.** Edit its source and run the generator ([Generated files](#generated-files)).
