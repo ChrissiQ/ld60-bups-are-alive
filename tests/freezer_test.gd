@@ -2,26 +2,30 @@ extends SceneTree
 ## Run: godot --headless --path . -s tests/freezer_test.gd
 ## The freezer, on the game screen over FakeWorld (a small world kept on the main thread: SimService.use_backend):
 ## a dish is frozen (the simulation takes it out of the world whole, and answers a frame later), thawed under its own number at the world's
-## time, or trashed; the question after a pipette; the sections of the tray; the save, which has no freezer.
+## time, or trashed; a freeze that the family tree's worker is slow to answer (the interface goes on: nothing is held, the row says freezing);
+## the question after a pipette; the sections of the tray; the save, which has no freezer.
 ##
 ## Expected values [derived from the rules in main.gd and FakeWorld; the fake's clock starts at 3,661 s and
 ## each frame stands for 1/60 s of real time, times the speed]:
 ##  - The last dish's buttons say why they are off; with 3 dishes the freeze and trash buttons are on. A freeze sends one FREEZE for
 ##    the dish's row; the dish leaves the running set and the world's rows at once, its entry keeps its number and its count, and its row
-##    is in the freezer. Until the answer comes (one frame) the game waits quietly: the world's next set_time is paused, the tray takes no
-##    input, and the toolbar is not paused (nothing is shown).
+##    is in the freezer. Until the answer comes (one frame) its row says it is freezing (details line shown, Unfreeze and Info off) and the
+##    game goes on as it was: the world's next set_time is not paused and the tray takes input.
 ##  - The freezer's details line gives the time it was frozen at on the game's clock (the world's less the game's beginning: about 300 s
 ##    after 30 frames at x600), not the world's (3,661 s and more); the dish had at least 2 history samples then (300 s crosses 2 or 3
 ##    multiples of 120 s).
 ##  - Thawed 40 frames later at x600 (10 s a frame: 400 s away), it is among the running dishes under its old number once a
 ##    snapshot shows it, at the world's time, with the bups it was frozen with; its history gains int(400 / 120) = 3 level samples; its
-##    founders' family records are alive again with the dish as their home. An Unfreeze asked before the freeze has answered is done when
-##    it answers. A thaw the memory budget refuses leaves the entry in the freezer as it was and shows banner.memory_budget; the next one
+##    founders' family records are alive again with the dish as their home. A thaw the memory budget refuses leaves the entry in the freezer as it was and shows banner.memory_budget; the next one
 ##    works. DishWorld.load_blob moves what was due on by the time away (100 s saved, loaded at 700 s: bloom due 150 -> 750, a plankton born
 ##    at 100 and bursting at t -> 700 and t + 600); DishHistory.pad from 100 s to 700 s adds a fine sample for each multiple of 120 s
 ##    crossed (120 to 600: 5) and a whole-run one for each multiple of 240 s (240, 480: 2).
-##  - A trash removes the dish and sends one REMOVE_DISH for its row; trashing a frozen dish asks first, and confirmed, releases its
-##    claims on the family tree (LineageStore.claim_count back to 0) once its freeze has answered.
+##  - A trash removes the dish and sends one REMOVE_DISH for its row; trashing a frozen dish asks first, and confirmed, sends one
+##    DISCARD_FROZEN, which lets go of its claims on the family tree (LineageStore.claim_count back to what it was), after its freeze's
+##    claims are made when the freeze has not answered yet.
+##  - With the worker held (FakeWorld.hold_worker), a freeze stays unanswered: a second freeze is allowed, a pipette and an unfreeze are
+##    refused with a banner (no command sent), a trash is done at once, the claims of a trashed dish never outlive it, nor those of a dish
+##    left behind with the game; a bup whose birth the worker has not applied has no record and is not selectable, and is once it has.
 ##  - The last running dish dying out with dishes frozen pauses on it and stays, empty, after resuming; an unfreeze takes its place
 ##    and comes into view; that one dying out is noticed.
 ##  - A goal-mode save written to a scratch file has only the keys dish, goals and version (no freezer); loaded, the shelf is empty,
@@ -87,13 +91,16 @@ func _run() -> void:
 	TestUtil.check(m.dishes.size() == 2 and not m.dishes.has(second) and m.freezer_shelf.entries.size() == 1, "a frozen dish leaves the running dishes and is in the freezer")
 	TestUtil.check(fake.calls_of(SimCommand.KIND_FREEZE).size() == 1 and fake.calls_of(SimCommand.KIND_FREEZE)[0]["args"]["row"] == second_row and not fake.rows().has(second_row), "one FREEZE for its row, and the world has it no longer")
 	TestUtil.check(m.freezer_shelf.entries[0]["label"] == number and m.freezer_shelf.entries[0]["number"] == world_number and m.freezer_shelf.entries[0]["bups"] == bups and bups == 40, "the freezer keeps its number and its count (%d)" % bups)
-	TestUtil.check(m.holds.stills_world() and not m.paused and m.hud_layer.process_mode == Node.PROCESS_MODE_DISABLED, "until the answer comes the world waits and the tray takes no input, with nothing shown")
+	TestUtil.check(not m.holds.stills_world() and not m.paused and m.hud_layer.process_mode == Node.PROCESS_MODE_INHERIT, "nothing waits for the answer: the world runs and the tray takes input")
+	var pending_row: Control = m.freezer_shelf.row_for(m.freezer_shelf.entries[0])
+	TestUtil.check(FreezerShelf.is_freezing(m.freezer_shelf.entries[0]) and pending_row.get_node("Details").visible and pending_row.get_node("Details").text == Strings.t("hud.frozen_pending") and pending_row.get_node("Row/Unfreeze").disabled and pending_row.get_node("Row/Info").disabled and not pending_row.get_node("Row/Trash").disabled, "until the answer comes its row says it is freezing: Unfreeze and Info are off, Trash is not")
 	var clock_then := fake.clock
 	await process_frame
-	TestUtil.check(fake.clock == clock_then and fake.calls_of(SimCommand.KIND_SET_TIME)[-1]["args"]["paused"], "the frame it waits for the answer the world stands still")
+	TestUtil.check(fake.clock > clock_then and not fake.calls_of(SimCommand.KIND_SET_TIME)[-1]["args"]["paused"], "the frame it waits for the answer the world runs on")
 	await process_frame
-	TestUtil.check(not m.holds.stills_world() and m.hud_layer.process_mode == Node.PROCESS_MODE_INHERIT and not fake.calls_of(SimCommand.KIND_SET_TIME)[-1]["args"]["paused"], "once it has answered the world runs on")
+	TestUtil.check(not FreezerShelf.is_freezing(m.freezer_shelf.entries[0]) and m._freezing.is_empty(), "the answer has come")
 	var row: Control = m.freezer_shelf.row_for(m.freezer_shelf.entries[0])
+	TestUtil.check(not row.get_node("Row/Unfreeze").disabled and not row.get_node("Row/Info").disabled, "and the row's Unfreeze and Info are on")
 	TestUtil.check(row != null and m.freezer_shelf.rows_made() == 1 and not m.freezer_shelf.empty_note.visible, "its row is in the freezer")
 	TestUtil.check(row.get_node("Row/Unfreeze").tooltip_text == "Unfreeze" and row.get_node("Row/Info").tooltip_text == "Info" and row.get_node("Row/Trash").tooltip_text == "Trash", "the row has unfreeze, info and trash buttons")
 	TestUtil.check(not row.get_node("Details").visible, "the details are closed")
@@ -180,17 +187,17 @@ func _run() -> void:
 	m.trash_dish(m.dish)
 	TestUtil.check(m.dishes.size() == 1, "the last running dish can be neither frozen nor trashed")
 
-	# Trashing a frozen dish lets go of its claims on the family tree, once its freeze has answered.
+	# Trashing a frozen dish lets go of its claims on the family tree, also when its freeze has not answered yet.
 	var claims_before: int = fake.store.claim_count()
 	var spare: Dish = m.add_dish(chosen)
 	await process_frame
 	m.freeze_dish(spare)
 	var spare_entry: Dictionary = m.freezer_shelf.entries.back()
+	TestUtil.check(fake.store.claim_count() > claims_before, "a frozen dish holds claims on the family tree (%d, were %d)" % [fake.store.claim_count(), claims_before])
 	m._trash_frozen(spare_entry)
-	TestUtil.check(m.freezer_shelf.entries.has(spare_entry) and spare_entry.get("then") == "trash" and fake.store.claim_count() > claims_before, "a dish whose freeze has not answered is trashed once it has (claims %d, were %d)" % [fake.store.claim_count(), claims_before])
+	TestUtil.check(not m.freezer_shelf.entries.has(spare_entry) and m._freezing.is_empty() and fake.calls_of(SimThread.KIND_DISCARD_FROZEN).size() >= 1 and fake.store.claim_count() == claims_before, "trashing it, though its freeze has not answered, lets go of its claims at once (%d)" % fake.store.claim_count())
 	await process_frame
 	await process_frame
-	TestUtil.check(not m.freezer_shelf.entries.has(spare_entry) and fake.store.claim_count() == claims_before, "...and its claims on the family tree go with it (%d)" % fake.store.claim_count())
 
 	# The question after a pipette: nothing else goes on until it is answered.
 	var other: Dish = m.add_dish(chosen)
@@ -225,6 +232,7 @@ func _run() -> void:
 	TestUtil.check(m._extinct_queue.has(m.dish) or m.holds.has(&"end"), "the thawed dish dying out is noticed")
 	m.queue_free()
 	await process_frame
+	await _slow_freeze(chosen)
 	await _save(fake)
 	TestUtil.finish(self, "FREEZER TESTS OK")
 
@@ -268,3 +276,87 @@ func _save(fake: FakeWorld) -> void:
 	file.close()
 	TestUtil.check(SaveGame.read(SCRATCH).is_empty() and not SaveGame.has_save(SCRATCH), "a save whose dish is of another format is no save")
 	SaveGame.delete(SCRATCH)
+
+
+## A freeze the family tree's worker is slow to answer (FakeWorld.hold_worker): nothing is held, the row says freezing, a second freeze is allowed, a
+## pipette and an unfreeze are refused with a banner, a trash is done at once, and claims never outlive the dish they were made for, even when the
+## game is left first.
+func _slow_freeze(chosen: StartConditions) -> void:
+	var fake := FakeWorld.new()
+	root.get_node("SimService").use_backend(fake)
+	var m: Node = TestUtil.game_screen(self, chosen)
+	await process_frame
+	var first: Dish = m.dish
+	m.toolbar.set_paused(false)
+	var a: Dish = m.add_dish(chosen)
+	var b: Dish = m.add_dish(chosen)
+	var c: Dish = m.add_dish(chosen)
+	for i in 5:
+		await process_frame
+	var claims_before: int = fake.store.claim_count()
+	fake.hold_worker = true
+
+	m.freeze_dish(a)
+	for i in 3:
+		await process_frame
+	var entry_a: Dictionary = m.freezer_shelf.entries[0]
+	var row_a: Control = m.freezer_shelf.row_for(entry_a)
+	TestUtil.check(FreezerShelf.is_freezing(entry_a) and not m.holds.stills_world() and m.hud_layer.process_mode == Node.PROCESS_MODE_INHERIT and not m.paused, "(slow) a freeze that has not answered holds nothing")
+	TestUtil.check(row_a.get_node("Details").visible and row_a.get_node("Row/Unfreeze").disabled and row_a.get_node("Row/Info").disabled and fake.worker_backlog() > 0, "(slow) its row says it is freezing, with Unfreeze and Info off")
+
+	# A second freeze while one is pending is allowed.
+	var clock_then := fake.clock
+	m.freeze_dish(b)
+	for i in 3:
+		await process_frame
+	var entry_b: Dictionary = m.freezer_shelf.entries[1]
+	TestUtil.check(m.freezer_shelf.entries.size() == 2 and m._freezing.size() == 2 and fake.calls_of(SimCommand.KIND_FREEZE).size() == 2 and m.dishes.size() == 2 and fake.clock > clock_then, "(slow) a second freeze is allowed, and the world runs on")
+	TestUtil.check(FreezerShelf.is_freezing(entry_b) and m.freezer_shelf.row_for(entry_b).get_node("Details").visible, "(slow) both rows say they are freezing")
+
+	# A pipette and an unfreeze are refused, with the reason.
+	m.banner.text = ""
+	m.pipette(Vector2.ZERO, 50.0)
+	TestUtil.check(fake.calls_of(SimCommand.KIND_PIPETTE).is_empty() and m._pipette_pending.is_empty() and not m.holds.stills_world() and m.banner.text == Strings.t("hud.banner_freezer_busy"), "(slow) a pipette is refused with a banner, and nothing waits")
+	m.banner.text = ""
+	m.thaw(entry_a)
+	TestUtil.check(fake.calls_of(SimCommand.KIND_THAW).is_empty() and m._thawing.is_empty() and not m.holds.stills_world() and m.banner.text == Strings.t("hud.banner_freezer_busy"), "(slow) an unfreeze is refused with a banner, and nothing waits")
+
+	# A free-mode save is not made (the goal's is the only one), pending freeze or not.
+	m.save_game(false)
+	TestUtil.check(m._save_pending == null, "(slow) free mode saves nothing, so a save never waits for a freeze")
+
+	# A trash is done at once; its claims are let go of right after they are made.
+	m._trash_frozen(entry_b)
+	TestUtil.check(not m.freezer_shelf.entries.has(entry_b) and m._freezing.size() == 1 and fake.calls_of(SimThread.KIND_DISCARD_FROZEN).size() == 1, "(slow) a dish still freezing can be trashed at once")
+	fake.release_worker()
+	for i in 3:
+		await process_frame
+	TestUtil.check(not FreezerShelf.is_freezing(entry_a) and m._freezing.is_empty() and fake.store.claim_count() > claims_before, "(slow) the other freeze answers when the worker gets to it (claims %d, were %d)" % [fake.store.claim_count(), claims_before])
+	var row_done: Control = m.freezer_shelf.row_for(entry_a)
+	TestUtil.check(not row_done.get_node("Row/Unfreeze").disabled and not row_done.get_node("Row/Info").disabled and not row_done.get_node("Details").visible, "(slow) its row is a frozen dish's then")
+	m._trash_frozen(entry_a)
+	TestUtil.check(fake.store.claim_count() == claims_before, "(slow) no claim outlives the trashed dishes (%d, were %d)" % [fake.store.claim_count(), claims_before])
+
+	# A bup whose birth the worker has not applied has no record yet: it cannot be picked, and says nothing of it; it can once the worker has.
+	fake.hold_worker = true
+	var born: int = fake.add_bups(first.row, [Vector2(5.0, 5.0)])[0]
+	m.dish.selected.bup = born
+	for i in 3:
+		await process_frame
+	TestUtil.check(not first.has_record(born) and first.selected.bup == -1 and not m.inspector.info_panel.visible, "(slow) a bup with no record yet is not selected, and nothing is shown of it")
+	m._open_watched(first, born)
+	TestUtil.check(first.selected.bup == -1, "(slow) nor opened from the watch list")
+	fake.release_worker()
+	first.selected.bup = born
+	for i in 3:
+		await process_frame
+	TestUtil.check(first.has_record(born) and first.selected.bup == born, "(slow) once its record is made it is selected")
+
+	# Leaving the game with a freeze pending leaves no claim behind.
+	fake.hold_worker = true
+	m.freeze_dish(c)
+	TestUtil.check(m._freezing.size() == 1, "(slow) a freeze is pending as the game is left")
+	m.queue_free()
+	await process_frame
+	fake.release_worker()
+	TestUtil.check(fake.store.claim_count() == claims_before, "(slow) leaving the game lets go of the claims of a freeze still pending (%d, were %d)" % [fake.store.claim_count(), claims_before])
