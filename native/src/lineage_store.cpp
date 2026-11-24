@@ -6,7 +6,9 @@
 #include <climits>
 #include <cmath>
 #include <cstring>
+#include <iterator>
 #include <thread>
+#include <utility>
 
 using namespace godot;
 
