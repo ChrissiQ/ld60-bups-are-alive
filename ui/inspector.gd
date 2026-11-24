@@ -49,6 +49,7 @@ var _point_stamp := []  ## what the nutrient readout under the pointer was last 
 var _divisions_of := -1  ## the bup whose divisions count the panel last saw ...
 var _divisions_seen := 0  ## ... and what it was
 var _flash_until := 0  ## when the divisions number stops flashing (Time.get_ticks_msec)
+var _unknown := []  ## [dish's instance id, bup, lineage ticket] of the selected bup while it has no family record: the family tree's steps behind what was shown when that was first seen
 
 
 ## Finds the panels' nodes under the screen's `root`, and wires their buttons.
@@ -98,7 +99,12 @@ func bind(root: Node, lineage_view: LineageView, readouts: Readout) -> void:
 ## view. `hover_point`: the spot of the medium the select tool is over, or null when it is over none.
 func update(following: bool, hover_point: Variant) -> void:
 	if dish.selected.bup >= 0 and not dish.has_record(dish.selected.bup):
-		dish.selected.bup = -1  # its record is gone
+		if _unknown.size() != 3 or _unknown[0] != dish.get_instance_id() or _unknown[1] != dish.selected.bup:
+			_unknown = [dish.get_instance_id(), dish.selected.bup, dish.lineage_ticket()]
+		if dish.lineage_has(_unknown[2]):
+			dish.selected.bup = -1  # its record is gone (before the family tree has caught up with what was shown, it is only not known yet: it stays selected, and nothing is shown of it)
+	else:
+		_unknown = []
 	if dish.hovered.bup >= 0 and not dish.has_record(dish.hovered.bup):
 		dish.hovered.bup = -1  # (a hover left over in a dish that has come into view: it has no record of that bup, and `PanelText.deceased` needs one)
 	# A clicked bup, source, plankton or husk is pinned to the info panel in the side column and stays there. What the
@@ -121,7 +127,7 @@ func _show_info(following: bool) -> void:
 		husk_place = Dish.NO_HUSK
 	var pinned := dish.has_selection()
 	var editing := source != null and bup_id < 0
-	var alive_info: Dictionary = dish.bup_info(bup_id) if bup_id >= 0 else {}  # (fetched once: the panels below are built from it)
+	var alive_info: Dictionary = dish.bup_info(bup_id) if bup_id >= 0 and dish.has_record(bup_id) else {}  # (fetched once: the panels below are built from it; a bup with no family record yet shows nothing, as its birth is not known)
 	var waiting := false  # (alive, but its record has not been answered yet: its family record stands in, rather than showing it as deceased, and that has no mass or reserve of a living bup)
 	if bup_id >= 0 and alive_info.is_empty() and dish.has_bup(bup_id):
 		alive_info = dish.lineage_info(bup_id)

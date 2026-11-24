@@ -1,7 +1,7 @@
 class_name GpuSimBackend
 extends SimBackend
 ## The simulation on the GPU: the pooled world on a local RenderingDevice of its own, run by a SimThread, with the family tree in one
-## LineageStore the main thread may query while the worker writes it (the store has its own mutex).
+## LineageStore the main thread may query while the lineage worker writes it (the store has its own mutex).
 
 static var _warm: Array[Resource] = []  ## the pooled kernels' shader files, loaded on the main thread and held, so the sim thread's load finds them cached
 
@@ -38,7 +38,7 @@ func device_name() -> String:
 	return String(thread.status()["device"]) if thread != null else ""
 
 
-## Starts the sim thread and its worker. `limits` is a PoolLimits (null: PoolLimits.from_settings()).
+## Starts the sim thread and its workers. `limits` is a PoolLimits (null: PoolLimits.from_settings()).
 func start(limits: RefCounted) -> void:
 	if thread != null:
 		return
@@ -85,6 +85,11 @@ func texture_handles() -> Dictionary:
 
 func lineage() -> LineageStore:
 	return store
+
+
+## How many of the family tree's steps are done (LineageWorker.done: WorldClient.lineage_has).
+func lineage_done() -> int:
+	return thread.lineage.done() if thread != null else 0
 
 
 func status() -> Dictionary:

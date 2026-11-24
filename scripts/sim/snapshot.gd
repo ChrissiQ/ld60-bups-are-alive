@@ -16,4 +16,5 @@ var thumbs: ThumbsInfo = null  ## the newest thumbnails' atlas (null before the 
 var totals: Dictionary = {}  ## every running dish together, worked out where the snapshot is made (DishState.aggregate): {dishes, count, stats}
 var husk_view: Dictionary = {}  ## the main dish's live husks as last read: {row, version, transforms: PackedFloat32Array (SimCore.run's husk_list)}; empty before
 var worlds: Dictionary = {}  ## row -> DishWorldCopy (only when it changed)
-var timing: Dictionary = {}  ## iteration_ms, steps, step_ms_ema, duty, sync_ms, publish_ms, lineage_ms
+var timing: Dictionary = {}  ## iteration_ms, steps, step_ms_ema, duty, sync_ms, publish_ms; worker_queue; the family tree's lineage_ms, lineage_queue, lineage_queue_bytes, lineage_behind_s
+var lineage_ticket := 0  ## every family-tree step asked for before this snapshot's iteration (its events, a thaw's import, a pipette's retarget) is in the store once the family tree has done this many (WorldClient.lineage_done); 0: nothing to wait for

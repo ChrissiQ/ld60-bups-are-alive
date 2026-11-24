@@ -3,8 +3,13 @@ extends RefCounted
 ## The simulation's own thread: it makes the pooled world (SimCore, on a local RenderingDevice made on this
 ## thread, the only thread that ever touches it), keeps each dish's DishWorld (plankton, bloom, sources), drains the commands between
 ## iterations, asks the Governor how many steps to run, runs them with the questions due and the main dish's pictures in the same list
-## (record, submit, sync, one read back), hands what it read to the ResultWorker, and rests as the governor's duty says. It never touches
-## the scene tree.
+## (record, submit, sync, one read back), hands the family events to the LineageWorker and the rest of what it read to the ResultWorker,
+## and rests as the governor's duty says. It never touches the scene tree.
+##
+## The family tree's steps go to the LineageWorker in the order this thread asks them (an iteration's events, a dish added, removed,
+## frozen, thawed, pipetted, resized, a frozen dish discarded, a save's exports); a reply that needs the store (a freeze's blob, a save's
+## blobs) is completed there. A reply that needs only this thread's work (a pipette's, a resize's) is completed by the ResultWorker in order
+## with the snapshots, and never waits for the family tree.
 ##
 ## Rows: the main thread names a dish by its client row (WorldClient hands them out); this thread maps each to the core's row, which the
 ## core picks itself, so a refused dish never puts the two out of step. Snapshots, PayloadInfo.row and ViewRequest.row are client rows.
@@ -19,7 +24,7 @@ extends RefCounted
 ##     questions due and the view (with as many bup pictures, at evenly spaced steps, as display frames the last iteration spanned:
 ##     `_pictures_for`); run (the steps, then the answers and the pictures, with the asked-after bups' places, in one list,
 ##     split only where a step's diffusion rounds are, SimCore._record_step,
-##     and DSTATE, STATS, the family events, the answers and the pictures read back with its one sync); push to the worker; rest. An
+##     and DSTATE, STATS, the family events, the answers and the pictures read back with its one sync); hand on to the workers (`_hand_on`); rest. An
 ##     iteration the memory budget refuses (no step ran: the questions are answered and the pictures published all the same) puts the
 ##     dishes' worlds back as they were before its events, and the next tries are fewer steps, then one step at most every
 ##     REFUSED_RETRY_MSEC (`_plan_steps`)
@@ -39,7 +44,7 @@ extends RefCounted
 const KIND_INSPECT := &"inspect"  ## tests and tools: args {call: Callable(core: SimCore, rows: Dictionary client -> core row)}; the reply's value is what it returns
 const KIND_WORLD_SEED := &"world_seed"  ## args {seed}: the world's seed (new dishes' seeds are drawn from it and their number)
 const KIND_IDS_AT := &"ids_at"  ## args {seq, indices}: the ids of the bups at those texels of payload number `seq` (WorldClient.ids_at; SimCore.ids_at); the reply's value is a PackedInt64Array, -1 where unknown
-const KIND_DISCARD_FROZEN := &"discard_frozen"  ## args {number}: a frozen dish is trashed or left behind (WorldClient.discard_frozen): the family tree lets go of its claims, after any freeze of it still in the worker's queue
+const KIND_DISCARD_FROZEN := &"discard_frozen"  ## args {number}: a frozen dish is trashed or left behind (WorldClient.discard_frozen): the family tree lets go of its claims, after any freeze of it still in the lineage worker's queue
 const KIND_BEGIN_GAME := &"begin_game"  ## args {game_began}: a new game (WorldClient.begin_game): the numbers start again, the family tree's times count from it
 const HUSK_VIEW_MSEC := 100  ## the least real time between two reads of the main dish's husks (dish.gd's HUSK_REFRESH_MSEC)
 const FIELD_VIEW_MSEC := 100  ## the least real time between two field pictures (dish.gd's HAZE_REFRESH_MSEC)
@@ -54,8 +59,9 @@ const TEXTURE_KINDS := ["payload", "ids", "haze", "steer", "thumbs"]
 const ROOM_KINDS := [SimCommand.KIND_REMOVE_DISH, SimCommand.KIND_FREEZE, SimCommand.KIND_RESIZE, SimCommand.KIND_SET_PARAMS, KIND_INSPECT]
 
 var limits: PoolLimits
-var store: Object = null  ## the LineageStore the worker writes (null: none)
+var store: Object = null  ## the LineageStore the lineage worker writes (null: none)
 var queue := CommandQueue.new()
+var lineage: LineageWorker
 var worker: ResultWorker
 var governor := Governor.new()
 
@@ -121,26 +127,32 @@ var _period_ms := 0.0  ## ms between the last two iterations' beginnings (0: not
 func _init(p_limits: PoolLimits = null, p_store: Object = null) -> void:
 	limits = p_limits if p_limits != null else PoolLimits.new()
 	store = p_store
-	worker = ResultWorker.new(store)
+	lineage = LineageWorker.new(store)
+	worker = ResultWorker.new(lineage)
 	cpu_handover = ViewRenderer.cpu_handover()
 
 
 func start() -> void:
+	lineage.start()
 	worker.start()
 	_thread.start(_run)
 
 
-## Stops the loop, frees the device on its own thread, lets the worker finish what is queued, and joins both threads. Replies of commands
-## that were never drained are completed with the error "shutdown".
+## Stops the loop, frees the device on its own thread, lets the two workers finish what is queued (the family tree's steps all run, so a
+## reply waiting on one is completed), and joins the three threads. Neither worker waits on the other, and the pushes stop waiting for room
+## before the sim thread is joined, so no wait is left that nothing will end. Replies of commands that were never drained are completed with
+## the error "shutdown".
 func stop() -> void:
 	_state.lock()
 	_stop = true
 	_state.unlock()
 	queue.wake()
 	worker.release_pushes()
+	lineage.release_pushes()
 	if _thread.is_started():
 		_thread.wait_to_finish()
 	worker.stop()
+	lineage.stop()
 	for cmd in queue.drain():
 		if cmd.reply != null:
 			cmd.reply.complete(null, "shutdown")
@@ -148,6 +160,11 @@ func stop() -> void:
 
 func submit(cmd: SimCommand) -> void:
 	queue.push(cmd)
+
+
+## The items the two workers hold, queued or (the family tree's) under way: 0 once everything handed on so far is done.
+func queued() -> int:
+	return worker.queued() + lineage.queued()
 
 
 ## {ready, alive, failed, device, errors}: ready once the device and kernels are made (failed when they could not be); alive while the loop
@@ -400,7 +417,7 @@ func _iterate(k: int) -> float:
 		"births": _last_events[0], "deaths": _last_events[1],
 	}
 	item["timing"] = _timing()
-	worker.push_iteration(item)
+	_hand_on(item)
 	_changed = false
 	return busy
 
@@ -428,11 +445,27 @@ func _quiet_pass() -> void:
 	_passes += 1
 	_pass_ms += (Time.get_ticks_usec() - began) / 1000.0
 	item["timing"] = _timing()
-	worker.push_iteration(item)
+	_hand_on(item)
 	_changed = false
 
 
-## What the worker needs of the state now (bytes and plain values only: it never touches the device), from what the iteration's list
+## An iteration's results handed on: its family events to the lineage worker (which may make this thread wait when it is far behind: see
+## LineageWorker.MAX_BYTES), the rest to the result worker, with the ticket the store has the events by.
+func _hand_on(item: Dictionary) -> void:
+	var births: PackedByteArray = item["births"]
+	var deaths: PackedByteArray = item["deaths"]
+	item.erase("births")
+	item.erase("deaths")
+	var steps: int = item["steps"]
+	if steps > 0:
+		var began: float = item["game_began"]  # (the family tree's times are the game's: WorldClient.begin_game)
+		var delta: float = item["delta"]
+		lineage.push_events(births, deaths, float(item["t0"]) + delta - began, delta, float(item["sim_time"]) - began)
+	item["lineage_ticket"] = lineage.pushed()
+	worker.push_iteration(item)
+
+
+## What the workers need of the state now (bytes and plain values only: they never touch the device), from what the iteration's list
 ## read back (`res`: SimCore.run's) and what `plan` asked of it: the answers (before the rows, which carry them: a pass answers what was
 ## asked before it), the rows, the stats, the family events and the pictures.
 func _results(steps: int, d: float, t0: float, samples: Array, res: Dictionary, plan: IterationPlan) -> Dictionary:
@@ -874,7 +907,7 @@ func _handle(cmd: SimCommand) -> void:
 			_game_began = float(a["game_began"])
 		KIND_DISCARD_FROZEN:
 			var number := int(a["number"])
-			worker.push_op(func(st: Object) -> void:
+			lineage.push_op(func(st: Object) -> void:
 				if st != null:
 					st.discard_frozen(number))
 			return  # (it changes nothing the snapshot shows: none is owed)
@@ -912,7 +945,7 @@ func _add_dish(client: int, spec: DishSpec) -> void:
 		var now := governor.clock - _game_began
 		var founders := spec.founders  # (the core gave them the world's ids)
 		var names := spec.founder_names
-		worker.push_op(func(st: Object) -> void:
+		lineage.push_op(func(st: Object) -> void:
 			if st != null:
 				st.apply_events(births, PackedByteArray(), now, 0.0)
 				for i in mini(names.size(), founders.size() / GpuLayout.RECORD_BYTES):
@@ -959,13 +992,13 @@ func _remove_dish(client: int) -> void:
 	var live := _core.remove_dish(_rows[client])
 	_unmap(client)
 	var minutes := _minutes()
-	worker.push_op(func(st: Object) -> void:
+	lineage.push_op(func(st: Object) -> void:
 		if st != null:
 			st.release_dish(number, live, minutes))
 
 
-## Freeze: the dish is read whole and leaves the world; then, after the events before it, the worker exports its lineage into the
-## blob and releases the dish from the store, and completes the reply with the blob.
+## Freeze: the dish is read whole and leaves the world; then, after the events before it, the lineage worker exports its lineage into the
+## blob and releases the dish from the store, and completes the reply with the blob. The other dishes and the snapshots go on meanwhile.
 func _freeze(client: int, reply: SimReply) -> void:
 	if not _rows.has(client):
 		if reply != null:
@@ -978,7 +1011,7 @@ func _freeze(client: int, reply: SimReply) -> void:
 	blob.world = (_worlds[client] as DishWorld).save()
 	_unmap(client)
 	var minutes := _minutes()
-	worker.push_op(func(st: Object) -> void:
+	lineage.push_op(func(st: Object) -> void:
 		if st != null:
 			var ex: Dictionary = st.export_dish(number, live)
 			blob.host["lineage"] = ex["bytes"]
@@ -988,7 +1021,8 @@ func _freeze(client: int, reply: SimReply) -> void:
 			reply.complete(blob))
 
 
-## Thaw or load: the dish comes back at the world's time, and the worker merges its lineage into the store (an idempotent merge).
+## Thaw or load: the dish comes back at the world's time, and the lineage worker merges its lineage into the store (an idempotent merge).
+## The dish runs and shows at once; its records reach the store when the lineage worker gets to them.
 func _thaw(client: int, blob: DishBlob) -> void:
 	var cr := _core.load_dish(blob)
 	if cr < 0:
@@ -1007,7 +1041,7 @@ func _thaw(client: int, blob: DishBlob) -> void:
 	var number: int = _numbers[client]
 	var data: PackedByteArray = blob.host.get("lineage", PackedByteArray())
 	var watched := PackedInt64Array(blob.host.get("watched", []))
-	worker.push_op(func(st: Object) -> void:
+	lineage.push_op(func(st: Object) -> void:
 		if st != null and data.size() > 0:
 			st.import_bytes(data, watched, live, number))
 
@@ -1015,8 +1049,9 @@ func _thaw(client: int, blob: DishBlob) -> void:
 ## The pipette's retarget into a new dish like the source, at client row `dest`. The new dish's grid (its landscape takes a while
 ## in script: 135 ms for 100 cells across) is the one made ahead for the main view's dish when it is that one (`_make_grid_ahead`), or else
 ## made on the worker pool now while the dishes run on; the retarget is the first thing done once it is ready, between iterations. The reply
-## ({new_row, number, moved, ids, pass_ms}) comes from the worker after the store has the moved bups' new home, in event order; a command about the
-## source drained before then (a freeze, a trash) is done first.
+## ({new_row, number, moved, ids, pass_ms, lineage}) comes from the result worker, before the snapshot of the next iteration; the store gives
+## the moved bups their new home when the lineage worker gets to it, which `lineage` (its ticket: WorldClient.lineage_has, `moved`) tells. A command
+## about the source drained before then (a freeze, a trash) is done first.
 func _pipette(client: int, centre: Vector2, radius: float, dest: int, reply: SimReply) -> void:
 	if not _rows.has(client):
 		_refused[dest] = "no such dish"
@@ -1098,11 +1133,12 @@ func _retarget(client: int, asked_number: int, centre: Vector2, radius: float, d
 	_had_bups[dest] = moved > 0
 	var ids: PackedInt64Array = res["ids"]
 	var number := made_spec.number
-	worker.push_op(func(st: Object) -> void:
+	var ticket := lineage.push_op(func(st: Object) -> void:
 		if st != null and ids.size() > 0:
-			st.retarget_ids(ids, number)
+			st.retarget_ids(ids, number))
+	worker.push_op(func() -> void:
 		if reply != null:
-			reply.complete({"new_row": dest, "number": number, "moved": moved, "ids": ids, "pass_ms": pass_ms}))
+			reply.complete({"new_row": dest, "number": number, "moved": moved, "ids": ids, "pass_ms": pass_ms, "lineage": ticket}))
 
 
 ## A running dish's settings: the bloom is its world's; the feed, upkeep, limit and flags the core's (SimCore.set_params), and the flags'
@@ -1124,7 +1160,8 @@ func _set_params(client: int, params: Dictionary) -> void:
 
 ## A running dish's new size (and, with `resolution` > 0, its grid's most cells across): SimCore.resize, its world's size and medium, and
 ## when smaller its sources and plankton past the new edge gone; the bups the edge passed died, so their deaths go to the family tree in
-## event order. The reply: {row, removed}, or an error when the budget refused it (the dish is then as it was).
+## event order. The reply: {row, removed}, or an error when the budget refused it (the dish is then as it was); it comes from the result
+## worker, in order with the snapshots, without waiting for the family tree.
 func _resize(client: int, radius: float, resolution: int, reply: SimReply) -> void:
 	if not _rows.has(client):
 		if reply != null:
@@ -1152,11 +1189,13 @@ func _resize(client: int, radius: float, resolution: int, reply: SimReply) -> vo
 	_world_dirty[client] = true
 	var deaths: PackedByteArray = res["deaths"]
 	var now := governor.clock - _game_began
-	worker.push_op(func(st: Object) -> void:
+	lineage.push_op(func(st: Object) -> void:
 		if st != null and deaths.size() > 0:
-			st.apply_events(PackedByteArray(), deaths, now, 0.0)
+			st.apply_events(PackedByteArray(), deaths, now, 0.0))
+	var removed: int = res["removed"]
+	worker.push_op(func() -> void:
 		if reply != null:
-			reply.complete({"row": client, "removed": res["removed"]}))
+			reply.complete({"row": client, "removed": removed}))
 
 
 func _edit(client: int, e: WorldEdit) -> void:
@@ -1169,7 +1208,8 @@ func _edit(client: int, e: WorldEdit) -> void:
 		_world_dirty[client] = true
 
 
-## Every running dish read whole (and kept running), its lineage exported (no claims: the dish runs on), the blobs in client-row order.
+## Every running dish read whole (and kept running), its lineage exported (no claims: the dish runs on) by the lineage worker after the
+## events before it, the blobs in client-row order; the reply comes once the last export is done.
 func _save_all(reply: SimReply) -> void:
 	var blobs: Array = []
 	var clients: Array = _rows.keys()
@@ -1180,12 +1220,12 @@ func _save_all(reply: SimReply) -> void:
 		var live := _core.live_ids(_rows[client])
 		var number: int = _numbers[client]
 		blobs.append(blob)
-		worker.push_op(func(st: Object) -> void:
+		lineage.push_op(func(st: Object) -> void:
 			if st != null:
 				var ex: Dictionary = st.export_dish(number, live)
 				blob.host["lineage"] = ex["bytes"]
 				blob.host["lineage_ids"] = ex["ids"])
-	worker.push_op(func(_st: Object) -> void:
+	lineage.push_op(func(_st: Object) -> void:
 		if reply != null:
 			reply.complete(blobs))
 

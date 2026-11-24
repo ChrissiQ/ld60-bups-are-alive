@@ -12,8 +12,10 @@ extends SimBackend
 ## A reply completes `reply_frames` set_times after its command (the simulation's come after its next iteration); a save's at once (the quit
 ## save waits for it). `refuse_next(kind)` refuses the next add, unfreeze, pipette or resize as the memory budget does;
 ## `refusing_iteration` stands the world still with a reason, as a refused iteration does. `hold_worker` keeps the family tree's work (a
-## freeze's export and release, a trash's release, a discard, the births `add_bups` makes) waiting in order, as the simulation's result worker
-## does when it is behind, until `release_worker`; a freeze's reply comes after its export, so it waits too. It extends SimBackend, not
+## freeze's export and release, a trash's release, a discard, a dish's founders, a thaw's import, a pipette's retarget, the births `add_bups`
+## makes) waiting in order, as the simulation's lineage worker does when it is behind, until `release_worker`; a freeze's reply comes after
+## its export, so it waits too, while a pipette's does not. Each snapshot carries the ticket of the family tree's work asked before it, and
+## `lineage_done` counts the work done, as the simulation's do (WorldClient.lineage_has). It extends SimBackend, not
 ## FakeSimBackend: WorldClient finds the family tree through a method named `lineage`, which FakeSimBackend's variable of that name rules out.
 
 const START_CLOCK := 3661.0  ## s: the world's clock when the fake is made (the program has run a while before the game: not a multiple of INTERVAL)
@@ -44,6 +46,8 @@ var _refuse := {}  ## kind -> true: the next command of that kind is refused
 var _refused := {}  ## row -> why, for the next snapshot
 var _frame := 0
 var _worker_ops: Array[Callable] = []  ## the family tree's work held back, in the order it was asked
+var _lineage_pushed := 0  ## the family tree's work asked for, in all (each one's ticket)
+var _lineage_done := 0  ## and done
 
 
 func _init() -> void:
@@ -79,12 +83,22 @@ func worker_backlog() -> int:
 	return _worker_ops.size()
 
 
-## `op` is the family tree's work: done now, or after what is held back when the worker is held (the order is kept).
-func _store_op(op: Callable) -> void:
-	if hold_worker or not _worker_ops.is_empty():
-		_worker_ops.append(op)
-	else:
+## How much of the family tree's work is done, in all (WorldClient.lineage_has).
+func lineage_done() -> int:
+	return _lineage_done
+
+
+## `op` is the family tree's work: done now, or after what is held back when the worker is held (the order is kept). Returns its ticket.
+func _store_op(op: Callable) -> int:
+	_lineage_pushed += 1
+	var counted := func() -> void:
 		op.call()
+		_lineage_done += 1
+	if hold_worker or not _worker_ops.is_empty():
+		_worker_ops.append(counted)
+	else:
+		counted.call()
+	return _lineage_pushed
 
 
 func shutdown() -> void:
@@ -318,10 +332,15 @@ func _add(row: int, spec: DishSpec) -> void:
 	_dishes[row] = _entry(spec.copy(), bups)
 	_next_number = maxi(_next_number, spec.number + 1)
 	if spec.founders.size() > 0:
-		store.apply_events(SimCore.founder_births(spec.founders, spec.number), PackedByteArray(), clock, 0.0)
-		for i in mini(spec.founder_names.size(), spec.founders.size() / GpuLayout.RECORD_BYTES):  # (as SimThread binds them)
-			if spec.founder_names[i] != "":
-				store.set_custom_name(GpuLayout.id_of(spec.founders, i), BupNames.clean(spec.founder_names[i]))
+		var births := SimCore.founder_births(spec.founders, spec.number)
+		var founders := spec.founders
+		var names := spec.founder_names
+		var at_clock := clock
+		_store_op(func() -> void:
+			store.apply_events(births, PackedByteArray(), at_clock, 0.0)
+			for i in mini(names.size(), founders.size() / GpuLayout.RECORD_BYTES):  # (as SimThread binds them)
+				if names[i] != "":
+					store.set_custom_name(GpuLayout.id_of(founders, i), BupNames.clean(names[i])))
 
 
 func _entry(spec: DishSpec, bups: Dictionary) -> Dictionary:
@@ -404,7 +423,10 @@ func _thaw(row: int, blob: DishBlob) -> void:
 	_next_number = maxi(_next_number, spec.number + 1)
 	var data: PackedByteArray = blob.host.get("lineage", PackedByteArray())
 	if data.size() > 0:
-		store.import_bytes(data, PackedInt64Array(blob.host.get("watched", [])), PackedInt64Array(bups.keys()), spec.number)
+		var watched := PackedInt64Array(blob.host.get("watched", []))
+		var live := PackedInt64Array(bups.keys())
+		var number := spec.number
+		_store_op(func() -> void: store.import_bytes(data, watched, live, number))
 
 
 func _pipette(row: int, centre: Vector2, radius: float, dest: int, reply: SimReply) -> void:
@@ -431,8 +453,8 @@ func _pipette(row: int, centre: Vector2, radius: float, dest: int, reply: SimRep
 			ids.append(id)
 			source["bups"].erase(id)
 	_dishes[dest] = _entry(spec, moved)
-	store.retarget_ids(ids, number)
-	_answer(reply, {"new_row": dest, "number": number, "moved": ids.size(), "ids": ids})
+	var ticket := _store_op(func() -> void: store.retarget_ids(ids, number))
+	_answer(reply, {"new_row": dest, "number": number, "moved": ids.size(), "ids": ids, "lineage": ticket})
 
 
 func _save_all() -> Array:
@@ -465,6 +487,7 @@ func _publish(t0: float) -> void:
 	snap.sim_time = clock
 	snap.achieved_speed = 0.0 if paused or refusing_iteration != "" else speed
 	snap.paused = paused
+	snap.lineage_ticket = _lineage_pushed
 	for row: int in _dishes:
 		var d: Dictionary = _dishes[row]
 		var count: int = d["bups"].size()

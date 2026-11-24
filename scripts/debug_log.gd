@@ -123,6 +123,9 @@ static func backend(dish: Dish) -> Dictionary:
 			"iterations": timing.get("iterations", 0),
 			"refused_iteration": timing.get("refused_iteration", ""),
 			"worker_queue": timing.get("worker_queue", 0),
+			"lineage_queue": timing.get("lineage_queue", 0),
+			"lineage_queue_bytes": timing.get("lineage_queue_bytes", 0),
+			"lineage_behind_s": timing.get("lineage_behind_s", 0.0),
 		},
 		"memory": {
 			"fraction": timing.get("memory_fraction", 0.0),

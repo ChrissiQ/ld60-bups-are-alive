@@ -24,7 +24,7 @@
 // release_dish, import_bytes, discard_frozen, and apply_events while it makes the records' map bigger) work in slices: each holds the
 // mutex for at most about SLICE, then lets in any thread that waits on the store, and takes it again. A thread that asks the store
 // anything therefore waits about a slice at most, however big the dish. The other methods are short and hold it once (apply_events is
-// given a bounded batch: see ResultWorker.APPLY_PART).
+// given a bounded batch: see LineageWorker.APPLY_PART).
 //
 // At every slice boundary (between two slices of a long operation, where another thread may run any method):
 //  - every record's `holds` is the number of records that name it as their parent plus its pins, and an operation's own temporary holds
@@ -37,7 +37,7 @@
 //    import or discard is adding or taking away, which are counted for the ids it has done; every tombstone's id has a claim;
 //  - an operation keeps ids and indices only: no iterator, pointer or reference into records, pins, claim_counts or tombstones lives across
 //    a boundary, and each slice looks its records up again.
-// The game calls apply_events, export_dish, release_dish, import_bytes, retarget_ids and discard_frozen on one thread (its result worker)
+// The game calls apply_events, export_dish, release_dish, import_bytes, retarget_ids and discard_frozen on one thread (its lineage worker)
 // only, in order, so those never interleave with each other; pin, unpin, set_custom_name and every query may come from another thread at
 // any boundary. discard_frozen may come from another thread too, but two operations on the same dish number must never overlap.
 class LineageStore : public godot::RefCounted {
