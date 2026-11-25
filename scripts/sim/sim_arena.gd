@@ -128,6 +128,8 @@ var _pixels := 0
 var _slots_made := 0  ## `picture_slots()` when the pictures' buffers were last made
 var growths := {}  ## class -> how many times it grew (the debug log's pool figures)
 var shrinks := {}  ## class -> how many times it was made smaller (a growth never counts here, and a shrink never counts as a growth)
+var mark := Callable()  ## `_flush`'s completion mark: records it after the flush's commands and returns its number (0: none was recorded)
+var confirm := Callable()  ## `_flush`'s check: waits until the device has written the mark `mark` returned
 var flushes := 0  ## submits and waits `_flush` made (a count for tests and the debug log; nothing counts per step)
 var _remaking := false  ## inside `_remake`: buffers are released and not yet all made, so the memory watch is not read
 var asked := {}  ## class ("slot", "cloud", "husk", "entry", "event") -> the most `ensure_*` was asked for it since it was last busy or shrunk: a shrink never goes below room for it
@@ -236,14 +238,19 @@ func _release(nm: String) -> void:
 
 ## Submits what was recorded and waits for it, so that what was freed is released and what was copied is done. Only on a local device: the
 ## main device's frame submits, and a call here would break it. This is the one place a remake waits on the device.
-## A backend whose fence wait can time out (Metal's is one second) returns from `sync` with the work unfinished, so a flush there must have its
-## completion confirmed before anything else is recorded (the same confirmation an iteration's wait needs); that check belongs here.
+## A backend whose fence wait can time out (Metal's is one second) returns from `sync` with the work unfinished, so a flush there has its
+## completion confirmed before anything else is recorded (the same confirmation an iteration's wait needs): `mark` records a completion mark
+## after the flush's commands and returns its number, and `confirm` waits until the device has written it. Without them (a bare arena) a flush
+## is a submit and a wait.
 func _flush() -> void:
 	if not local or rd == null:
 		return
 	flushes += 1
+	var serial: Variant = mark.call() if mark.is_valid() else 0
 	rd.submit()
 	rd.sync()
+	if serial is int and serial != 0 and confirm.is_valid():
+		confirm.call(serial)
 
 
 ## Every buffer of `classes` at their new capacities, the kept ones copied. On a local device the old buffers are released before the new

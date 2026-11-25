@@ -11,6 +11,8 @@ extends SceneTree
 ##   equals A's word for word (diff "").
 ## - A blocking read (a dump, read through `read_parts`) with fault_stale_reads = 1 on B counts one more unfinished sync (2) and gives the
 ##   dump it gave before.
+## - A flush (SimArena._flush, which waits for a completion mark of its own) with fault_stale_reads = 1 counts one more unfinished sync (3),
+##   spends the fault and leaves the world not failed.
 ## - A fault that does not end (fault_stale_reads = 1 << 30) on a third world C, run one iteration: after about CONFIRM_LIMIT_MSEC (30 s,
 ##   not under 29 s and under 40 s) `run` gives {steps 0, failed true}, failure names the device and the wait, C's host copy of DSTATE is
 ##   byte for byte what it was before the iteration (nothing of the stale read was taken), and a second `run` gives the same failure at
@@ -42,6 +44,10 @@ func _init() -> void:
 	core.fault_stale_reads = 1
 	var again: Dictionary = b.dump(0)
 	TestUtil.show(core.unfinished == 2 and core.fault_stale_reads == 0 and SimHarness.diff(da, again) == "", "a stale blocking read is read again (unfinished %d) and gives the same dump" % core.unfinished)
+	core.fault_stale_reads = 1
+	var flushed_before: int = core.unfinished
+	core.arena._flush()
+	TestUtil.show(core.unfinished == flushed_before + 1 and core.fault_stale_reads == 0 and core.failure == "", "a stale flush is confirmed again (unfinished %d, failure '%s')" % [core.unfinished, core.failure])
 	a.core.release()
 	b.core.release()
 	_never_finished(s)

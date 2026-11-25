@@ -167,6 +167,8 @@ func _init(p_limits: PoolLimits = null, from_source := false, device: RenderingD
 			errors.append("%s: not made" % kname)
 	_consts = SimConstants.build()
 	arena = SimArena.new(rd, limits, _own_device or rd != RenderingServer.get_rendering_device())  # (only a local device may be submitted and waited for)
+	arena.mark = _flush_mark
+	arena.confirm = _confirm
 	_world = arena.zeros(GpuLayout.WD_WORDS * 4)
 	_dstate = arena.zeros(D_MAX * GpuLayout.DS_WORDS * 4)
 	_fill_p()
@@ -775,6 +777,8 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 		else:
 			refused = errors[-1] if not errors.is_empty() else "the room the steps need"
 			steps = 0
+		if failure != "":  # (a remake's flush the device did not finish: nothing more is asked of it)
+			return _failed_run()
 	var t_ask := Time.get_ticks_usec()
 	var questions: Array = plan.questions if plan != null and plan.get("questions") is Array else []
 	var view: ViewRequest = plan.view if plan != null and plan.get("view") is ViewRequest else null
@@ -1827,6 +1831,14 @@ func _stamp() -> int:
 	var serial := _record_mark(cl)
 	rd.compute_list_end()
 	return serial
+
+
+## The arena's flush marks (`SimArena.mark`): the next mark's list, or 0 while there is nothing to mark (the world's table is not made yet, or
+## the world has failed), in which case the flush is not confirmed.
+func _flush_mark() -> int:
+	if failure != "" or not (arena.bufs.get("WORLD", RID()) as RID).is_valid() or not _made.has("pool_mark"):
+		return 0
+	return _stamp()
 
 
 func _marked(data: PackedByteArray, tail: int, serial: int) -> bool:
