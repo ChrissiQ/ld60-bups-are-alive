@@ -22,6 +22,7 @@ The log is JSON:
 - `display`: the frame the game assumed, and the refresh rate, window mode and vsync mode the screen reports now.
 - `memory`: the figures the timing overlay's memory rows show, and the held share `memory_fraction`.
 - `pictures_last_second`: `WorldClient.picture_rate()`.
+- `backend`: where the dish is simulated and the pool's figures. `pool` has the class capacities, the bytes held against the budget, each class's `growths` and `shrinks`, and the remakes made without a wait (`fast_remakes`) and in release-first order with their flushes (`ordered_remakes`); `syncs_unfinished` counts submits the device returned from before they had finished (see [simulation.md](simulation.md#a-sync-that-returns-early)).
 - `recent_frames` and `recent_iterations`: the frame record, below.
 
 ### The frame record
