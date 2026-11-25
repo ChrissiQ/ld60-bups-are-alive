@@ -838,6 +838,8 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 	rd.sync()
 	var t2 := Time.get_ticks_usec()
 	var got := _take(reads)
+	if failure == "":
+		arena.synced()  # (`_take` found the iteration's mark: the device finished the list, so what was freed before it is released)
 	if failure != "" or not _apply_read_back(got["WORLD"], got["DSTATE"], steps):
 		return _failed_run()
 	if stats:
@@ -1947,6 +1949,7 @@ func answer(questions: Array) -> Dictionary:
 		got = _take(reads)
 		if failure != "":
 			return {}
+		arena.synced()
 	return _answers_take(staged, got)
 
 
@@ -2964,6 +2967,8 @@ func _run_list(rec: Callable, read_back := true, steps := 0) -> void:
 	rd.sync()
 	if read_back:
 		_read_back(steps)
+		if failure == "":
+			arena.synced()  # (the read back found the list's mark)
 
 
 ## WORLD (held to the last list's mark) and DSTATE read back become the host's, as `_apply_read_back` takes them. `steps` is how many

@@ -16,8 +16,19 @@ extends SceneTree
 ##  - when not even the ask fits (8000 slots) the answer is 0 and the capacity stays;
 ##  - the largest buffer still bounds a growth to the most that fits: with a budget far above the total, 18,000,000 slots asked (room for them
 ##    over FILL is 20,000,000, 2.24 GB in one buffer) answer the most that fits under BUFFER_MOST: 2 GiB at 112 bytes a slot is 19,173,961
-##    slots, 19,173,888 as a multiple of 256.
+##    slots, 19,173,888 as a multiple of 256;
+##  - which path a remake of the slot classes (4096 slots held, 6144 made) takes is decided by `SimArena._fits_unflushed`, the budget against
+##    `_unflushed_peak`: the bytes held now (every buffer's size, set here as `make_all` would) plus the bytes freed and not yet released
+##    (`_pending_free`) plus every new buffer of the classes. Held H, the classes' old bytes O and new bytes N (N less O is the class's
+##    growth; every figure within TOL of the unrounded sums, since each buffer is made at least 16 bytes and a multiple of 16):
+##      the peak is H + N, and H + N + p with p bytes pending;
+##      with the budget at the final total H + N - O plus TOL, where both copies cannot be held, the unflushed remake does not fit (it takes
+##      the ordered path, which `_sequence_peak` bounds): O is some hundreds of kilobytes, far over TOL;
+##      with the budget at H + N plus TOL it fits;
+##      with O bytes pending (an earlier remake's old buffers not yet released) the same budget no longer fits, and fits again after
+##      `synced()`, which sets the pending bytes to 0. The windowed `tests/sim/pool_remake_test.gd` makes the remakes themselves on a device.
 const GIB := 1024 * 1024 * 1024
+const TOL := 1024
 
 
 func _init() -> void:
@@ -25,6 +36,7 @@ func _init() -> void:
 	_most_that_fits()
 	_reserve()
 	_buffer_bound()
+	_remake_path()
 	TestUtil.finish(self, "OK pool_growth_test")
 
 
@@ -80,3 +92,32 @@ func _buffer_bound() -> void:
 	var most := arena.slot_cap_for(18000000)
 	TestUtil.check(most == 19173888, "18,000,000 slots asked, room over FILL is past a buffer's most: grows to 19,173,888 (got %d)" % most)
 	TestUtil.check(arena.fits(most, 0, 0, 0, 0) and not arena.fits(most + 256, 0, 0, 0, 0), "it is the most that fits: one step more does not")
+
+
+func _remake_path() -> void:
+	var arena := _arena()
+	for nm: String in SimArena.BUFFERS:
+		arena.sizes[nm] = SimArena._rounded(arena._bytes_of(nm))
+	var held := arena.bytes_now()
+	var old_class := 0
+	for nm: String in SimArena.BUFFERS:
+		if SimArena.SLOT_CLASSES.has(SimArena.BUFFERS[nm][0]):
+			old_class += int(arena.sizes[nm])
+	var before := arena.estimate_bytes(4096, arena.cell_cap, arena.bin_cap, arena.cloud_cap, arena.husk_cap, arena.event_cap, arena.entry_cap)
+	var after := arena.estimate_bytes(6144, arena.cell_cap, arena.bin_cap, arena.cloud_cap, arena.husk_cap, arena.event_cap, arena.entry_cap)
+	var new_class := after - before + old_class
+	arena.slot_cap = 6144  # (`_remake` is called with the new capacity already set)
+	var classes: Array = SimArena.SLOT_CLASSES
+	TestUtil.check(old_class > 100 * TOL, "the slot classes' old bytes are far over the tolerance (%d)" % old_class)
+	TestUtil.check(absi(arena._unflushed_peak(classes) - (held + new_class)) <= TOL, "no bytes pending: the peak is the held plus the new buffers (%d, expected %d)" % [arena._unflushed_peak(classes), held + new_class])
+	arena._pending_free = 5000
+	TestUtil.check(absi(arena._unflushed_peak(classes) - (held + new_class + 5000)) <= TOL, "5000 bytes pending are added to the peak")
+	arena._pending_free = 0
+	arena.limits.memory_budget_bytes = held + new_class - old_class + TOL
+	TestUtil.check(not arena._fits_unflushed(classes), "a budget at the final total: both copies do not fit, the remake is ordered")
+	arena.limits.memory_budget_bytes = held + new_class + TOL
+	TestUtil.check(arena._fits_unflushed(classes), "a budget at the held plus the new buffers: the remake is unflushed")
+	arena._pending_free = old_class
+	TestUtil.check(not arena._fits_unflushed(classes), "the old buffers of an earlier remake still pending: the same budget no longer fits")
+	arena.synced()
+	TestUtil.check(arena._pending_free == 0 and arena._fits_unflushed(classes), "after synced() nothing is pending and it fits again")

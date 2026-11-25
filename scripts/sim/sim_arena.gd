@@ -8,10 +8,12 @@ extends RefCounted
 ## for the next iterations' worst case is kept and a class shrinks only when the need itself has fallen. `changed` tells the core to make its
 ## uniform sets again. The field cells and squares are handed out in blocks from first-fit free lists.
 ##
-## A remake (`_remake`) on a local device releases before it allocates: the buffers that are not kept are freed and flushed first, each kept
-## buffer is made, copied and its old one freed and flushed, and the rest are made last, so the device never holds a class's old and new
-## buffers together beyond one kept buffer's. `fits` checks the peak of that sequence, not only the final size. A device frees a buffer only when
-## its commands are submitted and waited for (`_flush`), so without the flushes the old buffers would stay allocated until the next iteration ends.
+## A remake (`_remake`) on a local device takes one of two paths. When the device could hold every old buffer, the ones freed earlier and every
+## new buffer at once within the budget, the buffers are made and the old ones freed as they are replaced, with no wait (the fast path). Otherwise
+## it releases before it allocates (the ordered path): the buffers that are not kept are freed and flushed first, each kept buffer is made,
+## copied and its old one freed and flushed, and the rest are made last, so the device never holds a class's old and new buffers together beyond
+## one kept buffer's. `fits` checks the peak of that sequence, not only the final size. A device frees a buffer only when its commands are
+## submitted and waited for (`_flush`, or the iteration's own wait, `synced`), so until then a freed buffer is still allocated (`_pending_free`).
 
 const GROW := 1.5
 ## The most one buffer may take: the least any backend promises. Direct3D 12 documents 2048 MB as the largest resource (the C term of its
@@ -131,6 +133,9 @@ var shrinks := {}  ## class -> how many times it was made smaller (a growth neve
 var mark := Callable()  ## `_flush`'s completion mark: records it after the flush's commands and returns its number (0: none was recorded)
 var confirm := Callable()  ## `_flush`'s check: waits until the device has written the mark `mark` returned
 var flushes := 0  ## submits and waits `_flush` made (a count for tests and the debug log; nothing counts per step)
+var fast_remakes := 0  ## remakes of a local device made without a wait (the old buffers fit beside the new)
+var ordered_remakes := 0  ## remakes of a local device made in `_remake`'s release-first order, with their flushes
+var _pending_free := 0  ## bytes of the buffers freed on a local device since its last submit and wait, which the device still holds
 var _remaking := false  ## inside `_remake`: buffers are released and not yet all made, so the memory watch is not read
 var asked := {}  ## class ("slot", "cloud", "husk", "entry", "event") -> the most `ensure_*` was asked for it since it was last busy or shrunk: a shrink never goes below room for it
 
@@ -199,7 +204,7 @@ func _make(nm: String, n_bytes: int, keep: bool) -> void:
 ## Makes `nm` anew with `n_bytes` (at least 16, whole words), filled with its fill byte, and when `keep` with what the old one held copied
 ## into its start.
 func _make_sized(nm: String, n_bytes: int, keep: bool) -> void:
-	n_bytes = maxi(16, ((n_bytes + 15) / 16) * 16)
+	n_bytes = _rounded(n_bytes)
 	var e: Array = BUFFERS[nm] if BUFFERS.has(nm) else DRAW_BUFFERS[nm]
 	var fill: int = e[3] if e.size() > 3 else 0
 	var rid := rd.storage_buffer_create(n_bytes)
@@ -214,6 +219,7 @@ func _make_sized(nm: String, n_bytes: int, keep: bool) -> void:
 	if old.is_valid():
 		if keep:
 			rd.buffer_copy(old, rid, 0, 0, mini(sizes[nm], n_bytes))
+		_queue_free(nm)
 		rd.free_rid(old)
 	bufs[nm] = rid
 	sizes[nm] = n_bytes
@@ -223,12 +229,24 @@ func _make_sized(nm: String, n_bytes: int, keep: bool) -> void:
 	changed = true
 
 
+## What `_make_sized` makes of a size: at least 16, whole words.
+static func _rounded(n_bytes: int) -> int:
+	return maxi(16, ((n_bytes + 15) / 16) * 16)
+
+
+## Notes that the buffer `nm` is being freed: on a local device it stays allocated until the next submit and wait.
+func _queue_free(nm: String) -> void:
+	if local and rd != null:
+		_pending_free += int(sizes.get(nm, 0))
+
+
 ## Frees the buffer `nm` (and the names that alias it) without making another: for a buffer whose contents are not kept, released before
 ## the rest of its class is made so that its memory is free for them.
 func _release(nm: String) -> void:
 	var old: RID = bufs.get(nm, RID())
 	if not old.is_valid():
 		return
+	_queue_free(nm)
 	rd.free_rid(old)
 	bufs[nm] = RID()
 	for alias_name: String in bufs.keys():
@@ -251,25 +269,35 @@ func _flush() -> void:
 	rd.sync()
 	if serial is int and serial != 0 and confirm.is_valid():
 		confirm.call(serial)
+	_pending_free = 0
 
 
-## Every buffer of `classes` at their new capacities, the kept ones copied. On a local device the old buffers are released before the new
-## ones are made: (1) the buffers that are not kept are freed and flushed; (2) each kept buffer is made, copied into, its old one freed,
-## and flushed; (3) the buffers that are not kept are made at their new size, and flushed. The device then holds at most the class's
-## new total at the end and, before that, its other buffers plus the kept ones' old and new copies of one buffer (`_sequence_peak`).
-## On the main device the buffers are made one by one and freed as they are replaced (the frame frees them later).
+## The device has submitted and waited for everything recorded, and the work is confirmed finished (the iteration's own wait, whose read back
+## carried its mark): what was freed before it is released. A sync that is not known to have completed everything does not call this; a
+## missed call only makes `_remake` take the ordered path sooner.
+func synced() -> void:
+	_pending_free = 0
+
+
+## Every buffer of `classes` at their new capacities, the kept ones copied; the capacities are already the new ones, the buffers are the old.
+## On the main device the buffers are made one by one and freed as they are replaced (the frame frees them later). A local device does the
+## same, with no wait, when it can hold everything at once within the budget (`_unflushed_peak`): the old buffers stay allocated until its
+## next submit and wait (`_pending_free`), and the new ones are made beside them. Otherwise, on a local device, the old buffers are
+## released before the new ones are made: (1) the buffers that are not kept are freed and flushed; (2) each kept buffer is made, copied into,
+## its old one freed, and flushed; (3) the buffers that are not kept are made at their new size, and flushed. The device then holds at most
+## the class's new total at the end and, before that, its other buffers plus the kept ones' old and new copies of one buffer (`_sequence_peak`).
 func _remake(classes: Array) -> void:
 	_remaking = true
 	if not local or rd == null:
-		for nm: String in BUFFERS:
-			var e: Array = BUFFERS[nm]
-			if classes.has(e[0]):
-				_make(nm, _bytes_of(nm), e[2])
-		for nm: String in DRAW_BUFFERS:
-			if bufs.has(nm) and classes.has(DRAW_BUFFERS[nm][0]):
-				_make(nm, _bytes_of(nm), false)
+		_make_unflushed(classes)
 		_remaking = false
 		return
+	if _fits_unflushed(classes):
+		fast_remakes += 1
+		_make_unflushed(classes)
+		_remaking = false
+		return
+	ordered_remakes += 1
 	var kept: Array[String] = []
 	var scratch: Array[String] = []
 	for nm: String in BUFFERS:
@@ -289,6 +317,37 @@ func _remake(classes: Array) -> void:
 		_make(nm, _bytes_of(nm), false)
 	_flush()
 	_remaking = false
+
+
+## Each buffer of `classes` made at its new capacity, copied into when kept, its old one freed as it is replaced.
+func _make_unflushed(classes: Array) -> void:
+	for nm: String in BUFFERS:
+		var e: Array = BUFFERS[nm]
+		if classes.has(e[0]):
+			_make(nm, _bytes_of(nm), e[2])
+	for nm: String in DRAW_BUFFERS:
+		if bufs.has(nm) and classes.has(DRAW_BUFFERS[nm][0]):
+			_make(nm, _bytes_of(nm), false)
+
+
+## Whether a local device stays within the budget when `_remake(classes)` makes its buffers without a wait (`_unflushed_peak`).
+func _fits_unflushed(classes: Array) -> bool:
+	return _unflushed_peak(classes) <= limits.memory_budget_bytes
+
+
+## The most a local device holds if `_remake(classes)` makes its buffers without a wait: every buffer it holds now (`bytes_now`: the old
+## buffers of these classes included, the capacities having been changed but no buffer yet), the buffers freed since its last submit and wait
+## (`_pending_free`) and every new buffer of the classes. A freed buffer is released only at a submit and wait, so nothing is released in
+## between: this is the figure the device reaches at the end of the remake.
+func _unflushed_peak(classes: Array) -> int:
+	var made := 0
+	for nm: String in BUFFERS:
+		if classes.has(BUFFERS[nm][0]):
+			made += _rounded(_bytes_of(nm))
+	for nm: String in DRAW_BUFFERS:
+		if bufs.has(nm) and classes.has(DRAW_BUFFERS[nm][0]):
+			made += _rounded(_bytes_of(nm))
+	return bytes_now() + _pending_free + made
 
 
 ## The slot capacity `ensure_slots(slots, most, reserve)` would make: the one now when `slots` are within FILL of it, the grown one when that
@@ -846,10 +905,12 @@ func next_growth_bytes() -> int:
 	return estimate_bytes(_align(int(slot_cap * GROW)), cell_cap, bin_cap, cloud_cap, husk_cap) - estimate_bytes(slot_cap, cell_cap, bin_cap, cloud_cap, husk_cap)
 
 
-## The capacities, the bytes held, the budget, the share of it held, the next growth's bytes and the growths and shrinks so far (for the debug log).
+## The capacities, the bytes held, the budget, the share of it held, the next growth's bytes, the growths and shrinks so far and the remakes made
+## without and with waits (for the debug log).
 func report() -> Dictionary:
 	return {"fraction": memory_fraction(), "next_growth_bytes": next_growth_bytes(), "slots": slot_cap, "cells": cell_cap, "bins": bin_cap, "clouds": cloud_cap, "husks": husk_cap, "entries": entry_cap, "events": event_cap,
-		"bytes": bytes_now(), "budget_bytes": limits.memory_budget_bytes, "growths": growths.duplicate(), "shrinks": shrinks.duplicate()}
+		"bytes": bytes_now(), "budget_bytes": limits.memory_budget_bytes, "growths": growths.duplicate(), "shrinks": shrinks.duplicate(),
+		"fast_remakes": fast_remakes, "ordered_remakes": ordered_remakes}
 
 
 func _grew(klass: String) -> void:

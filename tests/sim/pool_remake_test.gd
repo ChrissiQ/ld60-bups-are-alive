@@ -28,6 +28,22 @@ extends SceneTree
 ##  - the clouds, 16384 held, budget at 20,000: 17,000 asked grow once to 20,000 (3 flushes; the entries need no more than they hold);
 ##  - the entries, budget at 5000 more than held: an ask within the held keeps them; an ask 1000 past them grows once to the held plus 5000
 ##    (2 flushes).
+## Two paths ([derived from `_remake`: it makes every buffer without a wait when the bytes held, the bytes freed and not yet released and every
+## new buffer fit the budget, and takes the order above otherwise]). The ordered checks above and below run with the budget at the remake's
+## final total plus TOL: both copies cannot be held (the class's old bytes are megabytes, far over TOL), the final total fits, so `ordered_remakes`
+## counts each of them and `fast_remakes` none (6 ordered remakes in all, 0 fast). With the budget at 6 GiB, far over everything:
+##  - the slots remake (16384 held, 15000 asked, 24576 made) makes no flush, counts one `fast_remakes` and no `ordered_remakes`, and the
+##    device holds, read as an offset from D0 before any wait, the class's new total (its old buffers are still counted, which is why the
+##    peak may not pass the budget unchecked); `_pending_free` is the class's old bytes; after one submit and wait the device holds the new total
+##    less the old, and `synced()` sets `_pending_free` to 0;
+##  - its data is what the ordered path leaves: each kept buffer holds the old bytes (a pattern written before, one prime-length block repeated,
+##    distinct per buffer) and then its fill byte (0 or 0xFF), each other buffer is all fill, and every buffer of the class equals the one the
+##    ordered path made, byte for byte;
+##  - two remakes in a row with no wait between (slots, then entries; H held at the start, N1 the slot classes' new bytes, NE the entries' new
+##    bytes; the budget H + N1 + NE - TOL): the first passes unflushed (peak H + N1), the second would hold H + N1 + NE (the first's old buffers
+##    still pending), over the budget by TOL, so it takes the ordered path (2 flushes, `_pending_free` 0 after it): the device never holds more than
+##    N1 over before, and the budget bounds it. With a submit and wait and `synced()` between, the second passes unflushed too (H + N1 - O1 + NE
+##    fits): 0 flushes, 2 fast remakes, 0 ordered.
 ## What it cannot show: the device's figure is what the device was asked to hold, not what the driver keeps resident (a driver may keep a freed
 ## block for reuse); that a backend whose wait can time out has finished the work when `_flush` returns; and the pictures' buffers
 ## (`ensure_draw` releases first in the same way and is not read here).
@@ -70,6 +86,11 @@ func _init() -> void:
 	_entries_remake(rd, arena)
 	_budgeted(arena, limits)
 	arena.free_all()
+	rd.submit()
+	rd.sync()
+	_fast_remake(rd)
+	_stacking(rd, false)
+	_stacking(rd, true)
 	TestUtil.finish(self, "OK pool_remake_test")
 
 
@@ -170,8 +191,10 @@ func _slots_remake(rd: RenderingDevice, arena: ProbeArena) -> void:
 	arena.marks.clear()
 	var flushes0 := arena.flushes
 	var entries := arena.entry_cap
+	arena.limits.memory_budget_bytes = _est(arena, SLOTS_TO) + TOL  # (the final total: both copies do not fit, so the ordered path)
 	arena.ensure_slots(SLOTS_ASKED)
 	TestUtil.show(arena.slot_cap == SLOTS_TO and int(arena.growths.get("slot", 0)) == 1, "%d slots asked: grown once from %d to %d (got %d)" % [SLOTS_ASKED, SLOTS_FROM, SLOTS_TO, arena.slot_cap])
+	TestUtil.show(arena.ordered_remakes == 1 and arena.fast_remakes == 0, "slots: the ordered path ran (ordered %d, fast %d)" % [arena.ordered_remakes, arena.fast_remakes])
 	_check_remake("slots", rd, arena, SimArena.SLOT_CLASSES, SLOTS_FROM, entries, d0, flushes0)
 
 
@@ -180,8 +203,10 @@ func _entries_remake(rd: RenderingDevice, arena: ProbeArena) -> void:
 	arena.marks.clear()
 	var flushes0 := arena.flushes
 	var from := arena.entry_cap
+	arena.limits.memory_budget_bytes = _est(arena, arena.slot_cap, 0, 0, int(from * 1.5)) + TOL
 	arena.ensure_entries(int(from * 0.95))
 	TestUtil.show(arena.entry_cap == int(from * 1.5), "entries asked over FILL: grown by 1.5 (%d to %d)" % [from, arena.entry_cap])
+	TestUtil.show(arena.ordered_remakes == 2 and arena.fast_remakes == 0, "entries: the ordered path ran (ordered %d, fast %d)" % [arena.ordered_remakes, arena.fast_remakes])
 	_check_remake("entries", rd, arena, ["entry"], arena.slot_cap, from, d0, flushes0)
 
 
@@ -235,3 +260,155 @@ func _budgeted(arena: ProbeArena, limits: PoolLimits) -> void:
 	TestUtil.show(arena.ensure_entries(entries_held - 100) and arena.entry_cap == entries_held and arena.flushes == flushes, "entries asked within the held: kept")
 	TestUtil.show(arena.ensure_entries(entries_held + 1000) and arena.entry_cap == entry_most and arena.flushes == flushes + 2, "entries asked past the held: grown once to the most that fits, %d (got %d, %d flushes)" % [entry_most, arena.entry_cap, arena.flushes - flushes])
 	TestUtil.show(arena.shrinks.is_empty(), "no shrink was counted in the end")
+	TestUtil.show(arena.ordered_remakes == 6 and arena.fast_remakes == 0, "every remake of these tests took the ordered path (ordered %d, fast %d)" % [arena.ordered_remakes, arena.fast_remakes])
+
+
+## The bytes of the buffers of `classes` (slot classes and the entries) at these capacities, as `_make_sized` makes them.
+static func _class_bytes(classes: Array, slots: int, entries: int) -> int:
+	var total := 0
+	for nm: String in SimArena.BUFFERS:
+		if classes.has(SimArena.BUFFERS[nm][0]):
+			total += _bytes(nm, slots, entries)
+	return total
+
+
+## `n` bytes of one block of 4093 bytes (a prime, so a copy that lands at a wrong offset shows) repeated, different for each `seed`.
+static func _pattern(n: int, seed: int) -> PackedByteArray:
+	var block := PackedByteArray()
+	block.resize(4093)
+	for i in 4093:
+		block[i] = (i * 7 + seed) & 0xFF
+	var out := PackedByteArray()
+	while out.size() < n:
+		out.append_array(block)
+	out.resize(n)
+	return out
+
+
+## One remake of the slot classes from SLOTS_FROM to SLOTS_TO on a fresh arena whose kept buffers hold a pattern, under `budget`
+## (0: the 6 GiB of PoolLimits). Returns what it counted and every buffer of the classes as it ended.
+func _slots_run(rd: RenderingDevice, budget: int) -> Dictionary:
+	var limits := PoolLimits.new()
+	var arena := ProbeArena.new(rd, limits)
+	arena.make_all({})
+	var patterns := {}
+	for nm: String in SimArena.BUFFERS:
+		var e: Array = SimArena.BUFFERS[nm]
+		if SimArena.SLOT_CLASSES.has(e[0]) and e[2]:
+			patterns[nm] = _pattern(int(arena.sizes[nm]), nm.hash())
+			rd.buffer_update(arena.buf(nm), 0, (patterns[nm] as PackedByteArray).size(), patterns[nm])
+	rd.submit()
+	rd.sync()
+	if budget > 0:
+		limits.memory_budget_bytes = budget
+	else:
+		budget = limits.memory_budget_bytes
+	var d0 := _usage(rd)
+	arena.marks.clear()
+	var entries := arena.entry_cap
+	arena.ensure_slots(SLOTS_ASKED)
+	var out := {"slot_cap": arena.slot_cap, "flushes": arena.flushes, "marks": arena.marks.size(), "fast": arena.fast_remakes, "ordered": arena.ordered_remakes,
+			"pending": arena._pending_free, "held": _usage(rd) - d0, "patterns": patterns, "entries": entries, "data": {}}
+	rd.submit()
+	rd.sync()
+	out["held_after_wait"] = _usage(rd) - d0
+	arena.synced()
+	out["pending_after_synced"] = arena._pending_free
+	for nm: String in SimArena.BUFFERS:
+		if SimArena.SLOT_CLASSES.has(SimArena.BUFFERS[nm][0]):
+			out["data"][nm] = rd.buffer_get_data(arena.buf(nm))
+	arena.free_all()
+	rd.submit()
+	rd.sync()
+	return out
+
+
+func _fast_remake(rd: RenderingDevice) -> void:
+	var fast := _slots_run(rd, 0)
+	var probe_limits := PoolLimits.new()
+	var probe := ProbeArena.new(rd, probe_limits)
+	probe.make_all({})
+	probe.slot_cap = SLOTS_TO
+	var tight := probe.estimate_bytes(SLOTS_TO, probe.cell_cap, probe.bin_cap, probe.cloud_cap, probe.husk_cap, probe.event_cap, probe.entry_cap) + TOL
+	probe.free_all()
+	rd.submit()
+	rd.sync()
+	var ordered := _slots_run(rd, tight)
+	var class_old := _class_bytes(SimArena.SLOT_CLASSES, SLOTS_FROM, int(fast["entries"]))
+	var class_new := _class_bytes(SimArena.SLOT_CLASSES, SLOTS_TO, int(fast["entries"]))
+	TestUtil.show(fast["slot_cap"] == SLOTS_TO and ordered["slot_cap"] == SLOTS_TO, "both arenas grew the slots to %d" % SLOTS_TO)
+	TestUtil.show(fast["flushes"] == 0 and fast["marks"] == 0 and fast["fast"] == 1 and fast["ordered"] == 0, "plenty of room: no flush, one fast remake (flushes %d, fast %d, ordered %d)" % [fast["flushes"], fast["fast"], fast["ordered"]])
+	TestUtil.show(ordered["flushes"] == 6 and ordered["fast"] == 0 and ordered["ordered"] == 1, "no room for both copies: the ordered path, 6 flushes (flushes %d, fast %d, ordered %d)" % [ordered["flushes"], ordered["fast"], ordered["ordered"]])
+	TestUtil.show(absi(int(fast["held"]) - class_new) <= TOL, "fast: before any wait the device holds the new total, the old buffers still counted (%+.2f MB, expected %+.2f)" % [int(fast["held"]) / float(MIB), class_new / float(MIB)])
+	TestUtil.show(absi(int(fast["held_after_wait"]) - (class_new - class_old)) <= TOL, "fast: after one submit and wait the old ones are gone (%+.2f MB, expected %+.2f)" % [int(fast["held_after_wait"]) / float(MIB), (class_new - class_old) / float(MIB)])
+	TestUtil.show(absi(int(fast["pending"]) - class_old) <= TOL, "fast: the pending bytes are the class's old bytes (%d, expected %d)" % [fast["pending"], class_old])
+	TestUtil.show(fast["pending_after_synced"] == 0 and ordered["pending"] == 0, "synced() clears the pending bytes, and an ordered remake leaves none")
+	var same := true
+	var as_derived := true
+	for nm: String in SimArena.BUFFERS:
+		var e: Array = SimArena.BUFFERS[nm]
+		if not SimArena.SLOT_CLASSES.has(e[0]):
+			continue
+		if (fast["data"][nm] as PackedByteArray) != (ordered["data"][nm] as PackedByteArray):
+			same = false
+			print("  %s differs between the paths" % nm)
+		var want := PackedByteArray()
+		want.resize(_bytes(nm, SLOTS_TO, int(fast["entries"])))
+		want.fill(e[3])
+		if e[2]:
+			var old: PackedByteArray = fast["patterns"][nm]
+			for i in old.size():
+				want[i] = old[i]
+		if (fast["data"][nm] as PackedByteArray) != want:
+			as_derived = false
+			print("  %s is not the old bytes then the fill" % nm)
+	TestUtil.show(same, "every buffer of the class is byte for byte what the ordered path made")
+	TestUtil.show(as_derived, "each kept buffer is the old bytes then its fill, each other buffer is all fill")
+
+
+## Slots then entries with no wait between (or, with `wait`, a submit and wait and `synced()` between).
+func _stacking(rd: RenderingDevice, wait: bool) -> void:
+	var label := "synced between" if wait else "no wait between"
+	var limits := PoolLimits.new()
+	var arena := ProbeArena.new(rd, limits)
+	arena.make_all({})
+	rd.submit()
+	rd.sync()
+	var d0 := _usage(rd)
+	var held := arena.bytes_now()
+	var entries_to := int(arena.entry_cap * 1.5)
+	var old_slots := _class_bytes(SimArena.SLOT_CLASSES, SLOTS_FROM, arena.entry_cap)
+	var old_entries := _class_bytes(["entry"], SLOTS_FROM, arena.entry_cap)
+	var new_slots := _class_bytes(SimArena.SLOT_CLASSES, SLOTS_TO, arena.entry_cap)
+	var new_entries := _class_bytes(["entry"], SLOTS_TO, entries_to)
+	var budget := held + new_slots + new_entries - TOL
+	limits.memory_budget_bytes = budget
+	arena.marks.clear()
+	arena.ensure_slots(SLOTS_ASKED)
+	TestUtil.show(arena.slot_cap == SLOTS_TO and arena.fast_remakes == 1 and arena.ordered_remakes == 0 and arena.flushes == 0, "%s: the first remake is unflushed (fast %d, ordered %d, flushes %d)" % [label, arena.fast_remakes, arena.ordered_remakes, arena.flushes])
+	TestUtil.show(absi(arena._pending_free - old_slots) <= TOL, "%s: its old buffers are pending (%d, expected %d)" % [label, arena._pending_free, old_slots])
+	var peak := _usage(rd) - d0
+	if wait:
+		rd.submit()
+		rd.sync()
+		arena.synced()
+		TestUtil.show(arena._pending_free == 0, "%s: nothing pending after synced()" % label)
+	arena.ensure_entries(int(arena.entry_cap * 0.95))
+	TestUtil.show(arena.entry_cap == entries_to, "%s: the entries grew by 1.5 (%d)" % [label, arena.entry_cap])
+	if wait:
+		TestUtil.show(arena.fast_remakes == 2 and arena.ordered_remakes == 0 and arena.flushes == 0, "%s: the second remake is unflushed too (fast %d, ordered %d, flushes %d)" % [label, arena.fast_remakes, arena.ordered_remakes, arena.flushes])
+		peak = maxi(peak, _usage(rd) - d0)
+	else:
+		TestUtil.show(arena.fast_remakes == 1 and arena.ordered_remakes == 1 and arena.flushes == 2, "%s: the second remake takes the ordered path, 2 flushes (fast %d, ordered %d, flushes %d)" % [label, arena.fast_remakes, arena.ordered_remakes, arena.flushes])
+		TestUtil.show(arena._pending_free == 0, "%s: its flush leaves nothing pending" % label)
+		for m: Array in arena.marks:
+			peak = maxi(peak, int(m[0]) - d0)
+		TestUtil.show(held + new_slots + new_entries > budget, "%s: unflushed it would have held %+.2f MB over before, more than the budget allows (%+.2f)" % [label, (new_slots + new_entries) / float(MIB), (budget - held) / float(MIB)])
+	TestUtil.show(peak <= budget - held + TOL, "%s: the device never held more than the budget allows (most %+.2f MB over before, allowed %+.2f)" % [label, peak / float(MIB), (budget - held) / float(MIB)])
+	rd.submit()
+	rd.sync()
+	var expected := new_slots - old_slots + new_entries - old_entries
+	TestUtil.show(absi((_usage(rd) - d0) - expected) <= TOL, "%s: at the end the device holds %+.2f MB over before (expected %+.2f)" % [label, (_usage(rd) - d0) / float(MIB), expected / float(MIB)])
+	arena.free_all()
+	rd.submit()
+	rd.sync()
