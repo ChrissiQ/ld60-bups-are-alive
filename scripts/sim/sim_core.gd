@@ -159,7 +159,7 @@ func _init(p_limits: PoolLimits = null, from_source := false, device: RenderingD
 		if not _made.has(kname) and not errors.any(func(e: String) -> bool: return e.begins_with(kname)):
 			errors.append("%s: not made" % kname)
 	_consts = SimConstants.build()
-	arena = SimArena.new(rd, limits)
+	arena = SimArena.new(rd, limits, _own_device or rd != RenderingServer.get_rendering_device())  # (only a local device may be submitted and waited for)
 	_world = arena.zeros(GpuLayout.WD_WORDS * 4)
 	_dstate = arena.zeros(D_MAX * GpuLayout.DS_WORDS * 4)
 	_fill_p()
@@ -1373,7 +1373,8 @@ func _ensure_room(steps: int, ev: Dictionary) -> bool:
 	var room := room_needed(steps, world_clouds, false)
 	_need_bytes = arena.need_bytes(room)
 	var refused: Array[String] = []
-	if not arena.ensure_slots(maxi(room["slots"], _wd(GpuLayout.WD_SLOTS)), maxi(room["most"], _wd(GpuLayout.WD_SLOTS))):
+	var reserve := arena.caps_for(room)  # (what the classes grown after the slots are asked for, which a growth to the most that fits leaves free)
+	if not arena.ensure_slots(maxi(room["slots"], _wd(GpuLayout.WD_SLOTS)), maxi(room["most"], _wd(GpuLayout.WD_SLOTS)), reserve):
 		refused.append("record slots %d" % maxi(room["slots"], _wd(GpuLayout.WD_SLOTS)))
 	var grown := arena.ensure_events(room["events"], room["events_most"])
 	if grown < 0:
@@ -1381,9 +1382,9 @@ func _ensure_room(steps: int, ev: Dictionary) -> bool:
 	elif grown > 0:
 		_p[GpuLayout.p_slot("event_capacity")] = arena.event_cap
 		_upload_p()
-	if not arena.ensure_clouds(room["clouds"]):
+	if not arena.ensure_clouds(room["clouds"], reserve):
 		refused.append("cloud slots %d" % room["clouds"])
-	if not arena.ensure_husks(room["husks"]):
+	if not arena.ensure_husks(room["husks"], reserve):
 		refused.append("husk slots %d" % room["husks"])
 	# The cloud lists' entries: the density the bin scan measured (entries a cloud slot in use) with ENTRY_MARGIN room, over the slots the
 	# iteration is expected to use (the estimate, not the hard bound, which can be many times the clouds there are). When the budget has

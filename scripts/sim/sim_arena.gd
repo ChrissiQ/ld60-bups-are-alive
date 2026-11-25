@@ -2,10 +2,16 @@ class_name SimArena
 extends RefCounted
 ## The pooled world's buffers, by the unit each grows with: record slots, field cells, cloud-list squares, cloud slots,
 ## husk slots, cloud-list entries, family events; and the fixed ones (the tables, the scans' scratch, the world's events). A class grows by 1.5 (or to what
-## is asked, if more) by copying what it holds into new buffers on the device; it shrinks, at most once a minute, when it has used less
+## is asked, if more) by copying what it holds into new buffers on the device; when 1.5 does not fit it grows once to the most that does, and
+## a growth never makes a class smaller. A class shrinks, at most once a minute, when it has used less
 ## than a quarter of its slots for that long, and never below the most that was asked of it while it was little used (`asked`), so room made ahead
 ## for the next iterations' worst case is kept and a class shrinks only when the need itself has fallen. `changed` tells the core to make its
 ## uniform sets again. The field cells and squares are handed out in blocks from first-fit free lists.
+##
+## A remake (`_remake`) on a local device releases before it allocates: the buffers that are not kept are freed and flushed first, each kept
+## buffer is made, copied and its old one freed and flushed, and the rest are made last, so the device never holds a class's old and new
+## buffers together beyond one kept buffer's. `fits` checks the peak of that sequence, not only the final size. A device frees a buffer only when
+## its commands are submitted and waited for (`_flush`), so without the flushes the old buffers would stay allocated until the next iteration ends.
 
 const GROW := 1.5
 ## The most one buffer may take: the least any backend promises. Direct3D 12 documents 2048 MB as the largest resource (the C term of its
@@ -18,6 +24,7 @@ const SHRINK_BELOW := 0.25
 const SHRINK_EVERY_MSEC := 60000
 const SHORT_SHRINK_MSEC := 10000  ## how long a class must have been little used before it shrinks while the machine is short of memory
 const SCAN_SCRATCH := 4096  ## words of a grid scan's group sums (GpuKernels.scan_groups' most)
+const SLOT_CLASSES := ["slot", "block", "bucket", "bucketbits"]  ## the classes `slot_cap` sizes
 const D_MAX := GpuLayout.D_MAX
 const TILES_ACROSS_MOST := (StartConditions.MAX_NUTRIENT_RESOLUTION + GpuKernelsField.FIELD_TILE - 1) / GpuKernelsField.FIELD_TILE
 const TILES_MOST := TILES_ACROSS_MOST * TILES_ACROSS_MOST  ## the field tiles of the biggest grid a dish has (pool_fdiff's TILES: a word a tile)
@@ -96,6 +103,7 @@ const TEXTURES_HANDED := [
 
 var rd: RenderingDevice
 var limits: PoolLimits
+var local := true  ## `rd` is a local device, which the arena may submit and wait for (`_flush`); never the main device, whose frame submits
 var cpu_handover := false  ## the pictures reach the main device as bytes, not as shared textures: which textures are counted
 var thumbs := false  ## the thumbnails' atlas has been asked for, so its textures are made and counted
 var bufs := {}  ## physical name -> RID (an alias maps a name to another's RID)
@@ -119,12 +127,18 @@ var _texels := 0
 var _pixels := 0
 var _slots_made := 0  ## `picture_slots()` when the pictures' buffers were last made
 var growths := {}  ## class -> how many times it grew (the debug log's pool figures)
+var shrinks := {}  ## class -> how many times it was made smaller (a growth never counts here, and a shrink never counts as a growth)
+var flushes := 0  ## submits and waits `_flush` made (a count for tests and the debug log; nothing counts per step)
+var _remaking := false  ## inside `_remake`: buffers are released and not yet all made, so the memory watch is not read
 var asked := {}  ## class ("slot", "cloud", "husk", "entry", "event") -> the most `ensure_*` was asked for it since it was last busy or shrunk: a shrink never goes below room for it
 
 
-func _init(device: RenderingDevice, p_limits: PoolLimits) -> void:
+## `p_local` false for the main device (`SimCore` says so when it is given that device): the arena then remakes in the order a frame allows
+## and never submits or waits.
+func _init(device: RenderingDevice, p_limits: PoolLimits, p_local := true) -> void:
 	rd = device
 	limits = p_limits
+	local = p_local
 
 
 static func zeros(n: int) -> PackedByteArray:
@@ -207,68 +221,173 @@ func _make_sized(nm: String, n_bytes: int, keep: bool) -> void:
 	changed = true
 
 
-## Every buffer of `classes` at their new capacities, the kept ones copied.
+## Frees the buffer `nm` (and the names that alias it) without making another: for a buffer whose contents are not kept, released before
+## the rest of its class is made so that its memory is free for them.
+func _release(nm: String) -> void:
+	var old: RID = bufs.get(nm, RID())
+	if not old.is_valid():
+		return
+	rd.free_rid(old)
+	bufs[nm] = RID()
+	for alias_name: String in bufs.keys():
+		if _aliases.get(alias_name, "") == nm:
+			bufs[alias_name] = RID()
+
+
+## Submits what was recorded and waits for it, so that what was freed is released and what was copied is done. Only on a local device: the
+## main device's frame submits, and a call here would break it. This is the one place a remake waits on the device.
+## A backend whose fence wait can time out (Metal's is one second) returns from `sync` with the work unfinished, so a flush there must have its
+## completion confirmed before anything else is recorded (the same confirmation an iteration's wait needs); that check belongs here.
+func _flush() -> void:
+	if not local or rd == null:
+		return
+	flushes += 1
+	rd.submit()
+	rd.sync()
+
+
+## Every buffer of `classes` at their new capacities, the kept ones copied. On a local device the old buffers are released before the new
+## ones are made: (1) the buffers that are not kept are freed and flushed; (2) each kept buffer is made, copied into, its old one freed,
+## and flushed; (3) the buffers that are not kept are made at their new size, and flushed. The device then holds at most the class's
+## new total at the end and, before that, its other buffers plus the kept ones' old and new copies of one buffer (`_sequence_peak`).
+## On the main device the buffers are made one by one and freed as they are replaced (the frame frees them later).
 func _remake(classes: Array) -> void:
+	_remaking = true
+	if not local or rd == null:
+		for nm: String in BUFFERS:
+			var e: Array = BUFFERS[nm]
+			if classes.has(e[0]):
+				_make(nm, _bytes_of(nm), e[2])
+		for nm: String in DRAW_BUFFERS:
+			if bufs.has(nm) and classes.has(DRAW_BUFFERS[nm][0]):
+				_make(nm, _bytes_of(nm), false)
+		_remaking = false
+		return
+	var kept: Array[String] = []
+	var scratch: Array[String] = []
 	for nm: String in BUFFERS:
 		var e: Array = BUFFERS[nm]
 		if classes.has(e[0]):
-			_make(nm, _bytes_of(nm), e[2])
+			(kept if e[2] else scratch).append(nm)
 	for nm: String in DRAW_BUFFERS:
 		if bufs.has(nm) and classes.has(DRAW_BUFFERS[nm][0]):
-			_make(nm, _bytes_of(nm), false)
+			scratch.append(nm)
+	for nm in scratch:
+		_release(nm)
+	_flush()
+	for nm in kept:
+		_make(nm, _bytes_of(nm), true)
+		_flush()
+	for nm in scratch:
+		_make(nm, _bytes_of(nm), false)
+	_flush()
+	_remaking = false
 
 
-## The slot capacity `ensure_slots(slots, most)` would make: the one now when `slots` are within FILL of it, the grown one when that fits the
-## budget (by GROW, but not past room for `most` slots (0: no bound), the most the slots can ever need, or what is asked if that is more;
-## else just what is asked), 0 when none does.
-func slot_cap_for(slots: int, most := 0) -> int:
+## The slot capacity `ensure_slots(slots, most, reserve)` would make: the one now when `slots` are within FILL of it, the grown one when that
+## fits the budget (by GROW, but not past room for `most` slots (0: no bound), the most the slots can ever need, or what is asked if that is
+## more). When that does not fit: the capacity now if `slots` are within it (a growth never makes a class smaller), else the most that fits
+## between what is asked and the grown one (`_most_that_fits`, with `reserve` kept for the classes that grow after the slots), 0 when not
+## even what is asked fits.
+func slot_cap_for(slots: int, most := 0, reserve := {}) -> int:
+	var target := _slot_target(slots, most)
+	if target == slot_cap or fits(target, 0, 0, 0, 0):
+		return target
+	if slots <= slot_cap:
+		return slot_cap
+	return _most_that_fits(_align(slots), target, GpuLayout.BLK_SLOTS,
+			func(c: int) -> bool: return _fits(c, 0, 0, _reserved(reserve, "cloud"), _reserved(reserve, "husk"), _reserved(reserve, "event"), _reserved(reserve, "entry")),
+			func(c: int) -> bool: return _fits(c, 0, 0, 0, 0))
+
+
+## The capacity a growth for `slots` aims at: the one now when `slots` are within FILL of it, else GROW times it (not past room for `most`) or
+## room for `slots`, whichever is more.
+func _slot_target(slots: int, most: int) -> int:
 	if slots <= int(FILL * slot_cap):
 		return slot_cap
 	var grown := int(slot_cap * GROW)
 	if most > 0:
 		grown = mini(grown, ceili(most / FILL))
-	var want := _align(maxi(ceili(slots / FILL), grown))
-	if not fits(want, 0, 0, 0, 0):
-		want = _align(slots)
-		if not fits(want, 0, 0, 0, 0):
-			return 0
-	return want
+	return _align(maxi(ceili(slots / FILL), grown))
+
+
+## What `reserve` (`caps_for`'s capacities, or none) holds for class `cls`: the room a class that grows after the one being grown is asked for
+## this iteration, which the growth leaves free.
+static func _reserved(reserve: Dictionary, cls: String) -> int:
+	return int(reserve.get(cls, 0))
+
+
+## The largest capacity under `target` (`target` itself did not fit), a multiple of `unit`, that is at least `ask` and that `probe` takes
+## (the budget with the room kept for the classes that grow next); when not even `ask` fits with that room, `ask` if `plain` takes it
+## (the budget alone); else 0. One growth to the most that fits ends the growing against a budget: a class held at the most that fits is not
+## made again for an ask a little over it, as a fit to the exact ask would be. `ask` is a multiple of `unit`.
+func _most_that_fits(ask: int, target: int, unit: int, probe: Callable, plain: Callable) -> int:
+	if ask >= target:
+		return 0
+	if not probe.call(ask):
+		return ask if plain.call(ask) else 0
+	var lo := ask / unit
+	var hi := target / unit  # (`target` is known not to fit)
+	while hi - lo > 1:
+		var mid := (lo + hi) / 2
+		if probe.call(mid * unit):
+			lo = mid
+		else:
+			hi = mid
+	return lo * unit
 
 
 ## Room for `slots` record slots; false when that would pass the budget. `most` (0: none) is what the slots can never pass, so a growth by
-## GROW stops short of room for more than that.
-func ensure_slots(slots: int, most := 0) -> bool:
+## GROW stops short of room for more than that. `reserve` (`caps_for`, or none): what the classes that grow after the slots are asked for, so
+## a growth to the most that fits leaves it. Never makes the slots smaller.
+func ensure_slots(slots: int, most := 0, reserve := {}) -> bool:
 	asked["slot"] = maxi(int(asked.get("slot", 0)), slots)
-	var want := slot_cap_for(slots, most)
+	var want := slot_cap_for(slots, most, reserve)
 	if want == 0:
 		return false
-	if want != slot_cap:
-		slot_cap = want
-		_grew("slot")
-		_remake(["slot", "block", "bucket", "bucketbits"])
+	if want > slot_cap:
+		_grow_slots(want)
 	return true
 
 
+func _grow_slots(want: int) -> void:
+	slot_cap = want
+	_grew("slot")
+	_remake(SLOT_CLASSES)
+
+
 ## Room for `slots` record slots made ahead of the need: grown only when the buffers afterwards hold at most `share` of the budget
-## (so the growth never takes the room a later one may need, or reaches the warning), else nothing is done. True when it grew.
+## (so the growth never takes the room a later one may need, or reaches the warning), else nothing is done. True when it grew. The growth
+## is by GROW or, when that does not fit, to what is asked (this is called every pass, so it does not search for the most that fits).
 func pre_grow_slots(slots: int, share: float) -> bool:
-	var want := slot_cap_for(slots)
-	if want == 0 or want == slot_cap:
+	var want := _slot_target(slots, 0)
+	if want == slot_cap:
 		return false
+	if not fits(want, 0, 0, 0, 0):
+		want = _align(slots)
+		if want <= slot_cap or not fits(want, 0, 0, 0, 0):
+			return false
 	if estimate_bytes(want, cell_cap, bin_cap, cloud_cap, husk_cap) > share * limits.memory_budget_bytes:
 		return false
-	return ensure_slots(slots)
+	asked["slot"] = maxi(int(asked.get("slot", 0)), slots)
+	_grow_slots(want)
+	return true
 
 
-## Room for `clouds` cloud slots; false when that would pass the budget.
-func ensure_clouds(clouds: int) -> bool:
+## Room for `clouds` cloud slots; false when that would pass the budget. A growth that does not fit by GROW goes to the most that fits
+## (`_most_that_fits`, keeping `reserve`'s husks and entries free) and never makes the class smaller.
+func ensure_clouds(clouds: int, reserve := {}) -> bool:
 	asked["cloud"] = maxi(int(asked.get("cloud", 0)), clouds)
 	if clouds <= int(FILL * cloud_cap):
 		return true
 	var want := maxi(ceili(clouds / FILL), int(cloud_cap * GROW))
 	if not fits(0, 0, 0, want, 0):
-		want = clouds
-		if not fits(0, 0, 0, want, 0):
+		if clouds <= cloud_cap:
+			return true
+		want = _most_that_fits(clouds, want, 1,
+				func(c: int) -> bool: return _fits(0, 0, 0, c, _reserved(reserve, "husk"), 0, _reserved(reserve, "entry")),
+				func(c: int) -> bool: return _fits(0, 0, 0, c, 0))
+		if want == 0:
 			return false
 	cloud_cap = want
 	entry_cap = maxi(entry_cap, GpuKernelsClouds.ENTRIES_PER_SLOT * cloud_cap)
@@ -283,15 +402,20 @@ static func entries_for(slots: int, density: int) -> int:
 
 
 ## Room for `entries` list entries; false when growing would pass the budget (the lists then keep what they have: the kernel cuts the
-## lists that do not fit and raises the overflow flag).
+## lists that do not fit and raises the overflow flag). A growth that does not fit by GROW goes to the most that fits and never makes the
+## class smaller.
 func ensure_entries(entries: int) -> bool:
 	asked["entry"] = maxi(int(asked.get("entry", 0)), entries)
 	if entries <= int(FILL * entry_cap):
 		return true
 	var want := maxi(ceili(entries / FILL), int(entry_cap * GROW))
 	if not fits(0, 0, 0, 0, 0, 0, want):
-		want = entries
-		if not fits(0, 0, 0, 0, 0, 0, want):
+		if entries <= entry_cap:
+			return true
+		want = _most_that_fits(entries, want, 1,
+				func(c: int) -> bool: return _fits(0, 0, 0, 0, 0, 0, c),
+				func(c: int) -> bool: return _fits(0, 0, 0, 0, 0, 0, c))
+		if want == 0:
 			return false
 	entry_cap = want
 	_grew("entry")
@@ -299,15 +423,20 @@ func ensure_entries(entries: int) -> bool:
 	return true
 
 
-## Room for `husks` husk slots; false when that would pass the budget.
-func ensure_husks(husks: int) -> bool:
+## Room for `husks` husk slots; false when that would pass the budget. A growth that does not fit by GROW goes to the most that fits
+## (keeping `reserve`'s entries free) and never makes the class smaller.
+func ensure_husks(husks: int, reserve := {}) -> bool:
 	asked["husk"] = maxi(int(asked.get("husk", 0)), husks)
 	if husks <= int(FILL * husk_cap):
 		return true
 	var want := maxi(ceili(husks / FILL), int(husk_cap * GROW))
 	if not fits(0, 0, 0, 0, want):
-		want = husks
-		if not fits(0, 0, 0, 0, want):
+		if husks <= husk_cap:
+			return true
+		want = _most_that_fits(husks, want, 1,
+				func(c: int) -> bool: return _fits(0, 0, 0, 0, c, 0, _reserved(reserve, "entry")),
+				func(c: int) -> bool: return _fits(0, 0, 0, 0, c))
+		if want == 0:
 			return false
 	husk_cap = want
 	_grew("husk")
@@ -325,6 +454,7 @@ func ensure_events(events: int, most := 0) -> int:
 	if _event_shrink_to > 0:
 		if _event_shrink_to < event_cap and events <= _event_shrink_to:
 			event_cap = _event_shrink_to
+			_shrank("event")
 			_remake(["event"])
 			made = 1
 		_event_shrink_to = 0
@@ -375,11 +505,22 @@ func ensure_draw(texels: int, pixels: int, most_texels := 0, with_thumbs := fals
 	thumbs = new_thumbs
 	_slots_made = picture_slots()
 	_grew("draw")
+	var remade: Array[String] = []
 	for nm: String in DRAW_BUFFERS:
 		var bytes := maxi(16, ((_bytes_of(nm) + 15) / 16) * 16)
 		if bufs.has(nm) and int(sizes.get(nm, 0)) == bytes:
 			continue
-		_make(nm, bytes, false)
+		remade.append(nm)
+	_remaking = true
+	if local and rd != null:  # (none of them is kept: the old ones are released and flushed before the new ones are made)
+		for nm in remade:
+			_release(nm)
+		_flush()
+	for nm in remade:
+		_make(nm, maxi(16, ((_bytes_of(nm) + 15) / 16) * 16), false)
+	if local and rd != null:
+		_flush()
+	_remaking = false
 	return true
 
 
@@ -520,14 +661,69 @@ static func _trim(free: Array, top: int) -> int:
 
 
 ## Whether the pool with these capacities (slots, clouds, husks, events and entries: the most of these and the pool's current ones; cells and bins: more than
-## the pool's current ones) stays within the memory budget and no single buffer passes `BUFFER_MOST`.
+## the pool's current ones) stays within the memory budget and no single buffer passes `BUFFER_MOST`, and the device never holds more than the
+## budget while the remake is made (`_sequence_peak`). The memory watch is read here, before room is made, and never inside a remake:
+## `_remaking` is true from a remake's first release to its last flush, so a reading cannot fall in between.
 func fits(slots: int, cells: int, bins: int, clouds: int, husks: int, events := 0, entries := 0) -> bool:
-	if limits.watch != null:
+	if limits.watch != null and not _remaking:
 		limits.watch.before_growth(Time.get_ticks_msec(), bytes_now())  # (the free memory is read again before room is made, at most once a second)
+	return _fits(slots, cells, bins, clouds, husks, events, entries)
+
+
+## `fits` without the watch's reading (the searches for the most that fits call it many times after one reading).
+func _fits(slots: int, cells: int, bins: int, clouds: int, husks: int, events := 0, entries := 0) -> bool:
 	var cloud_room := maxi(clouds, cloud_cap)
 	var want := [maxi(slots, slot_cap), cell_cap + cells, bin_cap + bins, cloud_room, maxi(husks, husk_cap), maxi(events, event_cap), maxi(entries, maxi(entry_cap, GpuKernelsClouds.ENTRIES_PER_SLOT * cloud_room))]
 	return largest_buffer_bytes(want[0], want[1], want[2], want[3], want[4], want[5], want[6]) <= BUFFER_MOST \
-			and estimate_bytes(want[0], want[1], want[2], want[3], want[4], want[5], want[6]) <= limits.memory_budget_bytes
+			and estimate_bytes(want[0], want[1], want[2], want[3], want[4], want[5], want[6]) <= limits.memory_budget_bytes \
+			and _sequence_peak(want) <= limits.memory_budget_bytes
+
+
+## The most the device holds during one `_remake` of the classes whose capacity differs in `want` (slots, cells, bins, clouds, husks,
+## events, entries), in `_remake`'s order on a local device: the bytes held now less the not-kept buffers (freed first); then, for each kept buffer,
+## the bytes so far plus its new copy (its old one still held); and last the new total. 0 where nothing is remade or the device is the main
+## one, whose frame frees a buffer later (the final total, which `_fits` checks, is then the figure that matters).
+func _sequence_peak(want: Array) -> int:
+	var classes: Array = []
+	if want[0] != slot_cap:
+		classes.append_array(SLOT_CLASSES)
+	if want[1] != cell_cap:
+		classes.append_array(["cell", "view"])
+	if want[2] != bin_cap:
+		classes.append("bin")
+	if want[3] != cloud_cap:
+		classes.append("cloud")
+	if want[4] != husk_cap:
+		classes.append("husk")
+	if want[5] != event_cap:
+		classes.append("event")
+	if want[6] != entry_cap:
+		classes.append("entry")
+	if classes.is_empty() or not local or rd == null:
+		return 0
+	var running := estimate_bytes(slot_cap, cell_cap, bin_cap, cloud_cap, husk_cap, event_cap, entry_cap)
+	var kept: Array = []  # [bytes now, bytes then] of each kept buffer, in `_remake`'s order
+	var scratch_new := 0
+	for nm: String in BUFFERS:
+		var e: Array = BUFFERS[nm]
+		if not classes.has(e[0]):
+			continue
+		var now_bytes := _buffer_bytes(nm, slot_cap, cell_cap, bin_cap, cloud_cap, husk_cap, event_cap, entry_cap)
+		var then_bytes := _buffer_bytes(nm, want[0], want[1], want[2], want[3], want[4], want[5], want[6])
+		if e[2]:
+			kept.append([now_bytes, then_bytes])
+		else:
+			running -= now_bytes
+			scratch_new += then_bytes
+	for nm: String in DRAW_BUFFERS:
+		if bufs.has(nm) and classes.has(DRAW_BUFFERS[nm][0]):
+			running -= int(sizes.get(nm, 0))
+			scratch_new += int(want[1]) * int(DRAW_BUFFERS[nm][1])  # (the only one of them a remake of these classes makes: "view", a unit a cell)
+	var peak := running
+	for pair: Array in kept:
+		peak = maxi(peak, running + int(pair[1]))
+		running += int(pair[1]) - int(pair[0])
+	return maxi(peak, running + scratch_new)
 
 
 ## The bytes the buffers and the pictures' textures take at these capacities.
@@ -611,19 +807,23 @@ func give_back(room: Dictionary, used: Dictionary) -> bool:
 	var remake: Array = []
 	if slots < slot_cap:
 		slot_cap = slots
-		remake.append_array(["slot", "block", "bucket", "bucketbits"])
+		remake.append_array(SLOT_CLASSES)
+		_shrank("slot")
 	var clouds := maxi(int(caps["cloud"] * GROW), ceili(int(used["clouds"]) / FILL))
 	if clouds < cloud_cap:
 		cloud_cap = clouds
 		remake.append("cloud")
+		_shrank("cloud")
 	var husks := maxi(int(caps["husk"] * GROW), ceili(int(used["husks"]) / FILL))
 	if husks < husk_cap:
 		husk_cap = husks
 		remake.append("husk")
+		_shrank("husk")
 	var entries := maxi(int(caps["entry"] * GROW), GpuKernelsClouds.ENTRIES_PER_SLOT * cloud_cap)
 	if entries < entry_cap:
 		entry_cap = entries
 		remake.append("entry")
+		_shrank("entry")
 	if int(caps["event"] * GROW) < event_cap:
 		_event_shrink_to = maxi(int(caps["event"] * GROW), SimCore.EVENT_FLOOR)
 	if not remake.is_empty():
@@ -639,14 +839,18 @@ func next_growth_bytes() -> int:
 	return estimate_bytes(_align(int(slot_cap * GROW)), cell_cap, bin_cap, cloud_cap, husk_cap) - estimate_bytes(slot_cap, cell_cap, bin_cap, cloud_cap, husk_cap)
 
 
-## The capacities, the bytes held, the budget, the share of it held, the next growth's bytes and the growths so far (for the debug log).
+## The capacities, the bytes held, the budget, the share of it held, the next growth's bytes and the growths and shrinks so far (for the debug log).
 func report() -> Dictionary:
 	return {"fraction": memory_fraction(), "next_growth_bytes": next_growth_bytes(), "slots": slot_cap, "cells": cell_cap, "bins": bin_cap, "clouds": cloud_cap, "husks": husk_cap, "entries": entry_cap, "events": event_cap,
-		"bytes": bytes_now(), "budget_bytes": limits.memory_budget_bytes, "growths": growths.duplicate()}
+		"bytes": bytes_now(), "budget_bytes": limits.memory_budget_bytes, "growths": growths.duplicate(), "shrinks": shrinks.duplicate()}
 
 
 func _grew(klass: String) -> void:
 	growths[klass] = int(growths.get(klass, 0)) + 1
+
+
+func _shrank(klass: String) -> void:
+	shrinks[klass] = int(shrinks.get(klass, 0)) + 1
 
 
 ## Shrinks a class that has used less than a quarter of its slots for a minute (at least to the limits' size and to the room for what
@@ -679,15 +883,19 @@ func maybe_shrink(slots: int, clouds: int, husks: int, entries := 0, events := 0
 		match cls:
 			"slot":
 				slot_cap = _align(to)
-				_remake(["slot", "block", "bucket", "bucketbits"])
+				_shrank(cls)
+				_remake(SLOT_CLASSES)
 			"cloud":
 				cloud_cap = to
+				_shrank(cls)
 				_remake(["cloud"])
 			"husk":
 				husk_cap = to
+				_shrank(cls)
 				_remake(["husk"])
 			"entry":
 				entry_cap = to
+				_shrank(cls)
 				_remake(["entry"])
 			"event":
 				_event_shrink_to = to
