@@ -144,6 +144,26 @@ A dish takes a row of the `DISHP` and `DSTATE` tables (`GpuLayout.D_MAX`, 1024 r
 
 **Growth.** A class grows by 1.5 when a batch would pass 90% of a buffer, never past the most that class can need: for record slots, the dishes' caps over the fill share; for the event ring, the births bound ([Room for births](#room-for-births)).
 
+**A growth never makes a class smaller.** When the growth by 1.5 does not fit the budget:
+
+- An ask within the capacity held is answered true and the capacity stays (`slot_cap_for`, `ensure_clouds`, `ensure_husks` and `ensure_entries` all keep it). Only a shrink makes a class smaller.
+- An ask past the capacity grows the class once to the most that fits: a multiple of 256 slots for the slots, any count for the clouds, husks and entries, between the ask and the growth by 1.5 (`SimArena._most_that_fits`, a bisection on the budget). When not even the ask fits, the growth is refused and nothing changes.
+- One growth to the most that fits ends the growing against a budget: a class held there is not made again for an ask a little over it, as a fit to each ask would. Stepped factors (1.25, then 1.1) would remake the class several times on the way and still leave room unused. `pre_grow_slots` does not search, because it runs every loop of the sim thread: it grows by 1.5 or, when that does not fit, to the ask.
+- The slots are grown first in an iteration, so their search leaves room for the classes that grow after them: `SimCore._ensure_room` passes `caps_for(room)` as a `reserve` for the clouds, husks and entries the dishes need. When the budget cannot hold that reserve at all, the ask itself is taken (a reserve never refuses what the budget alone would grow). The buffer limit `BUFFER_MOST` bounds the search as it bounds a growth.
+
+**The order of a remake.** `SimArena._remake` makes a class's buffers again in this order on the sim thread's own (local) device:
+
+1. Free the buffers that are not kept (their contents are made again from nothing), then flush.
+2. For each kept buffer: make the new one, copy the old into it, free the old, then flush.
+3. Make the buffers that are not kept at their new size, then flush.
+
+The device never holds a class's old and new copies of everything at once. `free_rid` only queues the release, which a local device carries out at its next submit and wait, so each step ends in `SimArena._flush` (a submit and a wait): without it the old buffers would still be held while the new ones are made, and the peak would be the old total plus the new one. The most the device holds is the largest of: the bytes now less the buffers freed first; then, for each kept buffer, the bytes so far plus its new copy (its old one is still held until its flush); and the new total. For a class that grows the last is the largest, so the peak is the final total (`SimArena._sequence_peak`; `tests/sim/pool_remake_test.gd` reads it from the device). The slot classes take 6 flushes (one, the four kept buffers, one), the entries 2, a husk class 3.
+
+- **Only a local device is flushed.** The main device's frame submits, and a submit or a wait there would break it: when `SimArena.local` is false the buffers are made one by one and freed as they are replaced, as a frame allows, and nothing waits.
+- **Every wait is `SimArena._flush`,** so a backend that needs more than a submit and a wait to know the work is done has one place to put it. On a backend whose fence wait can time out (Metal's does) the wait can return with the work unfinished: a flush there needs its completion confirmed before the next buffer is made, and that check belongs in `_flush`.
+- **The memory watch is never read in the middle of a remake.** `SimArena.fits` reads it (`before_growth`, at most once a second) before room is made and not while `_remaking`, so a reading cannot fall between a release and the last make. `fits` also checks the peak of the sequence against the budget, not only the final total.
+- **The counts.** `growths` counts growths, per class, and nothing else; `shrinks` counts the shrinks apart (a shrink is never a growth and the reverse). Neither is touched in the step's path: they change when a class is made again, and the pool's figures in the timing and the debug log report both. `flushes` is the number of waits the arena made, for tests.
+
 **Shrinking.** A class shrinks when it used under a quarter of its slots for a minute, never below room for the most it was asked for in that time (`asked`: room made ahead for a step's worst case is not shrunk and grown back). The event ring shrinks at the start of the next iteration, because an iteration's events are read after it.
 
 **A dish that leaves the world** (`SimCore.remove_dish`: a freeze, a trash, a resize's old row) gives back at once. In the next pass, a quiet one included (so paused too), `SimCore._give_back` and `SimArena.give_back` shrink each class that holds more than 1.5 times what the running dishes need (`SimCore.room_needed`, the room an iteration is given) down to that. A class never goes under what the world still counts (the leaver's slots count until a step closes the gap, so they go the rest of the way after the next step) and never under the starting sizes.
@@ -213,6 +233,7 @@ The pool is bounded by what the machine can give the GPU. The pieces:
 - A card with its own: `CARD_SHARE` (0.75) of the card's OS budget, else of its dedicated memory, never over 0.4 of the physical memory, and 2 GiB when the card's size could not be read.
 - Never under 1 GiB, and with no upper cap.
 - No single buffer may pass `SimArena.BUFFER_MOST`, 2 GiB: the largest resource Direct3D 12 documents, and under the 4 GiB - 1 of a Vulkan storage range and of a `RenderingDevice` buffer's 32-bit size. `SimArena.fits` refuses a growth that would pass it as it refuses one past the budget.
+- **The budget holds during a remake too.** `fits` checks the budget against the total after the growth and against the peak of the remake (`_sequence_peak`, [Buffers: growing and shrinking](#buffers-growing-and-shrinking)): with the release-before-allocate order the transient is the final total, so a growth that fits does not pass the budget on the way. A growth that does not fit by 1.5 goes to the most that fits, and a class is never made smaller to make room.
 
 **The working budget.** `MemoryWatch` sets `memory_budget_bytes` every 5 s and before a growth. It is what the pool holds plus what it may still take: half the free system memory or, on a card that reports a live budget and usage, `CARD_SHARE` of the card's unused budget, between the floor and the ceiling. It falls at once and rises with hysteresis, and the arena shrinks sooner while the machine is short.
 
