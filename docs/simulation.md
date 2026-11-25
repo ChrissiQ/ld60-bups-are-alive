@@ -58,9 +58,19 @@ The sim thread (`SimThread`) owns a local `RenderingDevice`, a `SimCore` and a `
 1. Records the steps.
 2. After them, in the same compute list, records the answers to the questions due and the main dish's pictures.
 3. Submits, then syncs once, with one read-back of the dish state, stats, family events, answers and the pictures' bytes.
-4. Hands the family events to `LineageWorker` and the rest of what was read to `ResultWorker` (`SimThread._hand_on`).
+4. Checks the read-back (below). Hands the family events to `LineageWorker` and the rest of what was read to `ResultWorker` (`SimThread._hand_on`).
 
 An iteration the memory budget refuses puts the dishes' worlds back (`DishWorld.restore`) and is retried with fewer steps.
+
+#### A sync that returns early
+
+On Metal a fence wait gives up after one second and `RenderingDevice.sync` carries on without saying so, so a submit that takes longer returns before the device has finished, and every read after it (asynchronous or blocking) is what the staging held before. Direct3D 12 and Vulkan wait without a limit. Every read-back whose results the host uses is therefore held to a completion mark:
+
+- The `pool_mark` kernel is the last command of the work a read-back follows. It writes a number (1 to `SimCore.MARK_MOST`, counting round) into `WORLD[WD_SERIAL]`, and the read-back copies that word, last, to the tail of its scratch buffer. The cost is one thread's write and four bytes copied and compared an iteration; nothing is uploaded.
+- A read-back whose tail is not the number it was given is thrown away whole. The host submits and waits again and reads again (`SimCore._wait_marked`) until the mark arrives, counting the sync in `syncs_unfinished` in the debug log. Past `SimCore.CONFIRM_LIMIT_MSEC` (30 s) the world has failed: `SimCore.failure` is set, `SimCore.run` gives nothing, and `SimThread` records the error, sets the status to failed and refuses every command with the reason. The steps themselves are not run again: they were submitted, and the device finishes them.
+- A read-back the device finished is still checked (`SimCore._invariants`): the capacity words are the arena's, the slots, cloud slots and husk slots in use are within them (unless a kernel found a buffer full), and each running dish's step is the step the host held plus the steps that ran. A read that fails these fails the world the same way.
+- A submit and wait that nothing is read back after, and after which something is uploaded, calls `SimCore._confirm` with the mark its list ended with. (The field's own submits inside an iteration need none: only dispatches are recorded between them and the iteration's read-back, and its mark covers them.)
+- The mark is a kernel's write, not an upload, because a timed-out sync leaves staging blocks the device may still be reading and a later upload could land in one.
 
 ### Results and the family tree
 

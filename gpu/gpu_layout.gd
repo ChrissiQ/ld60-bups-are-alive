@@ -230,7 +230,7 @@ const LG_LIFE := 3  ## a death's reserve and body less what it gives back; a let
 const LG_TERMS := 4
 
 ## WORLD: one row of the world's totals (uints).
-const WD_WORDS := 18
+const WD_WORDS := 19
 const WD_SLOTS := 0  ## the slots in use (the sum of the aligned segment lengths)
 const WD_CLOUD_SLOTS := 1
 const WD_HUSK_SLOTS := 2
@@ -249,6 +249,7 @@ const WD_ENTRIES_PEAK := 14  ## the most entries the lists asked for (before the
 const WD_ENTRY_DENSITY := 15  ## the most entries a cloud slot in use averaged at the same time (rounded up), reset with WD_ENTRIES_PEAK
 const WD_ENTRIES_FULL := 16  ## the entries every cloud would have if every square were listed: summed by the count, taken (and zeroed) by `pool_bin_room`, which records it as the lists' ask
 const WD_FALLBACKS := 17  ## the bups that, after the swim, were in a square not listed, so that their demand and apply took their clouds from the cloud slots (a count since the world was made, wrapping)
+const WD_SERIAL := 18  ## the completion mark: the number `pool_mark` wrote last (SimCore's `_stamp`); a read back that carries the number its submit was given was finished by the device
 
 ## The payload textures (a bup's picture, written sim-side after `finalize`): PAYLOAD (RGBA32UI, PAYLOAD_TEX_WIDTH wide) and the ids
 ## texture (RGBA32UI: the id, IDT_LO and IDT_HI, and where the bup was in the dish's picture before, IDS_PREV_X and IDS_PREV_Y). The

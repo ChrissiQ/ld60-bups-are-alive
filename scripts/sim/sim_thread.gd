@@ -235,9 +235,14 @@ func _run() -> void:
 	_core.warm_up_pipette()
 	limits.start_watch()
 	while not _stopping():
+		if _core.failure != "":
+			_fail_world()
+			break
 		_watch_memory()
 		for cmd in queue.drain():
 			_handle(cmd)
+		if _core.failure != "":
+			continue  # (the top of the loop stops the world)
 		_finish_pipettes()
 		_make_grid_ahead()
 		if _stopping():
@@ -285,12 +290,21 @@ func _watch_memory() -> void:
 
 
 ## The world could not be made: every command that wants a reply is answered with an error until the thread is stopped.
-func _refuse_all() -> void:
+func _refuse_all(why := "the simulation could not start") -> void:
 	while not _stopping():
 		for cmd in queue.drain():
 			if cmd.reply != null:
-				cmd.reply.complete(null, "the simulation could not start")
+				cmd.reply.complete(null, why)
 		queue.wait()
+
+
+## The core can no longer be trusted (SimCore.failure: a read back the device never finished, or one no state of the world explains): the
+## error is recorded in the status, the status is failed, and every command that wants a reply is answered with the reason until the
+## thread is stopped. Nothing the failed read back held is used: the iteration that met it hands nothing on.
+func _fail_world() -> void:
+	_error(_core.failure)
+	_set_status("failed", true)
+	_refuse_all(_core.failure)
 
 
 ## The steps of the next iteration (0: nothing owed). After a refused iteration (the memory budget: SimCore.run ran nothing) the next asks
@@ -382,6 +396,8 @@ func _iterate(k: int) -> float:
 			bursts[client] = true
 	var start := Time.get_ticks_usec()
 	var res: Dictionary = _core.run(k, d, plan)
+	if _core.failure != "":
+		return 0.0  # (nothing of the failed read back is used: not the governor's figures, the worlds' events, the rows or the pictures)
 	var ran: int = res["steps"]
 	var run_ms := (Time.get_ticks_usec() - start) / 1000.0
 	governor.advanced(ran, d, run_ms)
@@ -441,6 +457,8 @@ func _quiet_pass() -> void:
 	plan.questions = _due_questions()
 	plan.view = _view_request(true)
 	var res := _core.run(0, governor.delta(), plan)
+	if _core.failure != "":
+		return
 	var item := _results(0, governor.delta(), governor.clock, [], res, plan)
 	_passes += 1
 	_pass_ms += (Time.get_ticks_usec() - began) / 1000.0
@@ -537,6 +555,7 @@ func _timing() -> Dictionary:
 	t["machine"] = limits.watch.report() if limits.watch != null else {}
 	t["next_growth_bytes"] = _core.arena.next_growth_bytes()
 	t["overflow"] = _core.overflow()
+	t["syncs_unfinished"] = _core.unfinished
 	return t
 
 

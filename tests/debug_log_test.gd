@@ -47,6 +47,7 @@ func _initialize() -> void:
 			TestUtil.check(be["governor"].has(key) and (be["governor"][key] is float or be["governor"][key] is int), "the governor has the number %s" % key)
 		TestUtil.check(is_equal_approx(float(be["governor"]["iteration_world_s"]), float(be["governor"]["k"]) * float(be["governor"]["step_s"])), "...the world time of the last iteration is its steps times the step length")
 		TestUtil.check(be["governor"]["T_ITER_ms"] == Governor.T_ITER_MS and be["pool"] is Dictionary and be["pool_in_use"] is Dictionary and be["pool_overflow"] is float and be["payload_behind_sim_s"] is float,"...T_ITER is the governor's, and the pool, what of it is in use, its overflow bits and the payload's age are there (the canned world serves none)")
+		TestUtil.check(be.has("syncs_unfinished") and be["syncs_unfinished"] is float and float(be["syncs_unfinished"]) == 0.0, "...the syncs found unfinished are counted (none on the canned world)")
 		TestUtil.check(be.has("time_process") and (be["time_process"] is float or be["time_process"] is int), "backend has the process time")
 		TestUtil.check(be.has("draw_slots") and be["draw_slots"] is Dictionary and be["draw_slots"].has("drawn") and be["draw_slots"].has("capacity") and be["draw_slots"].has("live"), "...draw_slots has drawn, capacity and live")
 		TestUtil.check(be.get("pictures_last_second") is Dictionary and (be["pictures_last_second"] as Dictionary).has("shown"), "...pictures_last_second says how often the picture changed")

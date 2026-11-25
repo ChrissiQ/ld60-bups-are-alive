@@ -47,6 +47,9 @@ const EVENT_READ_MARGIN := 1.25  ## the room over the most events a step of the 
 const EVENT_READ_SLACK := 1024  ## ... and the events more (a step that had more has the rest read after)
 const FIELD_SUBMIT_MS := 4.0  ## the most GPU time the field's diffusion rounds of a step are given in one submit: under half a display frame at 120 Hz, so the interface's frames get the card between submits [measured at 999 dishes of 300 µm in water, Apple Silicon, Metal: submits of about 4 ms gave a frame p95 of 8.7 ms, of about 9 ms 9.3 ms, the step's 140 ms of rounds in one submit 12.6-12.8 ms; the 4 ms submits cost 2-3% of the speed]
 const COUNT_READ_MARGIN := 1.25  ## the share over a dish's births a step in its last iteration that `_expected_count` allows for each step to come
+const MARK_MOST := 0xFFFFFF  ## the completion marks count 1 to this and start again: a push constant is a float, which holds every whole number up to 2^24
+const CONFIRM_LIMIT_MSEC := 30000  ## the longest a read back is waited for after the device has not finished the work it follows: about thirty of the waits a fence gives up after (Godot's Metal driver gives a submit's wait one second, and RenderingDevice.sync goes on without saying so) and far past any submit this world makes (the field's own submits are kept near FIELD_SUBMIT_MS), so a wait this long means the device is not going to finish
+const CONFIRM_POLL_MSEC := 2  ## the pause between two reads of a mark that has not arrived
 
 var rd: RenderingDevice
 var limits: PoolLimits
@@ -110,6 +113,10 @@ var _moved_since_pic := true  ## steps ran (or bups were moved) since the last b
 var _profile: Variant = null  ## while `profile_steps` runs: kernel name -> Array of µs, each dispatch its own submit
 var _scratch := RID()  ## where `read_parts` gathers what it reads (up to SCRATCH_KEEP bytes)
 var _scratch_bytes := 0
+var failure := ""  ## why the world can no longer be trusted (a read back the device did not finish within CONFIRM_LIMIT_MSEC, or one that no state of the world explains), or "" while it can: once set, `run`, `answer`, `publish` and the reads give nothing, and the thread that owns the core stops the world
+var unfinished := 0  ## the syncs that returned before the device had finished (the read back after one did not carry the number its submit was given), for the debug log
+var _serial := 0  ## the number of the last completion mark recorded (`_record_mark`): WORLD[WD_SERIAL] holds it once the device has run the list that carries it
+var fault_stale_reads := 0  ## checks only: the next this many marked reads come back as a read the device had not finished (all zeros), as a timed-out wait leaves them
 var _husk_found := 0  ## the husks a read found past its bound, until a read is complete
 var lone_field := false  ## checks only: a step runs the lone feed and diffusion passes (ping-pong, then pool_land_copy) in place of pool_fdiff (tools/gpu/fused_check.gd)
 var _tile_rounds := PackedInt32Array()  ## the tiles of pool_fdiff that run in each round (a prefix of TILES)
@@ -410,7 +417,8 @@ func pipette(row: int, centre: Vector2, radius: float, dest: Variant = null, gri
 	var pd := float(row + dst * D_MAX)
 	var bg := _bup_groups()
 	_run_list(func(cl: int) -> void: _record_pipette(cl, bg, centre, radius, pd))
-	_read_back()
+	if failure != "":
+		return {}
 	_event_rows.clear()
 	_mark_stats_fresh()
 	version += 1
@@ -733,8 +741,9 @@ func set_field(row: int, values: PackedFloat32Array) -> void:
 ## `steps` steps of `delta` seconds of every running dish, and what is asked of the state after them, in one submit and one wait (with the
 ## field's own submits and waits before it when a step's diffusion rounds are split, `_record_step`): the
 ## steps are recorded, then the stats, the answers to `plan.questions` (`answer`'s) and the pictures of `plan.view` (`publish`'s), in one
-## compute list; one read back (`_request`) takes WORLD, DSTATE, STATS, the family events, the answers and what the pictures hand over;
-## submit; sync. `plan` (IterationPlan) carries each dish's world events, the history samples, the questions and the view. Returns {steps,
+## compute list; one read back (`_request`) takes WORLD, DSTATE, STATS, the family events, the answers and what the pictures hand over,
+## held to a completion mark (`_take`: a read the device had not finished is waited for and read again, and past CONFIRM_LIMIT_MSEC the
+## world has failed: `failure`, and `run` gives {steps 0, failed true, refused why}); submit; sync. `plan` (IterationPlan) carries each dish's world events, the history samples, the questions and the view. Returns {steps,
 ## overflow, record_usec, gpu_usec, stats (STATS up to the highest running row), births and deaths (the steps' family events: EVB's and
 ## EVD's bytes in use), answers (`answer`'s), published (`publish`'s), answer_usec and publish_usec (the host's time on the answers and on
 ## the pictures, before the list and after the sync), read_usec (on the read back), refused (why the steps did not run, or "")}; steps 0 when the room the steps need would pass the memory budget
@@ -743,6 +752,8 @@ func set_field(row: int, values: PackedFloat32Array) -> void:
 ## undone: the iteration cannot be done again from what the host holds (the records and fields change in place on the device), so
 ## `overflow()` keeps it and the kernels keep every read and write inside the buffers.
 func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
+	if failure != "":
+		return _failed_run()
 	_apply_edits()
 	if steps <= 0 and plan == null:
 		if not _stats_fresh:
@@ -823,7 +834,8 @@ func run(steps: int, delta: float, plan: Variant = null) -> Dictionary:
 	rd.sync()
 	var t2 := Time.get_ticks_usec()
 	var got := _take(reads)
-	_apply_read_back(got["WORLD"], got["DSTATE"])
+	if failure != "" or not _apply_read_back(got["WORLD"], got["DSTATE"], steps):
+		return _failed_run()
 	if stats:
 		_mark_stats_fresh(got["STATS"])
 	_submit_usec_most = maxi(_submit_usec_most, t2 - t1)
@@ -924,7 +936,7 @@ func profile_steps(steps: int, delta: float, plan: Variant = null) -> Dictionary
 	_record_stats(-1, 0, steps - 1)
 	var out: Dictionary = _profile
 	_profile = null
-	_read_back()
+	_run_list(func(_cl: int) -> void: pass, true, steps)  # (the steps ran in lists of their own: this one carries the mark the read back is held to)
 	_event_rows.clear()
 	for row: int in _dishes:
 		_event_rows[row] = true
@@ -1150,6 +1162,8 @@ func _refresh_stats() -> void:
 ## STATS sample 0 holds every running dish's state now: its mass sums are taken, for `births_series`, from `stats` (STATS up to the
 ## highest running row, as an iteration reads it back), or read now when it is not given.
 func _mark_stats_fresh(stats := PackedByteArray()) -> void:
+	if failure != "":
+		return
 	_stats_fresh = true
 	_mass_sum.clear()
 	if _dishes.is_empty():
@@ -1663,28 +1677,39 @@ func _field_parts(cd: CoreDish) -> Array:
 ## Parts of the buffers in one read back ([buffer name, byte offset, bytes] each; the records' and block table's names are the physical
 ## ones, `_cur`'s): each part is copied on the device into one scratch buffer, which is read back once. Reading a part of a big buffer
 ## straight back costs about what the whole buffer does (the device's staging is the buffer's size: 1 MB of a 128 MB buffer took 5.0 ms,
-## against 0.74 ms copied out first [measured, M1 Pro]). Returns the parts' bytes in order.
+## against 0.74 ms copied out first [measured, M1 Pro]). Returns the parts' bytes in order (empty ones when the world has failed).
 func read_parts(parts: Array) -> Array:
+	var rids: Array = []
+	for p: Array in parts:
+		rids.append([arena.buf(p[0]), int(p[1]), int(p[2])])
+	return _gather(rids)
+
+
+## `read_parts` over buffers' RIDs ([RID, byte offset, bytes] each): the copies and the completion mark are one read of the scratch, taken
+## only when it carries the mark of the last list (`_read_marked`).
+func _gather(parts: Array) -> Array:
 	var total := 0
 	for p: Array in parts:
 		total += int(p[2])
 	var out: Array = []
-	if total == 0:
+	if total == 0 or failure != "":
 		for p: Array in parts:
 			out.append(PackedByteArray())
 		return out
-	var scratch := _scratch_for(total)
+	var tail := _mark_at(total)
+	var scratch := _scratch_for(tail + 4)
 	var at := 0
 	for p: Array in parts:
 		if int(p[2]) > 0:
-			rd.buffer_copy(arena.buf(p[0]), scratch, int(p[1]), at, int(p[2]))
+			rd.buffer_copy(p[0], scratch, int(p[1]), at, int(p[2]))
 		at += int(p[2])
-	var data := rd.buffer_get_data(scratch, 0, total)
+	rd.buffer_copy(arena.buf("WORLD"), scratch, GpuLayout.WD_SERIAL * 4, tail, 4)
+	var data := _read_marked(scratch, 0, tail + 4, tail, _serial)
 	if scratch != _scratch:
 		rd.free_rid(scratch)
 	at = 0
 	for p: Array in parts:
-		out.append(data.slice(at, at + int(p[2])))
+		out.append(data.slice(at, at + int(p[2])) if not data.is_empty() else PackedByteArray())
 		at += int(p[2])
 	return out
 
@@ -1705,25 +1730,35 @@ func _scratch_for(total: int) -> RID:
 ## Reads the next submit's sync completes, without a wait of their own: `parts` ([key, buffer name, byte offset, bytes] each) are copied,
 ## where the commands stand, into the scratch buffer, which one request reads back (as `read_parts` gathers them), so each part is its
 ## buffer as the commands recorded before left it; `direct` parts (the same form) are each requested straight from their buffer, for a
-## part that is most of a buffer of its own. `_take` gives the bytes after the sync; nothing else may read through the scratch in between.
+## part that is most of a buffer of its own. A completion mark is recorded first (`_stamp`) and copied last, to the scratch's tail, and the
+## scratch's read is requested after the direct ones, so a read that carries the mark was finished by the device, the direct ones with it
+## (`_take`). `_take` gives the bytes after the sync; nothing else may read through the scratch in between.
 func _request(parts: Array, direct: Array) -> Dictionary:
-	var reads := {"parts": parts, "direct": direct, "got": {}, "total": 0, "scratch": RID()}
+	var reads := {"parts": parts, "direct": direct, "got": {}, "total": 0, "tail": 0, "serial": 0, "scratch": RID()}
 	var total := 0
 	for p: Array in parts:
 		total += int(p[3])
 	reads["total"] = total
-	if total > 0:
-		var scratch := _scratch_for(total)
-		var at := 0
-		for p: Array in parts:
-			if int(p[3]) > 0:
-				rd.buffer_copy(arena.buf(p[1]), scratch, int(p[2]), at, int(p[3]))
-			at += int(p[3])
-		reads["scratch"] = scratch
-		rd.buffer_get_data_async(scratch, _read_in.bind(reads, ""), 0, total)
+	var direct_bytes := 0
+	for p: Array in direct:
+		direct_bytes += int(p[3])
+	if total == 0 and direct_bytes == 0:
+		return reads
+	reads["serial"] = _stamp()
 	for p: Array in direct:
 		if int(p[3]) > 0:
 			rd.buffer_get_data_async(arena.buf(p[1]), _read_in.bind(reads, String(p[0])), int(p[2]), int(p[3]))
+	var tail := _mark_at(total)
+	var scratch := _scratch_for(tail + 4)
+	var at := 0
+	for p: Array in parts:
+		if int(p[3]) > 0:
+			rd.buffer_copy(arena.buf(p[1]), scratch, int(p[2]), at, int(p[3]))
+		at += int(p[3])
+	rd.buffer_copy(arena.buf("WORLD"), scratch, GpuLayout.WD_SERIAL * 4, tail, 4)
+	reads["tail"] = tail
+	reads["scratch"] = scratch
+	rd.buffer_get_data_async(scratch, _read_in.bind(reads, ""), 0, tail + 4)
 	return reads
 
 
@@ -1731,18 +1766,27 @@ func _read_in(data: PackedByteArray, reads: Dictionary, key: String) -> void:
 	(reads["got"] as Dictionary)[key] = data
 
 
-## The bytes of `_request`'s parts once the sync that ran them is done: key -> bytes (empty for a part of none). A part whose request did
-## not complete with the sync (none is expected to) is read with a wait.
+## The bytes of `_request`'s parts once the sync that ran them is done: key -> bytes (empty for a part of none). A read whose scratch does
+## not carry the request's mark was not finished by the device (the sync returned early): none of its bytes are used, the device is
+## waited for (`_wait_marked`) and every part is read again; past CONFIRM_LIMIT_MSEC the world has failed (`failure`) and nothing is given.
+## A part whose request did not complete with the sync is read with a wait.
 func _take(reads: Dictionary) -> Dictionary:
 	var got: Dictionary = reads["got"]
 	var out := {}
-	var total: int = reads["total"]
+	var scratch: RID = reads["scratch"]
 	var data := PackedByteArray()
-	if total > 0:
-		var scratch: RID = reads["scratch"]
-		data = got.get("", PackedByteArray())
-		if data.size() < total:
-			data = rd.buffer_get_data(scratch, 0, total)
+	if scratch.is_valid():
+		var tail: int = reads["tail"]
+		var serial: int = reads["serial"]
+		data = _faulted(got.get("", PackedByteArray()))
+		if not _marked(data, tail, serial):
+			unfinished += 1
+			data = _wait_marked(scratch, 0, tail + 4, tail, serial)
+			got.clear()  # (the direct parts were requested with the scratch's: they are as stale as it was)
+			if data.is_empty():
+				if scratch != _scratch:
+					rd.free_rid(scratch)
+				return out
 		if scratch != _scratch:
 			rd.free_rid(scratch)
 	var at := 0
@@ -1756,6 +1800,88 @@ func _take(reads: Dictionary) -> Dictionary:
 			d = rd.buffer_get_data(arena.buf(p[1]), int(p[2]), bytes)
 		out[p[0]] = d if bytes > 0 else PackedByteArray()
 	return out
+
+
+# ---- the completion mark ------------------------------------------------------------------------------------------------------------
+# A submit's wait can return before the device has finished: on Metal a fence wait gives up after one second and RenderingDevice.sync
+# goes on, so the bytes read after it (and every async read's) are what the staging held before. A list that ends with `pool_mark` leaves
+# a number in WORLD[WD_SERIAL] that only the device writes, after everything the list did; a read that carries the number of the list it
+# follows was finished, and one that does not is thrown away, waited for and read again. The mark costs one thread's write and, in a
+# read back, four bytes copied and compared. A flush (a submit and wait with nothing read back after it) calls `_confirm`.
+
+## The mark's offset in a scratch holding `total` bytes before it (word aligned).
+func _mark_at(total: int) -> int:
+	return (total + 3) & ~3
+
+
+## The next mark's dispatch in list `cl`: after every dispatch before it (each ends in a barrier). Returns its number.
+func _record_mark(cl: int) -> int:
+	_serial = _serial % MARK_MOST + 1
+	_disp(cl, "pool_mark", 1, float(_serial))
+	return _serial
+
+
+## A list of the mark only, after every list recorded before it. Returns its number.
+func _stamp() -> int:
+	var cl := rd.compute_list_begin()
+	var serial := _record_mark(cl)
+	rd.compute_list_end()
+	return serial
+
+
+func _marked(data: PackedByteArray, tail: int, serial: int) -> bool:
+	return data.size() >= tail + 4 and data.decode_u32(tail) == serial
+
+
+## `data` as read, except that a check can have it come back unfinished (`fault_stale_reads`).
+func _faulted(data: PackedByteArray) -> PackedByteArray:
+	if fault_stale_reads > 0:
+		fault_stale_reads -= 1
+		var stale := PackedByteArray()
+		stale.resize(data.size())
+		return stale
+	return data
+
+
+## A blocking read of `bytes` of `buffer` from `offset`, whose word at `tail` is the mark of the list `serial` it follows: the bytes once
+## the device has finished that list, none when it does not within CONFIRM_LIMIT_MSEC (`failure`).
+func _read_marked(buffer: RID, offset: int, bytes: int, tail: int, serial: int) -> PackedByteArray:
+	var data := _faulted(rd.buffer_get_data(buffer, offset, bytes))
+	if _marked(data, tail, serial):
+		return data
+	unfinished += 1
+	return _wait_marked(buffer, offset, bytes, tail, serial)
+
+
+## `_read_marked`'s wait: an empty submit and wait, then the read again, until it carries the mark.
+func _wait_marked(buffer: RID, offset: int, bytes: int, tail: int, serial: int) -> PackedByteArray:
+	var began := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - began <= CONFIRM_LIMIT_MSEC:
+		rd.submit()
+		rd.sync()
+		var data := _faulted(rd.buffer_get_data(buffer, offset, bytes))
+		if _marked(data, tail, serial):
+			return data
+		OS.delay_msec(CONFIRM_POLL_MSEC)
+	_fail("the device did not finish a submit within %d s" % (CONFIRM_LIMIT_MSEC / 1000))
+	return PackedByteArray()
+
+
+## Waits for the device to finish the list that carries mark `serial` (after a submit and wait with no read back of its own). False, and
+## `failure` set, when it does not within CONFIRM_LIMIT_MSEC.
+func _confirm(serial: int) -> bool:
+	return not _read_marked(arena.buf("WORLD"), GpuLayout.WD_SERIAL * 4, 4, 0, serial).is_empty()
+
+
+func _fail(why: String) -> void:
+	if failure == "":
+		failure = why
+		push_warning("SimCore: " + why)
+
+
+## What `run` gives once the world has failed: nothing ran, and `refused` says why.
+func _failed_run() -> Dictionary:
+	return {"steps": 0, "overflow": _overflow, "refused": failure, "failed": true}
 
 
 ## What a dish is, word for word, for comparing two runs (tests/sim/canonical_dump.gd's sections): its records; its field (the glucose,
@@ -1807,6 +1933,8 @@ func answer(questions: Array) -> Dictionary:
 		rd.submit()
 		rd.sync()
 		got = _take(reads)
+		if failure != "":
+			return {}
 	return _answers_take(staged, got)
 
 
@@ -2180,7 +2308,10 @@ func publish(view: ViewRequest, _targets: Variant = null) -> Dictionary:
 	var reads := _request(parts, direct)
 	rd.submit()
 	rd.sync()
-	return _publish_take(pub, _take(reads))
+	var got := _take(reads)
+	if failure != "":
+		return {}
+	return _publish_take(pub, got)
 
 
 ## Before the list: the pictures' buffers made for `expect` bups (the count the dish is expected to have when the kernels run: they write
@@ -2809,24 +2940,39 @@ func _scan(cl: int, prefix: String, elements: int) -> void:
 	_disp(cl, prefix + "_add", g)
 
 
-## Records `rec(compute list)`, submits and syncs; then reads WORLD and DSTATE back, unless `read_back` is false (a list that writes
-## neither, as the pictures' is).
-func _run_list(rec: Callable, read_back := true) -> void:
+## Records `rec(compute list)` and the completion mark, submits and syncs; then reads WORLD and DSTATE back (`_read_back`, after the
+## `steps` steps the list ran), unless `read_back` is false (a list that writes neither, as the pictures' is; it carries no mark).
+func _run_list(rec: Callable, read_back := true, steps := 0) -> void:
 	var cl := rd.compute_list_begin()
 	rec.call(cl)
+	if read_back:
+		_record_mark(cl)
 	rd.compute_list_end()
 	rd.submit()
 	rd.sync()
 	if read_back:
-		_read_back()
+		_read_back(steps)
 
 
-func _read_back() -> void:
-	_apply_read_back(rd.buffer_get_data(arena.buf("WORLD")), rd.buffer_get_data(arena.buf("DSTATE")))
+## WORLD (held to the last list's mark) and DSTATE read back become the host's, as `_apply_read_back` takes them. `steps` is how many
+## steps of every running dish ran since the last read back.
+func _read_back(steps := 0) -> void:
+	if failure != "":
+		return
+	var world := _read_marked(arena.buf("WORLD"), 0, int(arena.sizes["WORLD"]), GpuLayout.WD_SERIAL * 4, _serial)
+	if world.is_empty():
+		return
+	_apply_read_back(world, rd.buffer_get_data(arena.buf("DSTATE")), steps)
 
 
-## WORLD and DSTATE as read after a sync become the host's (`_world`, `_dstate`), with what the host takes from them.
-func _apply_read_back(world: PackedByteArray, dstate: PackedByteArray) -> void:
+## WORLD and DSTATE as read after a sync become the host's (`_world`, `_dstate`), with what the host takes from them, unless they are
+## not a state the world can be in (`_invariants`: the world has failed, false, and nothing of them is taken). `steps`: the steps of every
+## running dish that ran since the last read back.
+func _apply_read_back(world: PackedByteArray, dstate: PackedByteArray, steps := 0) -> bool:
+	var bad := _invariants(world, dstate, steps)
+	if bad != "":
+		_fail("a read back the device finished is not a state the world can be in: " + bad)
+		return false
 	_world = world
 	_dstate = dstate
 	_overflow |= _wd(GpuLayout.WD_OVERFLOW)
@@ -2837,6 +2983,31 @@ func _apply_read_back(world: PackedByteArray, dstate: PackedByteArray) -> void:
 		_entry_density = maxi(_wd(GpuLayout.WD_ENTRY_DENSITY), int(_entry_density * 0.9))  # (falls by a tenth an iteration, as the deaths do)
 		_set_wd(GpuLayout.WD_ENTRIES_PEAK, 0)
 		_set_wd(GpuLayout.WD_ENTRY_DENSITY, 0)
+	return true
+
+
+## "" when `world` and `dstate` (a read back, not yet the host's) can be what the device holds, else what cannot be: the capacities are the
+## arena's, the slots, cloud slots and husk slots in use are within them (while no kernel has found a buffer full: the counters then
+## run on past it), and the step of every running dish is what the host held plus the `steps` that ran (each running dish takes one a
+## step, in `pool_setcount`). A read that only carried bytes the device had not written (zeros, old staging) fails these.
+func _invariants(world: PackedByteArray, dstate: PackedByteArray, steps: int) -> String:
+	if world.size() != int(arena.sizes["WORLD"]) or dstate.size() != int(arena.sizes["DSTATE"]):
+		return "WORLD is %d bytes and DSTATE %d, not %d and %d" % [world.size(), dstate.size(), arena.sizes["WORLD"], arena.sizes["DSTATE"]]
+	var caps := {GpuLayout.WD_SLOT_CAPACITY: arena.slot_cap, GpuLayout.WD_PUFF_CAPACITY: arena.cloud_cap, GpuLayout.WD_HUSK_CAPACITY: arena.husk_cap, GpuLayout.WD_ENTRY_CAPACITY: arena.entry_cap}
+	for word: int in caps:
+		if world.decode_u32(word * 4) != caps[word]:
+			return "capacity word %d is %d, the arena's is %d" % [word, world.decode_u32(word * 4), caps[word]]
+	if world.decode_u32(GpuLayout.WD_OVERFLOW * 4) == 0:
+		var used := {GpuLayout.WD_SLOTS: GpuLayout.WD_SLOT_CAPACITY, GpuLayout.WD_CLOUD_SLOTS: GpuLayout.WD_PUFF_CAPACITY, GpuLayout.WD_HUSK_SLOTS: GpuLayout.WD_HUSK_CAPACITY}
+		for word: int in used:
+			if world.decode_u32(word * 4) > world.decode_u32(int(used[word]) * 4):
+				return "word %d is %d, past its capacity %d" % [word, world.decode_u32(word * 4), world.decode_u32(int(used[word]) * 4)]
+	for row: int in _dishes:
+		var at := (row * GpuLayout.DS_WORDS + GpuLayout.DS_STEP) * 4
+		var want := (_dstate.decode_u32(at) + steps) & 0xFFFFFFFF
+		if dstate.decode_u32(at) != want:
+			return "row %d is at step %d, not %d (it was at %d and %d steps ran)" % [row, dstate.decode_u32(at), want, _dstate.decode_u32(at), steps]
+	return ""
 
 
 ## What the kernels' loops run over now, beside the capacities of `SimArena.report` (for the debug log): the record slots, cloud slots

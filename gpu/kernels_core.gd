@@ -173,6 +173,16 @@ void f(uint k) {
 GRID_LOOP(f, uint(pcs.pb))
 """
 
+## The completion mark: WORLD's serial word becomes `pcs.pa`, a whole number below 2^24 (a float holds it exactly). It is recorded after
+## everything else of a submit and before a read back is copied out, and the read back's last word is a copy of it (SimCore `_stamp`):
+## a read back that carries the number tells the host that the device ran the submit to its end. One thread, no other word is touched.
+const K_MARK := """
+void main() {
+	if (gl_GlobalInvocationID.x != 0u) return;
+	WORLD[WD_SERIAL] = uint(pcs.pa);
+}
+"""
+
 ## The image bindings of the copy kernels (binding -> the name SimCore binds a texture by), past their storage buffers.
 const IMAGE_BINDINGS := {
 	"pool_copy_payload": {4: "PAYTEX", 5: "IDS"},
@@ -189,6 +199,7 @@ static func register(out: Dictionary) -> void:
 	GpuKernels.add(out, "pool_erase_cells", K_ERASE_CELLS, ["WORLD", "CELLDISH", "DISHP", "INSIDE", "CONC", "EDA"], "", 64, t)
 	GpuKernels.add(out, "pool_erase_puffs", K_ERASE_PUFFS, ["WORLD", "PUFF", "EDA"], "", 64, t)
 	GpuKernels.add(out, "pool_fraction", K_FRACTION, ["WORLD", "BLKDISH", "DSTATE", "BUPS", "FRQ"], "", 64, {"FRQ": "uint"})
+	GpuKernels.add(out, "pool_mark", K_MARK, ["WORLD"])
 	GpuKernels.add(out, "pool_ids", K_IDS, ["BUPS_U", "CHILD_U"])
 	GpuKernels.add(out, "pool_track", K_TRACK.replace("\n\t\t\tBEFORE", ""), ["DSTATE", "BUPS_U", "TQ", "TR"], "", 64, {"TQ": "uint", "TR": "uint"})
 	GpuKernels.add(out, "pool_track_picture", K_TRACK.replace("BEFORE", TRACK_BEFORE), ["DSTATE", "BUPS_U", "TQ", "TR", "PREVXY"], "", 64,
