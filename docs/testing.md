@@ -66,7 +66,7 @@ A window that is not managed is kept as it was started for the run's first 10 s 
 
 `.github/workflows/sim-tests.yml` runs these on a hosted Linux runner with no GPU, on the software Vulkan driver (lavapipe) under a virtual display (`xvfb-run`), by hand or as a job of the release:
 
-`isolation_test`, `permutation_test`, `field_padding_test`, `continuation_test`, `conjugation_isolation_test`, `medium_isolation_test`, `near_lists_test`, `invariants_test`, `stats_test`, `faint_view_test`, `picture_steps_test`, `places_before_test`.
+`isolation_test`, `permutation_test`, `field_padding_test`, `continuation_test`, `conjugation_isolation_test`, `medium_isolation_test`, `near_lists_test`, `invariants_test`, `stats_test`, `faint_view_test`, `picture_steps_test`, `places_before_test`, `stale_read_test`.
 
 - **No recorded values.** These tests need no values recorded on another machine: they compare runs made on the one device, or count. `conjugation_isolation_test` also expects a dish's donors to grow in number; `invariants_test` and `stats_test` hold sums to tolerances that were not measured on this driver; `faint_view_test` compares the nutrient picture with a sum it works out itself.
 - **The build.** The workflow builds the Linux debug `LineageStore` itself (at `GODOT_CPP_COMMIT`) and first dispatches one trivial kernel in an empty project (`tools/ci/compute_probe.gd`, `tools/ci/probe_project/`). A failure there is the runner's, not the game's.

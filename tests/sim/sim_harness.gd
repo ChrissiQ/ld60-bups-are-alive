@@ -156,18 +156,27 @@ func step(n: int, delta := -1.0) -> SimHarness:
 	var left := n
 	while left > 0:
 		var chunk := mini(left, CHUNK)
-		var plan: Variant = _new_type("IterationPlan")
-		plan.delta = d
-		plan.events = {}
-		for row in scenarios:
-			plan.events[row] = _worlds[row].events(_steps_done[row] * d, chunk, d)
-			_steps_done[row] += chunk
-		core.run(chunk, d, plan)
-		TestUtil.check(int(core.overflow()) == 0, "WORLD.overflow is %d after a run" % int(core.overflow()))
-		if options.get("tally", false):
-			_tally()
+		step_whole(chunk, d)
 		left -= chunk
 	return self
+
+
+## n steps of `delta` seconds (the harness's, unless given) in one call of the core's `run`, whatever CHUNK is; returns its result. For a
+## test that asks for a particular iteration (n at most the core's MAX_STEPS).
+func step_whole(n: int, delta := -1.0) -> Dictionary:
+	var d := delta if delta > 0.0 else _delta
+	var plan: Variant = _new_type("IterationPlan")
+	plan.delta = d
+	plan.events = {}
+	for row in scenarios:
+		plan.events[row] = _worlds[row].events(_steps_done[row] * d, n, d)
+		_steps_done[row] += n
+	var res: Dictionary = core.run(n, d, plan)
+	if not res.get("failed", false):
+		TestUtil.check(int(core.overflow()) == 0, "WORLD.overflow is %d after a run" % int(core.overflow()))
+	if options.get("tally", false):
+		_tally()
+	return res
 
 
 func _tally() -> void:
