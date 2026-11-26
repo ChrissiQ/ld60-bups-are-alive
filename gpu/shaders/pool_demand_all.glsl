@@ -51,7 +51,7 @@ const int P_CELLS = 1;
 const int P_DELTA = 5;
 const int P_HALF_SATURATION = 24;
 const int P_RESERVE_PER_MASS = 22;
-const int P_UPTAKE_PER_SIZE = 23;
+const int P_UPTAKE_PER_MASS = 23;
 const uint RECORD_WORDS = 28u;
 const uint R_ENERGY = 5u;
 const uint R_HARM = 15u;
@@ -210,7 +210,7 @@ void f(uint i, uint d, uint l) {
 		float cc, pgx, pgy, psig; puffs_at_d(d, x, y, cc, pgx, pgy, psig);
 		float ct = cg + cc;
 		if (ct > 0.0) {
-			float rate = P[P_UPTAKE_PER_SIZE] * sqrt(mass) * metab;
+			float rate = P[P_UPTAKE_PER_MASS] * mass * metab;
 			float room = max(max_e - energy, 0.0) / yld;
 			float w = min(rate * ct / (P[P_HALF_SATURATION] + ct) * P[P_DELTA], room);
 			if (w > 0.0) {

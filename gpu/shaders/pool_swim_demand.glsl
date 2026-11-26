@@ -95,7 +95,7 @@ const int P_TUMBLE_SECONDS = 112;
 const int P_TUMBLE_TURN_MEAN = 113;
 const int P_TUMBLE_TURN_SPREAD = 114;
 const int P_TUMBLE_UP_FACTOR = 111;
-const int P_UPTAKE_PER_SIZE = 23;
+const int P_UPTAKE_PER_MASS = 23;
 const uint RECORD_WORDS = 28u;
 const uint R_DONOR = 14u;
 const uint R_DX = 3u;
@@ -422,7 +422,7 @@ void demand(uint i, uint d, uint l) {
 		float cc, pgx, pgy, psig; puffs_at_d(d, x, y, cc, pgx, pgy, psig);
 		float ct = cg + cc;
 		if (ct > 0.0) {
-			float rate = P[P_UPTAKE_PER_SIZE] * sqrt(mass) * metab;
+			float rate = P[P_UPTAKE_PER_MASS] * mass * metab;
 			float room = max(max_e - energy, 0.0) / yld;
 			float w = min(rate * ct / (P[P_HALF_SATURATION] + ct) * P[P_DELTA], room);
 			if (w > 0.0) {

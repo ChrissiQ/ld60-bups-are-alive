@@ -75,7 +75,7 @@ var _out := OUT
 static func new_world() -> SimHarness:
 	var h := SimHarness.make([], {"delta": FINE_STEP})
 	if h != null:
-		h.core._consts["uptake_per_size"] = 0.0
+		h.core._consts["uptake_per_mass"] = 0.0
 		h.core._fill_p()
 		h.core._delta = -1.0
 	return h

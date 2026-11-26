@@ -32,7 +32,14 @@ const BASE_UPKEEP := 0.5 * Biology.MAINTENANCE_SHARE * FAST_BUDGET
 const MAINTENANCE_PER_MASS := 0.5 * Biology.MAINTENANCE_SHARE * FAST_BUDGET / REFERENCE_MASS
 const DRAG_UPKEEP := Biology.MOTILITY_SHARE * FAST_BUDGET / (Biology.SWIM_SPEED * Biology.SWIM_SPEED * 3.464)  ## swimming costs speed squared, and drag grows with size (3.464 = sqrt(REFERENCE_MASS))
 const SENSE_UPKEEP := Biology.SENSING_SHARE * FAST_BUDGET / REFERENCE_SENSE
-const UPTAKE_PER_SIZE := 1.5 * FAST_BUDGET / 3.464  ## at saturating concentration, metabolism 1
+## The most food a bup takes in per second at saturating concentration and metabolism 1, per unit of mass [derived]. A bup keeps a
+## fixed width as it lengthens (Biology.WIDTH, MASS_UM), so its membrane area and its volume both grow in step with its length, which is
+## its mass: a surface-limited and a volume-limited uptake are then the same law, and intake and the growth it feeds (which is also
+## proportional to mass) stay in proportion at every size. The 1.5 is the headroom at the reference mass, a game choice. Uptake following surface
+## area is the prevailing view, though single cells' uptake across conditions is not set by size alone (@Glover2022); no measurement of one
+## growing rod's uptake against its size is cited here. The nearest is across evolved E. coli clones, whose whole-cell metabolism rose
+## more slowly than volume (exponent 0.38, @Marshall2022); it compares genotypes, not one cell as it elongates.
+const UPTAKE_PER_MASS := 1.5 * FAST_BUDGET / REFERENCE_MASS
 const HALF_SATURATION := 0.002  ## concentration (energy per µm^2) at which uptake is half its maximum (Monod); real Ks is far below the concentrations a culture grows in [memory: micromolar vs millimolar]
 
 const DETECTION_FLOOR := HALF_SATURATION / 20.0  ## concentrations below this make no impression: receptors sense from far below the half-saturation of uptake

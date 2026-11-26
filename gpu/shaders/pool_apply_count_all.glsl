@@ -66,7 +66,7 @@ const int P_HALF_SATURATION = 24;
 const int P_KEY_FACTOR = 106;
 const int P_MASS_UM = 14;
 const int P_RESERVE_PER_MASS = 22;
-const int P_UPTAKE_PER_SIZE = 23;
+const int P_UPTAKE_PER_MASS = 23;
 const uint RECORD_WORDS = 28u;
 const uint R_DONOR = 14u;
 const uint R_ENERGY = 5u;
@@ -251,7 +251,7 @@ void apply_bup(uint i, uint d, uint l) {
 	float room = max_e - energy;
 	if (o >= 0 && room > 0.0 && CONC2B[o] > 0.0) {
 		float ca = CONC2B[o], cg = max(CONC[o], 0.0);
-		float rate = P[P_ACETATE_UPTAKE] * (((int(BUPS[b + R_REACH] + 0.5) >> 8) & 3) == 2 ? P[P_KEY_FACTOR] : 1.0) * P[P_UPTAKE_PER_SIZE] * sqrt(mass) * BUPS[b + R_METABOLISM];
+		float rate = P[P_ACETATE_UPTAKE] * (((int(BUPS[b + R_REACH] + 0.5) >> 8) & 3) == 2 ? P[P_KEY_FACTOR] : 1.0) * P[P_UPTAKE_PER_MASS] * mass * BUPS[b + R_METABOLISM];
 		float w2 = min(rate * ca / (P[P_HALF_SATURATION] + ca) * (P[P_HALF_SATURATION] / (P[P_HALF_SATURATION] + cg)) * P[P_DELTA], room / yld);
 		if (w2 > 0.0) {
 			WANT2[i] = w2; CELL2[i] = o;

@@ -432,7 +432,7 @@ void f(uint i, uint d, uint l) {
 		float cc, pgx, pgy, psig; puffs_at_d(d, x, y, cc, pgx, pgy, psig);
 		float ct = cg + cc;
 		if (ct > 0.0) {
-			float rate = P[P_UPTAKE_PER_SIZE] * sqrt(mass) * metab;
+			float rate = P[P_UPTAKE_PER_MASS] * mass * metab;
 			float room = max(max_e - energy, 0.0) / yld;
 			float w = min(rate * ct / (P[P_HALF_SATURATION] + ct) * P[P_DELTA], room);
 			if (w > 0.0) {
@@ -562,7 +562,7 @@ void f(uint i, uint d, uint l) {
 	float room = max_e - energy;
 	if (o >= 0 && room > 0.0 && CONC2B[o] > 0.0) {
 		float ca = CONC2B[o], cg = max(CONC[o], 0.0);
-		float rate = P[P_ACETATE_UPTAKE] * (((int(BUPS[b + R_REACH] + 0.5) >> 8) & 3) == 2 ? P[P_KEY_FACTOR] : 1.0) * P[P_UPTAKE_PER_SIZE] * sqrt(mass) * BUPS[b + R_METABOLISM];
+		float rate = P[P_ACETATE_UPTAKE] * (((int(BUPS[b + R_REACH] + 0.5) >> 8) & 3) == 2 ? P[P_KEY_FACTOR] : 1.0) * P[P_UPTAKE_PER_MASS] * mass * BUPS[b + R_METABOLISM];
 		float w2 = min(rate * ca / (P[P_HALF_SATURATION] + ca) * (P[P_HALF_SATURATION] / (P[P_HALF_SATURATION] + cg)) * P[P_DELTA], room / yld);
 		if (w2 > 0.0) {
 			WANT2[i] = w2; CELL2[i] = o;

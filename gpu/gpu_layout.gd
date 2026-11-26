@@ -314,7 +314,7 @@ const P_SLOTS := {
 	"growth_rate": [20, "const"],
 	"cost_per_mass": [21, "const"],
 	"reserve_per_mass": [22, "const"],
-	"uptake_per_size": [23, "const"],
+	"uptake_per_mass": [23, "const"],
 	"half_saturation": [24, "const"],
 	"motion_ns": [25, "dish"],  # the motion table's axes: points on the slope axis,
 	"motion_ne": [26, "dish"],  # on the error axis,

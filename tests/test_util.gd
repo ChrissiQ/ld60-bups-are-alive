@@ -110,7 +110,7 @@ static func key_event(code: Key, pressed := true, echo := false, shift := false)
 static func frozen_constants(structure := NAN) -> Dictionary:
 	var consts := SimConstants.build()
 	consts["diffusion"] = 0.0
-	consts["uptake_per_size"] = 0.0
+	consts["uptake_per_mass"] = 0.0
 	if not is_nan(structure):
 		consts["motion_structure"] = structure
 	return consts

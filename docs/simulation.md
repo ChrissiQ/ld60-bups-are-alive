@@ -383,6 +383,10 @@ A bup shorter on screen than `Cell.MIN_VISIBLE_LENGTH_PX` is not a capsule. Thos
 
 The model is the kernels (`gpu/kernels_life.gd` and its neighbours); the constants it uses are in `scripts/biology.gd` and `Genome`.
 
+### Food intake
+
+A bup takes in at most `Cell.UPTAKE_PER_MASS x mass x metabolism` of nutrient a second, Monod-limited by the concentration it stands in (`Cell.HALF_SATURATION`) and by the room left in its reserve (`pool_demand`, `pool_apply`; acetate uses the same factor). The energy it gains is that intake times its yield, `exp(-harm) / sqrt(metabolism)`. Intake is proportional to mass because a bup keeps its width as it lengthens, so its membrane area and its volume both follow its length; growth is proportional to mass too, so the ratio of intake to the growth it feeds is the same at every size: 1.5 x saturation / sqrt(metabolism) at saturation. The law is derived from the body's shape, not measured: no study of one growing rod's uptake against its size is in `docs/sources.md`, and `Cell.UPTAKE_PER_MASS`'s comment gives the surface-area view and the measured counterpoints. Taking intake proportional to the square root of mass instead made the biggest bups the slowest to double, by 55% across sizes 2.5 to 6.5. `tests/sim/size_growth_test.gd` checks that the doubling time at saturation does not depend on size.
+
 ### Death returns nutrient
 
 A bup that starves or dies by chance returns `Biology.DEATH_RELEASE` of its body (mass at `COST_PER_MASS`) as a cloud where it died (`pool_death_clouds`, `pool_death_count`). One displaced at its dish's limit (the trim) or removed by an edit returns nothing. With `death_husks` a death leaves a husk instead and makes no cloud.

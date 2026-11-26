@@ -21,6 +21,7 @@ var limit := 1000
 var bups := 20
 var nutrient_density := 32.0
 var founder_energy := FOUNDER_ENERGY  ## the founders' reserve
+var founder_genes := {}  ## genes to give every founder in place of the founder genome's (for example {"size": 6.0, "metabolism": 2.0})
 var feed_density := 0.0
 var bloom_density := 0.0
 var medium_thickness := 25.0
@@ -140,6 +141,8 @@ func founder_records(dish_number: int) -> PackedByteArray:
 	rng.seed = (layout_seed if layout_seed != 0 else seed_value) * 7919 + 17
 	var spread := minf(radius * 0.8, 40.0 + 40.0 * sqrt(maxf(bups - 4.0, 0.0)))  # (the game's disc: 4 in a spot 40 µm across, 100 across about 430 µm)
 	var founder := Genome.founder()
+	for g in founder_genes:
+		founder[g] = founder_genes[g]
 	var born: float = Cell.mass_to_add(founder)
 	var out := PackedByteArray()
 	out.resize(bups * GpuLayout.RECORD_BYTES)

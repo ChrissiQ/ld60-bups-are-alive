@@ -41,6 +41,20 @@ Enjalbert B, Millard P, Dinclaux M, Portais JC, Létisse F. Acetate fluxes in *E
 
 - Used for: acetate not slowing growth at the concentrations a dish reaches (`Biology` overflow section).
 
+### Glover2022
+
+Glover G, Voliotis M, Łapińska U, Invergo BM, Soanes D, O'Neill P, Moore K, Nikolic N, Petrov PG, Milner DS, Roy S, Heesom K, Richards TA, Tsaneva-Atanasova K, Pagliara S. Nutrient and salt depletion synergistically boosts glucose metabolism in individual *Escherichia coli* cells. *Communications Biology* 5: 385 (2022). [doi:10.1038/s42003-022-03336-6](https://doi.org/10.1038/s42003-022-03336-6)
+
+- Used for: the prevailing view that glucose uptake follows a cell's surface area, and the finding that cell size alone does not account for the uptake of single cells across conditions (`Cell.UPTAKE_PER_MASS`).
+- Checked (abstract, introduction, results and discussion; the reference list and the proteomics and statistics at the end were not read): "Seminal experiments carried out in chemostats suggest that glucose uptake increases with cell surface area"; the changes in glucose accumulation "are not dictated by changes in cell size"; "changes in cell size alone cannot account for the measured glucose accumulation traits". The uptake measured is that of the fluorescent glucose analogue 2-NBDG, in *E. coli* BW25113.
+
+### Marshall2022
+
+Marshall DJ, Malerba M, Lines T, Sezmis AL, Hasan CM, Lenski RE, McDonald MJ. Long-term experimental evolution decouples size and production costs in *Escherichia coli*. *Proceedings of the National Academy of Sciences* 119(21): e2200713119 (2022). [doi:10.1073/pnas.2200713119](https://doi.org/10.1073/pnas.2200713119)
+
+- Used for: a measured scaling of whole-cell metabolism with cell volume within one species, kept as the counterpoint to the uptake law (`Cell.UPTAKE_PER_MASS`).
+- Checked (title block, abstract and the start of the results): clones from the long-term evolution experiment, average volume from 0.239 fL for the ancestors to 0.670 fL at 60,000 generations; "The estimated scaling exponent for the metabolic rate, B, is 0.38, which differs significantly from interspecies comparisons". It compares evolved genotypes, not one cell as it grows, and the exponent is the metabolic rate against volume.
+
 ### Millard2023
 
 Millard P, Gosselin-Monplaisir T, Uttenweiler-Joseph S, Enjalbert B. Acetate is a beneficial nutrient for *E. coli* at low glycolytic flux. *The EMBO Journal* (2023). [doi:10.15252/embj.2022113079](https://doi.org/10.15252/embj.2022113079)
