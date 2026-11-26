@@ -45,7 +45,7 @@ Enjalbert B, Millard P, Dinclaux M, Portais JC, Létisse F. Acetate fluxes in *E
 
 Glover G, Voliotis M, Łapińska U, Invergo BM, Soanes D, O'Neill P, Moore K, Nikolic N, Petrov PG, Milner DS, Roy S, Heesom K, Richards TA, Tsaneva-Atanasova K, Pagliara S. Nutrient and salt depletion synergistically boosts glucose metabolism in individual *Escherichia coli* cells. *Communications Biology* 5: 385 (2022). [doi:10.1038/s42003-022-03336-6](https://doi.org/10.1038/s42003-022-03336-6)
 
-- Used for: the prevailing view that glucose uptake follows a cell's surface area, and the finding that cell size alone does not account for the uptake of single cells across conditions (`Cell.UPTAKE_PER_MASS`).
+- Used for: the prevailing view that glucose uptake increases with a cell's surface area, and the finding that increasing cell size does not accelerate glucose metabolism in single cells (`Cell.UPTAKE_PER_MASS`).
 - Checked (abstract, introduction, results and discussion; the reference list and the proteomics and statistics at the end were not read): "Seminal experiments carried out in chemostats suggest that glucose uptake increases with cell surface area"; the changes in glucose accumulation "are not dictated by changes in cell size"; "changes in cell size alone cannot account for the measured glucose accumulation traits". The uptake measured is that of the fluorescent glucose analogue 2-NBDG, in *E. coli* BW25113.
 
 ### Marshall2022

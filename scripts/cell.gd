@@ -35,8 +35,8 @@ const SENSE_UPKEEP := Biology.SENSING_SHARE * FAST_BUDGET / REFERENCE_SENSE
 ## The most food a bup takes in per second at saturating concentration and metabolism 1, per unit of mass [derived]. A bup keeps a
 ## fixed width as it lengthens (Biology.WIDTH, MASS_UM), so its membrane area and its volume both grow in step with its length, which is
 ## its mass: a surface-limited and a volume-limited uptake are then the same law, and intake and the growth it feeds (which is also
-## proportional to mass) stay in proportion at every size. The 1.5 is the headroom at the reference mass, a game choice. Uptake following surface
-## area is the prevailing view, though single cells' uptake across conditions is not set by size alone (@Glover2022); no measurement of one
+## proportional to mass) stay in proportion at every size. The 1.5 is the headroom at the reference mass, a game choice. Glucose uptake increasing
+## with surface area is the prevailing view, though in single cells increasing size does not accelerate glucose metabolism (@Glover2022); no measurement of one
 ## growing rod's uptake against its size is cited here. The nearest is across evolved E. coli clones, whose whole-cell metabolism rose
 ## more slowly than volume (exponent 0.38, @Marshall2022); it compares genotypes, not one cell as it elongates.
 const UPTAKE_PER_MASS := 1.5 * FAST_BUDGET / REFERENCE_MASS
