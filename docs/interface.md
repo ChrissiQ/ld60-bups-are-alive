@@ -96,7 +96,7 @@ Bups are artwork, not interface. Accessibility work (contrast, reduced motion, s
 
 A change that touches the design system (a colour, font, size, radius, spacing, component, layout rule or behaviour) ends with a review of `design/tokens.json`, `tools/gen_design.py` and the page, across every area and not only the part changed. An unused token is removed. A token whose purpose changed is renamed if its name is no longer accurate (names are roles, never appearances), with its description and the page's text updated. A new need reuses an existing token before adding one. The page's text describes the game as it is, with no trace of a superseded choice. Regenerate, then run `design_tokens_test` and `ui_lint_test`.
 
-A changed or new interface part also updates or adds a tutorial step ([The tutorial](#the-tutorial)), and a change to what an entry says updates the entry ([AGENTS.md](../AGENTS.md#the-encyclopedia)).
+A changed or new interface part also updates or adds a tutorial step ([The tutorial](#the-tutorial)), and a change to what an entry says updates the entry ([encyclopedia.md](encyclopedia.md)).
 
 ## The game screen
 
@@ -201,7 +201,7 @@ What the game's terms mean lives in the encyclopedia: `scripts/encyclopedia.gd` 
 
 A new term gets an entry, not a long tooltip: tooltips are names and icons only. The `TooltipFit` autoload wraps every tooltip to `UiText.TOOLTIP_WIDTH` characters a line as the pointer reaches its control.
 
-What an entry says, and when it must change, is in [AGENTS.md](../AGENTS.md#the-encyclopedia).
+What an entry says, and when it must change, is in [encyclopedia.md](encyclopedia.md).
 
 ### The tutorial
 
