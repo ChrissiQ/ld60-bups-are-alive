@@ -1,6 +1,6 @@
 # Instructions for coding agents
 
-Bups Are Alive is a realistic bacteria-evolution simulation and game: Godot 4.7 with GDScript, and GPU compute shaders for the simulation. The only C++ is the family-tree store (`LineageStore`) and the graphics-memory query (`GpuMemory`). [README.md](README.md) says how to build and run it, [CONTRIBUTING.md](CONTRIBUTING.md) what a good change looks like. This file is what every agent needs before changing the project; [Where to read next](#where-to-read-next) lists the docs per area.
+Bups Are Alive is a realistic bacteria-evolution simulation and game: Godot 4.7 with GDScript, GPU compute shaders for the simulation; the only C++ is the family-tree store (`LineageStore`) and the graphics-memory query (`GpuMemory`). [README.md](README.md) says how to build and run it, [CONTRIBUTING.md](CONTRIBUTING.md) what a good change looks like. [Where to read next](#where-to-read-next) lists the docs per area.
 
 ## What the project is for
 
