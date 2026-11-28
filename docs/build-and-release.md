@@ -10,7 +10,7 @@ The C++ is `LineageStore` and `GpuMemory`. On macOS, rebuild with:
 cd native && scons platform=macos arch=universal target=template_debug api_version=4.5 -j8
 ```
 
-and again with `target=template_release`. `native/godot-cpp` must be a clone at `GODOT_CPP_COMMIT` of `.github/workflows/build-native.yml`.
+and again with `target=template_release`. On Windows the same `scons` command with `platform=windows arch=x86_64` builds the `.dll` files; `native/src/.gdignore` keeps Godot from importing the `.obj` files the compiler leaves there. `native/godot-cpp` must be a clone at `GODOT_CPP_COMMIT` of `.github/workflows/build-native.yml`.
 
 - Say when the C++ changed: the other platforms' libraries come from the release workflow.
 - Do not rebuild while headless runs that load the library are in progress.

@@ -11,6 +11,7 @@ native/bin/*
 native/extension_api.json
 native/.sconsign.dblite
 *.o
+*.obj
 *.os
 
 # Mac OS
