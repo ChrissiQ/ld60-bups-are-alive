@@ -32,7 +32,7 @@ clear_stale_lock() {
 	local pid age
 	pid="$(cat "$LOCK_DIR/pid" 2>/dev/null)"
 	if [ -z "$pid" ] && [ -d "$LOCK_DIR" ]; then
-		age=$(( $(date +%s) - $(stat -f %m "$LOCK_DIR" 2>/dev/null || stat -c %Y "$LOCK_DIR" 2>/dev/null || date +%s) ))
+		age=$(( $(date +%s) - $(stat -c %Y "$LOCK_DIR" 2>/dev/null || stat -f %m "$LOCK_DIR" 2>/dev/null || date +%s) ))
 		if [ "$age" -ge "$EMPTY_LOCK_SECONDS" ] && [ -z "$(cat "$LOCK_DIR/pid" 2>/dev/null)" ]; then
 			echo "run_windowed: clearing a lock that has had no pid for $age s" >&2
 			if mv "$LOCK_DIR" "$LOCK_DIR.stale.$$" 2>/dev/null; then
